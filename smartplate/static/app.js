@@ -5,7 +5,7 @@
 const S = {
   meta: null, users: [], userId: 1, planId: null, view: null,
   tab: "week", exec: null, community: [], receipts: null, drawer: null,
-  busy: false, error: null,
+  busy: false, error: null, hideCold: false,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
 const rupee = (n) => "₹" + (Math.round((n || 0) * 100) / 100).toLocaleString("en-IN");
@@ -131,8 +131,10 @@ function topbar() {
   const modeOpts = Object.entries(m.modes).map(([k, v]) =>
     `<option value="${k}" ${S.view.plan.mode === k ? "selected" : ""}>${v}</option>`).join("");
   const userOpts = S.users.map(u => `<option value="${u.id}" ${u.id === S.userId ? "selected" : ""}>${esc(u.name)} · ${esc(u.city)}</option>`).join("");
+  const hh = S.view.household;
   return `<div class="topbar"><div class="inner">
     <div class="brand">Smart<em>Plate</em><span class="v">v${m.version}</span></div>
+    <span class="ctx"><span class="chip" title="planning area">📍 ${esc(S.view.user.city)}</span>${hh ? `<span class="chip" title="group plan">👥 ${esc(hh.name)}</span>` : ""}</span>
     <select id="userSel">${userOpts}</select>
     <select id="modeSel">${modeOpts}</select>
     <span class="spacer"></span>
@@ -151,7 +153,7 @@ function tabs() {
 
 function tabBody() {
   switch (S.tab) {
-    case "week": return statStrip() + controls() + weekGrid() + approveBar();
+    case "week": return coldStart() + statStrip() + controls() + weekGuide() + weekGrid() + approveBar();
     case "insights": return insights();
     case "orders": return ordersPanel();
     case "cooking": return cookingPanel();
@@ -214,6 +216,29 @@ function approveBar() {
       <button class="primary" data-act="exec">Review &amp; place orders →</button>
       <span class="reassure"><span class="shield">🛡</span><span>Nothing is ordered until you approve — skip or swap any item, cancel anytime.</span></span>
     </div>
+  </div>`;
+}
+
+/* cold-start honesty — don't imply learned precision before data exists (L2) */
+function coldStart() {
+  if (S.hideCold) return "";
+  return `<div class="coldstart"><span class="i">ℹ Demo week</span>
+    <span>Generated from a seeded sample Chennai catalog — not personal history yet. As you rate meals, the agent's taste model replaces these defaults.</span>
+    <button class="x" data-close-cold="1" title="Dismiss">✕</button></div>`;
+}
+
+/* persistent legend + "cards are interactive" hint (V3, helps H1 discoverability) */
+function weekGuide() {
+  return `<div class="legend">
+    <span class="grp"><span class="swatch" style="background:var(--accent)"></span>deliver</span>
+    <span class="grp"><span class="swatch" style="background:var(--green)"></span>cook</span>
+    <span class="grp"><span class="swatch" style="background:var(--muted-2)"></span>skip</span>
+    <span style="color:var(--muted)">·</span>
+    <span class="grp"><span class="b shift">⌚ shift</span>surge-dodge</span>
+    <span class="grp"><span class="b sub">subbed</span>swapped ≥ floor</span>
+    <span class="grp"><span class="b fridge">fridge</span>leftovers</span>
+    <span class="grp"><span class="b fest">festival</span></span>
+    <span class="hint">Tap any meal for the “why” &amp; swap options →</span>
   </div>`;
 }
 
@@ -400,6 +425,7 @@ function wire() {
   on("[data-cell]", "click", (e) => { S.drawer = e.currentTarget.dataset.cell; render(); });
   on("[data-close]", "click", (e) => { if (e.target.dataset.close) { S.drawer = null; render(); } });
   on("[data-close-err]", "click", () => { S.error = null; render(); });
+  on("[data-close-cold]", "click", () => { S.hideCold = true; render(); });
   on("[data-adopt]", "click", (e) => guard(() => adopt(e.currentTarget.dataset.adopt)));
   on("[data-sess]", "click", (e) => { const [id, st] = e.currentTarget.dataset.sess.split(":"); guard(() => setSession(id, st)); });
   const cmd = document.getElementById("cmd"); if (cmd) cmd.addEventListener("keydown", (e) => { if (e.key === "Enter") guard(runCommand); });

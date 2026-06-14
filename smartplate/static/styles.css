@@ -153,5 +153,20 @@ tr:hover td{background:var(--paper-2)}
 .errbar button.retry{border-color:var(--red);color:var(--red);background:transparent}
 .errbar button.retry:hover{background:var(--red);color:#fff}
 
+/* topbar context chips (N1) */
+.ctx{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ctx .chip{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.03em;color:var(--ink-2);background:var(--paper-2);border:1px solid var(--rule);border-radius:999px;padding:4px 10px;white-space:nowrap}
+
+/* cold-start honesty note (L2) */
+.coldstart{display:flex;gap:10px;align-items:center;background:var(--blue-bg);border:1px solid var(--rule);color:var(--ink-2);border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:13px}
+.coldstart .i{color:var(--blue);font-weight:700;white-space:nowrap}
+.coldstart .x{margin-left:auto;cursor:pointer;font-weight:700;background:none;border:none;color:var(--muted);font-size:15px}
+
+/* week legend + discoverability (V3, helps H1) */
+.legend{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:8px 0 14px;font-size:12px;color:var(--ink-2)}
+.legend .grp{display:flex;gap:5px;align-items:center}
+.legend .swatch{display:inline-block;width:10px;height:10px;border-radius:2px}
+.legend .hint{color:var(--muted);margin-left:auto}
+
 @media(max-width:900px){.week{grid-template-columns:1fr;}.daycol{border:1px solid var(--rule);border-radius:10px;padding:8px}
   .approvebar .cta{align-items:stretch;width:100%}.approvebar .reassure{max-width:none}}
