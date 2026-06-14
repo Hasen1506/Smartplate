@@ -86,6 +86,12 @@ async function runCommand() {
   toast(res.result.effect && res.result.effect !== "none" ? res.result.effect : "No actionable change");
   render();
 }
+// run a real, parser-understood command from a quick-action chip (T2)
+async function quickCmd(text) {
+  const inp = document.getElementById("cmd");
+  if (inp) inp.value = text;
+  await runCommand();
+}
 async function execute() {
   S.exec = await api(`/api/plan/${S.planId}/execute`, "POST", {});
   S.view = await api(`/api/plan/${S.planId}`);
@@ -190,7 +196,13 @@ function controls() {
       </div>
       <input type="text" id="cmd" placeholder="Tell the agent… e.g. 'skip friday dinner'" style="flex:1;min-width:220px">
       <button data-act="cmd">Send</button>
-      <button class="ghost" data-act="reopt">Re-optimise</button>
+      <button class="ghost" data-act="reopt" title="Recompute the week with your current rules & mode">Re-optimise</button>
+    </div>
+    <div class="qbar"><span class="lbl">Quick actions</span>
+      <span class="qchip" data-cmd="switch to survival">Switch to Survival</span>
+      <span class="qchip" data-cmd="skip friday dinner">Skip Fri dinner</span>
+      <span class="qchip" data-cmd="snooze monday">Snooze Monday</span>
+      <span class="qchip" data-cmd="cooked thursday lunch">I cooked Thu lunch</span>
     </div>
     <div class="guarantee"><span class="lock">🔒 Hard rules locked:</span> ${safety}
       <span class="tag">≤ ${rupee(u.weekly_budget)} cap</span>
@@ -210,6 +222,7 @@ function approveBar() {
       <div class="n">${rupee(b.spend)}<small> / ${rupee(b.budget)}</small></div>
       <div class="n" style="color:${b.over ? "var(--red)" : "var(--green)"}">${rupee(left)}<small> left</small></div>
       <span class="tag">${esc(v.plan.mode_label)} mode</span>
+      ${b.over ? `<span class="tag warn">over by ${rupee(b.spend - b.budget)} — from your edits</span>` : `<span class="tag good">✓ within cap</span>`}
     </div>
     <div class="grow"></div>
     <div class="cta">
@@ -426,6 +439,7 @@ function wire() {
   on("[data-close]", "click", (e) => { if (e.target.dataset.close) { S.drawer = null; render(); } });
   on("[data-close-err]", "click", () => { S.error = null; render(); });
   on("[data-close-cold]", "click", () => { S.hideCold = true; render(); });
+  on("[data-cmd]", "click", (e) => guard(() => quickCmd(e.currentTarget.dataset.cmd)));
   on("[data-adopt]", "click", (e) => guard(() => adopt(e.currentTarget.dataset.adopt)));
   on("[data-sess]", "click", (e) => { const [id, st] = e.currentTarget.dataset.sess.split(":"); guard(() => setSession(id, st)); });
   const cmd = document.getElementById("cmd"); if (cmd) cmd.addEventListener("keydown", (e) => { if (e.key === "Enter") guard(runCommand); });
