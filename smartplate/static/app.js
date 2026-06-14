@@ -5,6 +5,7 @@
 const S = {
   meta: null, users: [], userId: 1, planId: null, view: null,
   tab: "week", exec: null, community: [], receipts: null, drawer: null,
+  busy: false, error: null, hideCold: false,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
 const rupee = (n) => "₹" + (Math.round((n || 0) * 100) / 100).toLocaleString("en-IN");
@@ -24,8 +25,30 @@ function toast(msg) {
   setTimeout(() => t.remove(), 2600);
 }
 
+/* ---- busy + error states (L1) ---- */
+function ensureBusyBar() {
+  if (document.getElementById("busybar")) return;
+  const d = document.createElement("div");
+  d.className = "busybar"; d.id = "busybar"; d.innerHTML = "<i></i>";
+  document.body.appendChild(d);
+}
+function setBusy(b) {
+  S.busy = b;
+  const el = document.getElementById("busybar");
+  if (el) el.classList.toggle("on", b);
+}
+// Wrap every user-triggered action: show progress, surface errors instead of failing silently.
+async function guard(fn) {
+  setBusy(true); S.error = null;
+  try { await fn(); }
+  catch (e) { S.error = e.message || String(e); render(); }
+  finally { setBusy(false); }
+}
+async function reloadPlan() { S.view = await api(`/api/plan/${S.planId}`); render(); }
+
 /* ---------------------------------------------------------------- bootstrap */
 async function boot() {
+  ensureBusyBar();
   S.meta = await api("/api/meta");
   S.users = await api("/api/users");
   S.userId = S.users[0].id;
@@ -63,6 +86,12 @@ async function runCommand() {
   toast(res.result.effect && res.result.effect !== "none" ? res.result.effect : "No actionable change");
   render();
 }
+// run a real, parser-understood command from a quick-action chip (T2)
+async function quickCmd(text) {
+  const inp = document.getElementById("cmd");
+  if (inp) inp.value = text;
+  await runCommand();
+}
 async function execute() {
   S.exec = await api(`/api/plan/${S.planId}/execute`, "POST", {});
   S.view = await api(`/api/plan/${S.planId}`);
@@ -91,9 +120,16 @@ async function setSession(sid, status) {
 
 /* ---------------------------------------------------------------- render */
 function render() {
-  document.getElementById("app").innerHTML = topbar() + `<div class="wrap">${tabs() + tabBody()}</div>` +
+  document.getElementById("app").innerHTML = topbar() + `<div class="wrap">${errbar() + tabs() + tabBody()}</div>` +
     (S.drawer ? drawer() : "");
   wire();
+}
+
+function errbar() {
+  if (!S.error) return "";
+  return `<div class="errbar"><span>⚠ ${esc(S.error)}</span>
+    <button class="retry ghost" data-act="reload">Retry</button>
+    <button class="x" data-close-err="1" title="Dismiss">✕</button></div>`;
 }
 
 function topbar() {
@@ -101,8 +137,10 @@ function topbar() {
   const modeOpts = Object.entries(m.modes).map(([k, v]) =>
     `<option value="${k}" ${S.view.plan.mode === k ? "selected" : ""}>${v}</option>`).join("");
   const userOpts = S.users.map(u => `<option value="${u.id}" ${u.id === S.userId ? "selected" : ""}>${esc(u.name)} · ${esc(u.city)}</option>`).join("");
+  const hh = S.view.household;
   return `<div class="topbar"><div class="inner">
     <div class="brand">Smart<em>Plate</em><span class="v">v${m.version}</span></div>
+    <span class="ctx"><span class="chip" title="planning area">📍 ${esc(S.view.user.city)}</span>${hh ? `<span class="chip" title="group plan">👥 ${esc(hh.name)}</span>` : ""}</span>
     <select id="userSel">${userOpts}</select>
     <select id="modeSel">${modeOpts}</select>
     <span class="spacer"></span>
@@ -121,7 +159,7 @@ function tabs() {
 
 function tabBody() {
   switch (S.tab) {
-    case "week": return statStrip() + controls() + weekGrid();
+    case "week": return coldStart() + statStrip() + controls() + weekGuide() + weekGrid() + approveBar();
     case "insights": return insights();
     case "orders": return ordersPanel();
     case "cooking": return cookingPanel();
@@ -146,22 +184,74 @@ function statStrip() {
 }
 
 function controls() {
-  const al = S.view.user.allergens, med = S.view.user.medical;
-  const safety = [...al.map(a => `<span class="tag warn">no ${esc(a)}</span>`),
-    ...med.map(m => `<span class="tag warn">${esc(m)}-safe</span>`)].join("") || `<span class="tag">no hard exclusions</span>`;
+  const u = S.view.user;
+  const safety = [...u.allergens.map(a => `<span class="tag warn">no ${esc(a)}</span>`),
+    ...u.medical.map(m => `<span class="tag warn">${esc(m)}-safe</span>`)].join("") || `<span class="tag">no hard exclusions</span>`;
   const reasons = S.view.summary_reasons.map(r => `<li>${esc(r)}</li>`).join("");
   return `<div class="card" style="margin-bottom:18px">
     <div class="row" style="align-items:center">
       <div style="flex:1;min-width:240px">
         <h3 class="k">This week · ${esc(S.view.plan.week_start)} · ${esc(S.view.plan.mode_label)} mode</h3>
-        <div class="kv">${safety}<span class="tag">diet: ${esc(S.view.user.diet)}</span></div>
+        <div class="kv"><span class="tag">diet: ${esc(u.diet)}</span></div>
       </div>
       <input type="text" id="cmd" placeholder="Tell the agent… e.g. 'skip friday dinner'" style="flex:1;min-width:220px">
       <button data-act="cmd">Send</button>
-      <button class="ghost" data-act="reopt">Re-optimise</button>
-      <button class="primary" data-act="exec">Place orders →</button>
+      <button class="ghost" data-act="reopt" title="Recompute the week with your current rules & mode">Re-optimise</button>
     </div>
+    <div class="qbar"><span class="lbl">Quick actions</span>
+      <span class="qchip" data-cmd="switch to survival">Switch to Survival</span>
+      <span class="qchip" data-cmd="skip friday dinner">Skip Fri dinner</span>
+      <span class="qchip" data-cmd="snooze monday">Snooze Monday</span>
+      <span class="qchip" data-cmd="cooked thursday lunch">I cooked Thu lunch</span>
+    </div>
+    <div class="guarantee"><span class="lock">🔒 Hard rules locked:</span> ${safety}
+      <span class="tag">≤ ${rupee(u.weekly_budget)} cap</span>
+      <span style="color:var(--muted)">— the agent can't violate these, even in Survival mode.</span></div>
     <ul class="reasonlist">${reasons}</ul>
+  </div>`;
+}
+
+/* sticky approve bar — the one primary action for the week view (V1/C1/T1) */
+function approveBar() {
+  const v = S.view, b = v.budget, c = v.counts;
+  const left = b.budget - b.spend;
+  const sessions = (c.delivery || 0) + (c.cook || 0) + (c.skip || 0);
+  return `<div class="approvebar">
+    <div class="sum">
+      <div class="n">${sessions}<small> sessions</small></div>
+      <div class="n">${rupee(b.spend)}<small> / ${rupee(b.budget)}</small></div>
+      <div class="n" style="color:${b.over ? "var(--red)" : "var(--green)"}">${rupee(left)}<small> left</small></div>
+      <span class="tag">${esc(v.plan.mode_label)} mode</span>
+      ${b.over ? `<span class="tag warn">over by ${rupee(b.spend - b.budget)} — from your edits</span>` : `<span class="tag good">✓ within cap</span>`}
+    </div>
+    <div class="grow"></div>
+    <div class="cta">
+      <button class="primary" data-act="exec">Review &amp; place orders →</button>
+      <span class="reassure"><span class="shield">🛡</span><span>Nothing is ordered until you approve — skip or swap any item, cancel anytime.</span></span>
+    </div>
+  </div>`;
+}
+
+/* cold-start honesty — don't imply learned precision before data exists (L2) */
+function coldStart() {
+  if (S.hideCold) return "";
+  return `<div class="coldstart"><span class="i">ℹ Demo week</span>
+    <span>Generated from a seeded sample Chennai catalog — not personal history yet. As you rate meals, the agent's taste model replaces these defaults.</span>
+    <button class="x" data-close-cold="1" title="Dismiss">✕</button></div>`;
+}
+
+/* persistent legend + "cards are interactive" hint (V3, helps H1 discoverability) */
+function weekGuide() {
+  return `<div class="legend">
+    <span class="grp"><span class="swatch" style="background:var(--accent)"></span>deliver</span>
+    <span class="grp"><span class="swatch" style="background:var(--green)"></span>cook</span>
+    <span class="grp"><span class="swatch" style="background:var(--muted-2)"></span>skip</span>
+    <span style="color:var(--muted)">·</span>
+    <span class="grp"><span class="b shift">⌚ shift</span>surge-dodge</span>
+    <span class="grp"><span class="b sub">subbed</span>swapped ≥ floor</span>
+    <span class="grp"><span class="b fridge">fridge</span>leftovers</span>
+    <span class="grp"><span class="b fest">festival</span></span>
+    <span class="hint">Tap any meal for the “why” &amp; swap options →</span>
   </div>`;
 }
 
@@ -342,19 +432,22 @@ function featuresPanel() {
 /* ---------------------------------------------------------------- wiring */
 function wire() {
   const on = (sel, ev, fn) => document.querySelectorAll(sel).forEach(el => el.addEventListener(ev, fn));
-  const u = document.getElementById("userSel"); if (u) u.onchange = (e) => switchUser(e.target.value);
-  const md = document.getElementById("modeSel"); if (md) md.onchange = (e) => setMode(e.target.value);
+  const u = document.getElementById("userSel"); if (u) u.onchange = (e) => guard(() => switchUser(e.target.value));
+  const md = document.getElementById("modeSel"); if (md) md.onchange = (e) => guard(() => setMode(e.target.value));
   on("[data-tab]", "click", (e) => { S.tab = e.currentTarget.dataset.tab; render(); });
   on("[data-cell]", "click", (e) => { S.drawer = e.currentTarget.dataset.cell; render(); });
   on("[data-close]", "click", (e) => { if (e.target.dataset.close) { S.drawer = null; render(); } });
-  on("[data-adopt]", "click", (e) => adopt(e.currentTarget.dataset.adopt));
-  on("[data-sess]", "click", (e) => { const [id, st] = e.currentTarget.dataset.sess.split(":"); setSession(id, st); });
-  const cmd = document.getElementById("cmd"); if (cmd) cmd.addEventListener("keydown", (e) => { if (e.key === "Enter") runCommand(); });
+  on("[data-close-err]", "click", () => { S.error = null; render(); });
+  on("[data-close-cold]", "click", () => { S.hideCold = true; render(); });
+  on("[data-cmd]", "click", (e) => guard(() => quickCmd(e.currentTarget.dataset.cmd)));
+  on("[data-adopt]", "click", (e) => guard(() => adopt(e.currentTarget.dataset.adopt)));
+  on("[data-sess]", "click", (e) => { const [id, st] = e.currentTarget.dataset.sess.split(":"); guard(() => setSession(id, st)); });
+  const cmd = document.getElementById("cmd"); if (cmd) cmd.addEventListener("keydown", (e) => { if (e.key === "Enter") guard(runCommand); });
   const acts = {
     cmd: runCommand, reopt: reoptimize, exec: execute, savetpl: saveTemplate,
-    genrcpt: genReceipts, idem: idempotencyDemo,
+    genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan,
   };
-  on("[data-act]", "click", (e) => { const f = acts[e.currentTarget.dataset.act]; if (f) f(); });
+  on("[data-act]", "click", (e) => { const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
 }
 async function idempotencyDemo() {
   const d = await api("/api/demo/idempotency", "POST", {});
