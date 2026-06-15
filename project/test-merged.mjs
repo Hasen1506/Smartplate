@@ -1,0 +1,92 @@
+/*
+ * test-merged.mjs — end-to-end render test for "SmartPlate Wireframes.html".
+ *
+ * Loads the *generated* file in a real DOM (jsdom, runScripts: dangerously) so the inlined
+ * runtime boots exactly as it would in a browser, then asserts both screens render with no
+ * unresolved {{ }} placeholders and that the interactive bits (tab switches, notes toggle,
+ * top tab-bar) actually work. This verifies the real shipped artifact, not just the sources.
+ *
+ * Run:  node project/test-merged.mjs      (requires: npm install jsdom)
+ */
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { JSDOM } from 'jsdom';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const html = readFileSync(join(HERE, 'SmartPlate Wireframes.html'), 'utf8');
+
+const fails = [];
+const ok = (cond, msg) => { if (cond) console.log(`  ✓ ${msg}`); else { console.log(`  ✗ ${msg}`); fails.push(msg); } };
+const textIn = (el) => (el ? el.textContent : '');
+const btnByText = (root, txt) => [...root.querySelectorAll('button')].find((b) => b.textContent.includes(txt));
+
+const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true /* no `resources` → no network fetch */ });
+const { window } = dom;
+const { document } = window;
+
+await new Promise((res) => {
+  if (document.readyState === 'complete') return res();
+  window.addEventListener('load', res);
+  setTimeout(res, 1500); // fallback — boot runs synchronously at end of body anyway
+});
+
+const weekly = document.getElementById('screen-weekly');
+const setup = document.getElementById('screen-setup');
+
+console.log('\n[boot] both screens mounted');
+ok(weekly && weekly.querySelector('pre') === null, 'weekly screen rendered without a runtime error');
+ok(setup && setup.querySelector('pre') === null, 'setup screen rendered without a runtime error');
+ok(weekly && weekly.childElementCount > 0, 'weekly screen has rendered content');
+ok(setup && setup.childElementCount > 0, 'setup screen has rendered content');
+
+console.log('\n[placeholders] nothing left unresolved');
+ok(!weekly.innerHTML.includes('{{'), 'weekly screen has no leftover {{ }} placeholders');
+ok(!setup.innerHTML.includes('{{'), 'setup screen has no leftover {{ }} placeholders');
+
+console.log('\n[weekly] expected components present');
+ok(textIn(weekly).includes('When should SmartPlate plan'), 'step-1 window selector heading');
+ok(textIn(weekly).includes('sessions planned'), 'sessions summary chip');
+ok(textIn(weekly).includes('Calendar grid'), 'calendar-grid heading');
+ok(textIn(weekly).includes('MON') && textIn(weekly).includes('SUN'), 'day labels MON…SUN');
+ok(textIn(weekly).includes('↻ spin'), 'interactive ↻ spin control on grid cards');
+ok(weekly.querySelectorAll('button').length > 15, `many interactive buttons (${weekly.querySelectorAll('button').length})`);
+ok(weekly.querySelector('svg') !== null, 'at least one SVG (header squiggle / budget ring)');
+
+console.log('\n[setup] expected components present');
+ok(textIn(setup).includes('Program the agent'), 'setup header "Program the agent"');
+ok(textIn(setup).includes('Settings form'), 'default "Settings form" tab content');
+ok(setup.querySelector('svg') !== null, 'at least one SVG present');
+
+console.log('\n[interactivity] notes toggle re-renders annotations');
+const ann = 'the "when to order" selection moved up here';
+ok(weekly.innerHTML.includes(ann), 'design annotation visible when notes ON');
+const notes = document.getElementById('dc-notes');
+notes.checked = false; notes.dispatchEvent(new window.Event('change'));
+ok(!weekly.innerHTML.includes(ann), 'annotation removed when notes OFF');
+notes.checked = true; notes.dispatchEvent(new window.Event('change'));
+ok(weekly.innerHTML.includes(ann), 'annotation returns when notes back ON');
+
+console.log('\n[interactivity] weekly internal tab → Command dashboard');
+const dashBtn = btnByText(weekly, 'Command dashboard');
+ok(!!dashBtn, 'found "Command dashboard" tab button');
+ok(!textIn(weekly).includes('Your week is planned'), 'dashboard hero not shown on default (grid) tab');
+dashBtn && dashBtn.click();
+ok(textIn(weekly).includes('Your week is planned'), 'dashboard hero appears after click (sc-if + setState work)');
+ok(textIn(weekly).includes('Budget burn-down'), 'dashboard-only burn-down section appears');
+
+console.log('\n[interactivity] setup internal tab → Taste DNA radar');
+const dnaBtn = btnByText(setup, 'Taste DNA');
+ok(!!dnaBtn, 'found "Taste DNA" tab button');
+dnaBtn && dnaBtn.click();
+ok(setup.querySelectorAll('polygon').length > 0, 'radar <polygon> (JS-built SVG) renders after switching to DNA');
+
+console.log('\n[interactivity] top tab-bar switches screens');
+window.__dc.activate('screen-setup');
+ok(weekly.style.display === 'none', 'weekly hidden when Setup tab active');
+ok(setup.style.display !== 'none', 'setup visible when Setup tab active');
+window.__dc.activate('screen-weekly');
+ok(setup.style.display === 'none' && weekly.style.display !== 'none', 'switches back to weekly');
+
+console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
+process.exit(fails.length ? 1 : 0);

@@ -4,3 +4,5 @@ __pycache__/
 *.db
 .pytest_cache/
 /tmp/
+node_modules/
+package-lock.json
