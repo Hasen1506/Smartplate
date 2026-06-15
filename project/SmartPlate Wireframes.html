@@ -74,7 +74,7 @@
     <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;">
       <div>
         <div style="font:700 25px 'Caveat',cursive;">1 · When should SmartPlate plan?</div>
-        <div style="font:400 15px 'Gaegu',cursive; color:#56524a; margin-top:2px; max-width:540px;">Pick your days &amp; meal windows — tap any cell on/off. The agent optimises <b>only the sessions you switch on</b>; everything below recomputes live.</div>
+        <div style="font:400 15px 'Gaegu',cursive; color:#56524a; margin-top:2px; max-width:560px;">Pick your meal windows and set each window's <b>time</b>. Tap a cell to cycle <b>▢ deliver → ⌂ cook → ⊘ skip</b> — skip is how you say "not this window". The agent optimises <b>only the meals you deliver or cook</b>; everything below recomputes live.</div>
       </div>
       <div style="display:flex; flex-direction:column; align-items:flex-end; gap:7px;">
         {{ weekToggleEl }}
@@ -86,7 +86,7 @@
 
     <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-top:14px; border-top:2px dashed #cfc9bd; padding-top:13px;">
       <span style="font:700 16px 'Gaegu',cursive; padding:7px 13px; border:2px solid #2a2a28; border-radius:11px; background:#f3efe6;">{{ sessions }} sessions planned</span>
-      <span style="font:400 14px 'Gaegu',cursive; color:#7a746a;">▢ deliver · ⌂ cook · ⊘ skip · dashed = paused · ↻ spin to swap</span>
+      <span style="font:400 14px 'Gaegu',cursive; color:#7a746a;">tap a cell: ▢ deliver → ⌂ cook → ⊘ skip · ⊘ dashed = not eating</span>
       <div style="flex:1; min-width:230px;">
         <div style="display:flex; justify-content:space-between; font:700 13px 'Gaegu',cursive;"><span>₹{{ spent }} spent</span><span style="color:{{ leftColor }};">₹{{ left }} left</span></div>
         <div style="height:13px; border:2px solid #2a2a28; border-radius:8px; background:#fff; overflow:hidden; margin-top:3px;">{{ budgetFillSel }}</div>
@@ -147,6 +147,18 @@
   <sc-if value="{{ isGrid }}" hint-placeholder-val="{{ true }}">
   <div style="margin-top:22px;">
     <div style="font:700 26px 'Caveat',cursive; color:#2a2a28;">Calendar grid <span style="font:400 17px 'Gaegu',cursive; color:#7a746a;">— the whole week as a matrix; paused windows show greyed</span></div>
+
+    <!-- legend: every glyph spelled out once, so the dense cards are decodable without docs -->
+    <div style="display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin-top:12px; padding:10px 13px; border:2px solid #2a2a28; border-radius:12px; background:#fbf9f3;">
+      <span style="font:700 13px 'Gaegu',cursive; color:#7a746a; letter-spacing:.5px;">WHAT THE SYMBOLS MEAN</span>
+      <span style="font:400 13px 'Gaegu',cursive;"><b style="display:inline-block; min-width:20px; text-align:center; border:1.5px solid #2a2a28; border-radius:5px; background:#2a2a28; color:#fff;">▢</b> deliver</span>
+      <span style="font:400 13px 'Gaegu',cursive;"><b style="display:inline-block; min-width:20px; text-align:center; border:1.5px solid #2a2a28; border-radius:5px;">⌂</b> cook at home</span>
+      <span style="font:400 13px 'Gaegu',cursive;"><b style="display:inline-block; min-width:20px; text-align:center; border:1.5px dashed #8a8478; border-radius:5px; background:#f3efe6; color:#8a8478;">⊘</b> skip <span style="color:#7a746a;">(not eating this window)</span></span>
+      <span style="font:400 13px 'Gaegu',cursive;"><b>↻ spin</b> = swap for the next-best pick</span>
+      <span style="font:400 13px 'Gaegu',cursive;"><b>menu ▾</b> = browse the ranked options</span>
+      <span style="font:400 13px 'Gaegu',cursive;">🏠 home · 💼 work · ✈ travel <span style="color:#7a746a;">(where you'll be — sets what delivers)</span></span>
+      <span style="font:400 13px 'Gaegu',cursive;">⭐ your usual · ✦ a new pick the agent is trying</span>
+    </div>
 
     <div style="display:flex; flex-wrap:wrap; gap:38px; align-items:flex-start; margin-top:16px;">
 
@@ -356,7 +368,7 @@
         <span style="font:700 46px/1 'Caveat',cursive;">Program the agent</span>
       </div>
       <svg width="340" height="11" style="display:block; margin:2px 0 0 2px;"><path d="M2 6 Q 90 1 180 6 T 338 5" stroke="#cf4a2f" stroke-width="3" fill="none" stroke-linecap="round"/></svg>
-      <div style="font:400 18px 'Gaegu',cursive; color:#56524a; margin-top:8px; max-width:720px;">Where you set the rules. <b style="color:#2a2a28;">Hard rules</b> the agent can <i>never</i> break · <b style="color:#2f5fd0;">soft dials</b> it optimises toward · and <b>when to stand down</b>. Three ways to express the same program — plus the <b style="color:#6d3aa6;">🧬 Taste DNA</b> it learns and your <b style="color:#2f6d4a;">🍎 Nutrition</b> ledger.</div>
+      <div style="font:400 18px 'Gaegu',cursive; color:#56524a; margin-top:8px; max-width:720px;">Where you set the rules — one <b style="color:#2a2a28;">Settings form</b>, every lever grouped: <b style="color:#2a2a28;">hard rules</b> the agent can <i>never</i> break, <b style="color:#2f5fd0;">soft dials</b> it optimises toward, and <b>when to stand down</b>. Plus the <b style="color:#6d3aa6;">🧬 Taste DNA</b> it learns and your <b style="color:#2f6d4a;">🍎 Nutrition</b> ledger.</div>
     </div>
     <div style="font:600 17px 'Caveat',cursive; color:#2a2a28; border:2px solid #2a2a28; border-radius:9px 11px 9px 12px; padding:7px 13px; transform:rotate(-2.5deg); background:#f6e9b8;">lo-fi wireframe · v0</div>
   </div>
@@ -376,20 +388,12 @@
       <sc-if value="{{ isForm }}" hint-placeholder-val="{{ true }}"><div style="height:5px; width:90%; background:#cf4a2f; border-radius:4px;"></div></sc-if>
     </div>
     <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
-      <button onClick="{{ goRules }}" style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#fff; color:#2a2a28; box-shadow:3px 3px 0 rgba(42,42,40,.12); cursor:pointer;">🔒 Guardrails &amp; dials</button>
-      <sc-if value="{{ isRules }}" hint-placeholder-val="{{ false }}"><div style="height:5px; width:90%; background:#cf4a2f; border-radius:4px;"></div></sc-if>
-    </div>
-    <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
-      <button onClick="{{ goPlain }}" style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#fff; color:#2a2a28; box-shadow:3px 3px 0 rgba(42,42,40,.12); cursor:pointer;">✎ Plain-English program</button>
-      <sc-if value="{{ isPlain }}" hint-placeholder-val="{{ false }}"><div style="height:5px; width:90%; background:#cf4a2f; border-radius:4px;"></div></sc-if>
+      <button onClick="{{ goNutri }}" style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #2f6d4a; border-radius:12px 10px 12px 10px; background:#eef3ec; color:#2f6d4a; box-shadow:3px 3px 0 rgba(42,42,40,.12); cursor:pointer;">🍎 Nutrition</button>
+      <sc-if value="{{ isNutri }}" hint-placeholder-val="{{ false }}"><div style="height:5px; width:90%; background:#cf4a2f; border-radius:4px;"></div></sc-if>
     </div>
     <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
       <button onClick="{{ goDna }}" style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #6d3aa6; border-radius:12px 10px 12px 10px; background:#f3edfb; color:#6d3aa6; box-shadow:3px 3px 0 rgba(42,42,40,.12); cursor:pointer;">🧬 Taste DNA</button>
       <sc-if value="{{ isDna }}" hint-placeholder-val="{{ false }}"><div style="height:5px; width:90%; background:#cf4a2f; border-radius:4px;"></div></sc-if>
-    </div>
-    <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
-      <button onClick="{{ goNutri }}" style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #2f6d4a; border-radius:12px 10px 12px 10px; background:#eef3ec; color:#2f6d4a; box-shadow:3px 3px 0 rgba(42,42,40,.12); cursor:pointer;">🍎 Nutrition</button>
-      <sc-if value="{{ isNutri }}" hint-placeholder-val="{{ false }}"><div style="height:5px; width:90%; background:#cf4a2f; border-radius:4px;"></div></sc-if>
     </div>
   </div>
 
@@ -741,238 +745,11 @@
   </sc-if>
 
   <!-- ==================================================================== -->
-  <!-- APPROACH 2 — GUARDRAILS & DIALS -->
-  <!-- ==================================================================== -->
-  <sc-if value="{{ isRules }}" hint-placeholder-val="{{ false }}">
-  <div style="margin-top:22px;">
-    <div style="font:700 26px 'Caveat',cursive;">2 · Guardrails &amp; dials <span style="font:400 17px 'Gaegu',cursive; color:#7a746a;">— shows the solver's actual model: filter first, then score, then stand-down.</span></div>
-
-    <div style="display:flex; flex-wrap:wrap; gap:38px; align-items:flex-start; margin-top:16px;">
-
-      <!-- DESKTOP -->
-      <div style="flex:0 0 auto;">
-        <div style="font:700 13px 'Gaegu',cursive; color:#a8a294; letter-spacing:2px; margin-bottom:8px;">DESKTOP</div>
-        <div style="width:1000px; background:#fff; border:2.5px solid #2a2a28; border-radius:16px 16px 14px 16px; box-shadow:5px 6px 0 rgba(42,42,40,.10); overflow:hidden;">
-          <div style="display:flex; align-items:center; gap:8px; padding:9px 14px; border-bottom:2px solid #2a2a28; background:#f3efe6;">
-            <span style="width:11px; height:11px; border:1.5px solid #2a2a28; border-radius:50%;"></span>
-            <span style="width:11px; height:11px; border:1.5px solid #2a2a28; border-radius:50%;"></span>
-            <span style="width:11px; height:11px; border:1.5px solid #2a2a28; border-radius:50%;"></span>
-            <span style="margin-left:10px; font:400 13px 'Gaegu',cursive; color:#7a746a; border:1.5px solid #cfc9bd; border-radius:7px; padding:2px 12px; background:#fff;">smartplate.app / rules</span>
-          </div>
-          <!-- flow strip -->
-          <div style="display:flex; align-items:center; gap:8px; padding:11px 18px; border-bottom:2px dashed #cfc9bd; font:700 14px 'Gaegu',cursive;">
-            <span style="padding:5px 11px; border:2px solid #2a2a28; border-radius:9px; background:#2a2a28; color:#fff;">🔒 Guardrails filter the menu</span>
-            <span style="color:#a8a294;">→</span>
-            <span style="padding:5px 11px; border:2px solid #2f5fd0; border-radius:9px; background:#eef2fb; color:#2f5fd0;">🎛 Dials score what's left</span>
-            <span style="color:#a8a294;">→</span>
-            <span style="padding:5px 11px; border:2px dashed #8a8478; border-radius:9px; background:#faf8f2;">⊘ Stand-down if nothing fits</span>
-          </div>
-          <div style="display:flex; gap:0;">
-            <!-- guardrails -->
-            <div style="flex:1; padding:16px 16px; border-right:2px dashed #cfc9bd;">
-              <div style="font:700 18px 'Gaegu',cursive;">🔒 Guardrails <span style="font:400 13px; color:#7a746a;">— never crossed</span></div>
-              <div style="border:2px solid #2a2a28; border-radius:12px; padding:11px; margin-top:10px; background:#faf8f2;">
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="font:700 15px 'Gaegu',cursive;">Allergens</span><span style="font:400 12px 'Gaegu',cursive; color:#7a746a;">remove from menu</span></div>
-                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:7px;"><span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2a2a28; border-radius:9px; background:#2a2a28; color:#fff;">Peanut ✕</span><span style="font:400 13px 'Gaegu',cursive; padding:4px 10px; border:2px dashed #8a8478; border-radius:9px; color:#7a746a;">＋ add</span></div>
-              </div>
-              <div style="display:flex; gap:10px; margin-top:10px;">
-                <div style="flex:1; border:2px solid #2a2a28; border-radius:12px; padding:11px; background:#faf8f2;"><div style="font:700 15px 'Gaegu',cursive;">Diet</div><div style="font:700 14px 'Gaegu',cursive; border:2px solid #2a2a28; border-radius:8px; padding:4px 10px; background:#fff; margin-top:6px;">Vegetarian ▾</div></div>
-                <div style="flex:1; border:2px solid #2a2a28; border-radius:12px; padding:11px; background:#faf8f2;"><div style="font:700 15px 'Gaegu',cursive;">Min rating</div><div style="display:flex; align-items:center; gap:8px; margin-top:8px;"><div style="position:relative; flex:1; height:9px; border:2px solid #2a2a28; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:62%; background:repeating-linear-gradient(45deg,#2a2a28 0 4px,#46443e 4px 8px); border-radius:5px;"></div><div style="position:absolute; left:62%; top:50%; transform:translate(-50%,-50%); width:15px; height:15px; border:2px solid #2a2a28; border-radius:50%; background:#f6d36b;"></div></div><span style="font:700 14px 'Gaegu',cursive;">★4.2</span></div></div>
-              </div>
-              <div style="display:flex; gap:10px; margin-top:10px;">
-                <div style="flex:1; border:2px solid #2a2a28; border-radius:12px; padding:11px; background:#faf8f2;"><div style="font:700 15px 'Gaegu',cursive;">Budget cap</div><div style="font:700 22px 'Caveat',cursive; margin-top:2px;">₹2,000 <span style="font:400 12px 'Gaegu',cursive; color:#7a746a;">/ week</span></div></div>
-                <div style="flex:1; border:2px solid #2a2a28; border-radius:12px; padding:11px; background:#faf8f2;"><div style="font:700 15px 'Gaegu',cursive;">Medical</div><div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:6px;"><span style="font:700 12px 'Gaegu',cursive; padding:3px 8px; border:2px solid #2a2a28; border-radius:8px; background:#fff;">Low-sodium</span><span style="font:700 12px 'Gaegu',cursive; padding:3px 8px; border:2px solid #2a2a28; border-radius:8px; background:#fff;">Sugar cap</span></div></div>
-              </div>
-              <div style="border:2px solid #2a2a28; border-radius:12px; padding:11px; margin-top:10px; background:#faf8f2;"><div style="display:flex; justify-content:space-between;"><span style="font:700 15px 'Gaegu',cursive;">Fasting window</span><span style="font:700 13px 'Gaegu',cursive; padding:3px 9px; border:2px solid #2a2a28; border-radius:8px; background:#fff;">Tue lunch</span></div></div>
-              <div style="border:2px solid #2a2a28; border-radius:12px; padding:11px; margin-top:10px; background:#faf8f2;">
-                <div style="font:700 15px 'Gaegu',cursive;">📍 Areas &amp; windows</div>
-                <div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:6px;"><span style="font:700 12px 'Gaegu',cursive; padding:3px 8px; border:2px solid #2a2a28; border-radius:8px; background:#fff;">🏠 Adyar · 3km</span><span style="font:700 12px 'Gaegu',cursive; padding:3px 8px; border:2px solid #2a2a28; border-radius:8px; background:#fff;">💼 T. Nagar · 2km</span></div>
-                <div style="font:400 12px 'Gaegu',cursive; color:#7a746a; margin-top:6px;">☀ B: Mon/Thu/Sat · ◐ L: Tue–Sat · ☾ D: every day</div>
-              </div>
-            </div>
-            <!-- dials -->
-            <div style="flex:1; padding:16px 16px;">
-              <div style="font:700 18px 'Gaegu',cursive; color:#2f5fd0;">🎛 Dials <span style="font:400 13px; color:#7a746a;">— weights in the objective</span></div>
-              <div style="border:2px solid #2f5fd0; border-radius:12px; padding:12px; margin-top:10px; background:#f5f8fe;">
-                <div style="display:flex; align-items:center; gap:10px; margin-top:2px;"><span style="font:700 13px 'Gaegu',cursive; width:80px;">Taste</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:35%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:35%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-                <div style="display:flex; align-items:center; gap:10px; margin-top:9px;"><span style="font:700 13px 'Gaegu',cursive; width:80px;">Health</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:72%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:72%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-                <div style="display:flex; align-items:center; gap:10px; margin-top:9px;"><span style="font:700 13px 'Gaegu',cursive; width:80px;">Price</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:60%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:60%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-                <div style="display:flex; align-items:center; gap:10px; margin-top:9px;"><span style="font:700 13px 'Gaegu',cursive; width:80px;">Low carbon</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:45%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:45%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-                <div style="display:flex; align-items:center; gap:10px; margin-top:9px;"><span style="font:700 13px 'Gaegu',cursive; width:80px;">Dodge surge</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:80%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:80%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-                <div style="display:flex; align-items:center; gap:10px; margin-top:9px;"><span style="font:700 13px 'Gaegu',cursive; width:80px;">Variety</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:55%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:55%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-              </div>
-              <div style="display:flex; gap:10px; margin-top:10px;">
-                <div style="flex:1; border:2px solid #2f5fd0; border-radius:12px; padding:10px; background:#f5f8fe;"><div style="font:700 14px 'Gaegu',cursive; color:#2f5fd0;">Targets</div><div style="font:700 13px 'Gaegu',cursive; margin-top:4px;">1,800 kcal · 60g protein</div></div>
-                <div style="flex:1; border:2px solid #2f5fd0; border-radius:12px; padding:10px; background:#f5f8fe;"><div style="font:700 14px 'Gaegu',cursive; color:#2f5fd0;">Likes</div><div style="font:700 13px 'Gaegu',cursive; margin-top:4px;">♥ A2B · Murugan · South-Indian</div></div>
-              </div>
-              <div style="display:flex; align-items:center; gap:14px; margin-top:10px;">
-                <div style="display:flex; align-items:center; gap:6px;"><span style="display:inline-flex; width:38px; height:21px; border:2px solid #2f5fd0; border-radius:13px; background:#2f5fd0; align-items:center; justify-content:flex-end; padding:2px;"><span style="width:14px; height:14px; border-radius:50%; background:#fff;"></span></span><span style="font:400 13px 'Gaegu',cursive;">Weather-aware</span></div>
-                <div style="display:flex; align-items:center; gap:6px;"><span style="display:inline-flex; width:38px; height:21px; border:2px solid #2f5fd0; border-radius:13px; background:#2f5fd0; align-items:center; justify-content:flex-end; padding:2px;"><span style="width:14px; height:14px; border-radius:50%; background:#fff;"></span></span><span style="font:400 13px 'Gaegu',cursive;">Use leftovers</span></div>
-              </div>
-            </div>
-          </div>
-          <!-- power rules band -->
-          <div style="border-top:2px dashed #cfc9bd; padding:14px 18px;">
-            <div style="font:700 17px 'Gaegu',cursive; color:#9a5e1f;">⚡ Power rules <span style="font:400 13px; color:#7a746a;">— conditional; fire only inside their area + budget scope, and never override a lock</span></div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-              <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f;">💼 Work · lunch → ≤₹150 · fast S-Indian</span>
-              <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f;">🏠 Home · dinner → ≤₹300 · boost ♥</span>
-              <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f;">🏋 Gym day → +400 kcal · +25g protein</span>
-              <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f;">✈ Travel day → grab-and-go / skip</span>
-              <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f;">💸 &lt;₹120 left → cook-or-skip</span>
-              <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px dashed #b8702a; border-radius:9px; background:#fbf6ea; color:#cf4a2f;">📅 weekend · Home → 🎉 ₹350 treat</span>
-            </div>
-          </div>
-          <!-- stand-down band -->
-          <div style="border-top:2px solid #2a2a28; padding:14px 18px; background:#faf8f2;">
-            <div style="font:700 17px 'Gaegu',cursive;">⊘ When to stand down <span style="font:400 13px; color:#7a746a;">— the always-safe option; skip beats breaking a rule</span></div>
-            <div style="display:flex; gap:20px; flex-wrap:wrap; margin-top:8px;">
-              <div style="display:flex; align-items:center; gap:7px;"><span style="display:inline-flex; width:40px; height:22px; border:2px solid #2a2a28; border-radius:14px; background:#2a2a28; align-items:center; justify-content:flex-end; padding:2px;"><span style="width:15px; height:15px; border-radius:50%; background:#fff;"></span></span><span style="font:400 14px 'Gaegu',cursive;">Calendar says I'm out</span></div>
-              <div style="display:flex; align-items:center; gap:7px;"><span style="display:inline-flex; width:40px; height:22px; border:2px solid #2a2a28; border-radius:14px; background:#2a2a28; align-items:center; justify-content:flex-end; padding:2px;"><span style="width:15px; height:15px; border-radius:50%; background:#fff;"></span></span><span style="font:400 14px 'Gaegu',cursive;">Over budget</span></div>
-              <div style="display:flex; align-items:center; gap:7px;"><span style="display:inline-flex; width:40px; height:22px; border:2px solid #2a2a28; border-radius:14px; background:#2a2a28; align-items:center; justify-content:flex-end; padding:2px;"><span style="width:15px; height:15px; border-radius:50%; background:#fff;"></span></span><span style="font:400 14px 'Gaegu',cursive;">Festival suspends delivery</span></div>
-              <div style="display:flex; align-items:center; gap:7px;"><span style="display:inline-flex; width:40px; height:22px; border:2px solid #2a2a28; border-radius:14px; background:#fff; align-items:center; justify-content:flex-start; padding:2px;"><span style="width:15px; height:15px; border-radius:50%; background:#2a2a28;"></span></span><span style="font:400 14px 'Gaegu',cursive; color:#7a746a;">Nothing clears the rating floor</span></div>
-            </div>
-          </div>
-        </div>
-        <sc-if value="{{ notes }}" hint-placeholder-val="{{ true }}"><div style="font:600 18px 'Caveat',cursive; color:#cf4a2f; transform:rotate(-1.2deg); margin:12px 0 0 6px;">↳ teaches the model as you set it — locks can't be traded, dials only nudge. The flow strip up top makes "filter → score → skip" obvious.</div></sc-if>
-      </div>
-
-      <!-- MOBILE -->
-      <div style="flex:0 0 auto;">
-        <div style="font:700 13px 'Gaegu',cursive; color:#a8a294; letter-spacing:2px; margin-bottom:8px;">MOBILE</div>
-        <div style="width:300px; background:#fff; border:3px solid #2a2a28; border-radius:34px; box-shadow:5px 6px 0 rgba(42,42,40,.10); overflow:hidden;">
-          <div style="display:flex; justify-content:center; padding:8px;"><span style="width:80px; height:6px; background:#2a2a28; border-radius:4px;"></span></div>
-          <div style="padding:4px 14px 16px;">
-            <div style="font:700 15px 'Gaegu',cursive;">🔒 Guardrails</div>
-            <div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:6px;"><span style="font:700 12px 'Gaegu',cursive; padding:4px 9px; border:2px solid #2a2a28; border-radius:8px; background:#2a2a28; color:#fff;">Peanut</span><span style="font:700 12px 'Gaegu',cursive; padding:4px 9px; border:2px solid #2a2a28; border-radius:8px; background:#f3efe6;">Veg</span><span style="font:700 12px 'Gaegu',cursive; padding:4px 9px; border:2px solid #2a2a28; border-radius:8px; background:#f3efe6;">★4.2</span><span style="font:700 12px 'Gaegu',cursive; padding:4px 9px; border:2px solid #2a2a28; border-radius:8px; background:#f3efe6;">₹2,000</span><span style="font:700 12px 'Gaegu',cursive; padding:4px 9px; border:2px solid #2a2a28; border-radius:8px; background:#f3efe6;">Low-sodium</span></div>
-            <div style="font:700 15px 'Gaegu',cursive; color:#2f5fd0; margin-top:14px;">🎛 Dials</div>
-            <div style="border:2px solid #2f5fd0; border-radius:11px; padding:10px; margin-top:6px; background:#f5f8fe;">
-              <div style="display:flex; align-items:center; gap:8px;"><span style="font:700 12px 'Gaegu',cursive; width:66px;">Health</span><div style="position:relative; flex:1; height:8px; border:2px solid #2f5fd0; border-radius:6px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:72%; background:#bcd0e8;"></div><div style="position:absolute; left:72%; top:50%; transform:translate(-50%,-50%); width:13px; height:13px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-              <div style="display:flex; align-items:center; gap:8px; margin-top:7px;"><span style="font:700 12px 'Gaegu',cursive; width:66px;">Price</span><div style="position:relative; flex:1; height:8px; border:2px solid #2f5fd0; border-radius:6px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:60%; background:#bcd0e8;"></div><div style="position:absolute; left:60%; top:50%; transform:translate(-50%,-50%); width:13px; height:13px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-              <div style="display:flex; align-items:center; gap:8px; margin-top:7px;"><span style="font:700 12px 'Gaegu',cursive; width:66px;">Surge</span><div style="position:relative; flex:1; height:8px; border:2px solid #2f5fd0; border-radius:6px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:80%; background:#bcd0e8;"></div><div style="position:absolute; left:80%; top:50%; transform:translate(-50%,-50%); width:13px; height:13px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-            </div>
-            <div style="font:700 15px 'Gaegu',cursive; margin-top:14px;">⊘ Stand down when</div>
-            <div style="display:flex; align-items:center; gap:7px; margin-top:6px;"><span style="display:inline-flex; width:36px; height:20px; border:2px solid #2a2a28; border-radius:12px; background:#2a2a28; align-items:center; justify-content:flex-end; padding:2px;"><span style="width:13px; height:13px; border-radius:50%; background:#fff;"></span></span><span style="font:400 13px 'Gaegu',cursive;">Busy · over budget · festival</span></div>
-            <div style="font:700 15px 'Gaegu',cursive; color:#9a5e1f; margin-top:14px;">⚡ Power rules</div>
-            <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:6px;"><span style="font:700 11px 'Gaegu',cursive; padding:3px 8px; border:2px solid #b8702a; border-radius:8px; background:#f8edd6; color:#9a5e1f;">💼 lunch ≤₹150</span><span style="font:700 11px 'Gaegu',cursive; padding:3px 8px; border:2px solid #b8702a; border-radius:8px; background:#f8edd6; color:#9a5e1f;">🏠 dinner ≤₹300</span><span style="font:700 11px 'Gaegu',cursive; padding:3px 8px; border:2px solid #b8702a; border-radius:8px; background:#f8edd6; color:#9a5e1f;">&lt;₹120 → cook/skip</span></div>
-          </div>
-        </div>
-        <sc-if value="{{ notes }}" hint-placeholder-val="{{ true }}"><div style="font:600 18px 'Caveat',cursive; color:#cf4a2f; transform:rotate(-1.2deg); margin:12px 0 0 6px; max-width:300px;">↳ phone stacks the three layers top-to-bottom.</div></sc-if>
-      </div>
-
-    </div>
-  </div>
-  </sc-if>
-
-  <!-- ==================================================================== -->
-  <!-- APPROACH 3 — PLAIN-ENGLISH PROGRAM -->
-  <!-- ==================================================================== -->
-  <sc-if value="{{ isPlain }}" hint-placeholder-val="{{ false }}">
-  <div style="margin-top:22px;">
-    <div style="font:700 26px 'Caveat',cursive;">3 · Plain-English program <span style="font:400 17px 'Gaegu',cursive; color:#7a746a;">— the whole config as one editable sentence. Tap any underlined value.</span></div>
-
-    <div style="display:flex; flex-wrap:wrap; gap:38px; align-items:flex-start; margin-top:16px;">
-
-      <!-- DESKTOP -->
-      <div style="flex:0 0 auto;">
-        <div style="font:700 13px 'Gaegu',cursive; color:#a8a294; letter-spacing:2px; margin-bottom:8px;">DESKTOP</div>
-        <div style="width:1000px; background:#fff; border:2.5px solid #2a2a28; border-radius:16px 16px 14px 16px; box-shadow:5px 6px 0 rgba(42,42,40,.10); overflow:hidden;">
-          <div style="display:flex; align-items:center; gap:8px; padding:9px 14px; border-bottom:2px solid #2a2a28; background:#f3efe6;">
-            <span style="width:11px; height:11px; border:1.5px solid #2a2a28; border-radius:50%;"></span>
-            <span style="width:11px; height:11px; border:1.5px solid #2a2a28; border-radius:50%;"></span>
-            <span style="width:11px; height:11px; border:1.5px solid #2a2a28; border-radius:50%;"></span>
-            <span style="margin-left:10px; font:400 13px 'Gaegu',cursive; color:#7a746a; border:1.5px solid #cfc9bd; border-radius:7px; padding:2px 12px; background:#fff;">smartplate.app / program</span>
-          </div>
-          <div style="padding:22px 26px;">
-            <div style="font:400 14px 'Gaegu',cursive; color:#7a746a;">Your week, as a program · <span style="color:#2a2a28;">bold = hard rule</span> · <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">underlined = tap to change</span> · <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">⚡ power rule</span> · <span style="border-bottom:2px dashed #cf4a2f; color:#cf4a2f;">🎉 feast fund</span></div>
-            <div style="font:700 27px/1.7 'Gaegu',cursive; margin-top:14px; color:#2a2a28;">
-              Plan my week across three windows — <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">breakfast on Mon/Thu/Sat</span>, <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">lunch Tue–Sat</span>, <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">dinner every night</span> — each arriving <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">by its set time</span>.
-              Order around <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">Chennai</span>: deliver near <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">🏠 Home · Adyar</span> in the evenings, <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">💼 Work · T. Nagar</span> at midday.
-              Keep me <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">vegetarian</span>.
-              <b>Never</b> use <span style="background:#f3efe6; border:2px solid #2a2a28; border-radius:8px; padding:1px 8px;">peanut</span>,
-              <b>never</b> below <span style="background:#f3efe6; border:2px solid #2a2a28; border-radius:8px; padding:1px 8px;">★4.2</span>,
-              <b>never</b> over <span style="background:#f3efe6; border:2px solid #2a2a28; border-radius:8px; padding:1px 8px;">₹2,000/week</span>,
-              and respect <span style="background:#f3efe6; border:2px solid #2a2a28; border-radius:8px; padding:1px 8px;">low-sodium</span> + <span style="background:#f3efe6; border:2px solid #2a2a28; border-radius:8px; padding:1px 8px;">sugar cap</span>.
-              Lean toward <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">health</span> &amp; <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">price</span>; keep <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">carbon</span> low and <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">dodge surge</span> hard. Prefer <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">A2B</span> &amp; <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">Murugan Idli</span>. Let me <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">cook on Thu</span>.
-              <b style="color:#9a5e1f;">⚡ Power rules:</b> near <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">Work</span> at lunch, cap <span style="background:#f8edd6; border:2px solid #b8702a; border-radius:8px; padding:1px 8px; color:#9a5e1f;">₹150</span> &amp; prefer <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">fast South-Indian</span>; near <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">Home</span> at dinner, allow <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">₹300</span> &amp; <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">boost favourites</span>; if a day's budget dips under <span style="background:#f8edd6; border:2px solid #b8702a; border-radius:8px; padding:1px 8px; color:#9a5e1f;">₹120</span>, <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">cook-or-skip</span> only. On a <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">🏋 gym day</span> from my calendar, add <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">+400 kcal &amp; protein</span>; on a <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">✈ travel day</span>, go <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">grab-and-go or skip</span>.
-              <b>Skip</b> when my <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">calendar</span> says I'm out or I'm <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">over budget</span>.
-              <b style="color:#cf4a2f;">🎉 Feast Fund:</b> bank whatever you save and <span style="border-bottom:2px dashed #cf4a2f; color:#cf4a2f;">surprise me</span> with a treat when the jar fills.
-              <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">Propose the plan &amp; let me approve</span> every Sunday night.
-            </div>
-
-            <div style="display:flex; gap:10px; margin-top:22px;">
-              <button style="font:700 16px 'Gaegu',cursive; padding:10px 18px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#2a2a28; color:#fff; box-shadow:3px 3px 0 rgba(42,42,40,.22); cursor:pointer;">Run this program ▶</button>
-              <button style="font:700 16px 'Gaegu',cursive; padding:10px 18px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#fff; color:#2a2a28; box-shadow:3px 3px 0 rgba(42,42,40,.15); cursor:pointer;">⌨ Edit as text</button>
-              <button style="font:700 16px 'Gaegu',cursive; padding:10px 18px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#fff; color:#2a2a28; box-shadow:3px 3px 0 rgba(42,42,40,.15); cursor:pointer;">⚙ Advanced levers ▾</button>
-            </div>
-
-            <!-- advanced peek -->
-            <div style="border:2px dashed #cfc9bd; border-radius:13px; padding:14px 16px; margin-top:18px; background:#faf8f2;">
-              <div style="font:700 15px 'Gaegu',cursive; color:#7a746a;">⚙ Advanced — the same program as raw levers</div>
-              <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">🔒 diet=veg</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">🔒 exclude=peanut</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">🔒 rating≥4.2</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">🔒 budget≤2000</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2f5fd0; border-radius:9px; background:#eef2fb; color:#2f5fd0;">🎛 health=.72</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2f5fd0; border-radius:9px; background:#eef2fb; color:#2f5fd0;">🎛 price=.60</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2f5fd0; border-radius:9px; background:#eef2fb; color:#2f5fd0;">🎛 surge=.80</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2f5fd0; border-radius:9px; background:#eef2fb; color:#2f5fd0;">🎛 carbon=.45</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px dashed #8a8478; border-radius:9px; background:#fff;">⊘ skip: busy · over-budget</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px dashed #8a8478; border-radius:9px; background:#fff;">mode: balanced</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px dashed #8a8478; border-radius:9px; background:#fff;">autonomy: approve</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">📍 home=Adyar·3km</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">📍 work=T.Nagar·2km</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">windows: B=M/Th/Sa · L=Tu–Sa · D=7d</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f;">⚡ rule: work·lunch→≤150</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f;">⚡ rule: home·dinner→≤300</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f;">⚡ rule: &lt;120→cook/skip</span>
-                <span style="font:700 13px 'Gaegu',cursive; padding:4px 10px; border:2px solid #cf4a2f; border-radius:9px; background:#fbf0d6; color:#cf4a2f;">🎉 feast-fund: on · fill=500 · cap=350</span>
-              </div>
-            </div>
-
-            <!-- preview -->
-            <div style="border:2px solid #2a2a28; border-radius:13px; padding:14px 16px; margin-top:14px; background:#eef3ec;">
-              <div style="font:700 15px 'Gaegu',cursive;">✓ Dry-run preview <span style="font:400 13px; color:#7a746a;">— what this program would do this week</span></div>
-              <div style="font:400 15px 'Gaegu',cursive; color:#46443e; margin-top:5px;">14 windows planned (B×3 · L×5 · D×7) · 9 delivered · 3 cooked · 2 skipped · ₹1,670 / ₹2,000 · 0 allergen conflicts · saved ₹30 on surge. <span style="color:#9a5e1f;">⚡ 2 power rules fired</span> · <span style="color:#cf4a2f;">🎉 Feast Fund +₹30 → ₹390/₹500</span> · <span style="color:#2f5fd0;">no rule violations.</span></div>
-            </div>
-          </div>
-        </div>
-        <sc-if value="{{ notes }}" hint-placeholder-val="{{ true }}"><div style="font:600 18px 'Caveat',cursive; color:#cf4a2f; transform:rotate(-1.2deg); margin:12px 0 0 6px;">↳ most human "how do I program it?" — reads like a brief. Boxed = hard, underlined = soft, with a dry-run before you commit.</div></sc-if>
-      </div>
-
-      <!-- MOBILE -->
-      <div style="flex:0 0 auto;">
-        <div style="font:700 13px 'Gaegu',cursive; color:#a8a294; letter-spacing:2px; margin-bottom:8px;">MOBILE</div>
-        <div style="width:300px; background:#fff; border:3px solid #2a2a28; border-radius:34px; box-shadow:5px 6px 0 rgba(42,42,40,.10); overflow:hidden;">
-          <div style="display:flex; justify-content:center; padding:8px;"><span style="width:80px; height:6px; background:#2a2a28; border-radius:4px;"></span></div>
-          <div style="padding:4px 14px 16px;">
-            <div style="font:700 18px 'Caveat',cursive;">Your week, as a program</div>
-            <div style="font:700 17px/1.6 'Gaegu',cursive; margin-top:8px;">
-              Plan <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">breakfast M/Th/Sa</span>, <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">lunch Tu–Sa</span>, <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">dinner nightly</span> in <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">Chennai</span> — <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">🏠 Adyar</span> eves, <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">💼 T. Nagar</span> middays. <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">Veg</span>.
-              <b>Never</b> <span style="background:#f3efe6; border:1.5px solid #2a2a28; border-radius:6px; padding:0 5px;">peanut</span>, <b>never</b> <span style="background:#f3efe6; border:1.5px solid #2a2a28; border-radius:6px; padding:0 5px;">&lt;★4.2</span>, <b>never</b> <span style="background:#f3efe6; border:1.5px solid #2a2a28; border-radius:6px; padding:0 5px;">&gt;₹2,000</span>.
-              <b style="color:#9a5e1f;">⚡</b> <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">Work</span> lunch → <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">≤₹150</span>; <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">Home</span> dinner → <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">≤₹300</span>; <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">🏋 gym</span> → <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">+protein</span>; <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">✈ travel</span> → <span style="border-bottom:2px dashed #b8702a; color:#9a5e1f;">grab-and-go</span>.
-              <b>Skip</b> when <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">busy</span>.
-              <b style="color:#cf4a2f;">🎉</b> Bank savings → <span style="border-bottom:2px dashed #cf4a2f; color:#cf4a2f;">surprise treat</span> when full. <span style="border-bottom:2px dashed #2f5fd0; color:#2f5fd0;">Approve</span> weekly.
-            </div>
-            <div style="border:2px solid #2a2a28; border-radius:11px; padding:9px; margin-top:12px; background:#eef3ec;"><div style="font:700 13px 'Gaegu',cursive;">✓ Dry-run</div><div style="font:400 13px 'Gaegu',cursive; color:#46443e;">14 windows · 9 deliver · 3 cook · 2 skip · ₹1,670 · 0 conflicts · 🎉 +₹30</div></div>
-            <button style="width:100%; font:700 15px 'Gaegu',cursive; padding:10px; border:2px solid #2a2a28; border-radius:12px; background:#2a2a28; color:#fff; box-shadow:2px 2px 0 rgba(42,42,40,.22); cursor:pointer; margin-top:10px;">Run this program ▶</button>
-            <button style="width:100%; font:700 14px 'Gaegu',cursive; padding:8px; border:2px solid #2a2a28; border-radius:12px; background:#fff; cursor:pointer; margin-top:7px;">⚙ Advanced levers ▾</button>
-          </div>
-        </div>
-        <sc-if value="{{ notes }}" hint-placeholder-val="{{ true }}"><div style="font:600 18px 'Caveat',cursive; color:#cf4a2f; transform:rotate(-1.2deg); margin:12px 0 0 6px; max-width:300px;">↳ shortened on phone; "Advanced levers" drops to the form for power edits.</div></sc-if>
-      </div>
-
-    </div>
-  </div>
-  </sc-if>
-
-  <!-- ==================================================================== -->
   <!-- TAB 4 — TASTE DNA (the moat, made visible) -->
   <!-- ==================================================================== -->
   <sc-if value="{{ isDna }}" hint-placeholder-val="{{ false }}">
   <div style="margin-top:22px;">
-    <div style="font:700 26px 'Caveat',cursive;">4 · Taste DNA <span style="font:400 17px 'Gaegu',cursive; color:#7a746a;">— the private flavour model the agent learns from you. Copyable UI, <b>uncopyable data</b>.</span></div>
+    <div style="font:700 26px 'Caveat',cursive;">3 · Taste DNA <span style="font:400 17px 'Gaegu',cursive; color:#7a746a;">— the private flavour model the agent learns from you. Copyable UI, <b>uncopyable data</b>.</span></div>
 
     <div style="display:flex; flex-wrap:wrap; gap:38px; align-items:flex-start; margin-top:16px;">
 
@@ -1058,7 +835,8 @@
   <!-- ==================================================================== -->
   <sc-if value="{{ isNutri }}" hint-placeholder-val="{{ false }}">
   <div style="margin-top:22px;">
-    <div style="font:700 26px 'Caveat',cursive;">5 · Nutrition <span style="font:400 17px 'Gaegu',cursive; color:#7a746a;">— the <b>accountant</b> a chatbot can't be: targets that flex, a debt/credit ledger that carries, and repair meals.</span></div>
+    <div style="font:700 26px 'Caveat',cursive;">2 · Nutrition <span style="font:400 17px 'Gaegu',cursive; color:#7a746a;">— the <b>accountant</b> a chatbot can't be: targets that flex, a debt/credit ledger that carries, and repair meals.</span></div>
+    <div style="font:400 14px 'Gaegu',cursive; color:#56524a; margin-top:4px;">Read it top to bottom: <b>① your daily target</b> → <b>② this week vs target</b> → <b>③ each nutrient on its own clock</b> → <b>④ what the agent does when you drift</b>.</div>
 
     <div style="display:flex; flex-wrap:wrap; gap:38px; align-items:flex-start; margin-top:16px;">
 
@@ -1098,16 +876,18 @@
               </div>
             </div>
 
-            <!-- 30-day repair + fatigue -->
-            <div style="display:flex; gap:24px; flex-wrap:wrap; margin-top:18px;">
+            <!-- ④ when you drift: two distinct watches (a nutrient gap vs boredom) -->
+            <div style="font:700 16px 'Gaegu',cursive; border-bottom:2px solid #2a2a28; padding-bottom:4px; margin-top:20px;">④ When you drift off-target <span style="font:400 12px; color:#7a746a;">— two separate watches: a <b>nutrient gap</b> (we order specific dishes to fix it) vs <b>boredom</b> (we keep meals fresh)</span></div>
+            <div style="display:flex; gap:24px; flex-wrap:wrap; margin-top:14px;">
               <div style="flex:1; min-width:340px; border:2px solid #2f6d4a; border-radius:13px; padding:13px 15px; background:#f4f8f3;">
-                <div style="font:700 15px 'Gaegu',cursive; color:#2f6d4a;">🩺 30-day watch — repair meals</div>
-                <div style="font:400 13px 'Gaegu',cursive; color:#56524a; margin-top:5px;">Tracking micros a one-off order can't: you're trending <b>low on fibre &amp; iron</b> this month. The agent will softly bias toward <b>leafy/legume-rich</b> dishes until you're back in range — never a hard rule, just a nudge.</div>
+                <div style="font:700 15px 'Gaegu',cursive; color:#2f6d4a;">🩺 Repair meals — what we add when a nutrient runs short</div>
+                <div style="font:400 13px 'Gaegu',cursive; color:#56524a; margin-top:5px;">Tracking micros a one-off order can't: you're trending <b>low on fibre &amp; iron</b> this month. The agent softly biases your plan toward <b>leafy/legume-rich</b> dishes until you're back in range — never a hard rule, just a nudge.</div>
+                <div style="font:700 12px 'Gaegu',cursive; color:#2f6d4a; margin-top:8px;">→ this week it slipped in: +1 spinach dal · +1 rajma bowl</div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:9px;"><span style="font:700 12px 'Gaegu',cursive; padding:4px 9px; border:2px solid #2f6d4a; border-radius:8px; background:#fff; color:#2f6d4a;">Fibre 71% of goal</span><span style="font:700 12px 'Gaegu',cursive; padding:4px 9px; border:2px solid #2f6d4a; border-radius:8px; background:#fff; color:#2f6d4a;">Iron 78%</span><span style="font:700 12px 'Gaegu',cursive; padding:4px 9px; border:2px solid #2a2a28; border-radius:8px; background:#fff;">Protein 92%</span></div>
               </div>
               <div style="flex:1; min-width:300px; border:2px solid #2a2a28; border-radius:13px; padding:13px 15px; background:#faf8f2;">
-                <div style="font:700 15px 'Gaegu',cursive;">♻ Variety / recipe-fatigue</div>
-                <div style="font:400 13px 'Gaegu',cursive; color:#56524a; margin-top:5px;">Boredom is the #1 reason people quit meal apps — so variety is a tracked dial, not luck.</div>
+                <div style="font:700 15px 'Gaegu',cursive;">♻ Variety — so favourites don't become fatigue</div>
+                <div style="font:400 13px 'Gaegu',cursive; color:#56524a; margin-top:5px;">Boredom (not nutrition) is the #1 reason people quit meal apps — so variety is a tracked dial, not luck.</div>
                 <div style="font:400 12px 'Gaegu',cursive; color:#7a746a; margin-top:10px;">How much new vs the usual — a <b style="color:#2a2a28;">level</b>, not a raw slider</div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
                   <span style="font:700 12px 'Gaegu',cursive; padding:5px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">Usual</span>
@@ -1157,7 +937,9 @@
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    this.state = { tab: 'grid', week: 'this', sel: this.defaultSel(), picks: {}, browse: null, mobDay: 1, areaOverride: {}, qty: {}, addons: {}, spice: {}, horizon: 'week' };
+    this.state = { tab: 'grid', week: 'this', sel: this.defaultSel(), picks: this.defaultSkips(), browse: null, mobDay: 1, areaOverride: {}, qty: {}, addons: {}, spice: {}, horizon: 'week',
+      // user-editable window times (24h HH:MM) — were hardcoded labels before
+      times: { B: '08:30', L: '13:00', D: '20:30' } };
   }
 
   // ---- location primitive: serviceability gate per area ----
@@ -1325,14 +1107,52 @@ class Component extends DCLogic {
     this.setState({ picks, browse: null });
   }
   defaultSel() {
-    const pat = { B: [1, 1, 0, 1, 1, 1, 1], L: [1, 1, 1, 1, 1, 1, 1], D: [1, 1, 1, 1, 1, 1, 0] };
+    // every window is in the plan; "not eating" is expressed as SKIP, not a separate off
+    // state (we merged the old off+skip — there's only one "skip" now).
     const o = {};
-    ['B', 'L', 'D'].forEach((w) => pat[w].forEach((v, i) => { o[i + '-' + w] = !!v; }));
+    ['B', 'L', 'D'].forEach((w) => { for (let i = 0; i < 7; i++) o[i + '-' + w] = true; });
     return o;
+  }
+  // windows you don't eat by default start as SKIP (what used to be "off")
+  defaultSkips() {
+    const skipPat = { B: [0, 0, 1, 0, 0, 0, 0], D: [0, 0, 0, 0, 0, 0, 1] };
+    const picks = {};
+    Object.keys(skipPat).forEach((w) => skipPat[w].forEach((v, i) => {
+      if (!v) return;
+      const opts = this.optsForCtx(this.baseDays()[i], w, this.defaultArea(w));
+      const si = opts.findIndex((o) => o.tag === 'SKIP');
+      if (si >= 0) picks[i + '-' + w] = si;
+    }));
+    return picks;
   }
   toggleCell(i, w) {
     const k = i + '-' + w;
     this.setState((s) => ({ sel: { ...s.sel, [k]: !s.sel[k] } }));
+  }
+  // ---- editable window times (Step 1) ----
+  timeVal(w) { return (this.state.times || {})[w] || '08:00'; }
+  setTime(w, val) { if (!val) return; this.setState((s) => ({ times: { ...s.times, [w]: val } })); }
+  fmtTime(w) {
+    const v = this.timeVal(w); const [hh, mm] = v.split(':').map(Number);
+    const ap = hh >= 12 ? 'pm' : 'am'; const h12 = ((hh + 11) % 12) + 1;
+    return h12 + (mm ? ':' + String(mm).padStart(2, '0') : '') + ap;
+  }
+  // ---- Step-1 selector cell: cycle DELIVER → COOK → SKIP → DELIVER (was a hardcoded
+  // on/off toggle that only ever showed the slot's default glyph). There's no separate
+  // "off" — SKIP is the single "not eating" state — and each tap visibly changes the
+  // symbol, the active mode goes dark, and it stays in sync with the grid. ----
+  cycleWindow(i, w) {
+    const k = i + '-' + w;
+    const opts = this.optsForCtx(this.baseDays()[i], w, this.activeArea(i, w));
+    const avail = ['DELIVER', 'COOK', 'SKIP'].filter((t) => opts.some((o) => o.tag === t));
+    if (!avail.length) return;
+    const curTag = (opts[(this.state.picks[k] || 0) % (opts.length || 1)] || {}).tag;
+    const ai = avail.indexOf(curTag);
+    const nextTag = avail[(ai + 1) % avail.length];
+    const pidx = opts.findIndex((o) => o.tag === nextTag);
+    const patch = { sel: { ...this.state.sel, [k]: true }, browse: null };
+    if (pidx >= 0) patch.picks = { ...this.state.picks, [k]: pidx };
+    this.setState(patch);
   }
 
   // ---- nested budgets: the same cap viewed at Day / Week / Month. They coexist —
@@ -1434,9 +1254,12 @@ class Component extends DCLogic {
         const noDelivery = opts.filter((o) => o.tag === 'DELIVER').length === 0;
         const e = this.eff(m, k);
         if (on && m) {
-          sessions++; daySpend += e.cost; spent += e.cost;
+          daySpend += e.cost; spent += e.cost;
           dayKcal += e.kcal;
-          if (m.tag === 'DELIVER') { delivered++; if (isFav(m)) usualN++; else newN++; } else if (m.tag === 'COOK') cooked++; else if (m.tag === 'SKIP') skipped++;
+          // a SKIP is "not eating" — it doesn't count as a planned eating session
+          if (m.tag === 'DELIVER') { sessions++; delivered++; if (isFav(m)) usualN++; else newN++; }
+          else if (m.tag === 'COOK') { sessions++; cooked++; }
+          else if (m.tag === 'SKIP') skipped++;
           stripG.push(m.glyph);
         }
         return { on, off: !on, meal: m, opts, idx, k, w, di: i, area, noDelivery, wlabel: winMeta[w].t, eff: e };
@@ -1463,17 +1286,26 @@ class Component extends DCLogic {
       h('div', { style: { font: "700 14px 'Gaegu',cursive" } }, dy.d + ' ' + dy.date)));
     const onStyle = { font: "700 16px 'Gaegu',cursive", padding: '11px 0', textAlign: 'center', border: '2px solid #2a2a28', borderRadius: '9px', background: '#2a2a28', color: '#fff', cursor: 'pointer' };
     const cookStyle = { ...onStyle, background: '#fff', color: '#2a2a28' };
-    const skipStyle = { ...onStyle, background: '#f3efe6', color: '#2a2a28' };
+    const skipStyle = { font: "700 16px 'Gaegu',cursive", padding: '11px 0', textAlign: 'center', border: '2px dashed #8a8478', borderRadius: '9px', background: '#f3efe6', color: '#8a8478', cursor: 'pointer' };
     const offStyle = { font: "700 16px 'Gaegu',cursive", padding: '11px 0', textAlign: 'center', border: '2px dashed #cfc9bd', borderRadius: '9px', background: '#faf8f2', color: '#cfc9bd', cursor: 'pointer' };
     const rowsEls = wins.map((w) => {
-      const label = h('div', { key: 'l' + w, style: { display: 'flex', flexDirection: 'column', justifyContent: 'center' } },
+      const label = h('div', { key: 'l' + w, style: { display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '3px' } },
         h('span', { style: { font: "700 15px 'Gaegu',cursive" } }, winMeta[w].t),
-        h('span', { style: { font: "400 11px 'Gaegu',cursive", color: '#7a746a' } }, winMeta[w].s));
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '4px' } },
+          h('span', { style: { font: "400 11px 'Gaegu',cursive", color: '#7a746a' } }, 'by'),
+          h('input', { type: 'time', value: this.timeVal(w), onChange: (e) => this.setTime(w, e.target.value),
+            title: 'Set your ' + winMeta[w].t.replace(/^\S+\s/, '') + ' time — the agent plans & dodges surge around it',
+            style: { font: "700 11px 'Gaegu',cursive", border: '1.5px solid #2a2a28', borderRadius: '6px', padding: '2px 4px', background: '#fff', color: '#2a2a28', cursor: 'pointer', maxWidth: '98px' } })));
       const cells = days.map((dy, i) => {
-        const on = !!sel[i + '-' + w]; const m = dy.slots[w];
-        let st = offStyle, lab = '·';
-        if (on && m) { lab = m.glyph; st = m.tag === 'COOK' ? cookStyle : (m.tag === 'SKIP' ? skipStyle : onStyle); }
-        return h('button', { key: w + i, onClick: () => this.toggleCell(i, w), title: m ? m.item : '', style: st }, lab);
+        const vw = dy.view[wins.indexOf(w)];
+        const on = !!(vw && vw.on); const m = vw && vw.meal;
+        let st = offStyle, lab = '·', title = 'paused · tap to plan this window';
+        if (on && m) {
+          lab = m.glyph;
+          st = m.tag === 'COOK' ? cookStyle : (m.tag === 'SKIP' ? skipStyle : onStyle);
+          title = m.item + ' · tap: deliver → cook → skip';
+        }
+        return h('button', { key: w + i, onClick: () => this.cycleWindow(i, w), title, style: st }, lab);
       });
       return [label, ...cells];
     });
@@ -1527,7 +1359,7 @@ class Component extends DCLogic {
         allowance, capBadge);
       const cards = dy.view.map((v) => {
         if (!v.on) {
-          return h('div', { key: v.k, style: { border: '2px dashed #cfc9bd', borderRadius: '13px 11px 13px 11px', background: '#faf8f2', padding: '8px 9px', marginBottom: '8px', minHeight: '84px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' } },
+          return h('div', { key: v.k, style: { border: '2px dashed #cfc9bd', borderRadius: '13px 11px 13px 11px', background: '#faf8f2', padding: '8px 9px', minHeight: '84px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' } },
             h('div', { style: { font: "700 10px 'Gaegu',cursive", letterSpacing: '1px', color: '#bcb6a8' } }, v.wlabel),
             h('div', { style: { font: "400 13px 'Gaegu',cursive", color: '#bcb6a8' } }, '— paused —'));
         }
@@ -1573,15 +1405,19 @@ class Component extends DCLogic {
           ...v.opts.map((o, oi) => h('div', { key: 'o' + oi, onClick: () => this.chooseAlt(v.di, v.w, oi), style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px', padding: '4px 6px', marginBottom: '3px', borderRadius: '7px', cursor: 'pointer', border: oi === v.idx ? '1.5px solid #2a2a28' : '1.5px solid #e6e1d6', background: oi === v.idx ? '#f3efe6' : '#fff' } },
             h('span', { style: { font: "700 11px 'Gaegu',cursive" } }, (oi === 0 ? '◆ ' : '') + o.glyph + ' ' + o.item),
             h('span', { style: { font: "400 10px 'Gaegu',cursive", color: '#7a746a', whiteSpace: 'nowrap' } }, o.cost)))) : null;
-        return h('div', { key: v.k, style: { background: '#fff', border: '2px solid #2a2a28', borderRadius: '13px 11px 13px 11px', boxShadow: '2px 2px 0 rgba(42,42,40,.08)', padding: '8px 9px', marginBottom: '8px', minHeight: '84px' } },
+        return h('div', { key: v.k, style: { background: '#fff', border: '2px solid #2a2a28', borderRadius: '13px 11px 13px 11px', boxShadow: '2px 2px 0 rgba(42,42,40,.08)', padding: '8px 9px', minHeight: '84px' } },
           head,
           h('div', { style: { font: "700 14px/1.15 'Gaegu',cursive", marginTop: '5px' } }, m.item),
           h('div', { style: { font: "400 12px/1.2 'Gaegu',cursive", color: '#7a746a', marginTop: '2px' } }, (isFav(m) ? '⭐ ' : '') + m.meta),
           custom, areaRow, tags, modeRow, controls, panel);
       });
-      return h('div', { key: 'col' + i }, header, ...cards);
+      // each day-column is a SUBGRID spanning the 4 shared parent rows (header · B · L · D)
+      // so the breakfast/lunch/dinner rows line up across every day and stretch to equal
+      // height — fixes the "calendar grid is misaligned" bug (columns used to be independent
+      // stacks, so a tall card in one day pushed every card below it out of row).
+      return h('div', { key: 'col' + i, style: { display: 'grid', gridTemplateRows: 'subgrid', gridRow: '1 / -1', gap: '10px' } }, header, ...cards);
     });
-    const gridEl = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: '12px' } }, ...cols);
+    const gridEl = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gridTemplateRows: 'repeat(4, auto)', gap: '12px 12px', alignItems: 'stretch' } }, ...cols);
 
     // ---- constraint-conflict prompt: over cap → resolve by money, never by safety ----
     const conflictEl = left < 0 ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', border: '2.5px solid #cf4a2f', background: '#f7e0d9', borderRadius: '14px', padding: '11px 15px', marginTop: '12px' } },
@@ -1797,11 +1633,9 @@ class Component extends DCLogic {
     try { localStorage.setItem('smartplate_target', String(c.target)); localStorage.setItem('smartplate_protein', String(c.protein)); localStorage.setItem('smartplate_favs', JSON.stringify(this.state.favs)); } catch (e) {}
     return {
       isForm: this.state.tab === 'form',
-      isRules: this.state.tab === 'rules',
-      isPlain: this.state.tab === 'plain',
       isDna: this.state.tab === 'dna',
       isNutri: this.state.tab === 'nutri',
-      goForm: set('form'), goRules: set('rules'), goPlain: set('plain'), goDna: set('dna'), goNutri: set('nutri'),
+      goForm: set('form'), goDna: set('dna'), goNutri: set('nutri'),
       dnaRadar: this.radar(240), dnaRadarMob: this.radar(184),
       nutritionWeekEl: this.nutritionWeek(150), nutritionWeekMobEl: this.nutritionWeek(92),
       proteinDistEl: this.proteinDist(),

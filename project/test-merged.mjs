@@ -63,6 +63,9 @@ console.log('\n[setup] expected components present');
 ok(textIn(setup).includes('Program the agent'), 'setup header "Program the agent"');
 ok(textIn(setup).includes('Settings form'), 'default "Settings form" tab content');
 ok(setup.querySelector('svg') !== null, 'at least one SVG present');
+ok(!btnByText(setup, 'Guardrails'), 'redundant "Guardrails & dials" view removed from UI');
+ok(!btnByText(setup, 'Plain-English'), 'redundant "Plain-English program" view removed from UI');
+ok([...setup.querySelectorAll('button')].filter((b) => /Settings form|Nutrition|Taste DNA/.test(b.textContent)).length === 3, 'setup is down to 3 tabs: Settings form · Nutrition · Taste DNA');
 
 console.log('\n[interactivity] notes toggle re-renders annotations');
 const ann = 'the "when to order" selection moved up here';
@@ -107,8 +110,18 @@ const friBefore = resolved(4, 'L').item;
 while (wc.activeArea(4, 'L') !== 'home') wc.cycleArea(4, 'L'); // force Home, where Ponnusamy doesn't serve
 ok(resolved(4, 'L').item !== friBefore || resolved(4, 'L').tag !== 'DELIVER', 'switching FRI lunch to Home surfaces a different serviceable pick');
 
-console.log('\n[weekly] no "am/pm" typo in meal windows');
-ok(/by 8:30am/.test(weekly.innerHTML) && /by 1:00pm/.test(weekly.innerHTML), 'meal windows read 8:30am / 1:00pm / 8:30pm');
+console.log('\n[weekly] meal-window times are user-editable (Step 1)');
+ok(weekly.querySelectorAll('input[type="time"]').length >= 3, 'each window has an editable <input type="time">');
+const winTimes = [...weekly.querySelectorAll('input[type="time"]')].map((i) => i.value);
+ok(winTimes.includes('08:30') && winTimes.includes('13:00') && winTimes.includes('20:30'), `default times 08:30 / 13:00 / 20:30 (${winTimes.join(', ')})`);
+
+console.log('\n[weekly] Step-1 selector cell cycles deliver → cook → skip (one "skip", no separate off)');
+const bOpts = () => wc.optsForCtx(wc.baseDays()[0], 'B', wc.activeArea(0, 'B'));
+ok(bOpts().filter((o) => o.tag === 'SKIP').length === 1, 'exactly one SKIP option per window (off merged into skip)');
+const selTag = () => { const o = bOpts(); return o[(wc.state.picks['0-B'] || 0) % o.length].tag; };
+const c0 = selTag(); wc.cycleWindow(0, 'B'); const c1 = selTag(); wc.cycleWindow(0, 'B'); const c2 = selTag(); wc.cycleWindow(0, 'B'); const c3 = selTag();
+ok(c1 !== c0 && c2 !== c1 && c3 === c0, `selector cell steps through all modes and loops (${c0}→${c1}→${c2}→${c3})`);
+wc.setState({ picks: wc.defaultSkips() }); // restore pristine default
 
 console.log('\n[setup] BMR/TDEE calculator (Nutrition tab) — user enters details, target computes');
 const sc = window.__dc.comps[1];

@@ -1,39 +1,50 @@
-# SmartPlate — Full-Site UI/UX Design Audit
+# SmartPlate — Full-Site UI/UX Design Audit (v2)
 
 *Audited as a senior design lead on day one. The question is not "is it pretty?" — it's
 **can a normal user understand the product, trust it, and finish the core action
-(review the week → approve & auto-order) without reading docs?***
+(pick the week → review → approve & auto‑order) without reading docs?***
+
+> **v2 note.** This supersedes the v1 audit. Since v1, the team self‑hosted React (the
+> P0 CDN single‑point‑of‑failure, *F1*, is gone) and the default plan now loads **within
+> cap** (*F2*). This pass re‑booted the current artifact, fixed a batch of small things on
+> the spot (§1), and re‑scoped the findings to what's true **today**.
 
 ---
 
-## 0. What was audited & how it was booted (honest method notes)
+## 0. What was audited & how it was booted (method)
 
-There is **no conventional web app / dev server** in this repo — it's a *design handoff
-bundle*: two static `.dc.html` prototypes that load React from a CDN at runtime. Those
-prototypes **are** the product's front end, so I booted and audited them:
+The repo ships two things that both call themselves "SmartPlate":
 
-- **Boot:** a small local static Node server + **headless Chromium** (`@sparticuz/chromium`
-  via `puppeteer-core`). Playwright/Chromium's normal browser CDNs were **HTTP-403
-  blocked** in this environment, so the browser binary was sourced from an npm tarball.
-- **Render fix required:** the prototypes load React/ReactDOM from **unpkg**, which was
-  **403-blocked here** — the page rendered **blank** until I vendored React from npm and
-  served it locally. *(This is itself finding **F1**, a P0.)* Google Fonts was reachable,
-  so the hand-drawn type rendered correctly.
-- **Coverage:** 2 screens × all tab states = **7 captures**, each at 1460-wide,
-  `deviceScaleFactor:2`, full-page. Each prototype lays out its **desktop and mobile**
-  frames together, so every capture covers **mobile layout** too. Core flows covered:
-  *plan → review → approve/auto-order*, *program the rules*, *Taste DNA*, *Nutrition*.
+1. **The Flask app** (`run.py` → `smartplate/`) — a working JSON API + a vanilla‑JS plan
+   view. It boots cleanly (`python run.py` → `http://localhost:5057`, `GET /` → 200) and
+   the backend is the **source of truth for the product model** (nutrition, medical rules,
+   ledger). It is referenced in §4.
+2. **The interactive design prototype** — `project/SmartPlate Wireframes.html`, a
+   **self‑contained, offline** file (an inlined mini‑React runtime + template interpreter,
+   no network at runtime). This is the **front‑end the team is actively iterating**: it has
+   the Calendar‑grid / Command‑dashboard views, the Setup screens, Taste DNA and Nutrition.
+   **This audit is of that prototype**, because that's where the product's UX decisions live.
+
+- **Boot:** headless **Chromium via Playwright**, rendered from `file://` at 1460‑wide,
+  `deviceScaleFactor: 2`, full‑page. Each screen lays its **desktop and mobile** frames out
+  together, so every capture covers **mobile layout** too.
+- **Verified, not eyeballed:** the prototype's own end‑to‑end harness
+  (`project/test-merged.mjs`, jsdom) boots the shipped file and asserts the interactive bits
+  work — **all assertions pass**, including the new behaviours from §1.
+- **One environment caveat:** Google Fonts (Gaegu/Caveat) were cert‑blocked in the audit
+  sandbox, so captures render in a fallback cursive. Layout/alignment judgments are
+  unaffected; exact type colour/size is judged from the source.
 
 ### Screenshots (`./assets/`)
 | # | Screen / state | File |
 |---|---|---|
-| 01 | Weekly Plan — **Calendar grid** (default; selector + over-cap banner + 7-day grid + mobile) | [01-weekly-calendar-grid.png](./assets/01-weekly-calendar-grid.png) |
-| 02 | Weekly Plan — **Command dashboard** (status ring, command bar, tiles, burn-down) | [02-weekly-command-dashboard.png](./assets/02-weekly-command-dashboard.png) |
-| 03 | Setup — **Settings form** (the dense "see everything" view) | [03-setup-settings-form.png](./assets/03-setup-settings-form.png) |
-| 04 | Setup — **Guardrails & dials** | [04-setup-guardrails-dials.png](./assets/04-setup-guardrails-dials.png) |
-| 05 | Setup — **Plain-English program** | [05-setup-plain-english.png](./assets/05-setup-plain-english.png) |
-| 06 | Setup — **Taste DNA** (flavour-fingerprint radar) | [06-setup-taste-dna.png](./assets/06-setup-taste-dna.png) |
-| 07 | Setup — **Nutrition** (TDEE chain, kcal bars, debt/credit ledger) | [07-setup-nutrition.png](./assets/07-setup-nutrition.png) |
+| 01 | Weekly Plan — **Calendar grid** (selector + budget + aligned 7‑day grid + mobile) | [01-weekly-calendar-grid.png](./assets/01-weekly-calendar-grid.png) |
+| 02 | Weekly Plan — **Command dashboard** (status ring, command bar, tiles, burn‑down) | [02-weekly-command-dashboard.png](./assets/02-weekly-command-dashboard.png) |
+| 03 | Setup — **Settings form** (the one "see everything" config view) | [03-setup-settings-form.png](./assets/03-setup-settings-form.png) |
+| 04 | Setup — **Nutrition** (BMR/TDEE → this week → per‑nutrient → repair & variety) | [04-setup-nutrition.png](./assets/04-setup-nutrition.png) |
+| 05 | Setup — **Taste DNA** (flavour‑fingerprint radar) | [05-setup-taste-dna.png](./assets/05-setup-taste-dna.png) |
+| — | Calendar grid **before** the alignment fix (rows stagger) | [grid-before.png](./assets/grid-before.png) |
+| — | Calendar grid **after** the alignment fix (rows line up) | [grid-after.png](./assets/grid-after.png) |
 
 **Severity:** P0 = broken / blocks the core action / breaks trust badly · P1 = serious,
 fix this cycle · P2 = should fix · P3 = polish.
@@ -41,100 +52,123 @@ fix this cycle · P2 = should fix · P3 = polish.
 
 ---
 
-## 1. First impressions
+## 1. Fixed on the spot this pass (safe: layout / copy / hierarchy — no payment, delete, or publish action touched)
+
+| # | Fix | Why it mattered | Hurt it relieves |
+|---|-----|-----------------|------------------|
+| **1** | **Calendar‑grid alignment.** The 7 day‑columns were independent vertical stacks, so a tall card in one day shoved every card below it out of row — the breakfast/lunch/dinner rows didn't line up (see `grid-before`). Rebuilt as a **CSS subgrid**: each day‑column shares the parent's 4 row tracks (header · B · L · D), so the meal rows align and equal‑height across all 7 days (`grid-after`). | This was the reported bug. Misaligned rows make a *matrix* unreadable — the eye can't scan "every lunch" across the week. | **U** |
+| **2** | **One "skip", not "off" *and* "skip".** The selector had a redundant paused/off state next to skip. Merged them: every window is in the plan, and **SKIP is the single "not eating" state**. | Two visually different "I'm not eating this" states is a needless decision and a decode cost. | **U** |
+| **3** | **Step‑1 cells now cycle ▢ deliver → ⌂ cook → ⊘ skip** (active goes dark), kept in sync with the grid. Before, a cell only toggled on/off and showed a **hardcoded** glyph you couldn't change. | The reported "it only switches between two random symbols" — the symbol was the slot's default, not a control. | **U, C** |
+| **4** | **Editable meal‑window times.** The "by 8:30am / 1:00pm / 8:30pm" labels were static text; they're now real **`<input type="time">`** controls bound to state. | "When should SmartPlate plan?" implied you set the *when* — but the time was read‑only. | **U, C** |
+| **5** | **A real symbol legend** at the top of the grid: ▢ ⌂ ⊘, ↻ spin, menu ▾, 🏠/💼/✈ area, ⭐ usual / ✦ new — spelled out once, where the dense cards are. | Icon‑only controls with no on‑screen key (old *V3*) → users won't attempt edits they can't decode. | **U, C** |
+| **6** | **Removed two redundant config views.** Setup had **three** ways to express the *same* rules — Settings form, "Guardrails & dials", and "Plain‑English program". Cut the latter two from the UI; Setup is now **Settings form · Nutrition · Taste DNA**. | Three parallel editors of one config is confusing and triples the maintenance/consistency surface. | **U** |
+| **7** | **Nutrition section re‑framed.** Added a top‑to‑bottom reading guide (① target → ② week → ③ per‑nutrient → ④ when you drift) and split the two bottom cards under one honest header: **a nutrient gap (we order specific dishes) vs boredom (we keep it fresh)** — two different problems, two different fixes. | The repair‑meals and variety cards looked identical and their relationship (the user's "how do I structure this?") was unstated. | **U** |
+
+*Bigger items (density, loading/error states, cold‑start honesty, sticky approve bar) are
+recommendations only — §2–§3, §5–§6.*
+
+---
+
+## 2. First impressions
 
 | ID | Sev | Hurts | Finding (evidence) | Specific fix |
 |----|-----|-------|--------------------|--------------|
-| **F1** | **P0** | T, U | **Hard, single-source CDN dependency for React, pinned with SRI, no fallback.** When unpkg was unreachable (it was — 403), the **entire app rendered as a blank dotted page** (`window.React undefined`, `[dc] failed to load React or boot`). A real user on a flaky network or a blocked CDN sees nothing. | Self-host/bundle React (and fonts) with the app; or add a fallback loader (CDN → local). Don't gate first paint on one third party + an exact SRI hash. |
-| **F2** | **P1** | T | **The default Weekly Plan loads already "₹40 OVER cap"** — a red alarm banner on first view (01). The agent appears to propose an *invalid, over-budget* plan before the user touches anything. | The agent's *proposed* plan must be within the cap by default. Reserve the over-cap banner for **user-induced** overages (after a spin/swap). |
-| **F3** | **P2** | U | Reads as a **wireframe artifact**, not a product: "lo-fi wireframe · v1" badge, red margin annotations, side-by-side DESKTOP/MOBILE frames, fake browser chrome (01–07). Fine for review; misleading if shipped. | Strip wireframe scaffolding for the product build; keep one responsive layout, not two mock frames. |
+| **F3** | **P1** | U, T | **It still reads as a wireframe, not a product.** "lo‑fi wireframe · v1" badge, hand‑drawn type, side‑by‑side DESKTOP/MOBILE mock frames inside fake browser chrome (01–05). Fine for internal review; a real user shown this would not trust it with a credit card. | For the product build, strip the wireframe scaffolding: **one** responsive layout (not two mock frames), a product typeface for data, and drop the "wireframe" badge. |
+| **F4** | **P2** | U | **Two co‑equal views of the same week** — "Calendar grid" and "Command dashboard" (01–02) — with no guidance on which is "home". Power users like both; a first‑timer has to evaluate two layouts before doing anything. | Pick a **default** and make the other a toggle/"view as" — don't greet a new user with a fork. |
 
-## 2. Navigation
-
-| ID | Sev | Hurts | Finding | Specific fix |
-|----|-----|-------|---------|--------------|
-| **N1** | **P2** | U | Top-level nav is **two small, low-contrast pills** ("Weekly plan" / "Setup & rules") with no app bar, no brand, no household/user context (01–07). Weak orientation. | Real top nav: brand, clear active state, household/area context, and account. |
-| **N2** | **P2** | U | **Inconsistent product voice** — "SmartPlate · Weekly Plan" vs "Program the agent" with no brand. | *Fixed on the spot:* added a "SmartPlate · Setup & rules" eyebrow to the Setup header. Standardise the title pattern across screens. |
-
-## 3. Visual hierarchy
+## 3. Navigation · hierarchy · consistency · states
 
 | ID | Sev | Hurts | Finding | Specific fix |
 |----|-----|-------|---------|--------------|
-| **H1** | **P1** | U, C | **Meal cards are over-dense.** Each ~135px cell stacks: meal label, tag, dish, outlet/price/rating, area chip + serviceability, ▢/⌂/⊘ toggle, ↻ spin + menu, flags, "your pick" — ×21 cells on screen (01). The primary glance ("what/where/how much") competes with 6+ controls per card. | Progressive disclosure: default card = dish + price + status only; reveal spin/mode/area/menu on hover or in a tap-to-open detail sheet. |
-| **H2** | **P2** | U | The causal link **"the Step-1 selector drives the plan below"** is carried by a red annotation, not the design (01). | Group selector + result; reflect the selection in the plan's heading; show a subtle "updated" pulse on recompute. |
-| **H3** | **P2** | U | A manual **"Re-optimise"** button sat next to copy saying everything "recomputes live" — and its handler actually just scrolled to the grid (mislabeled). | *Fixed on the spot:* relabeled to **"See the plan ↓"** and demoted to secondary. Longer term: drop manual re-optimise or split "live preview" vs "commit." |
+| **H1** | **P1** | U, C | **Meal cards are still over‑dense.** Even now‑aligned, each cell stacks dish, outlet/₹/★, a −/×N/+ portion stepper, drink/spice, area chip + serviceability, ▢/⌂/⊘, and ↻ spin / menu ▾ (01). The 3‑second glance ("what / where / how much") competes with ~7 controls. | Progressive disclosure: default card = **dish · ₹ · status**; reveal portions/area/spin in a tap‑to‑open sheet. (Alignment fixed the *rows*; density is the remaining hierarchy problem.) |
+| **L1** | **P1** | T, U | **No loading / empty / error states.** The prototype renders synchronously from static data; there is no "optimising…", no "nothing serviceable to this area", no "provider down" (01–02). For an agent that **orders and pays**, silent success is as untrustworthy as silent failure. | Design *optimising* (skeleton), *empty* (new user / all‑skip week), and *error* (provider down, nothing serviceable, over‑cap) states, each with one clear recovery action. |
+| **L2** | **P2** | T | **Cold‑start is still faked.** Taste DNA shows "142 orders · 38 skips · 11 spins" and a full radar (05); a brand‑new user would see confident history they never created. | A "still learning — building your DNA" state for week 1; don't render precision before the data exists. (The Nutrition ledger already does this; mirror it in DNA.) |
+| **C2** | **P3** | U | Tab treatments differ (weekly sub‑tabs plain; Setup tabs colour‑coded). | Unify active‑tab styling across both screens. |
 
-## 4. Component consistency
+## 4. The product model — answering the questions that drove this work
 
-| ID | Sev | Hurts | Finding | Specific fix |
-|----|-----|-------|---------|--------------|
-| **C1** | **P1** | C | **Competing dark/high-emphasis buttons** dilute the one conversion action: selector CTA, grid "Auto-order ▶", "Approve & auto-order the week", dashboard "Send/Approve" (01–02). | *Fixed on the spot:* demoted the selector CTA. Rule: **exactly one primary per view** = the approve/auto-order CTA; everything else secondary/tertiary. |
-| **C2** | **P3** | U | Tab systems differ: Weekly Plan tabs are plain; Setup tabs are color-coded (DNA purple, Nutrition green) (01 vs 06/07). | Unify tab styling + active treatment across both screens. |
+*(Grounded in the Flask backend, which is the source of truth: `smartplate/domain/`.)*
 
-## 5. Loading / empty / error states
+### 4.1 What does a user actually worry about, and what are their nutrient targets?
+The model carries six concern layers, in priority order:
 
-| ID | Sev | Hurts | Finding | Specific fix |
-|----|-----|-------|---------|--------------|
-| **L1** | **P1** | T, U | **No loading, empty, or error states exist anywhere.** The plan is always fully populated; "live re-optimising" shows no progress; there's **no surfaced error** when a provider is down or *nothing is serviceable to an area* (the cook/skip fallback lives only in logic). For an agent that **orders and pays**, silent failure is a trust killer. | Design: *optimising* (skeleton), *empty* (new user / no sessions selected), and *error* (provider down, nothing serviceable, over budget) states with a clear recovery action. |
-| **L2** | **P2** | T | **Cold-start is undefined.** Every screen shows a fully-trained state — Taste DNA "142 orders · 38 skips," a full 7-day nutrition ledger (06, 07). A brand-new user would see confident data they never generated. | Explicit "still learning / building your DNA" states for week 1; don't fabricate precision before data exists. |
+1. **Hard safety (never violated, even in Survival mode):** allergens, medical conditions,
+   diet, a ★ rating floor, and the budget cap. Filtered out *before* optimisation.
+2. **Nutrition targets (soft):** daily **kcal 2000 · protein 60 g · carbs 250 g · fat 65 g ·
+   sugar 40 g** by default (`domain/nutrition.py`), **personalised** by the BMR/TDEE
+   calculator (Mifflin–St Jeor) in *Setup → Nutrition*. Split per meal (kcal 25/40/35 for
+   B/L/D; protein **evenly**, because backloading protein into one meal is suboptimal).
+3. **Health:** protein floor, veg servings/day, optional fasting window (`domain/health.py`).
+4. **Variety / recipe‑fatigue:** boredom is the #1 churn driver, so it's a tracked dial.
+5. **Budget:** nested day/week/month caps; underspend rolls forward as a visible banked credit.
+6. **Context:** weather, festivals, calendar conflicts, surge‑dodging.
 
-## 6. Trust signals
+### 4.2 If the plan misses a nutrient, what do we recommend to order?
+Macros are **soft** — a miss never makes the plan infeasible; the gap becomes **debt** in a
+nutrient‑specific ledger (`domain/ledger.py`), repaid on the right clock:
 
-| ID | Sev | Hurts | Finding | Specific fix |
-|----|-----|-------|---------|--------------|
-| **T1** | **P1** | T, C | For an agent that **auto-orders and pays**, reassurance was thin and far from the CTA — no clear "nothing is ordered until you approve / cancel anytime" near the button; the **autonomy mode** (auto-order vs propose & approve) lives only in Setup, invisible on the plan. | *Fixed on the spot:* added a "🛡 Nothing is ordered until you approve — skip/swap any item, cancel anytime" caption beside the dashboard approve CTA. Also surface the current autonomy mode on the plan, and show order status + cancel after approval. |
-| **T2** | **P2** | T | The **"Tell SmartPlate…" command bar is a non-functional placeholder**, yet it's the command dashboard's headline interaction (02). It promises NLP control the product may not deliver. | Only show it if it works; otherwise replace with the concrete quick-action chips already present. |
-| **T3** | **P2** | T | Safety cues exist but are **quiet** — ★ ratings, "0 allergen conflicts," "safe-retry," "🔒 hard rules" (01–04). The strongest trust story (allergens/budget can *never* be violated) is buried in Setup. | Elevate the "we can't break your hard rules" guarantee where meal decisions are shown, not only in Setup. |
+- **Calories** bank *weekly* — a light day leaves credit for a later one.
+- **Protein** is *daily* and **can't be repaid later**, so the agent **nudges upcoming meals
+  higher** rather than queuing a lump repair.
+- **Iron / fibre** run on a **~30‑day clock** → the **"Repair meals" watch** softly biases
+  the plan toward leafy/legume‑rich dishes until you're back in range (the UI now shows the
+  concrete action, e.g. *"slipped in: +1 spinach dal · +1 rajma bowl"*).
 
-## 7. Conversion paths
+So the recommendation is **specific dishes ordered into the plan**, surfaced in *Nutrition →
+④ When you drift* — explicitly separated from the **variety** watch, which fixes *boredom*,
+not a nutrient gap.
 
-| ID | Sev | Hurts | Finding | Specific fix |
-|----|-----|-------|---------|--------------|
-| **V1** | **P1** | C | The **single conversion action** (approve & auto-order the week) is muddied by 3–4 near-identical CTAs and a long dense scroll before reaching it (01–02). | A **persistent/sticky approve bar**: sessions · ₹ spent/left · one primary "Review & approve." |
-| **V2** | **P2** | C | **Mobile conversion is thinner than desktop.** Spin/mode/area edits exist in the mobile grid, but the mobile command dashboard is sparse (status + mini burn-down + approve) and its command bar is fake (02). | Make the approve flow + edit affordances first-class on mobile; drop the dead command bar. |
-| **V3** | **P2** | U, C | **Icon-only controls** (▢ ⌂ ⊘ ↻ 🏠💼✈) depend on a legend that scrolls away and tooltips that don't exist on touch (01). Users won't attempt edits they can't decode — the chat history flagged this too. | Label-on-first-use, a persistent mini-legend, and text labels at wider breakpoints. |
-| **V4** | **P3** | U | **Low-contrast, tiny data text** — 11–12px `#7a746a` on `#faf8f2` in a hand-drawn font — for exactly the figures users must trust (prices, ★, kcal) (01, 03, 07). | Increase size/contrast for data; reserve the display font (Gaegu/Caveat) for headings, use a legible face for figures. |
+### 4.3 Diabetes ("juice always low / no sugar") — and other conditions
+Medical conditions are **hard, per‑item rules applied before optimisation**
+(`domain/allergens.py → MEDICAL_RULES`), so the solver can never pick an unsafe item:
+
+| Condition | Rule in the model | User‑visible effect |
+|-----------|-------------------|---------------------|
+| `diabetes` | `item.sugar_g ≤ 20` | A sugary juice/dessert (>20 g added sugar) is **excluded outright** — only low/no‑sugar drinks survive. *"juice is always low."* |
+| `hypertension` | item not tagged `high_sodium` | High‑sodium dishes removed. |
+| `celiac` | no `gluten` in allergens | Gluten removed (also treated as an allergen). |
+
+A user's profile stores two lists — `allergens` (e.g. `["peanut"]`) and `medical`
+(e.g. `["diabetes"]`) — and **every** item must clear **all** of them; in household mode the
+**union** of members' rules applies. Beyond the per‑item cap, **sugar & sodium are also daily
+*hard* caps in the ledger** (never averaged or credited away like calories). **To add a new
+condition:** add one lambda over item fields to `MEDICAL_RULES` and surface a 🔒 chip in
+*Settings form → Locks*.
+
+> **Design gap (P2, T):** this is the single strongest trust story — *"we can't break your
+> diabetes/allergen rules, ever"* — yet it lives mostly in Setup. **Surface a 🔒 low‑sugar /
+> allergen‑safe chip on the plan itself**, next to the meals, where the decision is shown.
+
+## 5. The 5 issues hurting CONVERSION the most
+
+1. **H1 — meal‑card density drowns the decision.** Users can't answer "what / where / how
+   much" at a glance, so they hesitate to approve the whole week. *(Alignment is fixed; density isn't.)*
+2. **No single, unmistakable approve path.** "Auto‑order ▶" sits in the grid rail while
+   "Approve & auto‑order the week" lives on the dashboard — the money moment is split across
+   two views. A **persistent sticky approve bar** (sessions · ₹ spent/left · one primary CTA)
+   would carry it.
+3. **L1 — no "optimising / error" feedback.** Pressing a button that spends real money with
+   no visible progress or failure path suppresses commitment.
+4. **F4 — the two‑view fork on arrival.** Making a new user choose Calendar grid vs Command
+   dashboard before acting adds friction at the worst moment.
+5. **Trust cues are far from the money.** The "we can never break your hard rules" guarantee
+   (allergens, ₹ cap, diabetes sugar cap) is buried in Setup, not shown beside the approve CTA.
+
+## 6. The 5 quick wins fixable today
+
+1. **Default a "home" view** (recommend Calendar grid) and demote the other to a "view as"
+   toggle — removes the arrival fork *(F4)*. *(Small.)*
+2. **Surface the hard‑rule guarantee on the plan** — a 🔒 *allergen‑safe · ≤₹2,000 · low‑sugar*
+   chip next to the approve CTA, reusing data the model already enforces *(§4.3, conversion #5)*.
+3. **Add a "still learning" cold‑start state to Taste DNA** mirroring the Nutrition ledger's,
+   so week‑1 users aren't shown fabricated history *(L2)*.
+4. **Bump contrast/size of the figures users must trust** (₹, ★, kcal — today ~11–12px muted
+   on cream) and reserve the display font for headings.
+5. **Collapse each meal card to dish · ₹ · status by default**, moving portions/spin/area into
+   the tap‑to‑open sheet — the highest‑leverage step toward "approve without reading docs" *(H1)*.
 
 ---
 
-## 8. Fixed on the spot (safe: copy / hierarchy only — no payment, delete, or publish actions touched)
-
-1. **Button hierarchy + honest label** — demoted the selector's dark "Re-optimise ▶"
-   (which only scrolled to the grid) to a secondary **"See the plan ↓"**, so it no longer
-   competes with the real CTA. *(H3, C1)*
-2. **Trust reassurance at the CTA** — added "🛡 Nothing is ordered until you approve —
-   skip/swap any item, cancel anytime" beside the approve button. *The order/auto-order
-   button itself was left untouched.* *(T1)*
-3. **Brand consistency** — added a "SmartPlate · Setup & rules" eyebrow to the Setup
-   header so naming matches the Weekly Plan. *(N2)*
-
-*(Bigger items — density, sticky approve bar, loading/empty/error states, default-within-
-budget — are recommendations only, above.)*
-
----
-
-## 9. The 5 issues hurting CONVERSION the most
-
-1. **V1 — the approve action is buried & duplicated.** No single, persistent "review &
-   approve" path; 3–4 competing CTAs. The money moment is the hardest to find.
-2. **H1 — meal-card density drowns the decision.** Users can't quickly answer
-   "what/where/how much," so they hesitate to commit the whole week.
-3. **T1 — weak "you're in control" reassurance at the money action.** Auto-ordering &
-   paying with no visible "nothing happens until you approve" suppresses commitment.
-4. **L1 — no loading/error states.** Silent failure (or no feedback during "optimising")
-   makes users distrust pressing a button that spends real money.
-5. **F2 — the default plan is shown over-budget.** Leading with a red "OVER cap" alarm
-   makes the agent look broken before the user even starts.
-
-## 10. The 5 quick wins fixable today
-
-1. **One primary per view.** Finish demoting all non-approve CTAs to secondary so
-   "Approve & auto-order" is unmistakably *the* button. *(started — C1/V1)*
-2. **Keep the "nothing ordered until you approve" reassurance** and add the current
-   **autonomy mode** chip on the plan header. *(T1 — caption already added)*
-3. **Persistent mini-legend** for ▢ / ⌂ / ⊘ / ↻ / 🏠💼✈ (sticky, not scroll-away) so
-   edits are discoverable without docs. *(V3)*
-4. **Default the proposed plan within the ₹2,000 cap;** show the over-cap banner only
-   after a user override pushes it over. *(F2 — small init/data change)*
-5. **Bump contrast & size of data text** (prices, ★, kcal) and remove the React CDN
-   single-point-of-failure by vendoring it locally (also fixes blank-screen risk). *(V4, F1)*
+*Method footnote: prototype booted headless (Playwright/Chromium) and validated with its own
+jsdom harness (`project/test-merged.mjs`, all green). The Flask app boots independently
+(`python run.py`). Fixes in §1 are committed alongside this report.*
