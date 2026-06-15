@@ -44,6 +44,12 @@ console.log('\n[placeholders] nothing left unresolved');
 ok(!weekly.innerHTML.includes('{{'), 'weekly screen has no leftover {{ }} placeholders');
 ok(!setup.innerHTML.includes('{{'), 'setup screen has no leftover {{ }} placeholders');
 
+console.log('\n[weekly] default proposed plan is within the ₹2,000 cap (audit F2) — measured pristine');
+const wc = window.__dc.comps[0];
+const vDefault = wc.renderVals();
+console.log(`    default: spent ₹${vDefault.spent} · left ₹${vDefault.left}`);
+ok(vDefault.left >= 0, `default plan within cap (left ₹${vDefault.left})`);
+
 console.log('\n[weekly] expected components present');
 ok(textIn(weekly).includes('When should SmartPlate plan'), 'step-1 window selector heading');
 ok(textIn(weekly).includes('sessions planned'), 'sessions summary chip');
@@ -87,6 +93,22 @@ ok(weekly.style.display === 'none', 'weekly hidden when Setup tab active');
 ok(setup.style.display !== 'none', 'setup visible when Setup tab active');
 window.__dc.activate('screen-weekly');
 ok(setup.style.display === 'none' && weekly.style.display !== 'none', 'switches back to weekly');
+
+console.log('\n[weekly] ▢/⌂/⊘ mode toggle actually switches (bug fix)');
+const resolved = (i, w) => { const o = wc.optsForCtx(wc.baseDays()[i], w, wc.activeArea(i, w)); return o[(wc.state.picks[i + '-' + w] || 0) % o.length]; };
+ok(resolved(1, 'D').tag === 'DELIVER', 'TUE dinner starts as DELIVER');
+wc.setMode(1, 'D', 'COOK'); ok(resolved(1, 'D').tag === 'COOK', 'tapping ⌂ switches TUE dinner to COOK');
+wc.setMode(1, 'D', 'SKIP'); ok(resolved(1, 'D').tag === 'SKIP', 'tapping ⊘ switches TUE dinner to SKIP');
+wc.setMode(1, 'D', 'DELIVER'); ok(resolved(1, 'D').tag === 'DELIVER', 'tapping ▢ switches it back to DELIVER');
+
+console.log('\n[weekly] area switch is reactive where it should be');
+wc.setMode(4, 'L', 'DELIVER'); // FRI lunch = Veg Biryani @ Ponnusamy (work-only)
+const friBefore = resolved(4, 'L').item;
+while (wc.activeArea(4, 'L') !== 'home') wc.cycleArea(4, 'L'); // force Home, where Ponnusamy doesn't serve
+ok(resolved(4, 'L').item !== friBefore || resolved(4, 'L').tag !== 'DELIVER', 'switching FRI lunch to Home surfaces a different serviceable pick');
+
+console.log('\n[weekly] no "am/pm" typo in meal windows');
+ok(/by 8:30am/.test(weekly.innerHTML) && /by 1:00pm/.test(weekly.innerHTML), 'meal windows read 8:30am / 1:00pm / 8:30pm');
 
 console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
 process.exit(fails.length ? 1 : 0);
