@@ -38,6 +38,7 @@ def create_app() -> Flask:
             "swiggy_provider": config.SWIGGY_PROVIDER,
             "order_edit_window_min": config.ORDER_EDIT_WINDOW_MIN,
             "modes": config.MODE_LABELS,
+            "mode_outcomes": {k: v["outcome"] for k, v in config.MODE_META.items()},
             "note": "v1.1 plans with a MILP solver — no per-decision LLM cost (see FEASIBILITY.md).",
             "features": _FEATURE_MAP,
         })
@@ -63,6 +64,26 @@ def create_app() -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         service.reoptimize(plan_id, body.get("mode"))
         return jsonify(service.plan_view(plan_id))
+
+    @app.get("/api/plan/<int:plan_id>/recommend-budget")
+    def recommend_budget(plan_id):
+        return jsonify(service.recommend_budget(plan_id))
+
+    @app.post("/api/intake")
+    def intake_estimate():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.estimate_intake(body.get("text", "")))
+
+    @app.post("/api/user/<int:user_id>/intake")
+    def log_intake(user_id):
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.log_intake(
+            user_id, body.get("text", ""), iso_date=body.get("date"),
+            meal=body.get("meal", ""), source=body.get("source", "manual")))
+
+    @app.get("/api/user/<int:user_id>/ledger")
+    def nutrition_ledger(user_id):
+        return jsonify(service.nutrition_ledger(user_id))
 
     @app.post("/api/plan/<int:plan_id>/command")
     def plan_command(plan_id):

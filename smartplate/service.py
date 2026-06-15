@@ -8,9 +8,10 @@ the 17 features produce.
 import datetime as dt
 
 from . import config, db
-from .domain import (carbon, community, festivals, health, household, models,
-                     nutrition, receipts, reverse_mode, weather)
-from .kernel import agent_brain, budget, explainability, optimizer, scheduler, variance
+from .domain import (carbon, community, festivals, health, household, intake,
+                     ledger, models, nutrition, receipts, reverse_mode, weather)
+from .kernel import (agent_brain, budget, explainability, optimizer, recommender,
+                     scheduler, variance)
 
 
 # --------------------------------------------------------------------------- #
@@ -103,10 +104,50 @@ def plan_view(plan_id: int) -> dict:
         "coach": coach,
         "grid": grid,
         "week_context": _week_context(user, plan, fests),
+        # inverse-optimisation budget band for the planned sessions (docs §5):
+        # don't make the user guess the cap — recommend it.
+        "recommendation": recommender.recommend(user, [d["meal"] for d in decisions]),
     }
     if user.get("household_id"):
         view["household"] = _household_view(user, env["spend"])
     return view
+
+
+def recommend_budget(plan_id: int) -> dict:
+    """Standalone budget recommendation for a plan's sessions (Floor/Usual/Variety)."""
+    plan = models.get_plan(plan_id)
+    if not plan:
+        return {}
+    user = models.get_user(plan["user_id"])
+    meals = [s["meal"] for s in models.sessions_for_plan(plan_id)]
+    return recommender.recommend(user, meals)
+
+
+def estimate_intake(text: str) -> dict:
+    """Free-text 'I made X' → nutrition estimate to confirm (docs §7), no persistence."""
+    return intake.parse(text)
+
+
+def log_intake(user_id: int, text: str, *, iso_date: str | None = None, meal: str = "",
+               source: str = "manual", plan_id: int | None = None) -> dict:
+    """Parse free text AND persist it so the rolling ledger accumulates across days."""
+    parsed = intake.parse(text)
+    eid = intake.record(user_id, parsed["nutrition"], iso_date=iso_date, meal=meal,
+                        source=source, plan_id=plan_id, note=text)
+    return {"entry_id": eid, **parsed}
+
+
+def nutrition_ledger(user_id: int) -> dict:
+    """Rolling, nutrient-specific ledger from accumulated intake (docs §2.1):
+    calories bank weekly, protein is daily adherence + today's distribution, sugar a cap."""
+    user = models.get_user(user_id)
+    if not user:
+        return {}
+    bd = intake.by_day(intake.recent(user_id, 30))
+    targets = nutrition.targets_for(user)
+    floor = (health.targets_for(user).get("protein_floor_g") or targets["protein_g"])
+    return ledger.rolling_view(bd, kcal_target=targets["kcal"], protein_floor=floor,
+                               sugar_cap=targets.get("sugar_g"))
 
 
 def _counts(decisions):
