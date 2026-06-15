@@ -94,6 +94,7 @@
       </div>
       <button onClick="{{ goGrid }}" style="font:700 15px 'Gaegu',cursive; padding:10px 16px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#fff; color:#2a2a28; box-shadow:2px 2px 0 rgba(42,42,40,.12); cursor:pointer;">See the plan ↓</button>
     </div>
+    {{ nestedBudgetEl }}
   </div>
   <sc-if value="{{ notes }}" hint-placeholder-val="{{ true }}"><div style="font:600 18px 'Caveat',cursive; color:#cf4a2f; transform:rotate(-1.2deg); margin:10px 0 0 6px;">↳ the "when to order" selection moved up here, to the front. Toggle a window and the grid, the dashboard and the burn-down all re-optimise.</div></sc-if>
 
@@ -1084,12 +1085,13 @@
                 <div style="font:400 12px 'Gaegu',cursive; color:#7a746a; margin-top:6px;">green = within target · red = over · the dashed line is your goal</div>
               </div>
               <div style="flex:1; min-width:300px;">
-                <div style="font:700 16px 'Gaegu',cursive; border-bottom:2px solid #2a2a28; padding-bottom:4px;">Debt &amp; credit <span style="font:400 12px; color:#7a746a;">— carries across the week, like the budget</span></div>
+                <div style="font:700 16px 'Gaegu',cursive; border-bottom:2px solid #2a2a28; padding-bottom:4px;">What carries — and what doesn't <span style="font:400 12px; color:#7a746a;">— each nutrient on its own clock</span></div>
                 <div style="display:flex; flex-direction:column; gap:8px; margin-top:11px;">
-                  <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #2f6d4a; border-radius:11px; padding:9px 12px; background:#eef3ec;"><span style="font:700 14px 'Gaegu',cursive;">Protein</span><span style="font:700 14px 'Gaegu',cursive; color:#cf4a2f;">−14 g this week</span></div>
-                  <div style="font:400 13px 'Gaegu',cursive; color:#56524a;">↳ a <b style="color:#2f6d4a;">repair meal</b> (high-protein) is queued for <b>Fri dinner</b> to clear the debt.</div>
-                  <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #2a2a28; border-radius:11px; padding:9px 12px; background:#fff;"><span style="font:700 14px 'Gaegu',cursive;">🔒 Sodium</span><span style="font:700 14px 'Gaegu',cursive; color:#2f6d4a;">within cap ✓</span></div>
-                  <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #2a2a28; border-radius:11px; padding:9px 12px; background:#fff;"><span style="font:700 14px 'Gaegu',cursive;">🔒 Sugar</span><span style="font:700 14px 'Gaegu',cursive; color:#2f6d4a;">within cap ✓</span></div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #2f6d4a; border-radius:11px; padding:9px 12px; background:#eef3ec;"><span style="font:700 14px 'Gaegu',cursive;">Calories <span style="font-weight:400; color:#7a746a;">· weekly — banks</span></span><span style="font:700 14px 'Gaegu',cursive; color:#2f6d4a;">✦ +180 kcal banked → today</span></div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #2a2a28; border-radius:11px; padding:9px 12px; background:#fff;"><span style="font:700 14px 'Gaegu',cursive;">Protein <span style="font-weight:400; color:#7a746a;">· daily — doesn't bank</span></span><span style="font:700 14px 'Gaegu',cursive; color:#2a2a28;">floor 60g · hit 4/7 days</span></div>
+                  <div style="font:400 13px 'Gaegu',cursive; color:#56524a;">↳ protein is a <b>daily</b> target — you can't repay Monday's gap on Friday, so we just <b style="color:#2f6d4a;">nudge upcoming meals higher</b>, never queue a lump “repair”.</div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #2a2a28; border-radius:11px; padding:9px 12px; background:#fff;"><span style="font:700 14px 'Gaegu',cursive;">🔒 Sodium / Sugar <span style="font-weight:400; color:#7a746a;">· daily cap</span></span><span style="font:700 14px 'Gaegu',cursive; color:#2f6d4a;">within cap ✓</span></div>
+                  <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">Iron &amp; fibre run on a ~30-day clock → see the watch below.</div>
                 </div>
               </div>
             </div>
@@ -1153,7 +1155,7 @@
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    this.state = { tab: 'grid', week: 'this', sel: this.defaultSel(), picks: {}, browse: null, mobDay: 1, areaOverride: {}, qty: {}, addons: {}, spice: {} };
+    this.state = { tab: 'grid', week: 'this', sel: this.defaultSel(), picks: {}, browse: null, mobDay: 1, areaOverride: {}, qty: {}, addons: {}, spice: {}, horizon: 'week' };
   }
 
   // ---- location primitive: serviceability gate per area ----
@@ -1329,6 +1331,32 @@ class Component extends DCLogic {
   toggleCell(i, w) {
     const k = i + '-' + w;
     this.setState((s) => ({ sel: { ...s.sel, [k]: !s.sel[k] } }));
+  }
+
+  // ---- nested budgets: the same cap viewed at Day / Week / Month. They coexist —
+  // the tightest binds — and underspend rolls FORWARD, shown as an explicit banked
+  // credit so the extra is never silently "passed over". ----
+  setHorizon(h) { this.setState({ horizon: h }); }
+  nestedBudget(spent) {
+    const h = React.createElement;
+    const weekly = 2000, daily = Math.round(weekly / 7), monthly = Math.round(weekly * 4.3);
+    const horizon = this.state.horizon || 'week';
+    // representative spend at each grain (the engine computes the real nesting)
+    const caps = { day: { cap: daily, spent: Math.round(spent / 7) }, week: { cap: weekly, spent }, month: { cap: monthly, spent: Math.round(spent * 4.3) } };
+    const cur = caps[horizon], left = cur.cap - cur.spent;
+    // explicit banked credit: a light week so far leaves more per remaining day than the flat share
+    const banked = Math.max(0, Math.round((weekly - spent) / 3) - daily); // 3 days left, illustrative
+    const seg = (key, label) => h('button', { key, onClick: () => this.setHorizon(key), style: { font: "700 13px 'Gaegu',cursive", padding: '6px 13px', border: 'none', borderLeft: key !== 'day' ? '2px solid #2a2a28' : 'none', background: horizon === key ? '#2a2a28' : '#fff', color: horizon === key ? '#fff' : '#2a2a28', cursor: 'pointer' } }, label);
+    const capChip = (key, label, amt) => h('span', { key, style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: horizon === key ? '2px solid #2a2a28' : '1.5px solid #cfc9bd', borderRadius: '8px', background: horizon === key ? '#f3efe6' : '#fff', color: horizon === key ? '#2a2a28' : '#7a746a' } }, label + ' ₹' + amt.toLocaleString());
+    return h('div', { style: { marginTop: '12px', borderTop: '2px dashed #cfc9bd', paddingTop: '12px' } },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
+        h('span', { style: { font: "700 14px 'Gaegu',cursive" } }, 'Budget horizon'),
+        h('div', { style: { display: 'inline-flex', border: '2px solid #2a2a28', borderRadius: '10px', overflow: 'hidden' } }, seg('day', 'Day'), seg('week', 'Week'), seg('month', 'Month')),
+        h('span', { style: { font: "700 14px 'Gaegu',cursive", color: left < 0 ? '#cf4a2f' : '#2f6d4a' } }, '₹' + cur.spent.toLocaleString() + ' / ₹' + cur.cap.toLocaleString() + ' · ₹' + left.toLocaleString() + ' left')),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap', marginTop: '9px' } },
+        capChip('day', 'Day', daily), capChip('week', 'Week', weekly), capChip('month', 'Month', monthly),
+        h('span', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, '— nested; the tightest binds, underspend rolls forward'),
+        banked > 0 ? h('span', { style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '2px solid #cf4a2f', borderRadius: '8px', background: '#fdf1ec', color: '#cf4a2f' } }, '✦ ₹' + banked + ' banked → today') : null));
   }
 
   baseDays() {
@@ -1611,6 +1639,7 @@ class Component extends DCLogic {
       budgetFillSel: mkFill(spentPct), budgetFillGrid: mkFill(spentPct), budgetFillMob: mkFill(spentPct),
       kcalTargetStr: kcalTarget.toLocaleString(),
       usualN, newN, varietyStr: '⭐ ' + usualN + ' usual · ✦ ' + newN + ' new',
+      nestedBudgetEl: this.nestedBudget(spent),
       notes: this.props.showAnnotations ?? true,
     };
   }

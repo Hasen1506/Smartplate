@@ -173,5 +173,19 @@ ok(/money ⇄ everything-else/.test(setup.innerHTML), 'priority sliders collapse
 ok(/lean healthier/.test(setup.innerHTML), 'optional leans replace the slider stack');
 ok(/🔒 Locks/.test(setup.innerHTML) && /🎛 Dials/.test(setup.innerHTML) && /⚡ Rules/.test(setup.innerHTML), 'Setup grouped as Locks / Dials / Rules');
 
+console.log('\n[weekly] nested Day / Week / Month budgets');
+window.__dc.activate('screen-weekly');
+ok(weekly.innerHTML.includes('Budget horizon'), 'budget horizon control present');
+ok(/rolls forward/.test(weekly.innerHTML), 'shows the nested / roll-forward principle');
+wc.setHorizon('month');
+ok(weekly.innerHTML.includes('8,600'), 'switching to Month shows the monthly cap (₹8,600)');
+wc.setHorizon('week');
+
+console.log('\n[setup] nutrition ledger framed by nutrient timescale');
+sc.setState({ tab: 'nutri' });
+ok(setup.innerHTML.includes("doesn't bank"), 'protein framed as DAILY (not a weekly debt)');
+ok(/kcal banked/.test(setup.innerHTML), 'calories show an explicit banked credit');
+ok(!/14 g this week/.test(setup.innerHTML), 'old weekly protein-debt framing removed');
+
 console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
 process.exit(fails.length ? 1 : 0);
