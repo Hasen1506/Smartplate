@@ -98,8 +98,26 @@ Health-first
 
 **Why goal-programming for the default (Balanced):** it gives a crisp product line —
 *"the cheapest week that still hits your nutrition"* — and never goes infeasible if
-you add **slack variables** with a high price (a missed protein target becomes a
-*debt that carries* to next week via the ledger, not an unsolvable plan).
+you add **slack variables** with a high price. A missed *protein* target is **not**
+"carried as a debt to next week" (protein is daily — see §3.1); it's a daily-floor
+miss that nudges later days up. What legitimately carries is **calories** (weekly)
+and **micros** (~30-day). The slack just keeps the plan solvable, not a lump to repay.
+
+### 2.1 Nutrient timescales — not one rolling ledger (`domain/ledger.py`)
+
+Lumping every nutrient into one weekly debt/credit is wrong; each runs on its own clock:
+
+| Nutrient | Clock | Treatment | Carries? |
+|---|---|---|---|
+| Calories | weekly (fat is the store) | bank/credit, surfaced **explicitly** | ✅ |
+| **Protein** | **daily** (MPS is daily; not stored) | daily floor + rolling *adherence* signal → nudge future days; no lump repair | ❌ |
+| Fat / carbs | daily, flexible | soft band | ❌ |
+| Micros (iron, B12, fibre) | ~30 days (body stores) | long rolling window (the 30-day watch) | ✅ |
+| Sodium / sugar (medical) | daily hard cap | never averaged or credited away | ❌ |
+
+And banked surplus is shown, never silently "passed over": a light week leaves an
+**explicit** "✦ banked +₹X / +Y kcal → today" credit (`budget.nested_caps`,
+`ledger.calorie_credit`).
 
 **Concrete code change implied:** `nutrition.penalty` currently penalizes kcal *over*
 target as hard as *under* (`abs(kcal − target)`) and protein only when *under*. For a
@@ -319,6 +337,8 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
 | Budget-recommender card on the Weekly Plan | `project/SmartPlate Wireframes.html` | `test-merged.mjs` |
 | Gated novelty nudge in the solve | `config.py`, `optimizer.py` | `test_novelty_nudge_*` |
 | "I made X" free-text lookup | `domain/intake.py`, `service.py`, `app.py` | `test_intake_*` |
+| Nested day/week/month caps (tightest binds, roll-forward, explicit credit) | `kernel/budget.py` (`nested_caps`) + Weekly Plan horizon toggle | `test_ledger_budget`, `test-merged.mjs` |
+| Nutrient-specific ledger (protein daily · calories weekly · micros 30-day · medical daily-cap) | `domain/ledger.py` + corrected Nutrition tab | `test_ledger_budget`, `test-merged.mjs` |
 
 **On V/U badges (the question that prompted this slice):** rejected. Badging the
 "usual" majority is noise, and a literal "V" collides with veg/vegan in a food app.
@@ -336,11 +356,12 @@ high aspirational ★ as a soft preference above a low hard safety floor, so it 
 under budget instead of exploding it — and the recommender suggests a floor so the
 user needn't guess.
 
-**Horizon & budget granularity (model, not yet a separate knob).** The *session* is
-the atomic unit; horizon (day/week/month) only sets how many sessions are in the
-window and which time-bucket the spend-sum is capped over. Budget caps nest (daily ∧
-weekly ∧ monthly; the tightest binds) and roll forward (tomorrow's cap =
-`remaining / days_left`). A one-off order is just `N = 1` — the recommender handles it.
+**Horizon & budget granularity (now built).** The *session* is the atomic unit;
+horizon (day/week/month) only sets how many sessions are in the window and which
+time-bucket the spend-sum is capped over. Budget caps **nest** (daily ∧ weekly ∧
+monthly; the tightest binds) and **roll forward** — `kernel/budget.nested_caps`
+computes the effective daily cap and the **explicit** `banked_today` credit, and the
+Weekly Plan has a Day/Week/Month horizon toggle. A one-off order is just `N = 1`.
 
 **The three modes, verbally.** A mode is a statement about *what's allowed to give*:
 Tight Week minimises **cost** and lets nutrition give (protein floor holds, kcal band
