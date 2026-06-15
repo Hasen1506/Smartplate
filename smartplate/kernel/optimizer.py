@@ -21,10 +21,62 @@ from . import explainability, scheduler
 
 MAX_DELIVERY_CANDIDATES = 6
 # People cook a few nights, not every meal (§1.3 "cook 3 nights and order 2").
-# A hard cap keeps plans realistic and forces the delivery/substitution paths.
+# These are DEFAULT priors, not fixed truths (docs/optimization-and-ux.md §2): a
+# global "everyone cooks ≤6" and "cooking always costs 0.35" are exactly the fake
+# constants worth killing. They're overridable per user (learned/stated) via
+# `_cook_cap` / `_cook_effort`; the constants remain only as the cold-start default.
 MAX_COOK_PER_WEEK = 6
 COOK_EFFORT_PENALTY = 0.35   # soft cost of cooking yourself (time/effort)
 MAX_ITEM_REPEAT = 2          # variety: don't order the same dish more than twice a week
+
+
+def _cook_cap(user: dict) -> int:
+    """Cooks/week the user is willing to do — their stated rhythm, else the default.
+    Stored in health_targets so no schema change is needed; absent ⇒ the default
+    prior rather than an assumption imposed on them."""
+    ht = user.get("health_targets") or {}
+    try:
+        return int(ht.get("max_cook_per_week", MAX_COOK_PER_WEEK))
+    except (TypeError, ValueError):
+        return MAX_COOK_PER_WEEK
+
+
+def _cook_effort(user: dict, meal: str) -> float:
+    """Personal, per-meal effort cost of cooking — not one global number."""
+    ht = user.get("health_targets") or {}
+    eff = ht.get("cook_effort")
+    if isinstance(eff, dict):
+        eff = eff.get(meal, eff.get("default"))
+    if eff is None:
+        return COOK_EFFORT_PENALTY
+    try:
+        return float(eff)
+    except (TypeError, ValueError):
+        return COOK_EFFORT_PENALTY
+
+
+def _rating_filter(user: dict, items: list[dict]) -> list[dict]:
+    """Apply the rating floor as a candidate filter.
+
+    Default ("hard"): the user's ★ is a hard gate (current behaviour, and what the
+    "never below your floor" promise rests on). Optional ("soft"): filter only at
+    the low hard safety floor and let the user's aspirational ★ become a soft
+    penalty (see `_rating_pen`) so a high ★ bends under budget instead of exploding
+    it (docs §4)."""
+    user_floor = float(user.get("rating_floor", 4.0))
+    if config.RATING_FLOOR_MODE == "soft":
+        floor = min(user_floor, config.HARD_SAFETY_FLOOR)
+        return [it for it in items if it["restaurant_rating"] >= floor]
+    return [it for it in items
+            if it["restaurant_rating"] >= user_floor and it["item_rating"] >= user_floor - 0.3]
+
+
+def _rating_pen(user: dict, item: dict) -> float:
+    """Soft cost for a pick below the user's aspirational ★ (soft mode only)."""
+    if config.RATING_FLOOR_MODE != "soft":
+        return 0.0
+    short = max(0.0, float(user.get("rating_floor", 4.0)) - item.get("restaurant_rating", 0))
+    return round(0.8 * short, 4)
 
 
 # --------------------------------------------------------------------------- #
@@ -37,6 +89,9 @@ def build_context(user: dict, plan: dict) -> dict:
         "leftovers": leftovers.for_user(user["id"]),
         "calendar": calendar_sync.events_for(user["id"]),
         "weights": config.MODE_WEIGHTS.get(plan["mode"], config.MODE_WEIGHTS["balanced"]),
+        # how far calories may drift before the nutrition term bites — the mode's
+        # "what's allowed to give" knob (config.MODE_META).
+        "nutri_tol": config.mode_meta(plan["mode"])["nutri_tol"],
     }
 
 
@@ -69,7 +124,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
     cost = round(base_cost * surge_mult, 2)
 
     taste, senti = _taste(user, item)
-    nutri = nutrition.penalty(user, meal, item)
+    nutri = nutrition.penalty(user, meal, item, tol=ctx["nutri_tol"])
     hp = health.protein_penalty(user, item)
     cpen = carbon.penalty(item)
     return {
@@ -77,7 +132,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "restaurant_id": item["restaurant_id"], "restaurant_name": item["restaurant_name"],
         "item_id": item["id"], "item_name": item["name"], "rating": item["restaurant_rating"],
         "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3),
-        "time_shift": time_shift, "flaky": item.get("flaky", 0),
+        "time_shift": time_shift, "flaky": item.get("flaky", 0), "rating_pen": _rating_pen(user, item),
         "taste": taste, "sentiment": senti, "nutri": nutri, "health": hp, "carbon_pen": cpen,
         "carbon_kg": carbon.estimate(item), "weather_cond": cond,
         "weather_bias": weather.taste_bias(cond, item),
@@ -87,17 +142,17 @@ def _delivery_candidate(user, plan, session, item, ctx):
     }
 
 
-def _cook_candidate(user, session):
+def _cook_candidate(user, session, ctx):
     r = reverse_mode.cook_candidate(user, session["meal"])
     if not r:
         return None
-    item = {**r, "veg": r["veg"], "tags": ["light", "home"], "cuisine": "veg" if r["veg"] else "egg"}
-    nutri = nutrition.penalty(user, session["meal"], r)
+    nutri = nutrition.penalty(user, session["meal"], r, tol=ctx["nutri_tol"])
     return {
         "kind": "cook", "recipe_key": r["key"], "item_name": f"Cook: {r['name']}",
         "restaurant_name": "Home kitchen", "rating": 5.0, "cost": float(r["cost"]),
         "surge_mult": 1.0, "time_shift": None, "taste": 0.62, "sentiment": {"score": 0, "n": 0, "label": ""},
         "nutri": nutri, "health": health.protein_penalty(user, r), "carbon_pen": carbon.penalty(r),
+        "cook_effort": _cook_effort(user, session["meal"]),
         "carbon_kg": r["carbon_kg"], "weather_bias": 0.0, "festival_bias": 0.0,
         "nutrition": {k: r.get(k, 0) for k in ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")},
         "tags": ["home"],
@@ -136,9 +191,7 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     cands = []
     if not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
-        floor = user["rating_floor"]
-        safe = [it for it in safe
-                if it["restaurant_rating"] >= floor and it["item_rating"] >= floor - 0.3]  # rating floor
+        safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
         # keep the most promising few (cheap-but-decent) to bound the MILP
         safe.sort(key=lambda it: (it["price"] + it["delivery_fee"]) - 40 * (it["item_rating"] / 5))
         for it in safe[: MAX_DELIVERY_CANDIDATES * 2]:
@@ -146,7 +199,7 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
         cands.sort(key=lambda c: c["cost"] - 60 * c["taste"])
         cands = cands[:MAX_DELIVERY_CANDIDATES]
 
-    cook = _cook_candidate(user, session)
+    cook = _cook_candidate(user, session, ctx)
     if cook:
         cands.append(cook)
 
@@ -175,16 +228,18 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
         return 0.0 if cand.get("forced") else skip_penalty
     cost_norm = cand["cost"] / ref_cost if ref_cost else 0.0
     surge_premium = max(0.0, cand["surge_mult"] - 1.0)
-    # cooking-yourself carries a soft effort cost (not for free leftovers)
-    effort = COOK_EFFORT_PENALTY if (cand["kind"] == "cook" and cand.get("recipe_key")) else 0.0
+    # cooking-yourself carries a soft, *personal* effort cost (not for free leftovers)
+    effort = cand.get("cook_effort", COOK_EFFORT_PENALTY) if (cand["kind"] == "cook" and cand.get("recipe_key")) else 0.0
+    # carbon is OFF by default: carbon_pref==0 ⇒ no influence (no silent 0.5 baseline).
     return round(
         w["cost"] * cost_norm
         - w["taste"] * cand["taste"]
         + w["nutrition"] * cand["nutri"]
         + w["health"] * cand["health"]
-        + w["carbon"] * cand["carbon_pen"] * (0.5 + carbon_pref)
+        + w["carbon"] * cand["carbon_pen"] * carbon_pref
         + w["surge"] * surge_premium
         + effort
+        + cand.get("rating_pen", 0.0)
         + cand["weather_bias"] + cand["festival_bias"],
         5,
     )
@@ -229,7 +284,7 @@ def optimize(plan_id: int) -> dict:
     prob += pulp.lpSum(obj_terms)
     prob += pulp.lpSum(budget_terms) <= user["weekly_budget"]   # HARD budget envelope
     if cook_vars:
-        prob += pulp.lpSum(cook_vars) <= MAX_COOK_PER_WEEK      # realistic: cook a few nights
+        prob += pulp.lpSum(cook_vars) <= _cook_cap(user)        # the user's cook rhythm, not a fixed 6
     for vlist in item_vars.values():                            # variety: cap repeats per dish
         if len(vlist) > MAX_ITEM_REPEAT:
             prob += pulp.lpSum(vlist) <= MAX_ITEM_REPEAT
@@ -240,7 +295,32 @@ def optimize(plan_id: int) -> dict:
         "status": pulp.LpStatus[prob.status],
         "plan_id": plan_id,
         "decisions": decisions,
+        "diagnostics": _diagnostics(user, decisions),
     }
+
+
+def _diagnostics(user: dict, decisions: list[dict]) -> dict:
+    """Feasibility + shortfall surface (docs §1): what bound, and by how much.
+
+    Reports spend vs the budget ceiling and the per-day nutrition gap, plus the
+    single binding signal the UI leads with ("you're protein-short → repair", or
+    "budget is the wall here")."""
+    spend_rows = [d for d in decisions if d.get("chosen_kind") in ("delivery", "cook")]
+    spend = round(sum(d.get("cost", 0) for d in spend_rows), 2)
+    budget = user["weekly_budget"]
+    planned_days = len({d["day"] for d in spend_rows}) or 1
+    sf = nutrition.shortfall([d.get("nutrition") or {} for d in spend_rows],
+                             nutrition.targets_for(user), days=planned_days)
+    if spend >= 0.98 * budget:
+        binding = "budget"
+    elif sf["protein_gap_per_day"] <= -8:
+        binding = "nutrition (protein)"
+    elif sf["kcal_gap_per_day"] <= -250:
+        binding = "nutrition (calories)"
+    else:
+        binding = "comfortable"
+    return {"spend": spend, "budget": round(budget, 2),
+            "headroom": round(budget - spend, 2), "binding": binding, "nutrition": sf}
 
 
 def _persist_decisions(plan, user, sessions, active, cand_map, x, ctx):

@@ -82,7 +82,10 @@ def _next_best(user, plan, session, ctx, exclude_restaurant):
     w = ctx["weights"]
     ref = max(1.0, user["weekly_budget"] / 21)
     pool = [c for c in cands
-            if c["kind"] == "delivery" and c["restaurant_id"] != exclude_restaurant]
+            if c["kind"] == "delivery" and c["restaurant_id"] != exclude_restaurant
+            # the promise is hard at execution time regardless of the planner's
+            # rating-floor mode: never substitute below the user's chosen ★.
+            and c.get("rating", 0) >= user["rating_floor"]]
     if not pool:
         return next((c for c in cands if c["kind"] in ("cook", "skip")), None)
     pool.sort(key=lambda c: optimizer._objective(c, w, ref, user["carbon_pref"], 3.0))

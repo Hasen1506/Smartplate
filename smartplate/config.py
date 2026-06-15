@@ -31,3 +31,35 @@ MODE_LABELS = {  # internal name -> softer UI label (§7.4)
     "balanced": "Balanced",
     "survival": "Tight Week",
 }
+
+# A mode is not a bag of weights — it is a statement about *which variable is the
+# objective and which is the constraint that may give* (docs/optimization-and-ux.md §2).
+# `objective`  : what the solve is really chasing.
+# `gives`      : what is allowed to bend so the objective can win.
+# `nutri_tol`  : ± fraction of a meal's kcal target that counts as "on target"
+#                (no penalty). Tight Week lets calories drift; Comfort holds them close.
+# `outcome`    : the plain-language line to show the user — surface the behaviour,
+#                not the weights (§8: transparency is the trust moat).
+MODE_META = {
+    "comfort":  {"objective": "nutrition+taste", "gives": "money",     "nutri_tol": 0.08,
+                 "outcome": "The best week your budget allows — money's the only limit."},
+    "balanced": {"objective": "both-on-target",  "gives": "neither",   "nutri_tol": 0.15,
+                 "outcome": "Best taste-for-money that stays on your nutrition target."},
+    "survival": {"objective": "cost",            "gives": "nutrition", "nutri_tol": 0.28,
+                 "outcome": "The cheapest week that still hits your nutrition."},
+}
+
+
+def mode_meta(mode: str) -> dict:
+    return MODE_META.get(mode, MODE_META["balanced"])
+
+
+# Rating-floor policy. The brand promise is "we never silently substitute below
+# your rating floor" — so the *execution/substitution* path is always hard.
+# For the *planner*, the floor can optionally be split into a low hard safety
+# floor + a soft preference above it, so a high aspirational ★ bends under budget
+# instead of exploding it / forcing constant toggling (docs §4 — the ★ footgun).
+#   "hard" (default) : the user's ★ is a hard candidate filter (current behaviour).
+#   "soft"           : filter only at HARD_SAFETY_FLOOR; the user's ★ becomes a weight.
+RATING_FLOOR_MODE = os.environ.get("SMARTPLATE_RATING_FLOOR", "hard")
+HARD_SAFETY_FLOOR = float(os.environ.get("SMARTPLATE_SAFETY_FLOOR", "3.5"))

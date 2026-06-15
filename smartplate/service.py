@@ -10,7 +10,8 @@ import datetime as dt
 from . import config, db
 from .domain import (carbon, community, festivals, health, household, models,
                      nutrition, receipts, reverse_mode, weather)
-from .kernel import agent_brain, budget, explainability, optimizer, scheduler, variance
+from .kernel import (agent_brain, budget, explainability, optimizer, recommender,
+                     scheduler, variance)
 
 
 # --------------------------------------------------------------------------- #
@@ -103,10 +104,23 @@ def plan_view(plan_id: int) -> dict:
         "coach": coach,
         "grid": grid,
         "week_context": _week_context(user, plan, fests),
+        # inverse-optimisation budget band for the planned sessions (docs §5):
+        # don't make the user guess the cap — recommend it.
+        "recommendation": recommender.recommend(user, [d["meal"] for d in decisions]),
     }
     if user.get("household_id"):
         view["household"] = _household_view(user, env["spend"])
     return view
+
+
+def recommend_budget(plan_id: int) -> dict:
+    """Standalone budget recommendation for a plan's sessions (Floor/Usual/Variety)."""
+    plan = models.get_plan(plan_id)
+    if not plan:
+        return {}
+    user = models.get_user(plan["user_id"])
+    meals = [s["meal"] for s in models.sessions_for_plan(plan_id)]
+    return recommender.recommend(user, meals)
 
 
 def _counts(decisions):
