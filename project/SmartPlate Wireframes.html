@@ -124,7 +124,7 @@
       <!-- DESKTOP -->
       <div style="flex:0 0 auto;">
         <div style="font:700 13px 'Gaegu',cursive; color:#a8a294; letter-spacing:2px; margin-bottom:8px;">DESKTOP</div>
-        <div style="width:1040px; background:#fff; border:2.5px solid #2a2a28; border-radius:16px 16px 14px 16px; box-shadow:5px 6px 0 rgba(42,42,40,.10); overflow:hidden;">
+        <div style="width:1180px; background:#fff; border:2.5px solid #2a2a28; border-radius:16px 16px 14px 16px; box-shadow:5px 6px 0 rgba(42,42,40,.10); overflow:hidden;">
           <div style="display:flex; align-items:center; gap:8px; padding:9px 14px; border-bottom:2px solid #2a2a28; background:#f3efe6;">
             <span style="width:11px; height:11px; border:1.5px solid #2a2a28; border-radius:50%;"></span>
             <span style="width:11px; height:11px; border:1.5px solid #2a2a28; border-radius:50%;"></span>
@@ -199,7 +199,7 @@
       <!-- DESKTOP -->
       <div style="flex:0 0 auto;">
         <div style="font:700 13px 'Gaegu',cursive; color:#a8a294; letter-spacing:2px; margin-bottom:8px;">DESKTOP</div>
-        <div style="width:1040px; background:#fff; border:2.5px solid #2a2a28; border-radius:16px 16px 14px 16px; box-shadow:5px 6px 0 rgba(42,42,40,.10); overflow:hidden;">
+        <div style="width:1180px; background:#fff; border:2.5px solid #2a2a28; border-radius:16px 16px 14px 16px; box-shadow:5px 6px 0 rgba(42,42,40,.10); overflow:hidden;">
           <div style="display:flex; align-items:center; gap:8px; padding:9px 14px; border-bottom:2px solid #2a2a28; background:#f3efe6;">
             <span style="width:11px; height:11px; border:1.5px solid #2a2a28; border-radius:50%;"></span>
             <span style="width:11px; height:11px; border:1.5px solid #2a2a28; border-radius:50%;"></span>
@@ -980,6 +980,8 @@
               </div>
             </div>
           </div>
+          <!-- favourites + the repeat-ordering insight -->
+          <div style="border-top:2px dashed #cfc9bd; padding:14px 18px;">{{ favsEl }}</div>
           <!-- next-bet band -->
           <div style="border-top:2px dashed #cfc9bd; padding:14px 18px; background:#faf8f2;">
             <div style="font:700 15px 'Gaegu',cursive;">↗ Next bet — <b>Household Taste DNA</b></div>
@@ -1338,6 +1340,9 @@ class Component extends DCLogic {
     const cap = 2000;
     // daily kcal target — driven by the BMR calculator on the Setup screen (shared via localStorage)
     const kcalTarget = (() => { try { return parseInt(localStorage.getItem('smartplate_target'), 10) || 1800; } catch (e) { return 1800; } })();
+    // favourite outlets (shared from the Setup → Taste DNA screen) get a ⭐ on the plan
+    const favSet = (() => { try { const v = JSON.parse(localStorage.getItem('smartplate_favs') || 'null'); return Array.isArray(v) && v.length ? v : ['Murugan Idli', 'A2B', 'Sangeetha']; } catch (e) { return ['Murugan Idli', 'A2B', 'Sangeetha']; } })();
+    const isFav = (m) => !!m && favSet.some((f) => (m.meta || '').includes(f));
 
     let spent = 0, delivered = 0, cooked = 0, skipped = 0, sessions = 0;
     const days = raw.map((dy, i) => {
@@ -1493,12 +1498,12 @@ class Component extends DCLogic {
         return h('div', { key: v.k, style: { background: '#fff', border: '2px solid #2a2a28', borderRadius: '13px 11px 13px 11px', boxShadow: '2px 2px 0 rgba(42,42,40,.08)', padding: '8px 9px', marginBottom: '8px', minHeight: '84px' } },
           head,
           h('div', { style: { font: "700 14px/1.15 'Gaegu',cursive", marginTop: '5px' } }, m.item),
-          h('div', { style: { font: "400 12px/1.2 'Gaegu',cursive", color: '#7a746a', marginTop: '2px' } }, m.meta),
+          h('div', { style: { font: "400 12px/1.2 'Gaegu',cursive", color: '#7a746a', marginTop: '2px' } }, (isFav(m) ? '⭐ ' : '') + m.meta),
           custom, areaRow, tags, modeRow, controls, panel);
       });
       return h('div', { key: 'col' + i }, header, ...cards);
     });
-    const gridEl = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: '8px' } }, ...cols);
+    const gridEl = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: '12px' } }, ...cols);
 
     // ---- constraint-conflict prompt: over cap → resolve by money, never by safety ----
     const conflictEl = left < 0 ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', border: '2.5px solid #cf4a2f', background: '#f7e0d9', borderRadius: '14px', padding: '11px 15px', marginTop: '12px' } },
@@ -1539,7 +1544,7 @@ class Component extends DCLogic {
           h('span', { style: { font: "700 10px 'Gaegu',cursive", color: '#a8a294', letterSpacing: '1px' } }, m.meal),
           h('span', { style: { font: "700 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #2a2a28', borderRadius: '7px', background: '#f3efe6' } }, m.glyph + ' ' + m.tag)),
         h('div', { style: { font: "700 15px 'Gaegu',cursive", marginTop: '4px' } }, m.item),
-        h('div', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, m.meta),
+        h('div', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, (isFav(m) ? '⭐ ' : '') + m.meta),
         areaRow, mCustom,
         h('div', null, ...(m.flags || []).map((f, fi) => h('div', { key: 'f' + fi, style: { display: 'inline-block', font: "400 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px dashed #8a8478', borderRadius: '7px', background: '#faf8f2', marginTop: '6px', marginRight: '3px' } }, f))),
         h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px' } },
@@ -1564,7 +1569,33 @@ class Component extends DCLogic {
 </script>
 <script type="text/x-dc" id="logic-setup">
 class Component extends DCLogic {
-  state = { tab: 'form', bmr: { sex: 'F', age: 29, ht: 168, wt: 62, act: 1.4, goal: -110 } };
+  state = { tab: 'form', bmr: { sex: 'F', age: 29, ht: 168, wt: 62, act: 1.4, goal: -110 }, favs: ['Murugan Idli', 'A2B', 'Sangeetha'] };
+
+  // ---- favourite restaurants + the repeat-ordering insight ----
+  favPool() { return ['Murugan Idli', 'A2B', 'Sangeetha', 'Ponnusamy', 'Anjappar', 'Jr. Kuppanna', 'Saravana Bhavan']; }
+  addFav() { const next = this.favPool().find((p) => !this.state.favs.includes(p)); if (next) this.setState((s) => ({ favs: [...s.favs, next] })); }
+  removeFav(name) { this.setState((s) => ({ favs: s.favs.filter((f) => f !== name) })); }
+  favsPanel() {
+    const h = React.createElement;
+    const favs = this.state.favs;
+    const share = Math.max(52, 82 - (favs.length - 3) * 4); // more favourites → flatter concentration
+    const chip = (name) => h('span', { key: name, style: { display: 'inline-flex', alignItems: 'center', gap: '6px', font: "700 13px 'Gaegu',cursive", padding: '5px 8px 5px 11px', border: '2px solid #b8860b', borderRadius: '9px', background: '#fbf4dc', color: '#7a5a12' } },
+      '⭐ ' + name,
+      h('button', { onClick: () => this.removeFav(name), title: 'remove', style: { font: "700 12px 'Gaegu',cursive", width: '18px', height: '18px', border: 'none', borderRadius: '50%', background: '#e9d9a8', color: '#7a5a12', cursor: 'pointer', lineHeight: '1' } }, '×'));
+    const canAdd = this.favPool().some((p) => !favs.includes(p));
+    return h('div', null,
+      h('div', { style: { font: "700 16px 'Gaegu',cursive" } }, '⭐ Your favourite restaurants ', h('span', { style: { font: "400 13px 'Gaegu',cursive", color: '#7a746a' } }, '— pinned outlets the agent leans on')),
+      h('div', { style: { display: 'flex', gap: '7px', flexWrap: 'wrap', alignItems: 'center', marginTop: '9px' } },
+        ...favs.map(chip),
+        canAdd ? h('button', { onClick: () => this.addFav(), style: { font: "700 13px 'Gaegu',cursive", padding: '5px 11px', border: '2px dashed #b8860b', borderRadius: '9px', background: '#fff', color: '#7a5a12', cursor: 'pointer' } }, '+ add') : null),
+      h('div', { style: { font: "400 13px/1.4 'Gaegu',cursive", color: '#56524a', marginTop: '11px', maxWidth: '640px' } },
+        'Why this matters — behavioural research on food choice: people keep a small ',
+        h('b', null, '“consideration set” of ~4–6 places'),
+        ' and a big share of orders concentrate there. Across your last ', h('b', null, '142 orders'), ', ',
+        h('b', { style: { color: '#7a5a12' } }, '≈' + share + '%'),
+        ' came from these ' + favs.length + '. So the agent boosts their signature dishes, but ',
+        h('b', null, 'spaces them out'), ' (no repeat within 3 days) so favourites don’t become fatigue — and ⭐-stars them on the weekly plan.'));
+  }
 
   // ---- BMR / TDEE / daily target, computed from the user's OWN numbers (Mifflin–St Jeor) ----
   actList() { return [['Sedentary', 1.2], ['Light', 1.375], ['Moderate', 1.4], ['Active', 1.55], ['Athlete', 1.725]]; }
@@ -1662,7 +1693,7 @@ class Component extends DCLogic {
     const set = (t) => () => this.setState({ tab: t });
     const c = this.bmrCalc();
     // share the computed target with the Weekly screen (read on its next render)
-    try { localStorage.setItem('smartplate_target', String(c.target)); localStorage.setItem('smartplate_protein', String(c.protein)); } catch (e) {}
+    try { localStorage.setItem('smartplate_target', String(c.target)); localStorage.setItem('smartplate_protein', String(c.protein)); localStorage.setItem('smartplate_favs', JSON.stringify(this.state.favs)); } catch (e) {}
     return {
       isForm: this.state.tab === 'form',
       isRules: this.state.tab === 'rules',
@@ -1672,7 +1703,7 @@ class Component extends DCLogic {
       goForm: set('form'), goRules: set('rules'), goPlain: set('plain'), goDna: set('dna'), goNutri: set('nutri'),
       dnaRadar: this.radar(240), dnaRadarMob: this.radar(184),
       nutritionWeekEl: this.nutritionWeek(150), nutritionWeekMobEl: this.nutritionWeek(92),
-      bmrEl: this.bmrPanel(),
+      bmrEl: this.bmrPanel(), favsEl: this.favsPanel(),
       bmrTargetLabel: 'Target ' + c.target.toLocaleString() + ' kcal · ' + c.protein + 'g protein',
       notes: this.props.showAnnotations ?? true,
     };

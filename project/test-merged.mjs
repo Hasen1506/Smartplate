@@ -143,5 +143,22 @@ ok(wc.renderVals().spent === before + unit, 'whole-week spend tracks the extra p
 wc.setState({ tab: 'grid' });
 ok(/×\d/.test(weekly.innerHTML), 'grid cards expose a ×N portion control');
 
+console.log('\n[setup] favourite restaurants + repeat-ordering insight (Taste DNA tab)');
+sc.setState({ tab: 'dna' });
+ok(/favourite restaurants/i.test(setup.innerHTML), 'Favourites panel renders');
+ok(/consideration set/i.test(setup.innerHTML), 'shows the consideration-set / repeat-ordering insight');
+ok(setup.innerHTML.includes('Murugan Idli'), 'default favourites listed');
+const favN0 = sc.state.favs.length;
+sc.removeFav('Murugan Idli');
+ok(sc.state.favs.length === favN0 - 1 && !sc.state.favs.includes('Murugan Idli'), 'can remove a favourite');
+sc.addFav();
+ok(sc.state.favs.length === favN0, 'can add a favourite back');
+
+console.log('\n[cross-screen] Weekly stars meals from favourite outlets');
+sc.setState({ favs: ['Murugan Idli'] });
+window.__dc.activate('screen-weekly');
+wc.setState({ tab: 'grid', picks: {}, qty: {}, addons: {} });
+ok(weekly.innerHTML.includes('⭐'), 'a ⭐ marks favourite-outlet meals on the plan');
+
 console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
 process.exit(fails.length ? 1 : 0);
