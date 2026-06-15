@@ -100,6 +100,33 @@
   <!-- constraint-conflict prompt: appears only when picks blow the budget cap -->
   {{ conflictEl }}
 
+  <!-- ============ RECOMMENDED BUDGET (inverse optimisation — don't make them guess) ============ -->
+  <div style="background:#fff; border:2.5px solid #2a2a28; border-radius:16px 16px 14px 16px; box-shadow:5px 6px 0 rgba(42,42,40,.10); padding:16px 20px; margin-top:18px;">
+    <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+      <div style="font:700 23px 'Caveat',cursive;">Recommended budget <span style="font:400 14px 'Gaegu',cursive; color:#7a746a;">— priced from your sessions, nutrition target &amp; nearby places</span></div>
+      <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #2f6d4a; border-radius:9px; background:#eef3ec; color:#2f6d4a;">suggested floor ★4.3</span>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+      <div style="flex:1; min-width:180px; border:2px solid #2a2a28; border-radius:13px 11px 13px 11px; padding:11px 13px; background:#f6f4ee;">
+        <div style="font:700 12px 'Gaegu',cursive; color:#a8a294;">FLOOR</div>
+        <div style="font:700 26px 'Caveat',cursive;">₹1,420</div>
+        <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">cheapest week that still hits your nutrition</div>
+      </div>
+      <div style="flex:1; min-width:180px; border:2px solid #2a2a28; border-radius:13px 11px 13px 11px; padding:11px 13px; background:#fff;">
+        <div style="font:700 12px 'Gaegu',cursive; color:#a8a294;">USUAL</div>
+        <div style="font:700 26px 'Caveat',cursive;">₹1,650</div>
+        <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">your normal week (popular ⭐ picks)</div>
+      </div>
+      <div style="flex:1; min-width:180px; border:2px solid #cf4a2f; border-radius:13px 11px 13px 11px; padding:11px 13px; background:#fdf1ec;">
+        <div style="font:700 12px 'Gaegu',cursive; color:#cf4a2f;">VARIETY ✦</div>
+        <div style="font:700 26px 'Caveat',cursive;">₹1,950</div>
+        <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">room to try 2 new dishes this week</div>
+      </div>
+    </div>
+    <div style="font:400 13px 'Gaegu',cursive; color:#56524a; margin-top:10px;">↔ Trade-off: <b>+₹300</b> buys 2 new dishes · <b>−₹230</b> means one cook day or a skip · rain can add ~25%.</div>
+  </div>
+  <sc-if value="{{ notes }}" hint-placeholder-val="{{ true }}"><div style="font:600 18px 'Caveat',cursive; color:#cf4a2f; transform:rotate(-1.2deg); margin:10px 0 0 6px;">↳ inverse optimisation: instead of guessing a cap, the agent prices the week three ways. Pushing the ★ floor past the suggestion is what makes the budget jump.</div></sc-if>
+
   <!-- ============ TABS (only the two you liked) ============ -->
   <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:24px;">
     <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
@@ -136,6 +163,7 @@
             <div>
               <span style="font:700 12px 'Gaegu',cursive; padding:4px 10px; border:2px solid #2a2a28; border-radius:9px; background:#2a2a28; color:#fff;">BALANCED MODE</span>
               <span style="font:400 15px 'Gaegu',cursive; color:#56524a; margin-left:10px;">{{ weekLabel }} · {{ sessions }} sessions</span>
+              <div style="font:400 13px 'Gaegu',cursive; color:#2f6d4a; margin-top:3px;">Best taste-for-money that stays on your nutrition target. <span style="color:#a8a294;">(Tight Week = cheapest on-target · Comfort = best your budget allows)</span></div>
             </div>
             <div style="min-width:260px;">
               <div style="display:flex; justify-content:space-between; font:700 14px 'Gaegu',cursive;"><span>₹{{ spent }} spent</span><span style="color:{{ leftColor }};">₹{{ left }} left</span></div>
@@ -154,6 +182,7 @@
             <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; padding-top:13px; border-top:2px dashed #cfc9bd;">
               <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:{{ capBg }};">{{ capLabel }}</div>
               <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#fff;">{{ sessions }} sessions · {{ delivered }} deliver · {{ cooked }} cook</div>
+              <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#fdf1ec;" title="usual = a favourite outlet (⭐) · new = something the agent is introducing (✦)">{{ varietyStr }}</div>
               <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#fff;">≈1,620 kcal/day <span style="color:#7a746a;">· target {{ kcalTargetStr }}</span></div>
               <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#eef3ec;">surge saved ₹30</div>
               <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#eef3ec;">allergens 0 conflicts ✓</div>
@@ -385,9 +414,9 @@
             <!-- section nav -->
             <div style="width:186px; flex:0 0 186px; border-right:2px dashed #cfc9bd; padding:16px 12px;">
               <div style="font:700 13px 'Gaegu',cursive; padding:8px 10px; border:2px solid #2a2a28; border-radius:9px; background:#2a2a28; color:#fff; margin-bottom:7px;">Basics</div>
-              <div style="font:700 13px 'Gaegu',cursive; padding:8px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff; margin-bottom:7px;">🔒 Hard rules</div>
-              <div style="font:700 13px 'Gaegu',cursive; padding:8px 10px; border:2px solid #2f5fd0; border-radius:9px; background:#eef2fb; color:#2f5fd0; margin-bottom:7px;">🎛 Preferences</div>
-              <div style="font:700 13px 'Gaegu',cursive; padding:8px 10px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f; margin-bottom:7px;">⚡ Power rules</div>
+              <div style="font:700 13px 'Gaegu',cursive; padding:8px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff; margin-bottom:7px;">🔒 Locks</div>
+              <div style="font:700 13px 'Gaegu',cursive; padding:8px 10px; border:2px solid #2f5fd0; border-radius:9px; background:#eef2fb; color:#2f5fd0; margin-bottom:7px;">🎛 Dials</div>
+              <div style="font:700 13px 'Gaegu',cursive; padding:8px 10px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f; margin-bottom:7px;">⚡ Rules</div>
               <div style="font:700 13px 'Gaegu',cursive; padding:8px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff; margin-bottom:7px;">Schedule · windows</div>
               <div style="font:700 13px 'Gaegu',cursive; padding:8px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff; margin-bottom:7px;">Autonomy</div>
               <div style="font:700 13px 'Gaegu',cursive; padding:8px 10px; border:2px solid #cf4a2f; border-radius:9px; background:#fbf0d6; color:#cf4a2f; margin-bottom:7px;">🎉 Feast Fund</div>
@@ -412,7 +441,7 @@
               </div>
 
               <!-- HARD RULES -->
-              <div style="font:700 16px 'Gaegu',cursive; border-bottom:2px solid #2a2a28; padding-bottom:4px; margin-top:18px;">🔒 Hard rules <span style="font:400 12px; color:#7a746a;">— the solver removes anything that breaks these</span></div>
+              <div style="font:700 16px 'Gaegu',cursive; border-bottom:2px solid #2a2a28; padding-bottom:4px; margin-top:18px;">🔒 Locks <span style="font:400 12px; color:#7a746a;">— hard limits the solver can never break (allergens · ★ floor · budget cap · fasting)</span></div>
               <div style="margin-top:10px;">
                 <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">Allergens — never order</div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:5px;">
@@ -447,15 +476,22 @@
               </div>
 
               <!-- PREFERENCES -->
-              <div style="font:700 16px 'Gaegu',cursive; color:#2f5fd0; border-bottom:2px solid #2f5fd0; padding-bottom:4px; margin-top:18px;">🎛 Preferences <span style="font:400 12px; color:#7a746a;">— soft weights, the agent leans this way</span></div>
+              <div style="font:700 16px 'Gaegu',cursive; color:#2f5fd0; border-bottom:2px solid #2f5fd0; padding-bottom:4px; margin-top:18px;">🎛 Dials <span style="font:400 12px; color:#7a746a;">— the mode (money ⇄ everything-else) + a couple of leans the agent optimises toward</span></div>
               <div style="display:flex; gap:28px; flex-wrap:wrap; margin-top:10px;">
                 <div style="min-width:300px; flex:1;">
-                  <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">Priority balance</div>
-                  <div style="display:flex; align-items:center; gap:10px; margin-top:7px;"><span style="font:700 13px 'Gaegu',cursive; width:62px;">Taste</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:35%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:35%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-                  <div style="display:flex; align-items:center; gap:10px; margin-top:7px;"><span style="font:700 13px 'Gaegu',cursive; width:62px;">Health</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:72%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:72%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-                  <div style="display:flex; align-items:center; gap:10px; margin-top:7px;"><span style="font:700 13px 'Gaegu',cursive; width:62px;">Price</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:60%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:60%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-                  <div style="display:flex; align-items:center; gap:10px; margin-top:7px;"><span style="font:700 13px 'Gaegu',cursive; width:62px;">Low carbon</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:45%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:45%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
-                  <div style="display:flex; align-items:center; gap:10px; margin-top:7px;"><span style="font:700 13px 'Gaegu',cursive; width:62px;">Dodge surge</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:80%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:80%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
+                  <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">Mode — the one dial: <b style="color:#2a2a28;">money ⇄ everything-else</b> <span style="color:#a8a294;">· taste is learned, not set (see 🧬 Taste DNA)</span></div>
+                  <div style="display:flex; gap:6px; margin-top:7px;">
+                    <span style="flex:1; text-align:center; font:700 13px 'Gaegu',cursive; padding:7px 6px; border:2px solid #2a2a28; border-radius:10px; background:#fff;">Tight Week</span>
+                    <span style="flex:1; text-align:center; font:700 13px 'Gaegu',cursive; padding:7px 6px; border:2px solid #2f5fd0; border-radius:10px; background:#2f5fd0; color:#fff;">Balanced</span>
+                    <span style="flex:1; text-align:center; font:700 13px 'Gaegu',cursive; padding:7px 6px; border:2px solid #2a2a28; border-radius:10px; background:#fff;">Comfort</span>
+                  </div>
+                  <div style="font:400 13px 'Gaegu',cursive; color:#2f6d4a; margin-top:7px;">Balanced — best taste-for-money that stays on your nutrition target.</div>
+                  <div style="font:400 12px 'Gaegu',cursive; color:#7a746a; margin-top:13px;">Optional leans <span style="color:#a8a294;">— gentle nudges, not full sliders</span></div>
+                  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
+                    <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #2f6d4a; border-radius:9px; background:#eef3ec; color:#2f6d4a;">＋ lean healthier</span>
+                    <span style="font:400 13px 'Gaegu',cursive; padding:5px 11px; border:2px dashed #8a8478; border-radius:9px; color:#7a746a;">＋ lean greener</span>
+                    <span style="font:400 13px 'Gaegu',cursive; padding:5px 11px; border:2px dashed #8a8478; border-radius:9px; color:#7a746a;">dodge surge · on</span>
+                  </div>
                 </div>
                 <div style="min-width:260px; flex:1;">
                   <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">Nutrition targets</div>
@@ -473,7 +509,7 @@
               </div>
 
               <!-- POWER RULES -->
-              <div style="font:700 16px 'Gaegu',cursive; color:#9a5e1f; border-bottom:2px solid #b8702a; padding-bottom:4px; margin-top:18px;">⚡ Power rules <span style="font:400 12px; color:#7a746a;">— conditional refinements: <b>WHEN</b> a scope matches → <b>THEN</b> nudge. Scoped by area, budget band, or a <b>calendar life-event</b> (🏋 gym · ✈ travel · 📅 weekend). Never override a 🔒 lock.</span></div>
+              <div style="font:700 16px 'Gaegu',cursive; color:#9a5e1f; border-bottom:2px solid #b8702a; padding-bottom:4px; margin-top:18px;">⚡ Rules <span style="font:400 12px; color:#7a746a;">— conditional refinements: <b>WHEN</b> a scope matches → <b>THEN</b> nudge. Scoped by area, budget band, or a <b>calendar life-event</b> (🏋 gym · ✈ travel · 📅 weekend). Never override a 🔒 lock.</span></div>
               <div style="display:flex; flex-direction:column; gap:7px; margin-top:10px;">
                 <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; border:2px solid #b8702a; border-radius:11px; padding:8px 11px; background:#f8edd6;">
                   <span style="font:700 11px 'Gaegu',cursive; color:#9a5e1f; letter-spacing:1px;">WHEN</span>
@@ -1068,7 +1104,14 @@
               <div style="flex:1; min-width:300px; border:2px solid #2a2a28; border-radius:13px; padding:13px 15px; background:#faf8f2;">
                 <div style="font:700 15px 'Gaegu',cursive;">♻ Variety / recipe-fatigue</div>
                 <div style="font:400 13px 'Gaegu',cursive; color:#56524a; margin-top:5px;">Boredom is the #1 reason people quit meal apps — so variety is a tracked dial, not luck.</div>
-                <div style="display:flex; align-items:center; gap:10px; margin-top:10px;"><span style="font:700 13px 'Gaegu',cursive; width:84px;">Novelty</span><div style="position:relative; flex:1; height:9px; border:2px solid #2f5fd0; border-radius:7px; background:#fff;"><div style="position:absolute; left:0; top:0; bottom:0; width:55%; background:#bcd0e8; border-radius:5px;"></div><div style="position:absolute; left:55%; top:50%; transform:translate(-50%,-50%); width:16px; height:16px; border:2px solid #2f5fd0; border-radius:50%; background:#fff;"></div></div></div>
+                <div style="font:400 12px 'Gaegu',cursive; color:#7a746a; margin-top:10px;">How much new vs the usual — a <b style="color:#2a2a28;">level</b>, not a raw slider</div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+                  <span style="font:700 12px 'Gaegu',cursive; padding:5px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">Usual</span>
+                  <span style="font:700 12px 'Gaegu',cursive; padding:5px 10px; border:2px solid #cf4a2f; border-radius:9px; background:#fdf1ec; color:#cf4a2f;">Light ✦</span>
+                  <span style="font:700 12px 'Gaegu',cursive; padding:5px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">Mixed</span>
+                  <span style="font:700 12px 'Gaegu',cursive; padding:5px 10px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">Adventurous</span>
+                </div>
+                <div style="font:400 12px 'Gaegu',cursive; color:#7a746a; margin-top:7px;">Light → the agent slips in 1–2 <b style="color:#cf4a2f;">✦ new</b> picks/week; the plan shows “⭐ usual · ✦ new”. Rate a ✦ to train your DNA.</div>
                 <div style="display:flex; align-items:center; gap:7px; margin-top:10px;"><span style="font:400 13px 'Gaegu',cursive;">No repeat within</span><span style="font:700 14px 'Gaegu',cursive; border:2px solid #2a2a28; border-radius:8px; padding:3px 9px; background:#fff;">3 days</span><span style="font:400 12px 'Gaegu',cursive; color:#7a746a;">· powers the ↻ spin on the plan</span></div>
               </div>
             </div>
@@ -1343,8 +1386,12 @@ class Component extends DCLogic {
     // favourite outlets (shared from the Setup → Taste DNA screen) get a ⭐ on the plan
     const favSet = (() => { try { const v = JSON.parse(localStorage.getItem('smartplate_favs') || 'null'); return Array.isArray(v) && v.length ? v : ['Murugan Idli', 'A2B', 'Sangeetha']; } catch (e) { return ['Murugan Idli', 'A2B', 'Sangeetha']; } })();
     const isFav = (m) => !!m && favSet.some((f) => (m.meta || '').includes(f));
+    // A delivery from a favourite outlet is the "usual" (⭐); one the agent introduces
+    // from elsewhere is "new" (✦). We mark only the new ones — badging the usual
+    // majority would be noise (see docs/optimization-and-ux.md §6.1). Cook/skip: neither.
+    const isNew = (m) => !!m && m.tag === 'DELIVER' && !isFav(m);
 
-    let spent = 0, delivered = 0, cooked = 0, skipped = 0, sessions = 0;
+    let spent = 0, delivered = 0, cooked = 0, skipped = 0, sessions = 0, usualN = 0, newN = 0;
     const days = raw.map((dy, i) => {
       let daySpend = 0, dayKcal = 0; const stripG = [];
       const view = wins.map((w) => {
@@ -1359,7 +1406,7 @@ class Component extends DCLogic {
         if (on && m) {
           sessions++; daySpend += e.cost; spent += e.cost;
           dayKcal += e.kcal;
-          if (m.tag === 'DELIVER') delivered++; else if (m.tag === 'COOK') cooked++; else if (m.tag === 'SKIP') skipped++;
+          if (m.tag === 'DELIVER') { delivered++; if (isFav(m)) usualN++; else newN++; } else if (m.tag === 'COOK') cooked++; else if (m.tag === 'SKIP') skipped++;
           stripG.push(m.glyph);
         }
         return { on, off: !on, meal: m, opts, idx, k, w, di: i, area, noDelivery, wlabel: winMeta[w].t, eff: e };
@@ -1460,6 +1507,7 @@ class Component extends DCLogic {
           h('span', { style: { font: "700 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #2a2a28', borderRadius: '7px', background: '#f3efe6' } }, m.glyph + ' ' + m.tag));
         const tags = h('div', null,
           ...(m.flags || []).map((f, fi) => h('div', { key: 'f' + fi, style: { display: 'inline-block', font: "400 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px dashed #8a8478', borderRadius: '7px', color: '#4a463f', background: '#faf8f2', marginTop: '5px', marginRight: '3px' } }, f)),
+          isNew(m) ? h('div', { title: 'A new pick the agent is introducing — rate it to train your Taste DNA', style: { display: 'inline-block', font: "700 10px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #cf4a2f', borderRadius: '7px', color: '#cf4a2f', background: '#fdf1ec', marginTop: '5px', marginRight: '3px' } }, '✦ new') : null,
           changed ? h('div', { style: { display: 'inline-block', font: "400 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #cf4a2f', borderRadius: '7px', color: '#cf4a2f', background: '#fff', marginTop: '5px' } }, '✎ your pick') : null);
         const modeRow = h('div', { style: { display: 'flex', gap: '3px', marginTop: '7px' } },
           ...[['DELIVER', '▢'], ['COOK', '⌂'], ['SKIP', '⊘']].map(([mode, g]) => {
@@ -1544,7 +1592,7 @@ class Component extends DCLogic {
           h('span', { style: { font: "700 10px 'Gaegu',cursive", color: '#a8a294', letterSpacing: '1px' } }, m.meal),
           h('span', { style: { font: "700 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #2a2a28', borderRadius: '7px', background: '#f3efe6' } }, m.glyph + ' ' + m.tag)),
         h('div', { style: { font: "700 15px 'Gaegu',cursive", marginTop: '4px' } }, m.item),
-        h('div', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, (isFav(m) ? '⭐ ' : '') + m.meta),
+        h('div', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, (isFav(m) ? '⭐ ' : (isNew(m) ? '✦ ' : '')) + m.meta),
         areaRow, mCustom,
         h('div', null, ...(m.flags || []).map((f, fi) => h('div', { key: 'f' + fi, style: { display: 'inline-block', font: "400 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px dashed #8a8478', borderRadius: '7px', background: '#faf8f2', marginTop: '6px', marginRight: '3px' } }, f))),
         h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px' } },
@@ -1562,6 +1610,7 @@ class Component extends DCLogic {
       sessions, delivered, cooked, skipped, spent, left, leftColor, capLabel, capBg, spentPct, ringOffset,
       budgetFillSel: mkFill(spentPct), budgetFillGrid: mkFill(spentPct), budgetFillMob: mkFill(spentPct),
       kcalTargetStr: kcalTarget.toLocaleString(),
+      usualN, newN, varietyStr: '⭐ ' + usualN + ' usual · ✦ ' + newN + ' new',
       notes: this.props.showAnnotations ?? true,
     };
   }

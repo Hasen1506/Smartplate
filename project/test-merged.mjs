@@ -160,5 +160,18 @@ window.__dc.activate('screen-weekly');
 wc.setState({ tab: 'grid', picks: {}, qty: {}, addons: {} });
 ok(weekly.innerHTML.includes('⭐'), 'a ⭐ marks favourite-outlet meals on the plan');
 
+console.log('\n[weekly] budget recommender + variety marking (new)');
+ok(weekly.innerHTML.includes('Recommended budget'), 'budget recommender card present');
+ok(/FLOOR/.test(weekly.innerHTML) && /VARIETY/.test(weekly.innerHTML), 'recommender shows Floor + Variety bands');
+ok(weekly.innerHTML.includes('✦ new'), 'novel picks carry a subtle ✦ new mark (not V/U letters)');
+ok(/✦ \d+ new/.test(weekly.innerHTML), 'week chip counts usual ⭐ vs new ✦');
+
+console.log('\n[setup] slider cull → one mode dial + leans, grouped as Locks/Dials/Rules');
+window.__dc.activate('screen-setup');
+sc.setState({ tab: 'form' });
+ok(/money ⇄ everything-else/.test(setup.innerHTML), 'priority sliders collapsed to the money⇄everything mode dial');
+ok(/lean healthier/.test(setup.innerHTML), 'optional leans replace the slider stack');
+ok(/🔒 Locks/.test(setup.innerHTML) && /🎛 Dials/.test(setup.innerHTML) && /⚡ Rules/.test(setup.innerHTML), 'Setup grouped as Locks / Dials / Rules');
+
 console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
 process.exit(fails.length ? 1 : 0);
