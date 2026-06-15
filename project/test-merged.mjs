@@ -127,5 +127,21 @@ ok(lsTarget === String(t1), `Setup persisted target to localStorage (${lsTarget}
 window.__dc.activate('screen-weekly');
 ok(weekly.innerHTML.includes('target ' + t1.toLocaleString()), `Weekly shows the shared target ${t1.toLocaleString()}`);
 
+console.log('\n[weekly] per-meal portions (×N) + drink add-on change cost & kcal');
+wc.setState({ picks: {}, qty: {}, addons: {}, spice: {}, areaOverride: {} }); // clean baseline
+const tueD = () => resolved(1, 'D'); // Paneer Butter Masala (home-serviceable)
+const unit = wc.num(tueD().cost), unitKcal = wc.kcalFor(tueD().item, 'DELIVER');
+ok(wc.eff(tueD(), '1-D').cost === unit, `1 portion = unit price ₹${unit}`);
+wc.stepQty(1, 'D', 1);
+ok(wc.eff(tueD(), '1-D').cost === unit * 2, `×2 portions → ₹${unit * 2}`);
+wc.toggleDrink(1, 'D');
+ok(wc.eff(tueD(), '1-D').cost === unit * 2 + 40, `+ drink adds ₹40 → ₹${unit * 2 + 40}`);
+ok(wc.eff(tueD(), '1-D').kcal === unitKcal * 2 + 150, `kcal scales with portions + drink (${unitKcal * 2 + 150})`);
+const before = wc.renderVals().spent;
+wc.stepQty(1, 'D', 1); // ×3
+ok(wc.renderVals().spent === before + unit, 'whole-week spend tracks the extra portion');
+wc.setState({ tab: 'grid' });
+ok(/×\d/.test(weekly.innerHTML), 'grid cards expose a ×N portion control');
+
 console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
 process.exit(fails.length ? 1 : 0);

@@ -1108,7 +1108,7 @@
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    this.state = { tab: 'grid', week: 'this', sel: this.defaultSel(), picks: {}, browse: null, mobDay: 1, areaOverride: {} };
+    this.state = { tab: 'grid', week: 'this', sel: this.defaultSel(), picks: {}, browse: null, mobDay: 1, areaOverride: {}, qty: {}, addons: {}, spice: {} };
   }
 
   // ---- location primitive: serviceability gate per area ----
@@ -1214,6 +1214,22 @@ class Component extends DCLogic {
     const k = i + '-' + w;
     const n = this.optsForCtx(this.baseDays()[i], w, this.activeArea(i, w)).length || 1;
     this.setState((s) => ({ picks: { ...s.picks, [k]: ((s.picks[k] || 0) + 1) % n } }));
+  }
+  // ---- per-meal customisation: portions (×N), a drink add-on, spice/gravy level ----
+  spiceNames() { return ['Mild', 'Medium', 'Spicy']; }
+  qtyOf(k) { return this.state.qty[k] || 1; }
+  stepQty(i, w, d) { const k = i + '-' + w; this.setState((s) => ({ qty: { ...s.qty, [k]: Math.min(9, Math.max(1, (s.qty[k] || 1) + d)) } })); }
+  drinkOn(k) { return !!(this.state.addons[k] && this.state.addons[k].drink); }
+  toggleDrink(i, w) { const k = i + '-' + w; this.setState((s) => ({ addons: { ...s.addons, [k]: { drink: !(s.addons[k] && s.addons[k].drink) } } })); }
+  spiceOf(k) { return this.state.spice[k] == null ? 1 : this.state.spice[k]; }
+  cycleSpice(i, w) { const k = i + '-' + w; this.setState((s) => ({ spice: { ...s.spice, [k]: ((s.spice[k] == null ? 1 : s.spice[k]) + 1) % 3 } })); }
+  // effective cost & kcal for a meal once portions and add-ons are applied
+  eff(m, k) {
+    if (!m || m.tag === 'SKIP') return { qty: 1, drink: false, spice: this.spiceOf(k), cost: 0, kcal: 0 };
+    const qty = this.qtyOf(k), drink = this.drinkOn(k);
+    let cost = this.num(m.cost) * qty, kcal = this.kcalFor(m.item, m.tag) * qty;
+    if (drink) { cost += 40; kcal += 150; }
+    return { qty, drink, cost, kcal, spice: this.spiceOf(k) };
   }
   chooseAlt(i, w, idx) {
     const k = i + '-' + w;
@@ -1334,13 +1350,14 @@ class Component extends DCLogic {
         const idx = opts.length ? ((this.state.picks[k] || 0) % opts.length) : 0;
         const m = opts.length ? opts[idx] : dy.slots[w];
         const noDelivery = opts.filter((o) => o.tag === 'DELIVER').length === 0;
+        const e = this.eff(m, k);
         if (on && m) {
-          sessions++; daySpend += this.num(m.cost); spent += this.num(m.cost);
-          dayKcal += this.kcalFor(m.item, m.tag);
+          sessions++; daySpend += e.cost; spent += e.cost;
+          dayKcal += e.kcal;
           if (m.tag === 'DELIVER') delivered++; else if (m.tag === 'COOK') cooked++; else if (m.tag === 'SKIP') skipped++;
           stripG.push(m.glyph);
         }
-        return { on, off: !on, meal: m, opts, idx, k, w, di: i, area, noDelivery, wlabel: winMeta[w].t };
+        return { on, off: !on, meal: m, opts, idx, k, w, di: i, area, noDelivery, wlabel: winMeta[w].t, eff: e };
       });
       const kcalLeft = kcalTarget - dayKcal;
       const kcalPct = Math.min(100, Math.round((dayKcal / kcalTarget) * 100));
@@ -1393,7 +1410,7 @@ class Component extends DCLogic {
       days.forEach((dy, di) => dy.view.forEach((v) => {
         const on = v.on; const m = v.meal; const w = v.w;
         if (!on || !m) return;
-        cum += this.num(m.cost);
+        cum += v.eff.cost;
         const rem = cap - cum; const hPct = Math.max(small ? 8 : 4, Math.round((rem / cap) * 100));
         const fl = (m.flags || []).join(' ');
         let bg = 'repeating-linear-gradient(45deg,#2a2a28 0 5px,#46443e 5px 10px)', border = '1.5px solid #2a2a28';
@@ -1432,7 +1449,7 @@ class Component extends DCLogic {
             h('div', { style: { font: "700 10px 'Gaegu',cursive", letterSpacing: '1px', color: '#bcb6a8' } }, v.wlabel),
             h('div', { style: { font: "400 13px 'Gaegu',cursive", color: '#bcb6a8' } }, '— paused —'));
         }
-        const m = v.meal; const changed = v.idx > 0;
+        const m = v.meal; const changed = v.idx > 0; const e = v.eff;
         const head = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
           h('span', { style: { font: "700 10px 'Gaegu',cursive", letterSpacing: '1px', color: '#a8a294' } }, m.meal),
           h('span', { style: { font: "700 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #2a2a28', borderRadius: '7px', background: '#f3efe6' } }, m.glyph + ' ' + m.tag));
@@ -1452,7 +1469,23 @@ class Component extends DCLogic {
         const controls = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px', marginTop: '7px' } },
           h('button', { onClick: () => this.spin(v.di, v.w), title: 'Shuffle — another pick inside your rules', style: { font: "700 12px 'Gaegu',cursive", padding: '3px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#2a2a28', color: '#fff', cursor: 'pointer' } }, '↻ spin'),
           v.opts.length > 1 ? h('button', { onClick: () => this.toggleBrowse(v.k), title: 'Browse the ranked options', style: { font: "700 12px 'Gaegu',cursive", padding: '3px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#fff', color: '#2a2a28', cursor: 'pointer' } }, browseKey === v.k ? 'menu ▴' : 'menu ▾') : null);
+        const spice = this.spiceNames();
+        const custBtn = (active) => ({ font: "700 11px 'Gaegu',cursive", padding: '3px 8px', border: '1.5px solid #2a2a28', borderRadius: '7px', cursor: 'pointer', background: active ? '#2a2a28' : '#fff', color: active ? '#fff' : '#2a2a28' });
+        const miniBtn = { font: "700 13px 'Gaegu',cursive", width: '22px', height: '24px', border: '1.5px solid #2a2a28', borderRadius: '6px', background: '#fff', cursor: 'pointer', lineHeight: '1' };
+        const custom = m.tag !== 'SKIP' ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '5px', marginTop: '6px' } },
+          h('button', { onClick: () => this.stepQty(v.di, v.w, -1), title: 'fewer portions', style: miniBtn }, '−'),
+          h('span', { style: { font: "700 12px 'Gaegu',cursive", minWidth: '24px', textAlign: 'center' } }, '×' + e.qty),
+          h('button', { onClick: () => this.stepQty(v.di, v.w, 1), title: 'more portions', style: miniBtn }, '+'),
+          e.drink ? h('span', { style: { font: "700 11px 'Gaegu',cursive", color: '#2f5fd0' } }, '🥤') : null,
+          h('span', { style: { marginLeft: 'auto', font: "700 13px 'Gaegu',cursive", padding: '2px 8px', border: '1.5px solid #2a2a28', borderRadius: '7px', background: '#f3efe6' } }, '₹' + e.cost)) : null;
+        const customBlock = m.tag !== 'SKIP' ? h('div', { style: { marginBottom: '7px', paddingBottom: '6px', borderBottom: '1.5px dashed #e6e1d6' } },
+          h('div', { style: { font: "400 10px 'Gaegu',cursive", color: '#a8a294', marginBottom: '4px' } }, 'customise'),
+          h('div', { style: { display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' } },
+            m.tag === 'DELIVER' ? h('button', { onClick: () => this.toggleDrink(v.di, v.w), title: 'add a drink (₹40 · 150 kcal)', style: custBtn(e.drink) }, '🥤 drink +₹40') : null,
+            m.tag === 'DELIVER' ? h('button', { onClick: () => this.cycleSpice(v.di, v.w), title: 'spice / gravy level', style: custBtn(false) }, '🌶 ' + spice[e.spice] + ' ▾') : null,
+            m.tag === 'COOK' ? h('span', { style: { font: "400 11px 'Gaegu',cursive", color: '#7a746a' } }, 'home-cooked — set portions with × above; logged to nutrition') : null)) : null;
         const panel = browseKey === v.k ? h('div', { style: { marginTop: '7px', borderTop: '2px dashed #cfc9bd', paddingTop: '6px' } },
+          customBlock,
           h('div', { style: { font: "400 10px 'Gaegu',cursive", color: '#a8a294', marginBottom: '4px' } }, 'ranked options · tap to pick'),
           ...v.opts.map((o, oi) => h('div', { key: 'o' + oi, onClick: () => this.chooseAlt(v.di, v.w, oi), style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px', padding: '4px 6px', marginBottom: '3px', borderRadius: '7px', cursor: 'pointer', border: oi === v.idx ? '1.5px solid #2a2a28' : '1.5px solid #e6e1d6', background: oi === v.idx ? '#f3efe6' : '#fff' } },
             h('span', { style: { font: "700 11px 'Gaegu',cursive" } }, (oi === 0 ? '◆ ' : '') + o.glyph + ' ' + o.item),
@@ -1461,7 +1494,7 @@ class Component extends DCLogic {
           head,
           h('div', { style: { font: "700 14px/1.15 'Gaegu',cursive", marginTop: '5px' } }, m.item),
           h('div', { style: { font: "400 12px/1.2 'Gaegu',cursive", color: '#7a746a', marginTop: '2px' } }, m.meta),
-          areaRow, tags, modeRow, controls, panel);
+          custom, areaRow, tags, modeRow, controls, panel);
       });
       return h('div', { key: 'col' + i }, header, ...cards);
     });
@@ -1485,9 +1518,17 @@ class Component extends DCLogic {
       h('span', { style: { font: "700 11px 'Gaegu',cursive", color: mday.kcalColor } }, mday.kcalLeft >= 0 ? (mday.kcalLeft + ' kcal left') : ('+' + (-mday.kcalLeft) + ' over')));
     const mCards = mday.view.map((v) => {
       if (!v.on) return h('div', { key: v.k, style: { border: '2px dashed #cfc9bd', borderRadius: '11px', background: '#faf8f2', padding: '7px 9px', marginTop: '8px', textAlign: 'center', font: "400 12px 'Gaegu',cursive", color: '#bcb6a8' } }, v.wlabel + ' — paused');
-      const m = v.meal;
+      const m = v.meal; const e = v.eff;
       const modeRow = h('div', { style: { display: 'flex', gap: '3px', marginTop: '6px' } },
         ...[['DELIVER', '▢'], ['COOK', '⌂'], ['SKIP', '⊘']].map(([mode, g]) => h('button', { key: mode, onClick: () => this.setMode(v.di, v.w, mode), style: { flex: 1, font: "700 12px 'Gaegu',cursive", padding: '3px 0', border: '1.5px solid #2a2a28', borderRadius: '7px', background: m.tag === mode ? '#2a2a28' : '#fff', color: m.tag === mode ? '#fff' : '#2a2a28', cursor: 'pointer' } }, g)));
+      const mMini = { font: "700 14px 'Gaegu',cursive", width: '26px', height: '26px', border: '1.5px solid #2a2a28', borderRadius: '7px', background: '#fff', cursor: 'pointer', lineHeight: '1' };
+      const mCustom = m.tag !== 'SKIP' ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', marginTop: '7px', flexWrap: 'wrap' } },
+        h('button', { onClick: () => this.stepQty(v.di, v.w, -1), title: 'fewer portions', style: mMini }, '−'),
+        h('span', { style: { font: "700 13px 'Gaegu',cursive", minWidth: '26px', textAlign: 'center' } }, '×' + e.qty),
+        h('button', { onClick: () => this.stepQty(v.di, v.w, 1), title: 'more portions', style: mMini }, '+'),
+        m.tag === 'DELIVER' ? h('button', { onClick: () => this.toggleDrink(v.di, v.w), title: 'add a drink (₹40 · 150 kcal)', style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', cursor: 'pointer', background: e.drink ? '#2a2a28' : '#fff', color: e.drink ? '#fff' : '#2a2a28' } }, '🥤') : null,
+        m.tag === 'DELIVER' ? h('button', { onClick: () => this.cycleSpice(v.di, v.w), title: 'spice / gravy level', style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', cursor: 'pointer', background: '#fff' } }, '🌶 ' + this.spiceNames()[e.spice]) : null,
+        h('span', { style: { marginLeft: 'auto', font: "700 14px 'Gaegu',cursive", padding: '3px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#f3efe6' } }, '₹' + e.cost)) : null;
       const am = this.areaMeta();
       const servLabel = m.tag === 'COOK' ? 'home kitchen' : (m.tag === 'SKIP' ? 'paused' : (v.area === 'transit' ? '✈ grab-and-go' : '✓ delivers here'));
       const areaRow = h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' } },
@@ -1499,7 +1540,7 @@ class Component extends DCLogic {
           h('span', { style: { font: "700 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #2a2a28', borderRadius: '7px', background: '#f3efe6' } }, m.glyph + ' ' + m.tag)),
         h('div', { style: { font: "700 15px 'Gaegu',cursive", marginTop: '4px' } }, m.item),
         h('div', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, m.meta),
-        areaRow,
+        areaRow, mCustom,
         h('div', null, ...(m.flags || []).map((f, fi) => h('div', { key: 'f' + fi, style: { display: 'inline-block', font: "400 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px dashed #8a8478', borderRadius: '7px', background: '#faf8f2', marginTop: '6px', marginRight: '3px' } }, f))),
         h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px' } },
           h('button', { onClick: () => this.spin(v.di, v.w), style: { font: "700 12px 'Gaegu',cursive", padding: '3px 10px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#2a2a28', color: '#fff', cursor: 'pointer' } }, '↻ spin'),
