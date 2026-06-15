@@ -339,6 +339,7 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
 | "I made X" free-text lookup | `domain/intake.py`, `service.py`, `app.py` | `test_intake_*` |
 | Nested day/week/month caps (tightest binds, roll-forward, explicit credit) | `kernel/budget.py` (`nested_caps`) + Weekly Plan horizon toggle | `test_ledger_budget`, `test-merged.mjs` |
 | Nutrient-specific ledger (protein daily · calories weekly · micros 30-day · medical daily-cap) | `domain/ledger.py` + corrected Nutrition tab | `test_ledger_budget`, `test-merged.mjs` |
+| Per-meal protein distribution (even split ≈daily/3, not kcal-share; flags backloading) | `nutrition.protein_meal_target`, `ledger.protein_distribution` + "Protein across the day" viz | `test_protein_*` |
 
 **On V/U badges (the question that prompted this slice):** rejected. Badging the
 "usual" majority is noise, and a literal "V" collides with veg/vegan in a food app.

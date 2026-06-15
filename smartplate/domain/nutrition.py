@@ -36,11 +36,19 @@ def meal_target(user: dict, meal: str) -> dict:
     return {k: v * share for k, v in targets_for(user).items()}
 
 
+def protein_meal_target(user: dict, n_meals: int = 3) -> float:
+    """Protein wants an **even** split across meals (~0.4 g/kg per meal for muscle
+    protein synthesis), unlike calories which can skew to lunch. So per-meal protein
+    is daily ÷ n_meals, NOT the kcal MEAL_SHARE — backloading protein into one meal
+    is suboptimal even if the daily total is met (docs §3.1)."""
+    return targets_for(user)["protein_g"] / max(1, n_meals)
+
+
 def penalty(user: dict, meal: str, item: dict, tol: float = DEFAULT_KCAL_TOL) -> float:
     """Banded distance from the meal's kcal+protein target (0 = on target / inside band)."""
     tgt = meal_target(user, meal)
     kcal_t = max(tgt["kcal"], 1)
-    protein_t = max(tgt["protein_g"], 1)
+    protein_t = max(protein_meal_target(user), 1)   # even per-meal, not kcal-share scaled
 
     # kcal: free inside the band; outside, under is penalised more than over.
     delta = item.get("kcal", 0) - kcal_t

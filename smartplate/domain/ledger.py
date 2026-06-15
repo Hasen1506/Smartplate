@@ -80,6 +80,31 @@ def protein_adherence(intake_by_day: list[float], daily_floor: float) -> dict:
     }
 
 
+def protein_per_meal_target(daily_floor: float, n_meals: int = 3) -> int:
+    """~Even per-meal protein (≈0.4 g/kg / a daily-÷-meals split) — the dose MPS uses."""
+    return round(daily_floor / max(1, n_meals))
+
+
+def protein_distribution(meal_proteins: list[float], daily_floor: float,
+                         n_meals: int | None = None) -> dict:
+    """Within-day spread, not just the daily total. A day that backloads all protein
+    into one meal is suboptimal for MPS even when the total is met — so we flag meals
+    that fall well under the per-meal dose and nudge toward an even spread."""
+    n = n_meals or len(meal_proteins) or 3
+    per = protein_per_meal_target(daily_floor, n)
+    under = [p for p in meal_proteins if p < 0.7 * per]   # well below the per-meal mark
+    total = sum(meal_proteins)
+    return {
+        "per_meal_target_g": per,
+        "meals_under": len(under),
+        "even_enough": len(under) == 0,
+        "total_g": round(total),
+        "total_meets_daily": total >= daily_floor,
+        "note": ("protein spread well across the day" if not under
+                 else f"{len(under)} meal(s) low on protein — spread it out, don't backload one meal"),
+    }
+
+
 def micro_status(intake_30d: float, target_30d: float) -> dict:
     """30-day micro coverage (iron, fibre, …) — the timescale where stores matter."""
     pct = round(100 * intake_30d / target_30d) if target_30d else 0

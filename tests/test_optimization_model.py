@@ -35,6 +35,13 @@ def test_wider_tolerance_never_increases_penalty(seeded):
     assert wide <= tight
 
 
+def test_protein_meal_target_is_even_not_kcal_share(seeded):
+    user = models.get_user(1)
+    daily = nutrition.targets_for(user)["protein_g"]
+    # even split, NOT the kcal MEAL_SHARE (which would make breakfast/lunch/dinner differ)
+    assert nutrition.protein_meal_target(user, 3) == daily / 3
+
+
 def test_shortfall_reports_per_day_gaps(seeded):
     targets = {"kcal": 2000, "protein_g": 60}
     items = [{"kcal": 1500, "protein_g": 40}] * 7      # under on both

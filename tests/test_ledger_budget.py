@@ -53,6 +53,14 @@ def test_protein_is_daily_not_carried():
     assert r["chronic_miss"] is True                  # a pattern to nudge, not a lump to repay
 
 
+def test_protein_distribution_flags_backloading():
+    even = ledger.protein_distribution([20, 20, 20], 60)
+    assert even["even_enough"] and even["per_meal_target_g"] == 20
+    backloaded = ledger.protein_distribution([5, 5, 50], 60)   # total met, spread poor
+    assert backloaded["total_meets_daily"] and not backloaded["even_enough"]
+    assert backloaded["meals_under"] == 2
+
+
 def test_micros_run_monthly_and_medical_caps_daily():
     m = ledger.micro_status(700, 1000)
     assert m["timescale"] == "monthly" and m["in_deficit"]
