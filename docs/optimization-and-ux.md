@@ -270,15 +270,67 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
 
 ## 9. Build order (incremental)
 
-1. **Control taxonomy refactor** — regroup Setup into Locks / Targets / Dials / Rules;
-   cull 5 priority sliders → mode + 2 leans; drop the Taste slider. *(UI only.)*
-2. **Nutrition as a band with slack** — rework `nutrition.penalty` → asymmetric band +
-   one-sided protein floor; add slack vars so plans stay feasible (`optimizer`).
-3. **Mode = objective/constraint switch** — wire Tight/Balanced/Comfort to the §2
-   framings, not just weight magnitudes.
-4. **Budget recommender** — three-run inverse optimization + trade-off card.
-5. **Card-face badges** for applied add-ons; keep `menu ▾` collapsed.
-6. **"I made X" logging** (P2) — free-text → nutrition lookup → `eaten` ledger.
+1. ✅ **Nutrition as a band** — `nutrition.penalty` → on-target band, over penalised
+   less than under, one-sided protein floor; `nutrition.shortfall` for the gap.
+2. ✅ **Mode = objective/constraint switch** — `config.MODE_META` gives each mode an
+   objective, a "what gives," a `nutri_tol`, and a plain-language `outcome`.
+3. ✅ **Kill the magic numbers** — cook cap + cook effort overridable per user;
+   carbon truly off at `carbon_pref == 0`.
+4. ✅ **Rating footgun** — optional soft ★ above a hard safety floor (config flag,
+   default hard); recommender suggests a floor; substitution stays hard.
+5. ✅ **Budget recommender** — `kernel/recommender.py`: Floor / Usual / Variety bands,
+   expected surge priced in, suggested ★ floor, one-off support.
+6. ✅ **Novelty/variety model** — `domain/fatigue.py`: familiar/novel pools + levels
+   (replaces the crude repeat-cap as the *mechanism*; the cap stays as a floor).
+7. ✅ **Feasibility/shortfall diagnostic** on every solve (`optimizer._diagnostics`).
+8. ◻ **Control-taxonomy UI refactor** — regroup Setup into Locks/Targets/Dials/Rules;
+   cull 5 sliders → mode + 2 leans; drop the Taste slider. *(wireframe.)*
+9. ◻ **Variety UI** — level dial + subtle V/U badges; surface the recommender band.
+10. ◻ **Novelty composition constraint** in the MILP (gated; off by default so it
+    can't silently shift behaviour until a user opts in).
+11. ◻ **"I made X" logging** (P2) — free-text → nutrition lookup → `eaten` ledger.
+
+---
+
+## 10. What shipped in code (and the review corrections it encodes)
+
+| Change | Where | Verified by |
+|---|---|---|
+| Banded, asymmetric nutrition + `shortfall` | `domain/nutrition.py` | `test_optimization_model` (band/over-under/tol/shortfall) |
+| Mode framing (objective / gives / tol / outcome) | `config.py` (`MODE_META`, `mode_meta`) | `test_mode_tolerance_orders_correctly` |
+| Per-mode kcal tolerance threaded into the solve | `kernel/optimizer.py` (`build_context` → `nutri_tol`) | existing optimizer tests stay green |
+| Cook cap + effort overridable (no fake 6 / 0.35) | `kernel/optimizer.py` (`_cook_cap`, `_cook_effort`) | `test_cook_cap_respected` |
+| Carbon off at `pref == 0` (no silent 0.5 baseline) | `kernel/optimizer.py` (`_objective`) | `test_carbon_off_when_pref_zero` |
+| Soft ★ above a hard safety floor (opt-in) | `config.py` + `optimizer._rating_filter/_rating_pen` | suite green in default (hard) mode |
+| "Never substitute below your ★" held in soft mode | `kernel/variance.py` (`_next_best` guard) | `test_substitution` |
+| Budget recommender (Floor/Usual/Variety + ★) | `kernel/recommender.py`, `service.py`, `app.py` | `test_recommend_*` |
+| Novelty/variety model + levels | `domain/fatigue.py` | `test_novelty_*`, `test_pools_*` |
+| Feasibility/shortfall diagnostic | `optimizer._diagnostics` | `test_optimize_returns_diagnostics` |
+| Mode outcomes exposed to UI | `app.py` `/api/meta.mode_outcomes` | smoke |
+| Canonical Mifflin activity factors (5 levels) | `project/SmartPlate Wireframes.html` | `project/test-merged.mjs` |
+
+**Magic numbers → cold-start priors.** Every constant we flagged is now either
+user-overridable (cook cap/effort, via `health_targets`), honestly off until the
+user asks for it (carbon), or a prior that learned data replaces (surge already did
+this — it's the pattern the others now follow). Nothing is a silent fake.
+
+**Rating policy.** The brand promise ("never silently substitute below your ★") is
+hard at execution *regardless* of planner mode. The planner can optionally treat a
+high aspirational ★ as a soft preference above a low hard safety floor, so it bends
+under budget instead of exploding it — and the recommender suggests a floor so the
+user needn't guess.
+
+**Horizon & budget granularity (model, not yet a separate knob).** The *session* is
+the atomic unit; horizon (day/week/month) only sets how many sessions are in the
+window and which time-bucket the spend-sum is capped over. Budget caps nest (daily ∧
+weekly ∧ monthly; the tightest binds) and roll forward (tomorrow's cap =
+`remaining / days_left`). A one-off order is just `N = 1` — the recommender handles it.
+
+**The three modes, verbally.** A mode is a statement about *what's allowed to give*:
+Tight Week minimises **cost** and lets nutrition give (protein floor holds, kcal band
+widens); Balanced minimises **deviation from both** set-points; Comfort maximises
+**nutrition-fit + taste** with budget as the only hard ceiling. The recommender's
+Floor / Usual / Variety bands line up with these three.
 
 ---
 
