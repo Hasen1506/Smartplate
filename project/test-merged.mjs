@@ -161,7 +161,7 @@ wc.setState({ tab: 'grid', picks: {}, qty: {}, addons: {} });
 ok(weekly.innerHTML.includes('⭐'), 'a ⭐ marks favourite-outlet meals on the plan');
 
 console.log('\n[weekly] budget recommender + variety marking (new)');
-ok(weekly.innerHTML.includes('Recommended budget'), 'budget recommender card present');
+ok(weekly.innerHTML.includes('Recommended') && weekly.innerHTML.includes('priced from'), 'budget recommendation present');
 ok(/FLOOR/.test(weekly.innerHTML) && /VARIETY/.test(weekly.innerHTML), 'recommender shows Floor + Variety bands');
 ok(weekly.innerHTML.includes('✦ new'), 'novel picks carry a subtle ✦ new mark (not V/U letters)');
 ok(/✦ \d+ new/.test(weekly.innerHTML), 'week chip counts usual ⭐ vs new ✦');
@@ -186,6 +186,7 @@ sc.setState({ tab: 'nutri' });
 ok(setup.innerHTML.includes("doesn't bank"), 'protein framed as DAILY (not a weekly debt)');
 ok(/kcal banked/.test(setup.innerHTML), 'calories show an explicit banked credit');
 ok(!/14 g this week/.test(setup.innerHTML), 'old weekly protein-debt framing removed');
+ok(/Protein across the day/.test(setup.innerHTML), 'per-meal protein distribution viz present');
 
 console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
 process.exit(fails.length ? 1 : 0);

@@ -94,20 +94,21 @@
       </div>
       <button onClick="{{ goGrid }}" style="font:700 15px 'Gaegu',cursive; padding:10px 16px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#fff; color:#2a2a28; box-shadow:2px 2px 0 rgba(42,42,40,.12); cursor:pointer;">See the plan ↓</button>
     </div>
-    {{ nestedBudgetEl }}
   </div>
   <sc-if value="{{ notes }}" hint-placeholder-val="{{ true }}"><div style="font:600 18px 'Caveat',cursive; color:#cf4a2f; transform:rotate(-1.2deg); margin:10px 0 0 6px;">↳ the "when to order" selection moved up here, to the front. Toggle a window and the grid, the dashboard and the burn-down all re-optimise.</div></sc-if>
 
   <!-- constraint-conflict prompt: appears only when picks blow the budget cap -->
   {{ conflictEl }}
 
-  <!-- ============ RECOMMENDED BUDGET (inverse optimisation — don't make them guess) ============ -->
-  <div style="background:#fff; border:2.5px solid #2a2a28; border-radius:16px 16px 14px 16px; box-shadow:5px 6px 0 rgba(42,42,40,.10); padding:16px 20px; margin-top:18px;">
-    <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:10px;">
-      <div style="font:700 23px 'Caveat',cursive;">Recommended budget <span style="font:400 14px 'Gaegu',cursive; color:#7a746a;">— priced from your sessions, nutrition target &amp; nearby places</span></div>
+  <!-- ============ BUDGET — nested horizon + recommended band (inverse optimisation) ============ -->
+  <div style="background:#fff; border:2.5px solid #2a2a28; border-radius:16px 16px 14px 16px; box-shadow:5px 6px 0 rgba(42,42,40,.10); padding:20px 24px; margin-top:18px;">
+    <div style="font:700 25px 'Caveat',cursive;">Budget <span style="font:400 14px 'Gaegu',cursive; color:#7a746a;">— set the horizon, and see what your week should cost</span></div>
+    {{ nestedBudgetEl }}
+    <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-top:20px; border-top:2px dashed #cfc9bd; padding-top:16px;">
+      <div style="font:700 21px 'Caveat',cursive;">Recommended <span style="font:400 14px 'Gaegu',cursive; color:#7a746a;">— priced from your sessions, nutrition target &amp; nearby places</span></div>
       <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #2f6d4a; border-radius:9px; background:#eef3ec; color:#2f6d4a;">suggested floor ★4.3</span>
     </div>
-    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;">
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:14px;">
       <div style="flex:1; min-width:180px; border:2px solid #2a2a28; border-radius:13px 11px 13px 11px; padding:11px 13px; background:#f6f4ee;">
         <div style="font:700 12px 'Gaegu',cursive; color:#a8a294;">FLOOR</div>
         <div style="font:700 26px 'Caveat',cursive;">₹1,420</div>
@@ -1093,6 +1094,7 @@
                   <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #2a2a28; border-radius:11px; padding:9px 12px; background:#fff;"><span style="font:700 14px 'Gaegu',cursive;">🔒 Sodium / Sugar <span style="font-weight:400; color:#7a746a;">· daily cap</span></span><span style="font:700 14px 'Gaegu',cursive; color:#2f6d4a;">within cap ✓</span></div>
                   <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">Iron &amp; fibre run on a ~30-day clock → see the watch below.</div>
                 </div>
+                {{ proteinDistEl }}
               </div>
             </div>
 
@@ -1348,7 +1350,7 @@ class Component extends DCLogic {
     const banked = Math.max(0, Math.round((weekly - spent) / 3) - daily); // 3 days left, illustrative
     const seg = (key, label) => h('button', { key, onClick: () => this.setHorizon(key), style: { font: "700 13px 'Gaegu',cursive", padding: '6px 13px', border: 'none', borderLeft: key !== 'day' ? '2px solid #2a2a28' : 'none', background: horizon === key ? '#2a2a28' : '#fff', color: horizon === key ? '#fff' : '#2a2a28', cursor: 'pointer' } }, label);
     const capChip = (key, label, amt) => h('span', { key, style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: horizon === key ? '2px solid #2a2a28' : '1.5px solid #cfc9bd', borderRadius: '8px', background: horizon === key ? '#f3efe6' : '#fff', color: horizon === key ? '#2a2a28' : '#7a746a' } }, label + ' ₹' + amt.toLocaleString());
-    return h('div', { style: { marginTop: '12px', borderTop: '2px dashed #cfc9bd', paddingTop: '12px' } },
+    return h('div', { style: { marginTop: '6px' } },
       h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
         h('span', { style: { font: "700 14px 'Gaegu',cursive" } }, 'Budget horizon'),
         h('div', { style: { display: 'inline-flex', border: '2px solid #2a2a28', borderRadius: '10px', overflow: 'hidden' } }, seg('day', 'Day'), seg('week', 'Week'), seg('month', 'Month')),
@@ -1768,6 +1770,26 @@ class Component extends DCLogic {
       h('div', { style: { display: 'flex', gap: '5px', marginTop: '3px' } }, ...labels));
   }
 
+  // protein wants an EVEN spread across meals (~daily/3), not backloaded — viz B/L/D
+  // against the per-meal dose so a low meal is visible (docs §3.1).
+  proteinDist() {
+    const h = React.createElement;
+    const per = Math.round(this.bmrCalc().protein / 3);
+    const data = [['B', 12], ['L', 26], ['D', 18]];
+    const hgt = 64, maxv = Math.max(per * 1.7, 30);
+    const targetY = Math.round(hgt * (1 - per / maxv));
+    const bars = data.map((d, i) => h('div', { key: 'p' + i, title: d[1] + 'g', style: { flex: 1, height: Math.round(hgt * d[1] / maxv) + 'px', background: d[1] < 0.7 * per ? '#cf4a2f' : '#6db07a', border: '1.5px solid #2a2a28', borderRadius: '4px 4px 0 0', alignSelf: 'flex-end' } }));
+    const labels = data.map((d, i) => h('div', { key: 'pl' + i, style: { flex: 1, textAlign: 'center', font: "700 10px 'Gaegu',cursive", color: '#7a746a' } }, d[0] + ' ' + d[1] + 'g'));
+    return h('div', { style: { marginTop: '12px', borderTop: '2px dashed #cfc9bd', paddingTop: '10px' } },
+      h('div', { style: { font: "700 14px 'Gaegu',cursive" } }, 'Protein across the day ', h('span', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, '· aim ~' + per + 'g/meal, evenly')),
+      h('div', { style: { position: 'relative', display: 'flex', alignItems: 'flex-end', gap: '6px', height: hgt + 'px', borderBottom: '2px solid #2a2a28', marginTop: '8px' } },
+        h('div', { style: { position: 'absolute', left: 0, right: 0, top: targetY + 'px', borderTop: '2px dashed #2f6d4a' } }),
+        h('span', { style: { position: 'absolute', right: '2px', top: (targetY - 14) + 'px', font: "700 10px 'Gaegu',cursive", color: '#2f6d4a', background: '#fff', padding: '0 3px' } }, '~' + per + 'g'),
+        ...bars),
+      h('div', { style: { display: 'flex', gap: '6px', marginTop: '3px' } }, ...labels),
+      h('div', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a', marginTop: '6px' } }, 'A low breakfast isn’t fixed by a big dinner — protein is used meal-by-meal, so the agent spreads it.'));
+  }
+
   renderVals() {
     const set = (t) => () => this.setState({ tab: t });
     const c = this.bmrCalc();
@@ -1782,6 +1804,7 @@ class Component extends DCLogic {
       goForm: set('form'), goRules: set('rules'), goPlain: set('plain'), goDna: set('dna'), goNutri: set('nutri'),
       dnaRadar: this.radar(240), dnaRadarMob: this.radar(184),
       nutritionWeekEl: this.nutritionWeek(150), nutritionWeekMobEl: this.nutritionWeek(92),
+      proteinDistEl: this.proteinDist(),
       bmrEl: this.bmrPanel(), favsEl: this.favsPanel(),
       bmrTargetLabel: 'Target ' + c.target.toLocaleString() + ' kcal · ' + c.protein + 'g protein',
       notes: this.props.showAnnotations ?? true,
