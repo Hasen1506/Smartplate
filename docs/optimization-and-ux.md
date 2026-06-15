@@ -310,9 +310,15 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
 10. ✅ **Novelty nudge** in the MILP — a soft bonus for novel picks scaled by the
     variety level, **gated off by default** (`SMARTPLATE_VARIETY=on`) so it can't
     silently shift behaviour. (A hard composition constraint remains a later option.)
-11. ✅ **"I made X" lookup** — `domain/intake.py` parses free text ("dal + 2 rotis")
-    to a nutrition estimate with matched/unmatched + confidence; `POST /api/intake`.
-    *(Persisting it into the rolling ledger lands with the ledger build, SPEC §1.)*
+11. ✅ **"I made X" lookup + persistence** — `domain/intake.py` parses free text
+    ("dal + 2 rotis") → nutrition estimate (matched/unmatched + confidence), and
+    **persists** it (`intake_log`) so entries accumulate; `POST /api/intake`
+    (estimate), `POST /api/user/<id>/intake` (log), `GET /api/user/<id>/ledger`.
+12. ✅ **Nutrient-specific rolling ledger** — `ledger.rolling_view` over accumulated
+    intake: calories bank weekly (explicit credit), protein daily adherence +
+    today's distribution, sugar a daily cap.
+13. ✅ **Protein evenness in the solve** — a day-level slack term penalising
+    backloading (per-meal target = daily ÷ meals-that-day), `SMARTPLATE_PROTEIN_EVEN`.
 
 ---
 
@@ -340,6 +346,8 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
 | Nested day/week/month caps (tightest binds, roll-forward, explicit credit) | `kernel/budget.py` (`nested_caps`) + Weekly Plan horizon toggle | `test_ledger_budget`, `test-merged.mjs` |
 | Nutrient-specific ledger (protein daily · calories weekly · micros 30-day · medical daily-cap) | `domain/ledger.py` + corrected Nutrition tab | `test_ledger_budget`, `test-merged.mjs` |
 | Per-meal protein distribution (even split ≈daily/3, not kcal-share; flags backloading) | `nutrition.protein_meal_target`, `ledger.protein_distribution` + "Protein across the day" viz | `test_protein_*` |
+| Protein evenness as a day-level term in the solve (penalises backloading) | `optimizer.optimize` (slack var) + `config.PROTEIN_EVEN_W` | `test_protein_evenness_keeps_plan_feasible` |
+| Intake persistence + rolling nutrient-specific ledger | `db.intake_log`, `intake.record/recent/by_day`, `ledger.rolling_view`, `service`, `app` | `test_intake_persists_and_ledger_accumulates`, `test_intake_log_and_ledger_endpoints` |
 
 **On V/U badges (the question that prompted this slice):** rejected. Badging the
 "usual" majority is noise, and a literal "V" collides with veg/vegan in a food app.

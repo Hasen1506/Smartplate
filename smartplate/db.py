@@ -188,6 +188,22 @@ CREATE TABLE IF NOT EXISTS grocery_baskets (     -- §5.3.12 / §5.3.17
     items TEXT NOT NULL,                           -- [{name, qty, price, recipe}]
     total REAL NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS intake_log (          -- "I made/ate X" → rolling nutrition ledger
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    plan_id INTEGER,
+    iso_date TEXT NOT NULL,                         -- the day eaten (drives the rolling windows)
+    meal TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'manual',         -- manual | cooked | ordered
+    kcal REAL NOT NULL DEFAULT 0,
+    protein_g REAL NOT NULL DEFAULT 0,
+    carbs_g REAL NOT NULL DEFAULT 0,
+    fat_g REAL NOT NULL DEFAULT 0,
+    sugar_g REAL NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '',
+    created_ts TEXT NOT NULL
+);
 """
 
 

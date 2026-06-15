@@ -2,7 +2,10 @@
 
 Pins the corrected model: protein is DAILY (no carry), calories carry WEEKLY (with an
 explicit credit), micros run on a ~30-DAY clock, medical caps are daily-hard."""
-from smartplate.domain import ledger
+import datetime as dt
+
+from smartplate import service
+from smartplate.domain import intake, ledger
 from smartplate.kernel import budget
 
 
@@ -66,3 +69,20 @@ def test_micros_run_monthly_and_medical_caps_daily():
     assert m["timescale"] == "monthly" and m["in_deficit"]
     cap = ledger.medical_cap_status(25, 20)
     assert not cap["ok"] and cap["over_by"] == 5
+
+
+# --------------------------------------------------------------------------- #
+# Persistence — intake accumulates across days and feeds the rolling ledger
+# --------------------------------------------------------------------------- #
+def test_intake_persists_and_ledger_accumulates(seeded):
+    y = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+    t = dt.date.today().isoformat()
+    service.log_intake(1, "dal + 2 rotis", iso_date=y, meal="lunch")   # a light prior day
+    service.log_intake(1, "oats", iso_date=t, meal="breakfast")
+    assert len(intake.recent(1, 7)) == 2
+
+    led = service.nutrition_ledger(1)
+    assert led["days_logged"] == 2
+    assert led["calories"]["credit_today"] > 0          # light yesterday ⇒ banked credit today
+    assert led["protein"]["carries"] is False           # protein stays daily, even persisted
+    assert led["today_distribution"] is not None         # today has a logged meal

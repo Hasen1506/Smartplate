@@ -51,3 +51,10 @@ def test_command_endpoint(client):
 def test_sentiment_endpoint(client):
     r = client.post("/api/sentiment", json={"reviews": ["fresh and amazing"]}).get_json()
     assert r["score"] > 0
+
+
+def test_intake_log_and_ledger_endpoints(client):
+    r = client.post("/api/user/1/intake", json={"text": "dal + 2 rotis", "meal": "lunch"}).get_json()
+    assert r["entry_id"] and "nutrition" in r
+    led = client.get("/api/user/1/ledger").get_json()
+    assert "calories" in led and "protein" in led and led["days_logged"] >= 1

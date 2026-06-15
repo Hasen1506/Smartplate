@@ -116,3 +116,28 @@ def medical_cap_status(day_value: float, cap: float) -> dict:
     """Daily hard cap (sodium/sugar) — never averaged away across days."""
     return {"carries": False, "timescale": "daily_cap",
             "ok": day_value <= cap, "over_by": round(max(0.0, day_value - cap), 1)}
+
+
+def _empty_protein() -> dict:
+    return {"carries": False, "timescale": "daily", "today_floor_g": 0, "days_hit": 0,
+            "days_total": 0, "adherence_pct": 0, "chronic_miss": False, "note": "no protein logged yet"}
+
+
+def rolling_view(entries_by_day: dict, *, kcal_target: float, protein_floor: float,
+                 sugar_cap: float | None = None, today: str | None = None) -> dict:
+    """Assemble the rolling ledger from accumulated daily intake, each nutrient on
+    its own clock: calories bank over prior days (explicit credit toward today),
+    protein is daily adherence + today's distribution, sugar is a daily cap."""
+    import datetime as _dt
+    today = today or _dt.date.today().isoformat()
+    days = sorted(entries_by_day)
+    prior = [d for d in days if d < today]
+    cal = calorie_credit([entries_by_day[d]["kcal"] for d in prior], kcal_target)
+    protein_days = [entries_by_day[d]["protein_g"] for d in days]
+    pro = protein_adherence(protein_days, protein_floor) if protein_days else _empty_protein()
+    today_meals = [m.get("protein_g", 0) for m in entries_by_day.get(today, {}).get("meals", [])]
+    dist = protein_distribution(today_meals, protein_floor) if today_meals else None
+    sugar_today = entries_by_day.get(today, {}).get("sugar_g", 0)
+    med = medical_cap_status(sugar_today, sugar_cap) if sugar_cap else None
+    return {"days_logged": len(days), "calories": cal, "protein": pro,
+            "today_distribution": dist, "sugar": med}

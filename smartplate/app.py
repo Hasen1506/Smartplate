@@ -74,6 +74,17 @@ def create_app() -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         return jsonify(service.estimate_intake(body.get("text", "")))
 
+    @app.post("/api/user/<int:user_id>/intake")
+    def log_intake(user_id):
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.log_intake(
+            user_id, body.get("text", ""), iso_date=body.get("date"),
+            meal=body.get("meal", ""), source=body.get("source", "manual")))
+
+    @app.get("/api/user/<int:user_id>/ledger")
+    def nutrition_ledger(user_id):
+        return jsonify(service.nutrition_ledger(user_id))
+
     @app.post("/api/plan/<int:plan_id>/command")
     def plan_command(plan_id):
         body = request.get_json(force=True, silent=True) or {}

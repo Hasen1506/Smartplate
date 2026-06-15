@@ -9,7 +9,10 @@ dishes, **flag what we couldn't match**, and return an *estimate to confirm* wit
 confidence — never silent precision. Swap in a real food DB (IFCT / USDA / Nutritionix)
 to widen coverage; the interface stays the same.
 """
+import datetime as dt
 import re
+
+from .. import db
 
 MACROS = ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")
 
@@ -103,3 +106,40 @@ def parse(text: str) -> dict:
         "confidence": confidence,
         "note": note,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Persistence — entries accumulate across real days to feed the rolling ledger.
+# --------------------------------------------------------------------------- #
+def record(user_id: int, nutrition: dict, *, iso_date: str | None = None, meal: str = "",
+           source: str = "manual", plan_id: int | None = None, note: str = "") -> int:
+    iso_date = iso_date or dt.date.today().isoformat()
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO intake_log(user_id, plan_id, iso_date, meal, source, "
+            "kcal, protein_g, carbs_g, fat_g, sugar_g, note, created_ts) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+            (user_id, plan_id, iso_date, meal, source,
+             nutrition.get("kcal", 0), nutrition.get("protein_g", 0), nutrition.get("carbs_g", 0),
+             nutrition.get("fat_g", 0), nutrition.get("sugar_g", 0), note))
+        return cur.lastrowid
+
+
+def recent(user_id: int, days: int = 30) -> list[dict]:
+    since = (dt.date.today() - dt.timedelta(days=max(1, days) - 1)).isoformat()
+    with db.cursor() as cur:
+        rows = cur.execute(
+            "SELECT * FROM intake_log WHERE user_id=? AND iso_date>=? ORDER BY iso_date, id",
+            (user_id, since)).fetchall()
+    return [db.row_to_dict(r) for r in rows]
+
+
+def by_day(entries: list[dict]) -> dict:
+    """Group logged entries by date, summing macros and keeping the day's meals."""
+    out = {}
+    for e in entries:
+        d = out.setdefault(e["iso_date"], {**{k: 0.0 for k in MACROS}, "meals": []})
+        for k in MACROS:
+            d[k] += e.get(k, 0) or 0
+        d["meals"].append(e)
+    return out
