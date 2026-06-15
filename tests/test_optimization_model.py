@@ -3,7 +3,7 @@ the novelty/variety model, carbon-off-by-default, and the feasibility diagnostic
 
 Companion to docs/optimization-and-ux.md."""
 from smartplate import config
-from smartplate.domain import fatigue, models, nutrition
+from smartplate.domain import fatigue, intake, models, nutrition
 from smartplate.kernel import optimizer, recommender
 
 
@@ -83,6 +83,14 @@ def test_variety_pref_defaults_without_assuming(seeded):
     assert fatigue.variety_pref(models.get_user(1)) in fatigue.VARIETY_LEVELS
 
 
+def test_novelty_nudge_lowers_objective_for_novel_picks():
+    base = dict(kind="delivery", cost=100, surge_mult=1.0, taste=0.5, nutri=0.0,
+                health=0.0, carbon_pen=0.0, weather_bias=0.0, festival_bias=0.0)
+    plain = optimizer._objective(base, config.MODE_WEIGHTS["balanced"], 100, 0.0, 3.0)
+    novel = optimizer._objective({**base, "novelty_bonus": 0.3}, config.MODE_WEIGHTS["balanced"], 100, 0.0, 3.0)
+    assert novel < plain                                 # novel picks score better when the nudge feeds a bonus
+
+
 # --------------------------------------------------------------------------- #
 # Budget recommender — Floor ≤ Usual ≤ Variety, suggests a sane ★ floor
 # --------------------------------------------------------------------------- #
@@ -108,6 +116,21 @@ def test_recommend_handles_one_off_single_meal(seeded):
 # --------------------------------------------------------------------------- #
 # Feasibility / shortfall diagnostic on every solve
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# "I made X" free-text intake lookup
+# --------------------------------------------------------------------------- #
+def test_intake_parses_quantities_and_dishes():
+    r = intake.parse("dal + 2 rotis")
+    dishes = {i["dish"]: i["qty"] for i in r["items"]}
+    assert dishes.get("dal") == 1 and dishes.get("roti") == 2
+    assert r["nutrition"]["kcal"] > 0 and not r["unmatched"]
+
+
+def test_intake_flags_unmatched_honestly():
+    r = intake.parse("dal and zorptax")
+    assert any("zorptax" in u for u in r["unmatched"]) and r["confidence"] < 1.0
+
+
 def test_optimize_returns_diagnostics(seeded):
     res = optimizer.optimize(seeded["plan_id"])
     diag = res["diagnostics"]

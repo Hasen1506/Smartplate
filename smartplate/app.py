@@ -69,6 +69,11 @@ def create_app() -> Flask:
     def recommend_budget(plan_id):
         return jsonify(service.recommend_budget(plan_id))
 
+    @app.post("/api/intake")
+    def intake_estimate():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.estimate_intake(body.get("text", "")))
+
     @app.post("/api/plan/<int:plan_id>/command")
     def plan_command(plan_id):
         body = request.get_json(force=True, silent=True) or {}

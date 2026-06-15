@@ -63,3 +63,10 @@ def mode_meta(mode: str) -> dict:
 #   "soft"           : filter only at HARD_SAFETY_FLOOR; the user's ★ becomes a weight.
 RATING_FLOOR_MODE = os.environ.get("SMARTPLATE_RATING_FLOOR", "hard")
 HARD_SAFETY_FLOOR = float(os.environ.get("SMARTPLATE_SAFETY_FLOOR", "3.5"))
+
+# Variety nudge. When "on", the planner softly biases toward novel (less-familiar)
+# delivery picks, scaled by the user's variety level (domain/fatigue). OFF by default
+# so it never silently shifts a plan until the user opts into more variety — the
+# honest version of the "composition constraint" in docs §4.
+VARIETY_NUDGE = os.environ.get("SMARTPLATE_VARIETY", "off")
+VARIETY_NUDGE_W = float(os.environ.get("SMARTPLATE_VARIETY_W", "0.6"))

@@ -8,8 +8,8 @@ the 17 features produce.
 import datetime as dt
 
 from . import config, db
-from .domain import (carbon, community, festivals, health, household, models,
-                     nutrition, receipts, reverse_mode, weather)
+from .domain import (carbon, community, festivals, health, household, intake,
+                     models, nutrition, receipts, reverse_mode, weather)
 from .kernel import (agent_brain, budget, explainability, optimizer, recommender,
                      scheduler, variance)
 
@@ -121,6 +121,12 @@ def recommend_budget(plan_id: int) -> dict:
     user = models.get_user(plan["user_id"])
     meals = [s["meal"] for s in models.sessions_for_plan(plan_id)]
     return recommender.recommend(user, meals)
+
+
+def estimate_intake(text: str) -> dict:
+    """Free-text 'I made X' → nutrition estimate to confirm (docs §7). The
+    persistence hook into the ledger lands with the ledger build (SPEC §1)."""
+    return intake.parse(text)
 
 
 def _counts(decisions):

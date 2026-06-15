@@ -14,8 +14,8 @@ Budget is a HARD constraint; 'skip' is the always-feasible relief valve.
 import pulp
 
 from .. import config, db
-from ..domain import (allergens, carbon, festivals, health, leftovers, models,
-                      nutrition, reverse_mode, sentiment, surge, weather)
+from ..domain import (allergens, carbon, fatigue, festivals, health, leftovers,
+                      models, nutrition, reverse_mode, sentiment, surge, weather)
 from ..integrations import calendar_sync
 from . import explainability, scheduler
 
@@ -92,6 +92,10 @@ def build_context(user: dict, plan: dict) -> dict:
         # how far calories may drift before the nutrition term bites — the mode's
         # "what's allowed to give" knob (config.MODE_META).
         "nutri_tol": config.mode_meta(plan["mode"])["nutri_tol"],
+        # variety nudge strength: the user's variety level as a fraction, or 0 when
+        # the nudge is off (default) so the planner behaves exactly as before.
+        "variety_frac": (fatigue.VARIETY_LEVELS.get(fatigue.variety_pref(user), 0.0)
+                         if config.VARIETY_NUDGE == "on" else 0.0),
     }
 
 
@@ -133,6 +137,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "item_id": item["id"], "item_name": item["name"], "rating": item["restaurant_rating"],
         "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3),
         "time_shift": time_shift, "flaky": item.get("flaky", 0), "rating_pen": _rating_pen(user, item),
+        "novelty_bonus": round(config.VARIETY_NUDGE_W * fatigue.novelty(item) * ctx.get("variety_frac", 0.0), 4),
         "taste": taste, "sentiment": senti, "nutri": nutri, "health": hp, "carbon_pen": cpen,
         "carbon_kg": carbon.estimate(item), "weather_cond": cond,
         "weather_bias": weather.taste_bias(cond, item),
@@ -240,6 +245,7 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
         + w["surge"] * surge_premium
         + effort
         + cand.get("rating_pen", 0.0)
+        - cand.get("novelty_bonus", 0.0)         # ↓ objective ⇒ novel picks preferred (when nudge on)
         + cand["weather_bias"] + cand["festival_bias"],
         5,
     )
