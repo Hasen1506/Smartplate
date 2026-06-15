@@ -283,12 +283,18 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
 6. ✅ **Novelty/variety model** — `domain/fatigue.py`: familiar/novel pools + levels
    (replaces the crude repeat-cap as the *mechanism*; the cap stays as a floor).
 7. ✅ **Feasibility/shortfall diagnostic** on every solve (`optimizer._diagnostics`).
-8. ◻ **Control-taxonomy UI refactor** — regroup Setup into Locks/Targets/Dials/Rules;
-   cull 5 sliders → mode + 2 leans; drop the Taste slider. *(wireframe.)*
-9. ◻ **Variety UI** — level dial + subtle V/U badges; surface the recommender band.
-10. ◻ **Novelty composition constraint** in the MILP (gated; off by default so it
-    can't silently shift behaviour until a user opts in).
-11. ◻ **"I made X" logging** (P2) — free-text → nutrition lookup → `eaten` ledger.
+8. ✅ **Control-taxonomy UI** — Setup nav + section headers regrouped to
+   **Locks / Dials / Rules**; the 5 priority sliders culled to one mode dial
+   (money ⇄ everything-else) + 2 leans; the Taste slider dropped (it's learned).
+9. ✅ **Variety UI** — a **level** control (Usual/Light/Mixed/Adventurous) replaces
+   the raw novelty slider; novel picks carry a subtle **✦** (not V/U — see §6.1);
+   a week chip shows "⭐ usual · ✦ new"; the recommender band is surfaced as a card.
+10. ✅ **Novelty nudge** in the MILP — a soft bonus for novel picks scaled by the
+    variety level, **gated off by default** (`SMARTPLATE_VARIETY=on`) so it can't
+    silently shift behaviour. (A hard composition constraint remains a later option.)
+11. ✅ **"I made X" lookup** — `domain/intake.py` parses free text ("dal + 2 rotis")
+    to a nutrition estimate with matched/unmatched + confidence; `POST /api/intake`.
+    *(Persisting it into the rolling ledger lands with the ledger build, SPEC §1.)*
 
 ---
 
@@ -308,6 +314,16 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
 | Feasibility/shortfall diagnostic | `optimizer._diagnostics` | `test_optimize_returns_diagnostics` |
 | Mode outcomes exposed to UI | `app.py` `/api/meta.mode_outcomes` | smoke |
 | Canonical Mifflin activity factors (5 levels) | `project/SmartPlate Wireframes.html` | `project/test-merged.mjs` |
+| Slider cull (5 → mode + 2 leans) + Locks/Dials/Rules grouping | `project/SmartPlate Wireframes.html` | `test-merged.mjs` |
+| Variety level control + novel **✦** marking + week chip | `project/SmartPlate Wireframes.html` | `test-merged.mjs` |
+| Budget-recommender card on the Weekly Plan | `project/SmartPlate Wireframes.html` | `test-merged.mjs` |
+| Gated novelty nudge in the solve | `config.py`, `optimizer.py` | `test_novelty_nudge_*` |
+| "I made X" free-text lookup | `domain/intake.py`, `service.py`, `app.py` | `test_intake_*` |
+
+**On V/U badges (the question that prompted this slice):** rejected. Badging the
+"usual" majority is noise, and a literal "V" collides with veg/vegan in a food app.
+We mark **only the new picks**, with a subtle **✦** (not a letter), plus one
+week-level "⭐ usual · ✦ new" chip that ties to the variety level and the rate-to-train loop.
 
 **Magic numbers → cold-start priors.** Every constant we flagged is now either
 user-overridable (cook cap/effort, via `health_targets`), honestly off until the
