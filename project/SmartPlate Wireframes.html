@@ -1569,7 +1569,7 @@ class Component extends DCLogic {
 </script>
 <script type="text/x-dc" id="logic-setup">
 class Component extends DCLogic {
-  state = { tab: 'form', bmr: { sex: 'F', age: 29, ht: 168, wt: 62, act: 1.4, goal: -110 }, favs: ['Murugan Idli', 'A2B', 'Sangeetha'] };
+  state = { tab: 'form', bmr: { sex: 'F', age: 29, ht: 168, wt: 62, act: 1.55, goal: -110 }, favs: ['Murugan Idli', 'A2B', 'Sangeetha'] };
 
   // ---- favourite restaurants + the repeat-ordering insight ----
   favPool() { return ['Murugan Idli', 'A2B', 'Sangeetha', 'Ponnusamy', 'Anjappar', 'Jr. Kuppanna', 'Saravana Bhavan']; }
@@ -1598,7 +1598,8 @@ class Component extends DCLogic {
   }
 
   // ---- BMR / TDEE / daily target, computed from the user's OWN numbers (Mifflin–St Jeor) ----
-  actList() { return [['Sedentary', 1.2], ['Light', 1.375], ['Moderate', 1.4], ['Active', 1.55], ['Athlete', 1.725]]; }
+  // Canonical Mifflin–St Jeor activity factors (sedentary → extra-active), tap to cycle.
+  actList() { return [['Sedentary', 1.2], ['Light', 1.375], ['Moderate', 1.55], ['Active', 1.725], ['Athlete', 1.9]]; }
   goalList() { return [['Cut', -500], ['Lean-maintain', -110], ['Maintain', 0], ['Gain', 250]]; }
   bmrCalc() {
     const b = this.state.bmr;
