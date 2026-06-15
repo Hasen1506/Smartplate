@@ -21,7 +21,7 @@ const ok = (cond, msg) => { if (cond) console.log(`  ✓ ${msg}`); else { consol
 const textIn = (el) => (el ? el.textContent : '');
 const btnByText = (root, txt) => [...root.querySelectorAll('button')].find((b) => b.textContent.includes(txt));
 
-const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true /* no `resources` → no network fetch */ });
+const dom = new JSDOM(html, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://smartplate.test/' /* real origin so localStorage works; no `resources` → no network fetch */ });
 const { window } = dom;
 const { document } = window;
 
@@ -109,6 +109,23 @@ ok(resolved(4, 'L').item !== friBefore || resolved(4, 'L').tag !== 'DELIVER', 's
 
 console.log('\n[weekly] no "am/pm" typo in meal windows');
 ok(/by 8:30am/.test(weekly.innerHTML) && /by 1:00pm/.test(weekly.innerHTML), 'meal windows read 8:30am / 1:00pm / 8:30pm');
+
+console.log('\n[setup] BMR/TDEE calculator (Nutrition tab) — user enters details, target computes');
+const sc = window.__dc.comps[1];
+sc.setState({ tab: 'nutri' });
+ok(/Mifflin/.test(setup.innerHTML), 'BMR panel renders (Mifflin–St Jeor)');
+ok(setup.querySelectorAll('input[type=number]').length >= 3, 'has age / height / weight inputs');
+ok(/target [\d,]+ kcal/.test(setup.innerHTML), 'computed target chip renders');
+const t0 = sc.bmrCalc().target;
+sc.setSex('M'); // male BMR is +166 kcal vs female in Mifflin–St Jeor → target rises
+const t1 = sc.bmrCalc().target;
+ok(t1 > t0, `target recomputes when details change (F ${t0} → M ${t1})`);
+
+console.log('\n[cross-screen] Weekly per-day target follows the BMR calculator');
+let lsTarget = null; try { lsTarget = window.localStorage.getItem('smartplate_target'); } catch (e) {}
+ok(lsTarget === String(t1), `Setup persisted target to localStorage (${lsTarget})`);
+window.__dc.activate('screen-weekly');
+ok(weekly.innerHTML.includes('target ' + t1.toLocaleString()), `Weekly shows the shared target ${t1.toLocaleString()}`);
 
 console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
 process.exit(fails.length ? 1 : 0);

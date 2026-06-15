@@ -154,7 +154,7 @@
             <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; padding-top:13px; border-top:2px dashed #cfc9bd;">
               <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:{{ capBg }};">{{ capLabel }}</div>
               <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#fff;">{{ sessions }} sessions · {{ delivered }} deliver · {{ cooked }} cook</div>
-              <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#fff;">≈1,620 kcal/day <span style="color:#7a746a;">· target 1,800</span></div>
+              <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#fff;">≈1,620 kcal/day <span style="color:#7a746a;">· target {{ kcalTargetStr }}</span></div>
               <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#eef3ec;">surge saved ₹30</div>
               <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#eef3ec;">allergens 0 conflicts ✓</div>
             </div>
@@ -242,7 +242,7 @@
               </div>
               <!-- tiles -->
               <div style="flex:1; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                <div style="border:2px solid #2a2a28; border-radius:13px 11px 13px 11px; padding:11px; background:#fff; box-shadow:2px 2px 0 rgba(42,42,40,.07);"><div style="font:700 13px 'Gaegu',cursive; color:#a8a294;">NUTRITION</div><div style="font:700 22px 'Caveat',cursive;">1,620 kcal/day</div><div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">protein 54/60g · target 1,800</div></div>
+                <div style="border:2px solid #2a2a28; border-radius:13px 11px 13px 11px; padding:11px; background:#fff; box-shadow:2px 2px 0 rgba(42,42,40,.07);"><div style="font:700 13px 'Gaegu',cursive; color:#a8a294;">NUTRITION</div><div style="font:700 22px 'Caveat',cursive;">1,620 kcal/day</div><div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">protein 54/60g · target {{ kcalTargetStr }}</div></div>
                 <div style="border:2px solid #2a2a28; border-radius:13px 11px 13px 11px; padding:11px; background:#fff; box-shadow:2px 2px 0 rgba(42,42,40,.07);"><div style="font:700 13px 'Gaegu',cursive; color:#a8a294;">CARBON</div><div style="font:700 22px 'Caveat',cursive;">13.8 kg</div><div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">band: Low–Mid</div></div>
                 <div style="border:2px solid #2a2a28; border-radius:13px 11px 13px 11px; padding:11px; background:#eef3ec; box-shadow:2px 2px 0 rgba(42,42,40,.07);"><div style="font:700 13px 'Gaegu',cursive; color:#a8a294;">SURGE DODGED</div><div style="font:700 22px 'Caveat',cursive; color:#2f6d4a;">₹30 saved</div><div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">Tue lunch shifted −1h</div></div>
                 <div style="border:2px solid #2a2a28; border-radius:13px 11px 13px 11px; padding:11px; background:#fff; box-shadow:2px 2px 0 rgba(42,42,40,.07);"><div style="font:700 13px 'Gaegu',cursive; color:#a8a294;">HOUSEHOLD</div><div style="font:700 22px 'Caveat',cursive;">₹835 each</div><div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">split 2 ways · veg merged</div></div>
@@ -1035,17 +1035,7 @@
           <div style="padding:18px;">
             <!-- TDEE chain -->
             <div style="font:700 16px 'Gaegu',cursive; border-bottom:2px solid #2a2a28; padding-bottom:4px;">How your daily target is set <span style="font:400 12px; color:#7a746a;">— BMI is a screening ratio, not the driver</span></div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:11px;">
-              <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">BMR ≈ 1,364 <span style="font-weight:400; color:#7a746a;">· Mifflin–St Jeor (62kg · 168cm · 29y · F)</span></span>
-              <span style="font:700 16px 'Gaegu',cursive; color:#7a746a;">×</span>
-              <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">activity 1.4 <span style="font-weight:400; color:#7a746a;">· Moderate ▾</span></span>
-              <span style="font:700 16px 'Gaegu',cursive; color:#7a746a;">=</span>
-              <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #2a2a28; border-radius:9px; background:#f3efe6;">TDEE ≈ 1,910</span>
-              <span style="font:700 16px 'Gaegu',cursive; color:#7a746a;">−110</span>
-              <span style="font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #2a2a28; border-radius:9px; background:#fff;">goal: lean-maintain ▾</span>
-              <span style="font:700 16px 'Gaegu',cursive; color:#7a746a;">→</span>
-              <span style="font:700 14px 'Gaegu',cursive; padding:6px 12px; border:2px solid #2f6d4a; border-radius:9px; background:#eef3ec; color:#2f6d4a;">target 1,800 kcal · 60g protein</span>
-            </div>
+            <div style="margin-top:12px;">{{ bmrEl }}</div>
             <div style="display:inline-block; font:700 13px 'Gaegu',cursive; padding:5px 11px; border:2px solid #b8702a; border-radius:9px; background:#f8edd6; color:#9a5e1f; margin-top:9px;">🏋 on gym days (from calendar) → +400 kcal · +25g protein, automatically</div>
 
             <!-- 7-day ledger -->
@@ -1094,7 +1084,7 @@
           <div style="display:flex; justify-content:center; padding:8px;"><span style="width:80px; height:6px; background:#2a2a28; border-radius:4px;"></span></div>
           <div style="padding:4px 14px 16px;">
             <div style="font:700 18px 'Caveat',cursive; color:#2f6d4a;">🍎 Nutrition</div>
-            <div style="font:700 13px 'Gaegu',cursive; border:2px solid #2f6d4a; border-radius:9px; padding:6px 10px; margin-top:6px; background:#eef3ec; color:#2f6d4a;">Target 1,800 kcal · 60g protein <span style="font-weight:400; color:#7a746a;">(BMR×activity−goal)</span></div>
+            <div style="font:700 13px 'Gaegu',cursive; border:2px solid #2f6d4a; border-radius:9px; padding:6px 10px; margin-top:6px; background:#eef3ec; color:#2f6d4a;">{{ bmrTargetLabel }} <span style="font-weight:400; color:#7a746a;">(BMR×activity−goal)</span></div>
             <div style="font:700 13px 'Gaegu',cursive; margin-top:12px;">This week vs target</div>
             <div style="margin-top:6px;">{{ nutritionWeekMobEl }}</div>
             <div style="display:flex; justify-content:space-between; align-items:center; border:2px solid #2f6d4a; border-radius:10px; padding:8px 10px; margin-top:10px; background:#eef3ec;"><span style="font:700 13px 'Gaegu',cursive;">Protein</span><span style="font:700 13px 'Gaegu',cursive; color:#cf4a2f;">−14g → repair Fri</span></div>
@@ -1330,6 +1320,8 @@ class Component extends DCLogic {
     const base = isNext ? 22 : 15;
     const raw = this.baseDays();
     const cap = 2000;
+    // daily kcal target — driven by the BMR calculator on the Setup screen (shared via localStorage)
+    const kcalTarget = (() => { try { return parseInt(localStorage.getItem('smartplate_target'), 10) || 1800; } catch (e) { return 1800; } })();
 
     let spent = 0, delivered = 0, cooked = 0, skipped = 0, sessions = 0;
     const days = raw.map((dy, i) => {
@@ -1350,7 +1342,6 @@ class Component extends DCLogic {
         }
         return { on, off: !on, meal: m, opts, idx, k, w, di: i, area, noDelivery, wlabel: winMeta[w].t };
       });
-      const kcalTarget = 1800;
       const kcalLeft = kcalTarget - dayKcal;
       const kcalPct = Math.min(100, Math.round((dayKcal / kcalTarget) * 100));
       const kcalColor = kcalLeft < 0 ? '#cf4a2f' : (kcalPct > 90 ? '#b8702a' : '#2f6d4a');
@@ -1524,6 +1515,7 @@ class Component extends DCLogic {
       isNext, weekLabel: 'Jun ' + base + '–' + (base + 6),
       sessions, delivered, cooked, skipped, spent, left, leftColor, capLabel, capBg, spentPct, ringOffset,
       budgetFillSel: mkFill(spentPct), budgetFillGrid: mkFill(spentPct), budgetFillMob: mkFill(spentPct),
+      kcalTargetStr: kcalTarget.toLocaleString(),
       notes: this.props.showAnnotations ?? true,
     };
   }
@@ -1531,7 +1523,57 @@ class Component extends DCLogic {
 </script>
 <script type="text/x-dc" id="logic-setup">
 class Component extends DCLogic {
-  state = { tab: 'form' };
+  state = { tab: 'form', bmr: { sex: 'F', age: 29, ht: 168, wt: 62, act: 1.4, goal: -110 } };
+
+  // ---- BMR / TDEE / daily target, computed from the user's OWN numbers (Mifflin–St Jeor) ----
+  actList() { return [['Sedentary', 1.2], ['Light', 1.375], ['Moderate', 1.4], ['Active', 1.55], ['Athlete', 1.725]]; }
+  goalList() { return [['Cut', -500], ['Lean-maintain', -110], ['Maintain', 0], ['Gain', 250]]; }
+  bmrCalc() {
+    const b = this.state.bmr;
+    const bmr = Math.round(10 * b.wt + 6.25 * b.ht - 5 * b.age + (b.sex === 'M' ? 5 : -161));
+    const tdee = Math.round(bmr * b.act);
+    const target = Math.round((tdee + b.goal) / 10) * 10;
+    const protein = Math.max(45, Math.round(b.wt * 0.97 / 5) * 5);
+    return { bmr, tdee, target, protein };
+  }
+  setBmr(key, val) { const n = parseInt(val, 10); this.setState((s) => ({ bmr: { ...s.bmr, [key]: isNaN(n) ? s.bmr[key] : Math.max(1, n) } })); }
+  stepBmr(key, d) { this.setState((s) => ({ bmr: { ...s.bmr, [key]: Math.max(1, s.bmr[key] + d) } })); }
+  setSex(sex) { this.setState((s) => ({ bmr: { ...s.bmr, sex } })); }
+  cycle(key, list) { this.setState((s) => { const i = list.findIndex((x) => x[1] === s.bmr[key]); return { bmr: { ...s.bmr, [key]: list[(i + 1) % list.length][1] } }; }); }
+
+  // the interactive "enter your details" panel that drives the daily target (no longer hardcoded)
+  bmrPanel() {
+    const h = React.createElement;
+    const b = this.state.bmr, c = this.bmrCalc();
+    const actName = (this.actList().find((a) => a[1] === b.act) || ['Moderate'])[0];
+    const goalName = (this.goalList().find((g) => g[1] === b.goal) || ['Maintain'])[0];
+    const chip = { font: "700 13px 'Gaegu',cursive", padding: '5px 11px', border: '2px solid #2a2a28', borderRadius: '9px', background: '#fff' };
+    const op = { font: "700 16px 'Gaegu',cursive", color: '#7a746a' };
+    const stepBtn = { font: "700 15px 'Gaegu',cursive", width: '26px', height: '29px', border: '2px solid #2a2a28', borderRadius: '7px', background: '#fff', cursor: 'pointer' };
+    const col = { display: 'flex', flexDirection: 'column', gap: '3px' };
+    const lab = { font: "700 12px 'Gaegu',cursive", color: '#56524a' };
+    const num = (label, key, unit) => h('div', { style: col },
+      h('span', { style: lab }, label),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '4px' } },
+        h('button', { onClick: () => this.stepBmr(key, -1), title: 'decrease', style: stepBtn }, '−'),
+        h('input', { type: 'number', value: b[key], onChange: (e) => this.setBmr(key, e.target.value), style: { width: '54px', font: "700 15px 'Gaegu',cursive", textAlign: 'center', border: '2px solid #2a2a28', borderRadius: '8px', padding: '4px 2px', background: '#fff' } }),
+        h('button', { onClick: () => this.stepBmr(key, 1), title: 'increase', style: stepBtn }, '+'),
+        h('span', { style: { font: "400 11px 'Gaegu',cursive", color: '#7a746a' } }, unit)));
+    const sexBtn = (val, txt) => h('button', { onClick: () => this.setSex(val), style: { font: "700 14px 'Gaegu',cursive", padding: '6px 12px', border: '2px solid #2a2a28', borderRadius: '8px', cursor: 'pointer', background: b.sex === val ? '#2a2a28' : '#fff', color: b.sex === val ? '#fff' : '#2a2a28' } }, txt);
+    return h('div', null,
+      h('div', { style: { font: "400 13px 'Gaegu',cursive", color: '#56524a', marginBottom: '10px' } }, 'Enter your details — your target is computed live below, not hardcoded.'),
+      h('div', { style: { display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' } },
+        h('div', { style: col }, h('span', { style: lab }, 'Sex'), h('div', { style: { display: 'flex', gap: '5px' } }, sexBtn('F', '♀ Female'), sexBtn('M', '♂ Male'))),
+        num('Age', 'age', 'yrs'), num('Height', 'ht', 'cm'), num('Weight', 'wt', 'kg'),
+        h('div', { style: col }, h('span', { style: lab }, 'Activity'), h('button', { onClick: () => this.cycle('act', this.actList()), title: 'tap to cycle', style: { ...chip, cursor: 'pointer' } }, actName + ' ×' + b.act + ' ▾')),
+        h('div', { style: col }, h('span', { style: lab }, 'Goal'), h('button', { onClick: () => this.cycle('goal', this.goalList()), title: 'tap to cycle', style: { ...chip, cursor: 'pointer' } }, goalName + ' ' + (b.goal > 0 ? '+' + b.goal : b.goal) + ' ▾'))),
+      h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginTop: '14px' } },
+        h('span', { style: chip }, 'BMR ≈ ' + c.bmr.toLocaleString(), h('span', { style: { fontWeight: 400, color: '#7a746a' } }, ' · Mifflin–St Jeor')),
+        h('span', { style: op }, '×'), h('span', { style: chip }, 'activity ' + b.act),
+        h('span', { style: op }, '='), h('span', { style: { ...chip, background: '#f3efe6' } }, 'TDEE ≈ ' + c.tdee.toLocaleString()),
+        h('span', { style: op }, (b.goal >= 0 ? '+' : '−') + Math.abs(b.goal)), h('span', { style: op }, '→'),
+        h('span', { style: { font: "700 14px 'Gaegu',cursive", padding: '6px 12px', border: '2px solid #2f6d4a', borderRadius: '9px', background: '#eef3ec', color: '#2f6d4a' } }, 'target ' + c.target.toLocaleString() + ' kcal · ' + c.protein + 'g protein')));
+  }
 
   // the learned flavour model — 6 axes, each 0..1
   dnaAxes() {
@@ -1562,7 +1604,7 @@ class Component extends DCLogic {
   // 7-day kcal-vs-target bar chart for the Nutrition tab
   nutritionWeek(hgt) {
     const h = React.createElement;
-    const target = 1800, maxS = 2300;
+    const target = this.bmrCalc().target, maxS = 2300;
     const data = [['M', 1720], ['T', 1700], ['W', 1640], ['T', 2060], ['F', 1780], ['S', 1980], ['S', 1560]];
     const targetY = Math.round(hgt * (1 - target / maxS));
     const bars = data.map((d, i) => h('div', { key: 'b' + i, title: d[1] + ' kcal', style: { flex: 1, height: Math.round(hgt * d[1] / maxS) + 'px', background: d[1] > target ? '#cf4a2f' : '#6db07a', border: '1.5px solid #2a2a28', borderRadius: '4px 4px 0 0', alignSelf: 'flex-end' } }));
@@ -1570,13 +1612,16 @@ class Component extends DCLogic {
     return h('div', null,
       h('div', { style: { position: 'relative', display: 'flex', alignItems: 'flex-end', gap: '5px', height: hgt + 'px', borderBottom: '2px solid #2a2a28' } },
         h('div', { style: { position: 'absolute', left: 0, right: 0, top: targetY + 'px', borderTop: '2px dashed #2f5fd0' } }),
-        h('span', { style: { position: 'absolute', right: '2px', top: (targetY - 14) + 'px', font: "700 10px 'Gaegu',cursive", color: '#2f5fd0', background: '#fff', padding: '0 3px' } }, 'target 1,800'),
+        h('span', { style: { position: 'absolute', right: '2px', top: (targetY - 14) + 'px', font: "700 10px 'Gaegu',cursive", color: '#2f5fd0', background: '#fff', padding: '0 3px' } }, 'target ' + target.toLocaleString()),
         ...bars),
       h('div', { style: { display: 'flex', gap: '5px', marginTop: '3px' } }, ...labels));
   }
 
   renderVals() {
     const set = (t) => () => this.setState({ tab: t });
+    const c = this.bmrCalc();
+    // share the computed target with the Weekly screen (read on its next render)
+    try { localStorage.setItem('smartplate_target', String(c.target)); localStorage.setItem('smartplate_protein', String(c.protein)); } catch (e) {}
     return {
       isForm: this.state.tab === 'form',
       isRules: this.state.tab === 'rules',
@@ -1586,6 +1631,8 @@ class Component extends DCLogic {
       goForm: set('form'), goRules: set('rules'), goPlain: set('plain'), goDna: set('dna'), goNutri: set('nutri'),
       dnaRadar: this.radar(240), dnaRadarMob: this.radar(184),
       nutritionWeekEl: this.nutritionWeek(150), nutritionWeekMobEl: this.nutritionWeek(92),
+      bmrEl: this.bmrPanel(),
+      bmrTargetLabel: 'Target ' + c.target.toLocaleString() + ' kcal · ' + c.protein + 'g protein',
       notes: this.props.showAnnotations ?? true,
     };
   }
@@ -1784,6 +1831,7 @@ class Component extends DCLogic {
 
   function makeScreen(container, templateEl, ComponentClass, getNotes) {
     var comp = new ComponentClass({ showAnnotations: getNotes() });
+    comp._container = container;
     var source = templateEl.content;
     comp._render = function () {
       comp.props.showAnnotations = getNotes();
@@ -1823,6 +1871,8 @@ class Component extends DCLogic {
     var tabs = document.querySelectorAll('.dc-tab');
     function activate(targetId) {
       for (var s = 0; s < screens.length; s++) screens[s].style.display = (screens[s].id === targetId) ? '' : 'none';
+      // re-render the screen we're showing so cross-screen values (e.g. the BMR target) refresh
+      comps.forEach(function (c) { if (c._container && c._container.id === targetId) { try { c._render(); } catch (e) {} } });
       for (var t = 0; t < tabs.length; t++) tabs[t].setAttribute('data-active', tabs[t].getAttribute('data-target') === targetId ? 'true' : 'false');
     }
     for (var t = 0; t < tabs.length; t++) {
