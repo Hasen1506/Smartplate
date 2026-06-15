@@ -70,3 +70,7 @@ HARD_SAFETY_FLOOR = float(os.environ.get("SMARTPLATE_SAFETY_FLOOR", "3.5"))
 # honest version of the "composition constraint" in docs §4.
 VARIETY_NUDGE = os.environ.get("SMARTPLATE_VARIETY", "off")
 VARIETY_NUDGE_W = float(os.environ.get("SMARTPLATE_VARIETY_W", "0.6"))
+
+# Protein evenness: a day-level penalty for backloading protein into one meal (the
+# per-meal even target is daily_protein / meals-that-day). Set 0 to disable.
+PROTEIN_EVEN_W = float(os.environ.get("SMARTPLATE_PROTEIN_EVEN", "0.25"))

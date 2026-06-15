@@ -138,6 +138,14 @@ def test_intake_flags_unmatched_honestly():
     assert any("zorptax" in u for u in r["unmatched"]) and r["confidence"] < 1.0
 
 
+def test_protein_evenness_keeps_plan_feasible(seeded, monkeypatch):
+    # even cranked hard, the slack-var linearisation must not make a plan infeasible
+    monkeypatch.setattr(config, "PROTEIN_EVEN_W", 2.0)
+    res = optimizer.optimize(seeded["plan_id"])
+    assert res["status"] == "Optimal"
+    assert len(models.decisions_for_plan(seeded["plan_id"])) == 21
+
+
 def test_optimize_returns_diagnostics(seeded):
     res = optimizer.optimize(seeded["plan_id"])
     diag = res["diagnostics"]

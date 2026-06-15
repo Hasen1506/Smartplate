@@ -287,6 +287,25 @@ def optimize(plan_id: int) -> dict:
                 item_vars.setdefault(c["item_id"], []).append(v)
         prob += pulp.lpSum(choice_vars) == 1            # exactly one option per session
 
+    # Protein evenness (day-level): penalise backloading protein into one meal.
+    # Each active meal's even target is daily_protein / (meals planned that day); a
+    # meal under it contributes a normalised shortfall (linearised via a slack var).
+    # Unlike the per-candidate protein term this adapts to how many meals a day has.
+    if config.PROTEIN_EVEN_W > 0 and active:
+        daily_protein = nutrition.targets_for(user)["protein_g"]
+        by_day = {}
+        for s in active:
+            by_day.setdefault(s["day"], []).append(s)
+        for day, day_sessions in by_day.items():
+            tgt = daily_protein / max(1, len(day_sessions))
+            for s in day_sessions:
+                cands = cand_map[s["id"]]
+                prot = pulp.lpSum((cands[i].get("nutrition") or {}).get("protein_g", 0) * x[(s["id"], i)]
+                                  for i in range(len(cands)))
+                short = pulp.LpVariable(f"pshort_{s['id']}", lowBound=0)
+                prob += short >= tgt - prot
+                obj_terms.append(config.PROTEIN_EVEN_W * short / max(tgt, 1.0))
+
     prob += pulp.lpSum(obj_terms)
     prob += pulp.lpSum(budget_terms) <= user["weekly_budget"]   # HARD budget envelope
     if cook_vars:
