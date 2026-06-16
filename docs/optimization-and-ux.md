@@ -423,16 +423,27 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
     today's distribution, sugar a daily cap.
 13. ✅ **Protein evenness in the solve** — a day-level slack term penalising
     backloading (per-meal target = daily ÷ meals-that-day), `SMARTPLATE_PROTEIN_EVEN`.
-14. ⬜ **Usual-first minimal substitution + infeasible conflict-prompt** (§5.2).
-15. ⬜ **Pin & re-optimize-the-rest**; one-pick-+-spin card; **＋ extra-order** hatch that
-    writes to the ledger (§6.2).
-16. ⬜ **Drink/add-on priced per outlet** (hide when the outlet serves none) — replaces the
-    hardcoded ₹40 / 150 kcal (§6.1, wireframe lines 1062/1399/1448).
-17. ⬜ **⚡ rule template gallery + auto-derived rules** (§4.2).
-18. ⬜ **Day awareness + plan states** — Today highlight, skip de-emphasis, located over-cap,
-    loading/empty/error (§6.3).
-19. ⬜ **Returning-user reconcile + re-anchor**; no over-correction of roll-over nutrients (§3.1).
-20. ⬜ **Two form-factor layouts** (desktop matrix · mobile day-picker) — audit F3.
+14. ✅ **Usual-first minimal substitution + infeasible conflict-prompt** (§5.2) — the grid
+    shows a "kept N of your usuals · swapped M" line, and the over-cap `conflictEl` offers the
+    three-way choice (✦ add new outlet · raise budget · relax target). *(Prototype; illustrative
+    counts.)*
+15. ✅ **Pin & re-optimize-the-rest**; one-pick-+-spin card; **＋ extra-order** hatch that
+    writes to the ledger (§6.2) — `togglePin`/`reoptimiseUnpinned` (pinned slots stay fixed),
+    `addExtra` off-plan orders add to spend + kcal. Card face stays one-pick + ↻ spin + menu ▾.
+16. ✅ **Drink/add-on priced per outlet** (hide when the outlet serves none) — `drinkInfo(m)`
+    derives `{available, price ₹30–60, kcal ~120–180}` per outlet; replaces the hardcoded
+    ₹40 / 150 kcal (§6.1). Murugan Idli serves none → 🥤 button hidden, toggle is a no-op.
+17. ✅ **⚡ rule template gallery + auto-derived rules** (§4.2) — Setup ⚡ Rules reframed as
+    "suggested rules you can toggle" (mostly auto-derived); **＋ add power rule** opens a
+    fill-in-the-blank *When [scope ▾] → then [nudge ▾]* gallery, not raw syntax. *(Illustrative gallery.)*
+18. ✅ **Day awareness + plan states** — Today highlight (accent + TODAY tag, desktop column +
+    mobile day-picker), past days de-emphasised, skip = greyed/dashed @ ~0.5 opacity + ⊘ tag,
+    located over-cap red-outline + recovery line, all-skip empty-state note (§6.3).
+19. ✅ **Returning-user reconcile + re-anchor**; no over-correction of roll-over nutrients (§3.1)
+    — a dismissible "welcome back" banner (demo toggle) offers [followed the plan · ate out · log it]
+    and states calories (weekly) / B12·iron (~30-day) roll over so a short gap won't over-correct.
+20. ✅ **Two form-factor layouts** (desktop matrix · mobile day-picker) — audit F3. Both mock
+    frames now reflect every new interaction (pin · extra-order · today · skip · drink-per-outlet).
 
 ---
 

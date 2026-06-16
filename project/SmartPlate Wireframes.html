@@ -191,7 +191,11 @@
           </div>
           <!-- 7-col grid (interactive: each card has inline ↻ spin + browse) -->
           <div style="padding:14px 16px;">
+            {{ welcomeBackEl }}
+            {{ planStateEl }}
             {{ gridEl }}
+            {{ usualFirstEl }}
+            {{ extraOrderEl }}
             <!-- insight tiles -->
             <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; padding-top:13px; border-top:2px dashed #cfc9bd;">
               <div style="font:700 13px 'Gaegu',cursive; padding:7px 11px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:{{ capBg }};">{{ capLabel }}</div>
@@ -515,7 +519,8 @@
               </div>
 
               <!-- POWER RULES -->
-              <div style="font:700 16px 'Gaegu',cursive; color:#9a5e1f; border-bottom:2px solid #b8702a; padding-bottom:4px; margin-top:18px;">⚡ Rules <span style="font:400 12px; color:#7a746a;">— conditional refinements: <b>WHEN</b> a scope matches → <b>THEN</b> nudge. Scoped by area, budget band, or a <b>calendar life-event</b> (🏋 gym · ✈ travel · 📅 weekend). Never override a 🔒 lock.</span></div>
+              <div style="font:700 16px 'Gaegu',cursive; color:#9a5e1f; border-bottom:2px solid #b8702a; padding-bottom:4px; margin-top:18px;">⚡ Rules <span style="font:400 12px; color:#7a746a;">— <b>suggested rules you can toggle</b>, mostly <b>auto-derived</b> from your calendar &amp; locks (🏋 gym · ✈ travel · 📅 weekend). You rarely write one. Never override a 🔒 lock.</span></div>
+              <div style="font:400 12px 'Gaegu',cursive; color:#7a746a; margin-top:6px;">Each row is a toggle — flip it on/off; the agent honours it as a <b>WHEN → THEN</b> nudge. To author a custom one, use the template gallery (no syntax).</div>
               <div style="display:flex; flex-direction:column; gap:7px; margin-top:10px;">
                 <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; border:2px solid #b8702a; border-radius:11px; padding:8px 11px; background:#f8edd6;">
                   <span style="font:700 11px 'Gaegu',cursive; color:#9a5e1f; letter-spacing:1px;">WHEN</span>
@@ -565,8 +570,10 @@
                   <span style="font:700 14px 'Gaegu',cursive; color:#b8702a;">→</span>
                   <span style="font:700 11px 'Gaegu',cursive; color:#9a5e1f; letter-spacing:1px;">THEN</span>
                   <span style="font:700 13px 'Gaegu',cursive; padding:3px 9px; border:2px solid #cf4a2f; border-radius:8px; background:#fff; color:#cf4a2f;">unlock a ₹350 treat from 🎉 Feast Fund</span>
-                  <span style="font:400 13px 'Gaegu',cursive; padding:3px 9px; border:2px dashed #8a8478; border-radius:8px; color:#7a746a;">＋ add power rule</span>
+                  <span style="font:700 11px 'Gaegu',cursive; padding:3px 9px; border:2px dashed #8a8478; border-radius:8px; color:#7a746a;">toggle: suggestion</span>
                 </div>
+                <button onClick="{{ openGallery }}" title="Open the fill-in-the-blank template gallery — pick a scope and a nudge from chips" style="align-self:flex-start; font:700 13px 'Gaegu',cursive; padding:6px 13px; border:2px dashed #b8702a; border-radius:9px; background:#fff; color:#9a5e1f; cursor:pointer;">＋ add power rule <span style="font:400 12px; color:#7a746a;">(from a template)</span></button>
+                {{ ruleGalleryEl }}
               </div>
 
               <!-- SCHEDULE -->
@@ -1433,10 +1440,14 @@ class Component extends DCLogic {
         h('div', { style: { height: '6px', border: '1.5px solid #2a2a28', borderRadius: '5px', background: '#fff', overflow: 'hidden', marginTop: '2px' } },
           h('div', { style: { height: '100%', width: dy.kcalPct + '%', background: dy.kcalColor } })));
       const capBadge = dy.crossCap ? h('div', { style: { marginTop: '6px', textAlign: 'center', font: "700 10px 'Gaegu',cursive", color: '#fff', background: '#cf4a2f', border: '1.5px solid #2a2a28', borderRadius: '7px', padding: '2px 4px' } }, '⚠ cap runs out here') : null;
-      const header = h('div', { key: 'h', style: { paddingBottom: '7px', borderBottom: dy.afterCap ? '2px solid #cf4a2f' : '2px solid #2a2a28', marginBottom: '8px' } },
-        h('div', { style: { textAlign: 'center', font: "700 16px 'Gaegu',cursive", color: dy.afterCap ? '#cf4a2f' : '#2a2a28' } }, dy.d + ' ', h('span', { style: { color: '#a8a294' } }, dy.date)),
+      // day awareness: accent Today, red-outline an over-cap day, de-emphasise the past (§6.3)
+      const headBorder = dy.dayOver ? '3px solid #cf4a2f' : (dy.isToday ? '3px solid #2f5fd0' : (dy.afterCap ? '2px solid #cf4a2f' : '2px solid #2a2a28'));
+      const todayTag = dy.isToday ? h('span', { style: { display: 'inline-block', font: "700 9px 'Gaegu',cursive", padding: '1px 6px', border: '1.5px solid #2f5fd0', borderRadius: '6px', background: '#eef2fb', color: '#2f5fd0', marginLeft: '5px', verticalAlign: 'middle' } }, 'TODAY') : null;
+      const overTag = dy.dayOver ? h('div', { style: { marginTop: '4px', textAlign: 'center', font: "700 9px 'Gaegu',cursive", color: '#cf4a2f' } }, '● over cap here') : null;
+      const header = h('div', { key: 'h', style: { paddingBottom: '7px', borderBottom: headBorder, marginBottom: '8px', opacity: dy.isPast ? 0.55 : 1 } },
+        h('div', { style: { textAlign: 'center', font: "700 16px 'Gaegu',cursive", color: dy.dayOver ? '#cf4a2f' : (dy.isToday ? '#2f5fd0' : (dy.afterCap ? '#cf4a2f' : '#2a2a28')) } }, dy.d + ' ', h('span', { style: { color: '#a8a294' } }, dy.date), todayTag),
         h('div', { style: { textAlign: 'center', font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, (dy.wx + ' ' + dy.fest).trim()),
-        allowance, capBadge);
+        allowance, capBadge, overTag);
       const cards = dy.view.map((v) => {
         if (!v.on) {
           return h('div', { key: v.k, style: { border: '2px dashed #cfc9bd', borderRadius: '13px 11px 13px 11px', background: '#faf8f2', padding: '8px 9px', minHeight: '84px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' } },
@@ -1490,9 +1501,14 @@ class Component extends DCLogic {
           ...v.opts.map((o, oi) => h('div', { key: 'o' + oi, onClick: () => this.chooseAlt(v.di, v.w, oi), style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px', padding: '4px 6px', marginBottom: '3px', borderRadius: '7px', cursor: 'pointer', border: oi === v.idx ? '1.5px solid #2a2a28' : '1.5px solid #e6e1d6', background: oi === v.idx ? '#f3efe6' : '#fff' } },
             h('span', { style: { font: "700 11px 'Gaegu',cursive" } }, (oi === 0 ? '◆ ' : '') + o.glyph + ' ' + o.item),
             h('span', { style: { font: "400 10px 'Gaegu',cursive", color: '#7a746a', whiteSpace: 'nowrap' } }, o.cost)))) : null;
-        return h('div', { key: v.k, style: { background: '#fff', border: '2px solid #2a2a28', borderRadius: '13px 11px 13px 11px', boxShadow: '2px 2px 0 rgba(42,42,40,.08)', padding: '8px 9px', minHeight: '84px' } },
+        // skip = de-emphasise (greyed + dashed @ ~0.5 opacity, ⊘ tag) — NOT blurred (§6.3)
+        const isSkip = m.tag === 'SKIP';
+        const cardStyle = isSkip
+          ? { background: '#f3efe6', border: '2px dashed #8a8478', borderRadius: '13px 11px 13px 11px', padding: '8px 9px', minHeight: '84px', opacity: 0.5 }
+          : { background: '#fff', border: '2px solid #2a2a28', borderRadius: '13px 11px 13px 11px', boxShadow: '2px 2px 0 rgba(42,42,40,.08)', padding: '8px 9px', minHeight: '84px' };
+        return h('div', { key: v.k, style: cardStyle },
           head,
-          h('div', { style: { font: "700 14px/1.15 'Gaegu',cursive", marginTop: '5px' } }, m.item),
+          h('div', { style: { font: "700 14px/1.15 'Gaegu',cursive", marginTop: '5px' } }, (isSkip ? '⊘ ' : '') + m.item),
           h('div', { style: { font: "400 12px/1.2 'Gaegu',cursive", color: '#7a746a', marginTop: '2px' } }, (isFav(m) ? '⭐ ' : '') + m.meta),
           custom, areaRow, tags, modeRow, controls, panel);
       });
@@ -1509,6 +1525,11 @@ class Component extends DCLogic {
       h('span', { style: { font: "700 16px 'Gaegu',cursive", color: '#cf4a2f' } }, '⚠ ₹' + (-left) + ' over your ₹2,000 cap'),
       h('span', { style: { font: "400 14px 'Gaegu',cursive", color: '#7a5a52', flex: 1, minWidth: '220px' } }, 'Your ★4.2 rating floor & allergen rules stay locked — the agent never trades safety for money. Resolve it by trimming spend:'),
       h('button', { onClick: () => this.trimToFit(), style: { font: "700 14px 'Gaegu',cursive", padding: '8px 14px', border: '2px solid #2a2a28', borderRadius: '11px', background: '#2a2a28', color: '#fff', boxShadow: '2px 2px 0 rgba(42,42,40,.22)', cursor: 'pointer' } }, 'Trim to fit ▶'),
+      // §5.2 three-way conflict choice when usual places can't hit the target under the cap
+      h('span', { style: { font: "400 13px 'Gaegu',cursive", color: '#7a5a52' } }, '· or pick what gives:'),
+      h('button', { onClick: () => this.addExtra('✦ new high-protein outlet', 180, 520), title: 'Bring in one new outlet to clear the target', style: { font: "700 13px 'Gaegu',cursive", padding: '7px 12px', border: '2px solid #cf4a2f', borderRadius: '11px', background: '#fff', color: '#cf4a2f', cursor: 'pointer' } }, '✦ add new outlet'),
+      h('button', { onClick: () => this.setHorizon('month'), title: 'Raise the budget horizon', style: { font: "700 13px 'Gaegu',cursive", padding: '7px 12px', border: '2px solid #2a2a28', borderRadius: '11px', background: '#fff', cursor: 'pointer' } }, '↑ raise budget'),
+      h('button', { onClick: () => this.trimToFit(), title: 'Relax the nutrition target', style: { font: "700 13px 'Gaegu',cursive", padding: '7px 12px', border: '2px solid #2a2a28', borderRadius: '11px', background: '#fff', cursor: 'pointer' } }, '↓ relax target'),
       h('button', { onClick: () => this.setState({ picks: {} }), style: { font: "700 14px 'Gaegu',cursive", padding: '8px 14px', border: '2px solid #2a2a28', borderRadius: '11px', background: '#fff', color: '#2a2a28', cursor: 'pointer' } }, '↺ Reset picks')) : null;
 
     // ---- interactive mobile day view (chips → that day's meals, spin + mode + allowance) ----
@@ -1516,9 +1537,9 @@ class Component extends DCLogic {
     const mday = days[md] || days[0];
     const dayLetters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
     const chips = h('div', { style: { display: 'flex', gap: '5px', marginTop: '14px' } },
-      ...days.map((d, i) => h('button', { key: 'mc' + i, onClick: () => this.setState({ mobDay: i }), style: { flex: 1, textAlign: 'center', font: "700 12px 'Gaegu',cursive", padding: '6px 0', border: '1.5px solid #2a2a28', borderRadius: '8px', background: i === md ? '#2a2a28' : (d.afterCap ? '#f7e0d9' : '#fff'), color: i === md ? '#fff' : '#2a2a28', cursor: 'pointer' } }, dayLetters[i])));
+      ...days.map((d, i) => h('button', { key: 'mc' + i, onClick: () => this.setState({ mobDay: i }), title: d.isToday ? 'Today' : (d.dayOver ? 'over cap' : d.d), style: { flex: 1, textAlign: 'center', font: "700 12px 'Gaegu',cursive", padding: '6px 0', border: d.dayOver ? '2px solid #cf4a2f' : (d.isToday ? '2px solid #2f5fd0' : '1.5px solid #2a2a28'), borderRadius: '8px', background: i === md ? '#2a2a28' : (d.isToday ? '#eef2fb' : (d.afterCap ? '#f7e0d9' : '#fff')), color: i === md ? '#fff' : (d.isToday ? '#2f5fd0' : '#2a2a28'), opacity: d.isPast && i !== md ? 0.55 : 1, cursor: 'pointer' } }, dayLetters[i] + (d.isToday ? '•' : ''))));
     const mTitle = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '14px' } },
-      h('span', { style: { font: "700 15px 'Gaegu',cursive" } }, mday.d + ' ' + mday.date + ' ', h('span', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, '· ' + mday.wx)),
+      h('span', { style: { font: "700 15px 'Gaegu',cursive" } }, mday.d + ' ' + mday.date + ' ', mday.isToday ? h('span', { style: { font: "700 9px 'Gaegu',cursive", padding: '1px 5px', border: '1.5px solid #2f5fd0', borderRadius: '6px', background: '#eef2fb', color: '#2f5fd0' } }, 'TODAY') : null, h('span', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, ' · ' + mday.wx)),
       h('span', { style: { font: "700 11px 'Gaegu',cursive", color: mday.kcalColor } }, mday.kcalLeft >= 0 ? (mday.kcalLeft + ' kcal left') : ('+' + (-mday.kcalLeft) + ' over')));
     const mCards = mday.view.map((v) => {
       if (!v.on) return h('div', { key: v.k, style: { border: '2px dashed #cfc9bd', borderRadius: '11px', background: '#faf8f2', padding: '7px 9px', marginTop: '8px', textAlign: 'center', font: "400 12px 'Gaegu',cursive", color: '#bcb6a8' } }, v.wlabel + ' — paused');
@@ -1538,11 +1559,15 @@ class Component extends DCLogic {
       const areaRow = h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' } },
         h('button', { onClick: () => this.cycleArea(v.di, v.w), title: 'Switch area · ' + am[v.area].label, style: { font: "700 11px 'Gaegu',cursive", padding: '3px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#eef2fb', cursor: 'pointer' } }, am[v.area].g + ' ' + am[v.area].label),
         h('span', { style: { font: "400 11px 'Gaegu',cursive", color: v.noDelivery ? '#cf4a2f' : '#7a746a' } }, v.noDelivery ? '⊘ none here · cook/skip' : servLabel));
-      return h('div', { key: v.k, style: { background: '#fff', border: '2px solid #2a2a28', borderRadius: '13px 11px 13px 11px', boxShadow: '2px 2px 0 rgba(42,42,40,.08)', padding: '9px 10px', marginTop: '8px' } },
+      const mSkip = m.tag === 'SKIP';
+      const mCardStyle = mSkip
+        ? { background: '#f3efe6', border: '2px dashed #8a8478', borderRadius: '13px 11px 13px 11px', padding: '9px 10px', marginTop: '8px', opacity: 0.5 }
+        : { background: '#fff', border: '2px solid #2a2a28', borderRadius: '13px 11px 13px 11px', boxShadow: '2px 2px 0 rgba(42,42,40,.08)', padding: '9px 10px', marginTop: '8px' };
+      return h('div', { key: v.k, style: mCardStyle },
         h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
           h('span', { style: { font: "700 10px 'Gaegu',cursive", color: '#a8a294', letterSpacing: '1px' } }, m.meal),
           h('span', { style: { font: "700 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #2a2a28', borderRadius: '7px', background: '#f3efe6' } }, m.glyph + ' ' + m.tag)),
-        h('div', { style: { font: "700 15px 'Gaegu',cursive", marginTop: '4px' } }, m.item),
+        h('div', { style: { font: "700 15px 'Gaegu',cursive", marginTop: '4px' } }, (mSkip ? '⊘ ' : '') + m.item),
         h('div', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, (isFav(m) ? '⭐ ' : (isNew(m) ? '✦ ' : '')) + m.meta),
         areaRow, mCustom,
         h('div', null, ...(m.flags || []).map((f, fi) => h('div', { key: 'f' + fi, style: { display: 'inline-block', font: "400 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px dashed #8a8478', borderRadius: '7px', background: '#faf8f2', marginTop: '6px', marginRight: '3px' } }, f))),
@@ -1563,6 +1588,40 @@ class Component extends DCLogic {
       ...extrasListEls);
     const mobGridEl = h('div', null, chips, mTitle, ...mCards, extraOrderEl);
 
+    // ---- usual-first framing + infeasible three-way conflict choice (§5.2) ----
+    const infeasible = left < 0;
+    const usualFirstEl = h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '12px', padding: '9px 13px', border: '2px solid #2a2a28', borderRadius: '12px', background: '#f6f4ee' } },
+      h('span', { style: { font: "700 14px 'Gaegu',cursive" } }, '⭐ Usual-first'),
+      h('span', { style: { font: "400 13px 'Gaegu',cursive", color: '#56524a' } }, 'kept ' + usualN + ' of your usuals · swapped ' + newN + ' to hit your target — the agent makes the fewest changes that clear your locks.'),
+      infeasible ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginLeft: 'auto' } },
+        h('span', { style: { font: "700 13px 'Gaegu',cursive", color: '#cf4a2f' } }, 'Usual places can’t hit it under ₹2,000 —'),
+        h('button', { onClick: () => this.addExtra('✦ new high-protein outlet', 180, 520), style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '1.5px solid #cf4a2f', borderRadius: '8px', background: '#fdf1ec', color: '#cf4a2f', cursor: 'pointer' } }, '✦ add new outlet'),
+        h('button', { onClick: () => this.setHorizon('month'), style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#fff', cursor: 'pointer' } }, 'raise budget'),
+        h('button', { onClick: () => this.trimToFit(), style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#fff', cursor: 'pointer' } }, 'relax target')) : null);
+
+    // ---- plan states (§6.3): empty-week note · located over-cap recovery line ----
+    const allSkip = sessions === 0;
+    const overDays = days.filter((d) => d.dayOver).map((d) => d.d);
+    let planStateEl = null;
+    if (allSkip) {
+      planStateEl = h('div', { style: { marginTop: '12px', padding: '11px 15px', border: '2px dashed #8a8478', borderRadius: '12px', background: '#faf8f2', font: "400 14px 'Gaegu',cursive", color: '#7a746a' } },
+        h('b', { style: { color: '#2a2a28' } }, 'Empty week — every window is set to skip.'), ' Tap a cell above to plan a meal, or ＋ order now for a one-off.');
+    } else if (infeasible) {
+      planStateEl = h('div', { style: { marginTop: '12px', padding: '11px 15px', border: '2.5px solid #cf4a2f', borderRadius: '12px', background: '#fdf1ec', font: "700 14px 'Gaegu',cursive", color: '#cf4a2f' } },
+        '⚠ ₹' + (-left) + ' over' + (overDays.length ? ' — ' + overDays.join(', ') + ' run hot' : '') + ' — drop a session, swap 2 picks, or raise the cap ▸');
+    }
+
+    // ---- returning-after-a-gap reconcile (§3.1) ----
+    const wb = this.state.welcomeBack;
+    const welcomeBackEl = h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '12px', padding: wb ? '11px 15px' : '7px 12px', border: wb ? '2.5px solid #2f5fd0' : '2px dashed #8a8478', borderRadius: '12px', background: wb ? '#eef2fb' : '#faf8f2' } },
+      wb ? h('span', { style: { font: "700 15px 'Gaegu',cursive", color: '#2f5fd0' } }, '👋 Welcome back') : null,
+      wb ? h('span', { style: { font: "400 13px 'Gaegu',cursive", color: '#3a4a6a', flex: 1, minWidth: '240px' } }, 'We didn’t hear from you Tue–Thu. Calories (weekly) & B12/iron (~30-day) roll over, so a short gap is fine — we won’t over-correct. Only protein/sugar reset daily, with no back-debt.') : null,
+      wb ? h('button', { onClick: () => this.toggleWelcomeBack(), style: { font: "700 13px 'Gaegu',cursive", padding: '5px 11px', border: '2px solid #2a2a28', borderRadius: '9px', background: '#2a2a28', color: '#fff', cursor: 'pointer' } }, 'Followed the plan') : null,
+      wb ? h('button', { onClick: () => this.toggleWelcomeBack(), style: { font: "700 13px 'Gaegu',cursive", padding: '5px 11px', border: '2px solid #2a2a28', borderRadius: '9px', background: '#fff', cursor: 'pointer' } }, 'Ate out') : null,
+      wb ? h('button', { onClick: () => this.toggleWelcomeBack(), style: { font: "700 13px 'Gaegu',cursive", padding: '5px 11px', border: '2px solid #2a2a28', borderRadius: '9px', background: '#fff', cursor: 'pointer' } }, 'Log it') : null,
+      wb ? h('button', { onClick: () => this.toggleWelcomeBack(), title: 'dismiss', style: { font: "700 13px 'Gaegu',cursive", padding: '5px 9px', border: 'none', borderRadius: '9px', background: 'transparent', color: '#7a746a', cursor: 'pointer' } }, '✕') : null,
+      wb ? null : h('button', { onClick: () => this.toggleWelcomeBack(), title: 'Demo: simulate reopening after a few quiet days', style: { font: "700 13px 'Gaegu',cursive", padding: '5px 11px', border: '2px solid #2a2a28', borderRadius: '9px', background: '#fff', cursor: 'pointer' } }, '👋 returning after a gap?'));
+
     return {
       isGrid: this.state.tab === 'grid', isDash: this.state.tab === 'dash',
       goGrid: () => this.setState({ tab: 'grid' }), goDash: () => this.setState({ tab: 'dash' }),
@@ -1580,7 +1639,6 @@ class Component extends DCLogic {
       usualFirstEl,
       planStateEl,
       welcomeBackEl,
-      ruleGalleryEl: null,
       notes: this.props.showAnnotations ?? true,
     };
   }
@@ -1588,7 +1646,11 @@ class Component extends DCLogic {
 </script>
 <script type="text/x-dc" id="logic-setup">
 class Component extends DCLogic {
-  state = { tab: 'form', bmr: { sex: 'F', age: 29, ht: 168, wt: 62, act: 1.55, goal: -110 }, favs: ['Murugan Idli', 'A2B', 'Sangeetha'] };
+  state = { tab: 'form', bmr: { sex: 'F', age: 29, ht: 168, wt: 62, act: 1.55, goal: -110 }, favs: ['Murugan Idli', 'A2B', 'Sangeetha'],
+    // ⚡ rule template gallery (§4.2): which suggested rules are on, and whether the
+    // fill-in-the-blank gallery is open + the slots the user has chosen.
+    ruleOn: { lunch: true, dinner: true, lowbudget: true, gym: true, travel: true, weekend: false },
+    galleryOpen: false, galleryScope: 0, galleryNudge: 0 };
 
   // ---- favourite restaurants + the repeat-ordering insight ----
   favPool() { return ['Murugan Idli', 'A2B', 'Sangeetha', 'Ponnusamy', 'Anjappar', 'Jr. Kuppanna', 'Saravana Bhavan']; }
@@ -1614,6 +1676,31 @@ class Component extends DCLogic {
         h('b', { style: { color: '#7a5a12' } }, '≈' + share + '%'),
         ' came from these ' + favs.length + '. So the agent boosts their signature dishes, but ',
         h('b', null, 'spaces them out'), ' (no repeat within 3 days) so favourites don’t become fatigue — and ⭐-stars them on the weekly plan.'));
+  }
+
+  // ---- ⚡ rule template gallery (§4.2): templates + toggles, not raw syntax ----
+  toggleRule(k) { this.setState((s) => ({ ruleOn: { ...s.ruleOn, [k]: !s.ruleOn[k] } })); }
+  toggleGallery() { this.setState((s) => ({ galleryOpen: !s.galleryOpen })); }
+  galScopes() { return ['💼 Work · lunch', '🏠 Home · dinner', '🏋 Gym day', '✈ Travel day', '📅 Weekend', '💸 low day-budget']; }
+  galNudges() { return ['cap ₹150', '+25 g protein', 'boost ♥ favourites', 'grab-and-go only', 'switch to Tight Week', 'unlock a treat']; }
+  cycleGal(key, listLen) { this.setState((s) => ({ [key]: ((s[key] || 0) + 1) % listLen })); }
+  // a small fill-in-the-blank gallery: "When [scope ▾] then [nudge ▾]" — chips, never raw logic
+  ruleGallery() {
+    const h = React.createElement;
+    if (!this.state.galleryOpen) return null;
+    const scopes = this.galScopes(), nudges = this.galNudges();
+    const sc = scopes[this.state.galleryScope % scopes.length], nu = nudges[this.state.galleryNudge % nudges.length];
+    const slot = (txt, onClick) => h('button', { onClick, style: { font: "700 13px 'Gaegu',cursive", padding: '5px 11px', border: '2px solid #2a2a28', borderRadius: '8px', background: '#fff', cursor: 'pointer' } }, txt + ' ▾');
+    return h('div', { style: { marginTop: '9px', padding: '11px 13px', border: '2px solid #b8702a', borderRadius: '11px', background: '#fbf6ea' } },
+      h('div', { style: { font: "700 13px 'Gaegu',cursive", color: '#9a5e1f', marginBottom: '7px' } }, 'Template gallery ', h('span', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, '— fill in the blanks; pick from chips, no syntax to write')),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+        h('span', { style: { font: "700 11px 'Gaegu',cursive", color: '#9a5e1f', letterSpacing: '1px' } }, 'WHEN'),
+        slot(sc, () => this.cycleGal('galleryScope', scopes.length)),
+        h('span', { style: { font: "700 14px 'Gaegu',cursive", color: '#b8702a' } }, '→'),
+        h('span', { style: { font: "700 11px 'Gaegu',cursive", color: '#9a5e1f', letterSpacing: '1px' } }, 'THEN'),
+        slot(nu, () => this.cycleGal('galleryNudge', nudges.length)),
+        h('button', { onClick: () => this.toggleGallery(), style: { font: "700 13px 'Gaegu',cursive", padding: '5px 12px', border: '2px solid #2a2a28', borderRadius: '9px', background: '#2a2a28', color: '#fff', cursor: 'pointer' } }, '✓ add rule')),
+      h('div', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a', marginTop: '8px' } }, 'A rule can never override a 🔒 lock. Most rules are auto-derived from your calendar & locks — you rarely author one.'));
   }
 
   // ---- BMR / TDEE / daily target, computed from the user's OWN numbers (Mifflin–St Jeor) ----
@@ -1743,6 +1830,8 @@ class Component extends DCLogic {
       nutritionWeekEl: this.nutritionWeek(150), nutritionWeekMobEl: this.nutritionWeek(92),
       proteinDistEl: this.proteinDist(),
       bmrEl: this.bmrPanel(), favsEl: this.favsPanel(),
+      ruleGalleryEl: this.ruleGallery(),
+      openGallery: () => this.toggleGallery(),
       bmrTargetLabel: 'Target ' + c.target.toLocaleString() + ' kcal · ' + c.protein + 'g protein',
       notes: this.props.showAnnotations ?? true,
     };
