@@ -54,11 +54,24 @@ Mode weights (`config.MODE_WEIGHTS`): **Comfort** cranks `taste`, **Tight Week
 | Type | Constraint | Where |
 |---|---|---|
 | **Hard — selection** | `Σ_i x[s,i] = 1` ∀ s | one option per session |
-| **Hard — budget** | `Σ cost·x ≤ weekly_budget` | the ₹ ceiling |
-| **Hard — cook cap** | `Σ cook ≤ 6 / week` | realism (`MAX_COOK_PER_WEEK`) |
-| **Hard — variety** | `Σ x[same dish] ≤ 2 / week` | `MAX_ITEM_REPEAT` |
+| **Hard — budget** | `Σ cost·x ≤ weekly_budget` | user-set / recommender-proposed ₹ ceiling (§5) |
+| **Hard — cook cap** | `Σ cook ≤ cook_cap` | **user value**; `MAX_COOK_PER_WEEK = 6` is only the cold-start default |
+| **Hard — variety** | `Σ x[same dish] ≤ repeat_cap` | **user value**; `MAX_ITEM_REPEAT = 2` is only the cold-start default |
 | **Hard — pre-filters on `C_s`** | allergens, diet, ★ rating floor, fasting window, serviceability, calendar travel / festival suspension | candidates removed *before* scoring |
 | **Soft — objective terms** | nutrition, taste, health, carbon, surge, weather, festival bias | the weighted sum |
+
+> **No hardcoded caps — every limit above is a *user value with a computed default*, not a fixed
+> constant.** `weekly_budget` is set by the user or proposed by the budget recommender (§5); the
+> cook/repeat caps default to 6/2 but are editable per user; the nutrition target is personalised
+> from BMR (§3). The constants in code (`MAX_COOK_PER_WEEK`, `MAX_ITEM_REPEAT`, the seed kcal/macro
+> numbers) are **cold-start priors that entered/learned data replaces** (§10) — never a ceiling the
+> user can't move.
+>
+> **Medical = exclude *and* instruct.** Hard rules drop genuinely unsafe items (diabetes → remove
+> >20 g-sugar dishes). But many dishes are safe *with a request*, so the agent also attaches
+> **order-time special instructions** ("no added sugar", "less salt", "no mayo") to the Swiggy cart —
+> keeping adjustable dishes in the candidate set instead of over-pruning the menu. Exclusion is the
+> floor; the kitchen instruction is the refinement.
 
 ### 1.4 The honest read of "maximise nutrition while minimising cost"
 
@@ -155,6 +168,21 @@ today isn't lost — it dips tomorrow's allowance or banks a credit and queues a
 meal. So:  `effective_target = TDEE + goal + Σ(context modifiers) + manual_nudge`,
 rendered as the little equation the BMR panel already shows.
 
+### 3.1 Returning after a gap — reconcile, don't assume; don't over-correct
+
+A user who's been away for days reopens to a model that **only knows what it observed**:
+orders we actually placed + what they logged (`intake.py`). For silent days the agent
+**does not invent adherence** — it shows the gap and a one-tap reconcile: *"Didn't hear
+from you Tue–Thu — followed the plan? [yes · ate out · log it]."*
+
+And it **must not panic-correct roll-over nutrients.** Calories (weekly) and micros like
+B12/iron (~30-day) sit on long clocks (§2.1), so a short gap barely moves them — no
+catch-up pile-on. Only daily-clock items (protein, sugar/sodium caps) reset, with no
+back-debt. On reopen, run a **reconcile + re-anchor** pass: mark unknown days *unknown*
+(not zero, not full), recompute the rolling windows, resume normally, and nudge **only**
+if a long-window nutrient is genuinely drifting. Over-suggesting "repair" after a quiet
+week is exactly the failure mode §2.1 exists to prevent.
+
 ---
 
 ## 4. Control taxonomy — the fix for "too many sliders"
@@ -190,6 +218,23 @@ settings + "slider fatigue." Replace with:
 Net: **5 priority sliders → 1 mode + 2 optional leans**, and the whole Setup
 collapses to **Locks / Targets / Dials / Rules**.
 
+### 4.2 Authoring ⚡ rules — templates, not syntax
+
+A blank `WHEN → THEN` editor is too much for most users, so almost no one should ever
+write one:
+
+- **Auto-derived (the default).** Most rules come for free from the calendar + locks —
+  🏋 gym day → `+25 g protein`, ✈ travel → grab-and-go only, 📅 weekend band. The user
+  authors *nothing*; they appear as toggleable suggestions.
+- **Template gallery (for custom).** `＋ add rule` opens fill-in-the-blank templates —
+  *"When [scope ▾] then [nudge ▾]"* with chips/dropdowns for the slots, never raw logic.
+  Scopes: area · budget band · calendar life-event. Nudges: a target bump, a mode flip,
+  a channel restriction.
+- A rule **can never override a 🔒 lock** (enforced, not just convention).
+
+So the prefilled rows in the wireframe are **"suggested rules you can toggle,"** not an
+authoring burden.
+
 ---
 
 ## 5. Budget recommender (new) — inverse optimization
@@ -222,6 +267,32 @@ Then show the recommendation as a **trade-off**, not a number:
   it sharpens the model and de-risks future novelty. Frame as a variable-reward loop
   (the Feast Fund / surprise mechanic, `ROADMAP §5`): "Trying something new? Rate it → I learn."
 
+### 5.2 Usual-first: minimal substitution, and the infeasible case
+
+The plan **starts from the usual basket** and the optimizer makes the *fewest*
+substitutions needed to clear the locks and approach the targets — keeping as much
+"usual" as possible and **showing the swap count** ("kept 5 of your usuals · swapped 2
+to hit protein"). Substitution distance is itself a soft cost: the solver prefers a
+familiar pick unless a swap buys real goal-fit.
+
+When even maximal substitution *within the favourites* can't reach the goal (e.g. every
+favourite outlet is low-protein under the cap), the plan does **not** silently miss or
+silently fail — it raises the **conflict-prompt** (`conflictEl`) as a three-way choice:
+
+> *"Your usual places can't hit 60 g protein under ₹X — add one new high-protein outlet
+> (✦), raise the budget to ₹Y, or relax the target to Z."*
+
+The user picks which constraint gives. This is the §2 "what's allowed to give" decision
+surfaced at the exact moment it binds.
+
+### 5.3 The recommended budget = the knee, framed by mode
+
+The mode picks the **default band** (Tight → Floor · Balanced → Usual · Comfort →
+Variety), rendered as *"you're on Balanced, so ≈ ₹1,650."* But the number is shown as a
+**knee on the spend axis** — the point past which marginal ₹ stops buying meaningful
+goal-fit — with the trade-off both ways: *"+₹300 buys 2 new dishes · −₹230 means a cook
+day or a skip."* The recommendation is a **slope**, not a guess.
+
 ---
 
 ## 6. Information architecture & card density
@@ -250,6 +321,39 @@ re-clutters exactly what was decompressed. Two fixes so "hidden" ≠ "undiscover
 - **Badge state on the face** when an add-on is non-default (a small 🥤 / 🌶 when a
   drink or spicy level is already applied) — applied state is visible without expanding.
 - **Reveal inline on intent** (hover / long-press / tap ▾), not always-on.
+
+### 6.2 Week-level interactions: one pick, pin-and-re-spin, the extra-order hatch
+
+- **One pick per slot, not four.** The card shows the optimizer's single choice + **↻ spin**
+  (next-best) + **menu ▾** (the ranked list — where the "4 best" actually live, on intent).
+  Surfacing four alternatives per slot *is* the density problem (audit H1).
+- **Pin & re-optimize the rest.** The freeze instinct belongs at the week level: the user
+  **🔒 pins** the slots they like, then **"re-optimize unpinned"** re-solves everything else
+  around them (pinned = fixed solver variables). Spinning one slot never disturbs a locked
+  favourite.
+- **The extra-order escape hatch.** Autopilot still needs an off-plan exit: a **＋ add item**
+  on any card/day (menu picker → off-plan order) and a global **＋ order now** one-off (the
+  recommender's `N = 1`). Both **write to the budget + nutrition ledger** (`intake.py`) so the
+  burn-down and targets stay truthful — an off-plan order the model can't see makes future
+  suggestions drift.
+- **Chaining across outlets = separate orders, shown honestly.** One Swiggy cart = one outlet,
+  so "add from another place" creates a **second linked order** with its **own delivery fee + ETA**
+  surfaced — never hidden as if it were one basket.
+
+### 6.3 Day awareness & plan states (today · skip · over-cap)
+
+- **Highlight Today.** A returning user must read "where am I" instantly: accent the **current
+  day** (border + "Today" label) and the **current meal window**; de-emphasise past days. (The
+  grid is otherwise day-agnostic — the reported "user may not know what day it is.")
+- **Skip = de-emphasise, don't blur.** A skipped session renders **greyed + dashed outline at
+  ~0.5 opacity** with a small ⊘ tag (blur reads as "broken/loading"). It stays legible as
+  "not eating," with a faint tap-to-plan affordance.
+- **Over-cap = located + actionable, not a banner.** Red-outline the **specific** offending day,
+  draw the burn-down crossing the cap line in red, and attach a one-line recovery: *"₹230 over —
+  drop a session, swap 2 picks, or raise the cap ▸."* Keep the plan visible; never a full
+  blocking overlay.
+- These join the missing **loading / empty / error** states (audit L1) — every state gets one
+  clear recovery action.
 
 ---
 
@@ -319,6 +423,44 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
     today's distribution, sugar a daily cap.
 13. ✅ **Protein evenness in the solve** — a day-level slack term penalising
     backloading (per-meal target = daily ÷ meals-that-day), `SMARTPLATE_PROTEIN_EVEN`.
+14. ✅ **Usual-first minimal substitution + infeasible conflict-prompt** (§5.2) — the grid
+    shows a "kept N of your usuals · swapped M" line, and the over-cap `conflictEl` offers the
+    three-way choice (✦ add new outlet · raise budget · relax target). *(Prototype; illustrative
+    counts.)*
+15. ✅ **Pin & re-optimize-the-rest**; one-pick-+-spin card; **＋ extra-order** hatch that
+    writes to the ledger (§6.2) — `togglePin`/`reoptimiseUnpinned` (pinned slots stay fixed),
+    `addExtra` off-plan orders add to spend + kcal. Card face stays one-pick + ↻ spin + menu ▾.
+16. ✅ **Drink/add-on priced per outlet** (hide when the outlet serves none) — `drinkInfo(m)`
+    derives `{available, price ₹30–60, kcal ~120–180}` per outlet; replaces the hardcoded
+    ₹40 / 150 kcal (§6.1). Murugan Idli serves none → 🥤 button hidden, toggle is a no-op.
+17. ✅ **⚡ rule template gallery + auto-derived rules** (§4.2) — Setup ⚡ Rules reframed as
+    "suggested rules you can toggle" (mostly auto-derived); **＋ add power rule** opens a
+    fill-in-the-blank *When [scope ▾] → then [nudge ▾]* gallery, not raw syntax. *(Illustrative gallery.)*
+18. ✅ **Day awareness + plan states** — Today highlight (accent + TODAY tag, desktop column +
+    mobile day-picker), past days de-emphasised, skip = greyed/dashed @ ~0.5 opacity + ⊘ tag,
+    located over-cap red-outline + recovery line, all-skip empty-state note, **plus the
+    optimising skeleton + provider-down/nothing-serviceable error (↻ Retry · switch-area)** —
+    the full L1 state set, reachable via a demo state switcher (§6.3, audit L1).
+19. ✅ **Returning-user reconcile + re-anchor**; no over-correction of roll-over nutrients (§3.1)
+    — a dismissible "welcome back" banner (demo toggle) offers [followed the plan · ate out · log it]
+    and states calories (weekly) / B12·iron (~30-day) roll over so a short gap won't over-correct.
+20. ✅ **Two form-factor layouts** (desktop matrix · mobile day-picker) — audit F3. Both mock
+    frames now reflect every new interaction (pin · extra-order · today · skip · drink-per-outlet).
+
+**Backend counterparts (the engine side of the above, `smartplate/`, `pytest` green):**
+
+21. ✅ **Usual-first in the solver** (§5.2) — every solve now reports a `usual_first`
+    diagnostic (`usual_kept` / `new_swapped` / `delivery_total`) off each pick's familiarity
+    (`domain/fatigue`), and an **optional soft preference** (`config.USUAL_FIRST`, default off)
+    adds a small premium to novel picks so the planner keeps the user's usuals unless a swap
+    buys goal-fit. `kernel/optimizer._diagnostics` + `_delivery_candidate`.
+22. ✅ **Returning-after-a-gap reconcile** (§3.1) — `ledger.reconcile_after_gap`: unknown days
+    stay **unknown** (never imputed as zero or on-plan), the rolling view recomputes over known
+    days only, and roll-over nutrients aren't catch-up corrected after a short gap — a nudge
+    fires *only* on a genuine sustained drift.
+23. ✅ **Medical exclude-AND-instruct** (§1.3, §4.3) — `allergens.order_instructions`: hard
+    exclusion stays the floor, and a *safe* item carries order-time cart notes ("no added
+    sugar", "less salt") only when relevant to that dish, so the menu isn't over-pruned.
 
 ---
 
@@ -377,6 +519,41 @@ Tight Week minimises **cost** and lets nutrition give (protein floor holds, kcal
 widens); Balanced minimises **deviation from both** set-points; Comfort maximises
 **nutrition-fit + taste** with budget as the only hard ceiling. The recommender's
 Floor / Usual / Variety bands line up with these three.
+
+---
+
+## 11. Data sources, cold-start & platform boundaries
+
+**Where the signal comes from — and where it doesn't.** Do *not* architect around pulling a
+user's historical Swiggy orders: platforms treat that as confidential and expose it (if at all)
+only via explicit user-consented OAuth at production. Two dependable sources instead:
+
+1. **Onboarding declaration** — a few **favourite outlets** (the ~4–6 "consideration set" the
+   code already models), plus the locks (allergens / medical / diet) and the BMR inputs. *Not*
+   exact past orders — too much to type, and unverifiable.
+2. **First-party behaviour** — every order we place + each skip / spin / rating. *This* is the
+   moat; it accrues from day one and the Taste-DNA model replaces the cold-start priors with it.
+
+Cold-start "usual" pool = popularity-weighted picks from the declared favourites near the ★ floor
+(`recommender.py`). If a user later **consents** to connect history at production, treat it as a
+warm-start bonus ("from your history" section) — never a requirement.
+
+**Taste DNA needs no LLM.** It's statistical — per-user affinity + variance + the `fatigue.py`
+recency model. The loop is suggest → rate / spin / order → update affinity + recency → next
+suggestion. The optional LLM brain (`FEASIBILITY §2`) is NL-editing polish, off by default.
+
+**Scheduling is session-based and app-driven.** The atomic unit is a session (day × meal window);
+SmartPlate's own kernel scheduler fires each order at its trigger — it does **not** rely on a
+Swiggy "schedule order" primitive. Production caveat (`FEASIBILITY §4`): if ToS forbids unattended
+placement, the trigger degrades from silent auto-order to **propose-and-confirm** (already a UI
+option: *Agent picks · I approve · Edit each*). For the build, everything runs against the **local
+MCP on `127.0.0.1`**; real access is a production gate, not a blocker.
+
+**"Will the platform call us biased?"** is a relationship / ToS question, not a technical one, and
+is mitigated the same way: recommendations are driven purely by the user's own constraints and are
+**explainable** (the per-decision log already exists), never pay-for-placement; and SmartPlate is
+framed as demand-generation + retention for the platform. Same production-gate bucket as the
+scheduled-order ToS clause.
 
 ---
 

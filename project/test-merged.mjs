@@ -147,9 +147,14 @@ const unit = wc.num(tueD().cost), unitKcal = wc.kcalFor(tueD().item, 'DELIVER');
 ok(wc.eff(tueD(), '1-D').cost === unit, `1 portion = unit price ₹${unit}`);
 wc.stepQty(1, 'D', 1);
 ok(wc.eff(tueD(), '1-D').cost === unit * 2, `×2 portions → ₹${unit * 2}`);
+const di = wc.drinkInfo(tueD()); // per-outlet drink: price/kcal derived from the meal, not a literal 40/150
+ok(di.available && di.price >= 30 && di.price <= 60, `TUE dinner outlet serves a drink, priced per-outlet ₹${di.price}`);
 wc.toggleDrink(1, 'D');
-ok(wc.eff(tueD(), '1-D').cost === unit * 2 + 40, `+ drink adds ₹40 → ₹${unit * 2 + 40}`);
-ok(wc.eff(tueD(), '1-D').kcal === unitKcal * 2 + 150, `kcal scales with portions + drink (${unitKcal * 2 + 150})`);
+ok(wc.eff(tueD(), '1-D').cost === unit * 2 + di.price, `+ drink adds the per-outlet price ₹${di.price} → ₹${unit * 2 + di.price}`);
+ok(wc.eff(tueD(), '1-D').kcal === unitKcal * 2 + di.kcal, `kcal scales with portions + per-outlet drink kcal (${unitKcal * 2 + di.kcal})`);
+// some outlets serve NO drink → button hidden, toggle is a no-op (Murugan Idli is a tiffin counter)
+const noDrink = wc.optsForCtx(wc.baseDays()[0], 'B', wc.activeArea(0, 'B'))[0]; // MON breakfast = Murugan Idli
+ok(wc.drinkInfo(noDrink).available === false, 'an outlet exists that serves no drink (Murugan Idli) — 🥤 button hidden');
 const before = wc.renderVals().spent;
 wc.stepQty(1, 'D', 1); // ×3
 ok(wc.renderVals().spent === before + unit, 'whole-week spend tracks the extra portion');
@@ -200,6 +205,84 @@ ok(setup.innerHTML.includes("doesn't bank"), 'protein framed as DAILY (not a wee
 ok(/kcal banked/.test(setup.innerHTML), 'calories show an explicit banked credit');
 ok(!/14 g this week/.test(setup.innerHTML), 'old weekly protein-debt framing removed');
 ok(/Protein across the day/.test(setup.innerHTML), 'per-meal protein distribution viz present');
+
+console.log('\n[weekly] (15/§6.2) pin & re-optimise-the-rest; off-plan extra-order hatch');
+window.__dc.activate('screen-weekly');
+wc.setState({ tab: 'grid', picks: wc.defaultSkips(), pins: {}, extras: [] });
+wc.togglePin(1, 'D'); // pin TUE dinner (Paneer)
+ok(wc.isPinned('1-D') && wc.pinnedCount() === 1, 'a slot can be 🔒 pinned (tracked in state)');
+const pinnedPickBefore = wc.state.picks['1-D'] || 0;
+const unpinnedPickBefore = wc.state.picks['0-B'] || 0;
+wc.reoptimiseUnpinned();
+ok((wc.state.picks['1-D'] || 0) === pinnedPickBefore, 're-optimise leaves the pinned slot untouched');
+ok((wc.state.picks['0-B'] || 0) !== unpinnedPickBefore, 're-optimise re-rolls an unpinned, non-skip slot');
+ok(weekly.innerHTML.includes('🔒'), 'pin control renders on the grid');
+const spentNoExtra = wc.renderVals().spent;
+wc.addExtra('Order now (one-off)', 160, 480);
+ok(wc.state.extras.length === 1, 'an off-plan extra order is tracked in state');
+ok(wc.renderVals().spent === spentNoExtra + 160, 'extra order adds to whole-week spend (budget burn-down truthful)');
+ok(wc.extrasKcal() === 480, 'extra order adds to the kcal ledger');
+ok(weekly.innerHTML.includes('＋ order now'), 'global ＋ order now affordance present');
+wc.setState({ pins: {}, extras: [], picks: wc.defaultSkips() });
+
+console.log('\n[weekly] (18/§6.3) day awareness: Today highlight + skip de-emphasis');
+ok(/TODAY/.test(weekly.innerHTML), 'Today is tagged in the grid');
+ok(weekly.innerHTML.includes('opacity:0.5'), 'skip cells render de-emphasised at ~0.5 opacity (not blurred)');
+ok(weekly.innerHTML.includes('⊘'), 'skip cells carry a ⊘ tag');
+
+console.log('\n[weekly] (14/§5.2) usual-first framing + infeasible three-way conflict');
+ok(/kept \d+ of your usuals/.test(weekly.innerHTML), 'usual-first "kept N · swapped M" framing present');
+// force over-cap to surface the conflict prompt's three-way choice
+wc.setState({ picks: {}, qty: { '0-D': 9, '1-D': 9, '2-D': 9, '3-D': 9, '4-L': 9 } });
+ok(wc.renderVals().left < 0, 'picks pushed over the ₹2,000 cap');
+ok(/add new outlet/.test(weekly.innerHTML) && /raise budget/.test(weekly.innerHTML) && /relax target/.test(weekly.innerHTML), 'infeasible conflict offers add-outlet · raise-budget · relax-target');
+wc.setState({ picks: wc.defaultSkips(), qty: {} });
+
+console.log('\n[weekly] (19/§3.1) returning-after-a-gap reconcile banner');
+ok(/returning after a gap/.test(weekly.innerHTML), 'a control to surface the welcome-back banner is present');
+wc.toggleWelcomeBack();
+ok(/Welcome back/.test(weekly.innerHTML) && /over-correct/.test(weekly.innerHTML), 'welcome-back banner explains roll-over nutrients won\'t over-correct');
+ok(/Followed the plan/.test(weekly.innerHTML) && /Ate out/.test(weekly.innerHTML) && /Log it/.test(weekly.innerHTML), 'reconcile offers followed-the-plan · ate-out · log-it');
+wc.toggleWelcomeBack();
+
+console.log('\n[setup] (17/§4.2) ⚡ rule template gallery — templates + toggles, not syntax');
+window.__dc.activate('screen-setup');
+sc.setState({ tab: 'form' });
+ok(/suggested rules you can toggle/.test(setup.innerHTML), 'rules reframed as suggested toggles');
+ok(/auto-derived/.test(setup.innerHTML), 'note that most rules are auto-derived from calendar/locks');
+ok(!setup.innerHTML.includes('Template gallery'), 'gallery is closed by default');
+sc.toggleGallery();
+ok(/Template gallery/.test(setup.innerHTML) && /WHEN/.test(setup.innerHTML) && /THEN/.test(setup.innerHTML), 'gallery opens to a fill-in-the-blank When→Then template');
+ok(/no syntax to write/.test(setup.innerHTML), 'gallery reads as templates, not raw logic');
+sc.toggleGallery();
+
+console.log('\n[weekly] (L1/§6.3) optimising skeleton + provider-down error states, each with recovery');
+window.__dc.activate('screen-weekly');
+wc.setState({ tab: 'grid', picks: wc.defaultSkips() });
+ok(!/Optimising your week/.test(weekly.innerHTML), 'no optimising skeleton in the default live state');
+wc.setPhase('optimising');
+ok(/Optimising your week/.test(weekly.innerHTML), 'optimising… skeleton state renders');
+wc.setPhase('error');
+ok(/reach the kitchen/.test(weekly.innerHTML) && /Retry/.test(weekly.innerHTML), 'provider-down error state carries a ↻ Retry recovery action');
+wc.setPhase('live');
+
+console.log('\n[weekly] (C2) main tabs are colour-coded (grid green · dashboard blue), active filled');
+window.__dc.activate('screen-weekly');
+wc.setState({ tab: 'grid' });
+const gridTab = btnByText(weekly, 'Calendar grid');
+ok(gridTab && /#2f6d4a/.test(gridTab.getAttribute('style')), 'active Calendar-grid tab is filled green');
+const dashTabInactive = btnByText(weekly, 'Command dashboard');
+ok(dashTabInactive && /#2f5fd0/.test(dashTabInactive.getAttribute('style')), 'inactive Command-dashboard tab carries its blue');
+ok(dashTabInactive.getAttribute('style').includes('background:#eef2fb'), 'inactive dashboard tab is outline (light), not filled');
+
+console.log('\n[setup] (L2) Taste DNA cold-start "still learning" state instead of faked history');
+window.__dc.activate('screen-setup');
+sc.setState({ tab: 'dna', coldStart: false });
+ok(/142 orders/.test(setup.innerHTML) && !/Still learning/.test(setup.innerHTML), 'trained model shows history by default');
+sc.toggleColdStart();
+ok(/Still learning/.test(setup.innerHTML) && /building your DNA/.test(setup.innerHTML), 'new-user view shows a "still learning — building your DNA" band');
+ok(!/142 orders/.test(setup.innerHTML), 'fabricated "142 orders" precision is hidden for a week-1 user');
+sc.setState({ coldStart: false });
 
 console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
 process.exit(fails.length ? 1 : 0);

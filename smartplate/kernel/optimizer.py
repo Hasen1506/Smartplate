@@ -131,12 +131,18 @@ def _delivery_candidate(user, plan, session, item, ctx):
     nutri = nutrition.penalty(user, meal, item, tol=ctx["nutri_tol"])
     hp = health.protein_penalty(user, item)
     cpen = carbon.penalty(item)
+    # usual-first (§5.2): a familiar pick is the "usual"; a novel one pays a small soft
+    # premium when USUAL_FIRST is on, so the planner keeps the user's usuals unless a
+    # swap buys goal-fit. `is_usual` drives the kept/swapped diagnostic (always computed).
+    novel = fatigue.novelty(item)
     return {
         "kind": "delivery",
         "restaurant_id": item["restaurant_id"], "restaurant_name": item["restaurant_name"],
         "item_id": item["id"], "item_name": item["name"], "rating": item["restaurant_rating"],
         "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3),
         "time_shift": time_shift, "flaky": item.get("flaky", 0), "rating_pen": _rating_pen(user, item),
+        "is_usual": not fatigue.is_novel(item), "familiarity": round(1.0 - novel, 4),
+        "usual_pen": round(config.USUAL_FIRST_W * novel, 4) if config.USUAL_FIRST == "on" else 0.0,
         "novelty_bonus": round(config.VARIETY_NUDGE_W * fatigue.novelty(item) * ctx.get("variety_frac", 0.0), 4),
         "taste": taste, "sentiment": senti, "nutri": nutri, "health": hp, "carbon_pen": cpen,
         "carbon_kg": carbon.estimate(item), "weather_cond": cond,
@@ -245,6 +251,7 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
         + w["surge"] * surge_premium
         + effort
         + cand.get("rating_pen", 0.0)
+        + cand.get("usual_pen", 0.0)             # ↑ objective for novel ⇒ usual picks preferred (when usual-first on)
         - cand.get("novelty_bonus", 0.0)         # ↓ objective ⇒ novel picks preferred (when nudge on)
         + cand["weather_bias"] + cand["festival_bias"],
         5,
@@ -344,8 +351,15 @@ def _diagnostics(user: dict, decisions: list[dict]) -> dict:
         binding = "nutrition (calories)"
     else:
         binding = "comfortable"
+    # usual-first surface (§5.2): of the delivery picks, how many are the user's
+    # usuals vs new swaps — the "kept N · swapped M" line the plan shows.
+    delivery = [d for d in decisions if d.get("chosen_kind") == "delivery"]
+    kept = sum(1 for d in delivery if d.get("is_usual"))
+    usual_first = {"usual_kept": kept, "new_swapped": len(delivery) - kept,
+                   "delivery_total": len(delivery)}
     return {"spend": spend, "budget": round(budget, 2),
-            "headroom": round(budget - spend, 2), "binding": binding, "nutrition": sf}
+            "headroom": round(budget - spend, 2), "binding": binding, "nutrition": sf,
+            "usual_first": usual_first}
 
 
 def _persist_decisions(plan, user, sessions, active, cand_map, x, ctx):
@@ -418,6 +432,10 @@ def _write_decision(plan, user, session, chosen, ctx):
             "reasons": reasons, "nutrition": chosen.get("nutrition", {}),
             "time_shift": chosen.get("time_shift"), "recipe_key": chosen.get("recipe_key"),
             "restaurant_name": chosen.get("restaurant_name"), "rating": chosen.get("rating", 0),
+            "is_usual": chosen.get("is_usual"),
+            "instructions": (allergens.order_instructions(
+                user, {**(chosen.get("nutrition") or {}), "tags": chosen.get("tags", [])})
+                if chosen.get("kind") == "delivery" else []),
             "status": "planned"}
 
 

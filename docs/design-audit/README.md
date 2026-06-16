@@ -63,6 +63,14 @@ fix this cycle · P2 = should fix · P3 = polish.
 | **5** | **A real symbol legend** at the top of the grid: ▢ ⌂ ⊘, ↻ spin, menu ▾, 🏠/💼/✈ area, ⭐ usual / ✦ new — spelled out once, where the dense cards are. | Icon‑only controls with no on‑screen key (old *V3*) → users won't attempt edits they can't decode. | **U, C** |
 | **6** | **Removed two redundant config views.** Setup had **three** ways to express the *same* rules — Settings form, "Guardrails & dials", and "Plain‑English program". Cut the latter two from the UI; Setup is now **Settings form · Nutrition · Taste DNA**. | Three parallel editors of one config is confusing and triples the maintenance/consistency surface. | **U** |
 | **7** | **Nutrition section re‑framed.** Added a top‑to‑bottom reading guide (① target → ② week → ③ per‑nutrient → ④ when you drift) and split the two bottom cards under one honest header: **a nutrient gap (we order specific dishes) vs boredom (we keep it fresh)** — two different problems, two different fixes. | The repair‑meals and variety cards looked identical and their relationship (the user's "how do I structure this?") was unstated. | **U** |
+| **8** | **Density decompressed + week‑level controls (resolves H1).** Each meal card keeps one pick + ↻ spin / menu ▾, now with a **🔒 pin** toggle; the rail gains **↻ Re‑optimise unpinned** (re‑rolls only non‑pinned slots) and a **＋ order now** off‑plan hatch (＋ item per card) that writes to the budget + kcal ledger. | The 4‑alternatives‑per‑slot density problem (H1); freeze/extra‑order had no home. | **U, C** |
+| **9** | **Day awareness + plan states (resolves H2; advances L1).** Today is accented (border + TODAY tag) in the desktop column and the mobile day‑picker; past days de‑emphasised; **skip = greyed/dashed @ ~0.5 opacity + ⊘ tag** (not blurred); over‑cap days are red‑outlined with a located recovery line; an all‑skip week shows an empty‑state note. | No "where am I" cue (H2); missing skip/empty/over‑cap states (L1). | **U, T** |
+| **10** | **Drink/add‑on priced per outlet.** The hardcoded `+₹40 / 150 kcal` drink became a per‑outlet `drinkInfo(m)` (₹30–60 · ~120–180 kcal); outlets that serve none hide the 🥤 button. | A fake flat add‑on misrepresents the cart and the kcal ledger. | **U, T** |
+| **11** | **⚡ Rules = suggested toggles + a template gallery (resolves the authoring‑burden read).** Rows reframed as auto‑derived suggestions you toggle; **＋ add power rule** opens a fill‑in‑the‑blank *When [scope ▾] → then [nudge ▾]* gallery, not raw syntax. | A blank WHEN→THEN editor implied everyone must author logic. | **U** |
+| **12** | **Returning‑after‑a‑gap reconcile + usual‑first framing.** A dismissible "welcome back" banner ([followed the plan · ate out · log it]) states roll‑over nutrients won't over‑correct; the plan summary shows "kept N usuals · swapped M", and the over‑cap conflict offers the three‑way ✦ add‑outlet · raise‑budget · relax‑target choice. | Silent re‑anchoring after a gap; no usual‑first / infeasible surfacing. | **T, U** |
+| **13** | **Loading / error states (completes L1).** An **optimising…** skeleton, a **provider‑down / nothing‑serviceable error** with ↻ Retry + switch‑area recovery, and the all‑skip empty state — reachable via a demo state switcher on the grid. | An agent that orders & pays can't show silent success/failure; these were the last missing async states. | **T, U** |
+| **14** | **Weekly main tabs colour‑coded (resolves C2).** Kept Setup's nice per‑section colours and brought the plain Weekly tabs up to match — Calendar grid = green, Command dashboard = blue, active filled / inactive coloured‑outline. Nutrition/DNA left as‑is. | Plain weekly sub‑tabs vs colour‑coded Setup read as two unfinished styles. | **U** |
+| **15** | **Taste‑DNA cold‑start honesty (resolves L2).** A week‑1 toggle swaps the fabricated "142 orders · 38 skips" for a **"still learning · building your DNA · N signals"** band (desktop + mobile + the favourites insight). | Showing a new user confident history they never created erodes trust. | **T** |
 
 *Bigger items (density, loading/error states, cold‑start honesty, sticky approve bar) are
 recommendations only — §2–§3, §5–§6.*
@@ -73,17 +81,18 @@ recommendations only — §2–§3, §5–§6.*
 
 | ID | Sev | Hurts | Finding (evidence) | Specific fix |
 |----|-----|-------|--------------------|--------------|
-| **F3** | **P1** | U, T | **It still reads as a wireframe, not a product.** "lo‑fi wireframe · v1" badge, hand‑drawn type, side‑by‑side DESKTOP/MOBILE mock frames inside fake browser chrome (01–05). Fine for internal review; a real user shown this would not trust it with a credit card. | For the product build, strip the wireframe scaffolding: **one** responsive layout (not two mock frames), a product typeface for data, and drop the "wireframe" badge. |
-| **F4** | **P2** | U | **Two co‑equal views of the same week** — "Calendar grid" and "Command dashboard" (01–02) — with no guidance on which is "home". Power users like both; a first‑timer has to evaluate two layouts before doing anything. | Pick a **default** and make the other a toggle/"view as" — don't greet a new user with a fork. |
+| **F3** | **P1** | U, T | **It still reads as a wireframe, not a product.** "lo‑fi wireframe · v1" badge, hand‑drawn type, side‑by‑side DESKTOP/MOBILE mock frames inside fake browser chrome (01–05). Fine for internal review; a real user shown this would not trust it with a credit card. | For the product build, strip the wireframe scaffolding (fake browser chrome, hand‑drawn type, "wireframe" badge; product typeface for data). **Ship two form‑factor‑tailored experiences — a desktop app and a mobile app — instead of the side‑by‑side mock frames.** Each is designed for its device (desktop = the dense week‑matrix; mobile = the day‑picker flow), not one layout that merely reflows. *(Implementation can still be a single responsive codebase with two distinct breakpoint layouts — the requirement is two genuinely device‑specific designs, and the dual‑mock presentation goes away.)* **Progress this pass:** the two form‑factor mocks (desktop week‑matrix · mobile day‑picker) are now **genuinely complete and in sync** — every new interaction (🔒 pin, ↻ re‑optimise unpinned, ＋ order now/item, Today highlight, skip de‑emphasis, per‑outlet drink) is present in *both*, so they read as two tailored designs rather than one reflow. Stripping the wireframe scaffolding (fake chrome, hand‑drawn type, "wireframe" badge) is still the product‑build step. |
+| **F4** | **P2** *(deferred)* | U | **Two co‑equal views of the same week** — "Calendar grid" and "Command dashboard" (01–02) — with no guidance on which is "home". Power users like both; a first‑timer has to evaluate two layouts before doing anything. | Pick a **default** and make the other a toggle/"view as" — don't greet a new user with a fork. *(Product‑owner decision: keep both co‑equal for now — left as is.)* |
 
 ## 3. Navigation · hierarchy · consistency · states
 
 | ID | Sev | Hurts | Finding | Specific fix |
 |----|-----|-------|---------|--------------|
-| **H1** | **P1** | U, C | **Meal cards are still over‑dense.** Even now‑aligned, each cell stacks dish, outlet/₹/★, a −/×N/+ portion stepper, drink/spice, area chip + serviceability, ▢/⌂/⊘, and ↻ spin / menu ▾ (01). The 3‑second glance ("what / where / how much") competes with ~7 controls. | Progressive disclosure: default card = **dish · ₹ · status**; reveal portions/area/spin in a tap‑to‑open sheet. (Alignment fixed the *rows*; density is the remaining hierarchy problem.) |
-| **L1** | **P1** | T, U | **No loading / empty / error states.** The prototype renders synchronously from static data; there is no "optimising…", no "nothing serviceable to this area", no "provider down" (01–02). For an agent that **orders and pays**, silent success is as untrustworthy as silent failure. | Design *optimising* (skeleton), *empty* (new user / all‑skip week), and *error* (provider down, nothing serviceable, over‑cap) states, each with one clear recovery action. |
-| **L2** | **P2** | T | **Cold‑start is still faked.** Taste DNA shows "142 orders · 38 skips · 11 spins" and a full radar (05); a brand‑new user would see confident history they never created. | A "still learning — building your DNA" state for week 1; don't render precision before the data exists. (The Nutrition ledger already does this; mirror it in DNA.) |
-| **C2** | **P3** | U | Tab treatments differ (weekly sub‑tabs plain; Setup tabs colour‑coded). | Unify active‑tab styling across both screens. |
+| **H1** | ~~P1~~ **resolved** | U, C | **Meal cards are still over‑dense.** Even now‑aligned, each cell stacks dish, outlet/₹/★, a −/×N/+ portion stepper, drink/spice, area chip + serviceability, ▢/⌂/⊘, and ↻ spin / menu ▾ (01). The 3‑second glance ("what / where / how much") competes with ~7 controls. | Progressive disclosure: default card = **dish · ₹ · status**; reveal portions/area/spin in a tap‑to‑open sheet. (Alignment fixed the *rows*; density is the remaining hierarchy problem.) **Decision:** one pick + ↻ spin / menu ▾ (the 4 best live *in* menu ▾), **pin & re‑optimize‑the‑rest** at week level, and a **＋ extra‑order** hatch that writes to the ledger — `optimization-and-ux.md §6.2`. **Built this pass (§1.8): 🔒 pin + ↻ Re‑optimise unpinned + ＋ order now/＋ item.** |
+| **H2** | ~~P2~~ **resolved** | U | **No day awareness in the grid.** A returning user can't tell which column is *today* or which meal window is current. | Highlight **Today** (border + label) and the current window; de‑emphasise past days. *(Decision: `optimization-and-ux.md §6.3`.)* **Built this pass (§1.9): TODAY tag + accent on the desktop column and mobile day‑picker; past days dimmed.** |
+| **L1** | ~~P1~~ **resolved** | T, U | **No loading / empty / error states.** The prototype renders synchronously from static data; there is no "optimising…", no "nothing serviceable to this area", no "provider down" (01–02). For an agent that **orders and pays**, silent success is as untrustworthy as silent failure. | Design *optimising* (skeleton), *empty* (new user / all‑skip week), and *error* (provider down, nothing serviceable, over‑cap) states, each with one clear recovery action. **Decision:** skip = greyed + dashed @ ~0.5 opacity (not blur); over‑cap = red‑outline the *specific* day + red burn‑down + a located recovery line, not a blocking banner — `optimization-and-ux.md §6.3`. **Built this pass (§1.9, §1.13): all four states ship — optimising skeleton, provider‑down/nothing‑serviceable error (↻ Retry · switch‑area), all‑skip empty state, located over‑cap recovery; reachable via a demo state switcher.** |
+| **L2** | ~~P2~~ **resolved** | T | **Cold‑start is still faked.** Taste DNA shows "142 orders · 38 skips · 11 spins" and a full radar (05); a brand‑new user would see confident history they never created. | A "still learning — building your DNA" state for week 1; don't render precision before the data exists. (The Nutrition ledger already does this; mirror it in DNA.) **Built this pass (§1.15): a week‑1 toggle swaps the fabricated counts for a "still learning · building your DNA · N signals" band (desktop + mobile + the favourites insight).** |
+| **C2** | ~~P3~~ **resolved** | U | Tab treatments differ (weekly sub‑tabs plain; Setup tabs colour‑coded). | Unify active‑tab styling across both screens. **Built this pass (§1.14): kept Setup's colour‑coded sections; brought the Weekly main tabs up to match — Calendar grid = green, Command dashboard = blue, active filled / inactive coloured‑outline. Nutrition/DNA untouched.** |
 
 ## 4. The product model — answering the questions that drove this work
 
@@ -94,10 +103,11 @@ The model carries six concern layers, in priority order:
 
 1. **Hard safety (never violated, even in Survival mode):** allergens, medical conditions,
    diet, a ★ rating floor, and the budget cap. Filtered out *before* optimisation.
-2. **Nutrition targets (soft):** daily **kcal 2000 · protein 60 g · carbs 250 g · fat 65 g ·
-   sugar 40 g** by default (`domain/nutrition.py`), **personalised** by the BMR/TDEE
-   calculator (Mifflin–St Jeor) in *Setup → Nutrition*. Split per meal (kcal 25/40/35 for
-   B/L/D; protein **evenly**, because backloading protein into one meal is suboptimal).
+2. **Nutrition targets (soft, never hardcoded):** **personalised from the user's own BMR/TDEE**
+   (Mifflin–St Jeor, *Setup → Nutrition*). The kcal/macro numbers in `domain/nutrition.py`
+   (≈ kcal 2000 · protein 60 g · carbs 250 g · fat 65 g · sugar 40 g) are **cold‑start defaults
+   shown only until the user enters their numbers**, not fixed targets. Split per meal (kcal
+   25/40/35 for B/L/D; protein **evenly**, because backloading protein into one meal is suboptimal).
 3. **Health:** protein floor, veg servings/day, optional fasting window (`domain/health.py`).
 4. **Variety / recipe‑fatigue:** boredom is the #1 churn driver, so it's a tracked dial.
 5. **Budget:** nested day/week/month caps; underspend rolls forward as a visible banked credit.
@@ -134,6 +144,16 @@ A user's profile stores two lists — `allergens` (e.g. `["peanut"]`) and `medic
 *hard* caps in the ledger** (never averaged or credited away like calories). **To add a new
 condition:** add one lambda over item fields to `MEDICAL_RULES` and surface a 🔒 chip in
 *Settings form → Locks*.
+
+> **Exclude *and* instruct — don't over‑prune the menu.** Hard exclusion is the floor, not the
+> whole answer. Many dishes are safe *with a request*, so at order time the agent also attaches
+> **special instructions to the Swiggy cart** — *"no added sugar", "less salt / no extra salt",
+> "no mayo"* — keeping adjustable items in the candidate set instead of dropping every sweet/salty
+> dish outright. A diabetic keeps far more of the menu when *"hold the sugar syrup"* is an option,
+> not just *"exclude all desserts."* So medical handling is **two‑layer**: (1) hard‑exclude the
+> genuinely unsafe, (2) **soft‑adjust the rest via cart instructions**. *(This needs the menu to
+> expose modifiable attributes / a free‑text instruction field — both exist on the Swiggy item
+> model; the local MCP can be built against them now.)*
 
 > **Design gap (P2, T):** this is the single strongest trust story — *"we can't break your
 > diabetes/allergen rules, ever"* — yet it lives mostly in Setup. **Surface a 🔒 low‑sugar /
