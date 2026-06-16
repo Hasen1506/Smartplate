@@ -266,5 +266,23 @@ wc.setPhase('error');
 ok(/reach the kitchen/.test(weekly.innerHTML) && /Retry/.test(weekly.innerHTML), 'provider-down error state carries a ↻ Retry recovery action');
 wc.setPhase('live');
 
+console.log('\n[weekly] (C2) main tabs are colour-coded (grid green · dashboard blue), active filled');
+window.__dc.activate('screen-weekly');
+wc.setState({ tab: 'grid' });
+const gridTab = btnByText(weekly, 'Calendar grid');
+ok(gridTab && /#2f6d4a/.test(gridTab.getAttribute('style')), 'active Calendar-grid tab is filled green');
+const dashTabInactive = btnByText(weekly, 'Command dashboard');
+ok(dashTabInactive && /#2f5fd0/.test(dashTabInactive.getAttribute('style')), 'inactive Command-dashboard tab carries its blue');
+ok(dashTabInactive.getAttribute('style').includes('background:#eef2fb'), 'inactive dashboard tab is outline (light), not filled');
+
+console.log('\n[setup] (L2) Taste DNA cold-start "still learning" state instead of faked history');
+window.__dc.activate('screen-setup');
+sc.setState({ tab: 'dna', coldStart: false });
+ok(/142 orders/.test(setup.innerHTML) && !/Still learning/.test(setup.innerHTML), 'trained model shows history by default');
+sc.toggleColdStart();
+ok(/Still learning/.test(setup.innerHTML) && /building your DNA/.test(setup.innerHTML), 'new-user view shows a "still learning — building your DNA" band');
+ok(!/142 orders/.test(setup.innerHTML), 'fabricated "142 orders" precision is hidden for a week-1 user');
+sc.setState({ coldStart: false });
+
 console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
 process.exit(fails.length ? 1 : 0);

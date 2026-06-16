@@ -129,15 +129,16 @@
   </div>
   <sc-if value="{{ notes }}" hint-placeholder-val="{{ true }}"><div style="font:600 18px 'Caveat',cursive; color:#cf4a2f; transform:rotate(-1.2deg); margin:10px 0 0 6px;">↳ inverse optimisation: instead of guessing a cap, the agent prices the week three ways. Pushing the ★ floor past the suggestion is what makes the budget jump.</div></sc-if>
 
-  <!-- ============ TABS (only the two you liked) ============ -->
+  <!-- ============ TABS (only the two you liked — each its own colour, echoing Setup's
+       colour-coded sections; active = filled, inactive = coloured outline) ============ -->
   <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:24px;">
     <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
-      <button onClick="{{ goGrid }}" style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#fff; color:#2a2a28; box-shadow:3px 3px 0 rgba(42,42,40,.12); cursor:pointer;">▦ Calendar grid</button>
-      <sc-if value="{{ isGrid }}" hint-placeholder-val="{{ true }}"><div style="height:5px; width:90%; background:#cf4a2f; border-radius:4px;"></div></sc-if>
+      <sc-if value="{{ isGrid }}" hint-placeholder-val="{{ true }}"><button style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#2f6d4a; color:#fff; box-shadow:3px 3px 0 rgba(42,42,40,.18); cursor:pointer;">▦ Calendar grid</button></sc-if>
+      <sc-if value="{{ isDash }}" hint-placeholder-val="{{ false }}"><button onClick="{{ goGrid }}" style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #2f6d4a; border-radius:12px 10px 12px 10px; background:#eaf2ec; color:#2f6d4a; box-shadow:3px 3px 0 rgba(42,42,40,.10); cursor:pointer;">▦ Calendar grid</button></sc-if>
     </div>
     <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
-      <button onClick="{{ goDash }}" style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#fff; color:#2a2a28; box-shadow:3px 3px 0 rgba(42,42,40,.12); cursor:pointer;">◳ Command dashboard</button>
-      <sc-if value="{{ isDash }}" hint-placeholder-val="{{ false }}"><div style="height:5px; width:90%; background:#cf4a2f; border-radius:4px;"></div></sc-if>
+      <sc-if value="{{ isDash }}" hint-placeholder-val="{{ false }}"><button style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #2a2a28; border-radius:12px 10px 12px 10px; background:#2f5fd0; color:#fff; box-shadow:3px 3px 0 rgba(42,42,40,.18); cursor:pointer;">◳ Command dashboard</button></sc-if>
+      <sc-if value="{{ isGrid }}" hint-placeholder-val="{{ true }}"><button onClick="{{ goDash }}" style="font:700 17px 'Gaegu',cursive; padding:9px 16px; border:2px solid #2f5fd0; border-radius:12px 10px 12px 10px; background:#eef2fb; color:#2f5fd0; box-shadow:3px 3px 0 rgba(42,42,40,.10); cursor:pointer;">◳ Command dashboard</button></sc-if>
     </div>
   </div>
 
@@ -774,13 +775,19 @@
             <!-- left: fingerprint -->
             <div style="flex:0 0 320px; padding:18px; border-right:2px dashed #cfc9bd;">
               <div style="font:700 17px 'Gaegu',cursive; color:#6d3aa6; text-align:center;">🧬 Your flavour fingerprint</div>
+              <div style="text-align:center; margin-top:6px;"><button onClick="{{ toggleColdStart }}" style="font:700 11px 'Gaegu',cursive; padding:3px 10px; border:1.5px dashed #6d3aa6; border-radius:8px; background:#fff; color:#6d3aa6; cursor:pointer;">{{ coldStartLabel }}</button></div>
               <div style="margin-top:8px;">{{ dnaRadar }}</div>
               <div style="font:400 12px 'Gaegu',cursive; color:#7a746a; text-align:center; margin-top:2px;">the shape shifts as you order, skip &amp; spin</div>
-              <div style="border:2px solid #6d3aa6; border-radius:12px; padding:11px; margin-top:14px; background:#f3edfb;">
+              <sc-if value="{{ dnaReady }}" hint-placeholder-val="{{ true }}"><div style="border:2px solid #6d3aa6; border-radius:12px; padding:11px; margin-top:14px; background:#f3edfb;">
                 <div style="font:700 14px 'Gaegu',cursive; color:#6d3aa6;">Trained on</div>
                 <div style="font:700 24px 'Caveat',cursive; margin:1px 0;">142 orders · 38 skips · 11 spins</div>
                 <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">every meal you rate = <b style="color:#6d3aa6;">+1 signal</b>. Private &amp; non-portable — it can't be exported to a rival.</div>
-              </div>
+              </div></sc-if>
+              <sc-if value="{{ coldStart }}" hint-placeholder-val="{{ false }}"><div style="border:2px dashed #b89cdb; border-radius:12px; padding:11px; margin-top:14px; background:#f7f3fc;">
+                <div style="font:700 14px 'Gaegu',cursive; color:#6d3aa6;">Still learning — week 1</div>
+                <div style="font:700 19px 'Caveat',cursive; margin:1px 0; color:#6d3aa6;">building your DNA · 6 signals so far</div>
+                <div style="font:400 12px 'Gaegu',cursive; color:#7a746a;">no fabricated history — the fingerprint sharpens as you order &amp; rate. Rate a few picks to start training it.</div>
+              </div></sc-if>
             </div>
             <!-- right: why it's you -->
             <div style="flex:1; padding:18px;">
@@ -821,10 +828,14 @@
           <div style="padding:4px 14px 16px;">
             <div style="font:700 18px 'Caveat',cursive; color:#6d3aa6;">🧬 Your Taste DNA</div>
             <div style="margin-top:6px;">{{ dnaRadarMob }}</div>
-            <div style="border:2px solid #6d3aa6; border-radius:11px; padding:9px; margin-top:8px; background:#f3edfb;">
+            <sc-if value="{{ dnaReady }}" hint-placeholder-val="{{ true }}"><div style="border:2px solid #6d3aa6; border-radius:11px; padding:9px; margin-top:8px; background:#f3edfb;">
               <div style="font:700 13px 'Gaegu',cursive; color:#6d3aa6;">142 orders · 38 skips · 11 spins</div>
               <div style="font:400 11px 'Gaegu',cursive; color:#7a746a;">private &amp; non-portable · confidence 78%</div>
-            </div>
+            </div></sc-if>
+            <sc-if value="{{ coldStart }}" hint-placeholder-val="{{ false }}"><div style="border:2px dashed #b89cdb; border-radius:11px; padding:9px; margin-top:8px; background:#f7f3fc;">
+              <div style="font:700 13px 'Gaegu',cursive; color:#6d3aa6;">Still learning — week 1 · 6 signals</div>
+              <div style="font:400 11px 'Gaegu',cursive; color:#7a746a;">building your DNA — no faked history yet</div>
+            </div></sc-if>
             <div style="border:2px solid #2a2a28; border-radius:10px; padding:8px 10px; margin-top:8px; background:#faf8f2; font:400 12px 'Gaegu',cursive;"><b>🌧 Rainy →</b> Chettinad +20%</div>
             <div style="border:2px solid #2a2a28; border-radius:10px; padding:8px 10px; margin-top:6px; background:#faf8f2; font:400 12px 'Gaegu',cursive;"><b>🕘 Late →</b> lighter dinners</div>
             <button style="width:100%; font:700 14px 'Gaegu',cursive; padding:9px; border:2px solid #2a2a28; border-radius:12px; background:#2a2a28; color:#fff; box-shadow:2px 2px 0 rgba(42,42,40,.22); cursor:pointer; margin-top:10px;">See everything it knows</button>
@@ -1672,7 +1683,10 @@ class Component extends DCLogic {
     // ⚡ rule template gallery (§4.2): which suggested rules are on, and whether the
     // fill-in-the-blank gallery is open + the slots the user has chosen.
     ruleOn: { lunch: true, dinner: true, lowbudget: true, gym: true, travel: true, weekend: false },
-    galleryOpen: false, galleryScope: 0, galleryNudge: 0 };
+    galleryOpen: false, galleryScope: 0, galleryNudge: 0,
+    // cold-start honesty (audit L2): a new user has no history yet, so Taste DNA shows a
+    // "still learning" band instead of fabricated precision. Demo-toggled here.
+    coldStart: false };
 
   // ---- favourite restaurants + the repeat-ordering insight ----
   favPool() { return ['Murugan Idli', 'A2B', 'Sangeetha', 'Ponnusamy', 'Anjappar', 'Jr. Kuppanna', 'Saravana Bhavan']; }
@@ -1694,15 +1708,22 @@ class Component extends DCLogic {
       h('div', { style: { font: "400 13px/1.4 'Gaegu',cursive", color: '#56524a', marginTop: '11px', maxWidth: '640px' } },
         'Why this matters — behavioural research on food choice: people keep a small ',
         h('b', null, '“consideration set” of ~4–6 places'),
-        ' and a big share of orders concentrate there. Across your last ', h('b', null, '142 orders'), ', ',
-        h('b', { style: { color: '#7a5a12' } }, '≈' + share + '%'),
-        ' came from these ' + favs.length + '. So the agent boosts their signature dishes, but ',
+        this.state.coldStart
+          ? h('span', null, ' and a big share of orders concentrate there. ',
+              h('b', { style: { color: '#7a5a12' } }, 'Still learning your split'),
+              ' — we’ll show your real concentration once you’ve ordered a few times. ')
+          : h('span', null, ' and a big share of orders concentrate there. Across your last ',
+              h('b', null, '142 orders'), ', ',
+              h('b', { style: { color: '#7a5a12' } }, '≈' + share + '%'),
+              ' came from these ' + favs.length + '. '),
+        'So the agent boosts their signature dishes, but ',
         h('b', null, 'spaces them out'), ' (no repeat within 3 days) so favourites don’t become fatigue — and ⭐-stars them on the weekly plan.'));
   }
 
   // ---- ⚡ rule template gallery (§4.2): templates + toggles, not raw syntax ----
   toggleRule(k) { this.setState((s) => ({ ruleOn: { ...s.ruleOn, [k]: !s.ruleOn[k] } })); }
   toggleGallery() { this.setState((s) => ({ galleryOpen: !s.galleryOpen })); }
+  toggleColdStart() { this.setState((s) => ({ coldStart: !s.coldStart })); }
   galScopes() { return ['💼 Work · lunch', '🏠 Home · dinner', '🏋 Gym day', '✈ Travel day', '📅 Weekend', '💸 low day-budget']; }
   galNudges() { return ['cap ₹150', '+25 g protein', 'boost ♥ favourites', 'grab-and-go only', 'switch to Tight Week', 'unlock a treat']; }
   cycleGal(key, listLen) { this.setState((s) => ({ [key]: ((s[key] || 0) + 1) % listLen })); }
@@ -1848,6 +1869,10 @@ class Component extends DCLogic {
       isDna: this.state.tab === 'dna',
       isNutri: this.state.tab === 'nutri',
       goForm: set('form'), goDna: set('dna'), goNutri: set('nutri'),
+      // cold-start honesty (audit L2): swap fabricated history for a "still learning" band
+      coldStart: this.state.coldStart, dnaReady: !this.state.coldStart,
+      coldStartLabel: this.state.coldStart ? '✓ showing the week-1 view' : '👶 preview a new user (week 1)',
+      toggleColdStart: () => this.toggleColdStart(),
       dnaRadar: this.radar(240), dnaRadarMob: this.radar(184),
       nutritionWeekEl: this.nutritionWeek(150), nutritionWeekMobEl: this.nutritionWeek(92),
       proteinDistEl: this.proteinDist(),
