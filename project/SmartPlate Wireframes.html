@@ -948,7 +948,7 @@ class Component extends DCLogic {
       // 🔒 pinned slots (key 'i-w' → true) survive a "re-optimise unpinned"; off-plan extras
       // are one-off orders that write to the budget + kcal ledger (§6.2). welcomeBack toggles
       // the returning-after-a-gap reconcile banner (§3.1).
-      pins: {}, extras: [], welcomeBack: false,
+      pins: {}, extras: [], welcomeBack: false, planPhase: 'live',
       // user-editable window times (24h HH:MM) — were hardcoded labels before
       times: { B: '08:30', L: '13:00', D: '20:30' } };
   }
@@ -1177,6 +1177,9 @@ class Component extends DCLogic {
 
   // ---- returning-after-a-gap reconcile (§3.1) ----
   toggleWelcomeBack() { this.setState((s) => ({ welcomeBack: !s.welcomeBack })); }
+
+  // ---- plan phase for the optimising / error states (§6.3 · audit L1) ----
+  setPhase(p) { this.setState({ planPhase: p }); }
 
   defaultSel() {
     // every window is in the plan; "not eating" is expressed as SKIP, not a separate off
@@ -1599,17 +1602,36 @@ class Component extends DCLogic {
         h('button', { onClick: () => this.setHorizon('month'), style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#fff', cursor: 'pointer' } }, 'raise budget'),
         h('button', { onClick: () => this.trimToFit(), style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#fff', cursor: 'pointer' } }, 'relax target')) : null);
 
-    // ---- plan states (§6.3): empty-week note · located over-cap recovery line ----
+    // ---- plan states (§6.3 · audit L1): optimising skeleton · provider-down error ·
+    // empty-week note · located over-cap recovery line — each with one recovery action ----
     const allSkip = sessions === 0;
     const overDays = days.filter((d) => d.dayOver).map((d) => d.d);
-    let planStateEl = null;
-    if (allSkip) {
-      planStateEl = h('div', { style: { marginTop: '12px', padding: '11px 15px', border: '2px dashed #8a8478', borderRadius: '12px', background: '#faf8f2', font: "400 14px 'Gaegu',cursive", color: '#7a746a' } },
+    const phase = this.state.planPhase || 'live';
+    // a tiny demo switcher so the async states are reachable in the static prototype
+    const phaseBtn = (p, label) => h('button', { key: p, onClick: () => this.setPhase(p), style: { font: "700 11px 'Gaegu',cursive", padding: '2px 8px', border: '1.5px solid #2a2a28', borderRadius: '7px', cursor: 'pointer', background: phase === p ? '#2a2a28' : '#fff', color: phase === p ? '#fff' : '#2a2a28' } }, label);
+    const demoBar = h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '12px', font: "400 11px 'Gaegu',cursive", color: '#a8a294' } },
+      h('span', null, 'demo state:'), phaseBtn('live', 'live'), phaseBtn('optimising', 'optimising…'), phaseBtn('error', 'error'));
+    const skelRow = (w) => h('div', { style: { height: '13px', borderRadius: '6px', background: '#ece7db', width: w, marginBottom: '8px' } });
+    let body = null;
+    if (phase === 'optimising') {
+      body = h('div', { style: { marginTop: '9px', padding: '13px 15px', border: '2px dashed #cfc9bd', borderRadius: '12px', background: '#faf8f2' } },
+        h('div', { style: { font: "700 14px 'Gaegu',cursive", color: '#7a746a', marginBottom: '10px' } }, '⏳ Optimising your week… pricing nearby outlets, dodging surge, hitting your targets.'),
+        skelRow('94%'), skelRow('80%'), skelRow('88%'));
+    } else if (phase === 'error') {
+      body = h('div', { style: { marginTop: '9px', padding: '12px 15px', border: '2.5px solid #cf4a2f', borderRadius: '12px', background: '#fdf1ec' } },
+        h('div', { style: { font: "700 14px 'Gaegu',cursive", color: '#cf4a2f' } }, '⚠ Couldn’t reach the kitchen — the provider didn’t respond and nothing is serviceable to this area right now.'),
+        h('div', { style: { font: "400 13px 'Gaegu',cursive", color: '#7a5a52', marginTop: '4px' } }, 'Nothing was ordered — your week is untouched.'),
+        h('div', { style: { display: 'flex', gap: '7px', marginTop: '9px' } },
+          h('button', { onClick: () => this.setPhase('optimising'), style: { font: "700 13px 'Gaegu',cursive", padding: '6px 12px', border: '2px solid #2a2a28', borderRadius: '10px', background: '#2a2a28', color: '#fff', cursor: 'pointer' } }, '↻ Retry'),
+          h('button', { onClick: () => this.setPhase('live'), style: { font: "700 13px 'Gaegu',cursive", padding: '6px 12px', border: '2px solid #2a2a28', borderRadius: '10px', background: '#fff', cursor: 'pointer' } }, 'Switch area / cook instead')));
+    } else if (allSkip) {
+      body = h('div', { style: { marginTop: '9px', padding: '11px 15px', border: '2px dashed #8a8478', borderRadius: '12px', background: '#faf8f2', font: "400 14px 'Gaegu',cursive", color: '#7a746a' } },
         h('b', { style: { color: '#2a2a28' } }, 'Empty week — every window is set to skip.'), ' Tap a cell above to plan a meal, or ＋ order now for a one-off.');
     } else if (infeasible) {
-      planStateEl = h('div', { style: { marginTop: '12px', padding: '11px 15px', border: '2.5px solid #cf4a2f', borderRadius: '12px', background: '#fdf1ec', font: "700 14px 'Gaegu',cursive", color: '#cf4a2f' } },
+      body = h('div', { style: { marginTop: '9px', padding: '11px 15px', border: '2.5px solid #cf4a2f', borderRadius: '12px', background: '#fdf1ec', font: "700 14px 'Gaegu',cursive", color: '#cf4a2f' } },
         '⚠ ₹' + (-left) + ' over' + (overDays.length ? ' — ' + overDays.join(', ') + ' run hot' : '') + ' — drop a session, swap 2 picks, or raise the cap ▸');
     }
+    const planStateEl = h('div', null, demoBar, body);
 
     // ---- returning-after-a-gap reconcile (§3.1) ----
     const wb = this.state.welcomeBack;

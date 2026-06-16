@@ -16,6 +16,46 @@ MEDICAL_RULES = {
     "celiac": lambda item: "gluten" not in item.get("allergens", []),
 }
 
+# The "instruct" half of exclude-and-instruct (docs/optimization-and-ux.md §1.3,
+# design-audit §4.3): hard exclusion is the floor, but many dishes are safe *with a
+# request*, so we attach order-time cart instructions to keep adjustable dishes in
+# the candidate set instead of pruning the whole menu down to pre-safe items.
+MEDICAL_INSTRUCTIONS = {
+    "diabetes": "no added sugar / less sweet",
+    "hypertension": "less salt — no extra salt",
+}
+
+
+def order_instructions(user: dict, item: dict | None = None) -> list[str]:
+    """Cart special-instructions implied by the user's medical profile.
+
+    These ride along on a *safe* item's order so the kitchen adjusts it (e.g. a
+    diabetic's drink comes unsweetened) — the soft refinement above the hard
+    exclusion in `violates`. `item` is optional: when given, an instruction is only
+    added if it's actually relevant to that dish (e.g. don't say "no sugar" on a
+    plain dal), keeping the note set tight.
+    """
+    notes: list[str] = []
+    for condition in user.get("medical", []):
+        msg = MEDICAL_INSTRUCTIONS.get(condition)
+        if not msg:
+            continue
+        if item is not None and not _instruction_relevant(condition, item):
+            continue
+        if msg not in notes:
+            notes.append(msg)
+    return notes
+
+
+def _instruction_relevant(condition: str, item: dict) -> bool:
+    """Whether a medical instruction actually applies to this dish."""
+    if condition == "diabetes":
+        # relevant to anything with some sugar (drinks, desserts, sweet gravies)
+        return item.get("sugar_g", 0) > 0 or "sweet" in item.get("tags", [])
+    if condition == "hypertension":
+        return True   # salt is near-universal in restaurant food
+    return True
+
 
 def violates(user: dict, item: dict) -> str | None:
     """Return a human reason string if the item is unsafe for the user, else None."""

@@ -74,3 +74,11 @@ VARIETY_NUDGE_W = float(os.environ.get("SMARTPLATE_VARIETY_W", "0.6"))
 # Protein evenness: a day-level penalty for backloading protein into one meal (the
 # per-meal even target is daily_protein / meals-that-day). Set 0 to disable.
 PROTEIN_EVEN_W = float(os.environ.get("SMARTPLATE_PROTEIN_EVEN", "0.25"))
+
+# Usual-first (docs §5.2): a soft preference for the user's *familiar* picks so the
+# planner makes the fewest substitutions that still clear the locks/targets — a novel
+# pick pays a small premium and only wins when it buys real goal-fit. OFF by default
+# (the kept/swapped diagnostic is always computed regardless); the budget recommender
+# and the variety nudge already cover the explore side.
+USUAL_FIRST = os.environ.get("SMARTPLATE_USUAL_FIRST", "off")
+USUAL_FIRST_W = float(os.environ.get("SMARTPLATE_USUAL_FIRST_W", "0.5"))

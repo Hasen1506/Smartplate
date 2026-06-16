@@ -123,6 +123,56 @@ def _empty_protein() -> dict:
             "days_total": 0, "adherence_pct": 0, "chronic_miss": False, "note": "no protein logged yet"}
 
 
+def reconcile_after_gap(entries_by_day: dict, window_days: list[str], *,
+                        kcal_target: float, protein_floor: float,
+                        sugar_cap: float | None = None, today: str | None = None) -> dict:
+    """Returning-after-a-gap reconcile (docs/optimization-and-ux.md §3.1).
+
+    A user who's been away reopens to a model that only knows what it *observed*.
+    `window_days` is the stretch we'd expect to hear about; days missing from
+    `entries_by_day` are **unknown** — we do NOT impute them as zero (didn't eat) or
+    as on-plan (ate exactly the plan). We recompute the rolling view over the KNOWN
+    days only, and we do **not** pile on catch-up suggestions for roll-over nutrients
+    after a short gap: calories (weekly) and micros (~30-day) carry on long clocks,
+    so a few quiet days barely move them; only the daily-clock items (protein, sugar)
+    reset, and they carry no back-debt. A nudge is raised *only* when the known data
+    shows a genuine sustained drift.
+    """
+    known = [d for d in window_days if d in entries_by_day]
+    unknown = [d for d in window_days if d not in entries_by_day]
+    known_entries = {d: entries_by_day[d] for d in known}
+    rolling = (rolling_view(known_entries, kcal_target=kcal_target,
+                            protein_floor=protein_floor, sugar_cap=sugar_cap, today=today)
+               if known_entries else None)
+
+    rollover_safe = sorted(n for n in TIMESCALE if carries(n))      # kcal, fibre, iron — carry
+    daily_reset = sorted(n for n, ts in TIMESCALE.items()
+                         if ts in ("daily", "daily_cap"))           # protein, sugar — reset, no debt
+
+    # Over-correct only on a *genuine sustained drift*, not on the mere existence of a
+    # gap. Proxy: average daily calorie balance across known days, beyond a tolerance.
+    nudge_needed = False
+    if rolling and rolling["calories"]["timescale"] == "weekly" and len(known) >= 3:
+        bal = rolling["calories"]["balance"]                        # +ve under-eaten / -ve over
+        nudge_needed = abs(bal) / max(1, len(known)) > 0.25 * kcal_target
+
+    return {
+        "gap_days": len(unknown),
+        "unknown_days": unknown,
+        "known_days": len(known),
+        "imputed": False,                       # unknown days left unknown, never faked
+        "reconcile_prompt": len(unknown) > 0,   # surface "didn't hear from you" if any gap
+        "over_correct": False,                  # policy: never pile catch-up after a gap
+        "nudge_needed": nudge_needed,           # the only exception: a real sustained drift
+        "rollover_safe": rollover_safe,         # a short gap won't dent these
+        "daily_reset": daily_reset,             # reset daily — no back-debt to repay
+        "rolling": rolling,
+        "note": ("welcome back — picking up where the ledger left off; roll-over nutrients are fine"
+                 if not nudge_needed else
+                 "welcome back — one nutrient is drifting on its long clock; nudging gently"),
+    }
+
+
 def rolling_view(entries_by_day: dict, *, kcal_target: float, protein_floor: float,
                  sugar_cap: float | None = None, today: str | None = None) -> dict:
     """Assemble the rolling ledger from accumulated daily intake, each nutrient on

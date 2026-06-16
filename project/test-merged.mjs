@@ -256,5 +256,15 @@ ok(/Template gallery/.test(setup.innerHTML) && /WHEN/.test(setup.innerHTML) && /
 ok(/no syntax to write/.test(setup.innerHTML), 'gallery reads as templates, not raw logic');
 sc.toggleGallery();
 
+console.log('\n[weekly] (L1/§6.3) optimising skeleton + provider-down error states, each with recovery');
+window.__dc.activate('screen-weekly');
+wc.setState({ tab: 'grid', picks: wc.defaultSkips() });
+ok(!/Optimising your week/.test(weekly.innerHTML), 'no optimising skeleton in the default live state');
+wc.setPhase('optimising');
+ok(/Optimising your week/.test(weekly.innerHTML), 'optimising… skeleton state renders');
+wc.setPhase('error');
+ok(/reach the kitchen/.test(weekly.innerHTML) && /Retry/.test(weekly.innerHTML), 'provider-down error state carries a ↻ Retry recovery action');
+wc.setPhase('live');
+
 console.log(`\n${fails.length ? '✗ FAIL — ' + fails.length + ' assertion(s)' : '✓ ALL PASS'}\n`);
 process.exit(fails.length ? 1 : 0);

@@ -438,12 +438,29 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
     fill-in-the-blank *When [scope ▾] → then [nudge ▾]* gallery, not raw syntax. *(Illustrative gallery.)*
 18. ✅ **Day awareness + plan states** — Today highlight (accent + TODAY tag, desktop column +
     mobile day-picker), past days de-emphasised, skip = greyed/dashed @ ~0.5 opacity + ⊘ tag,
-    located over-cap red-outline + recovery line, all-skip empty-state note (§6.3).
+    located over-cap red-outline + recovery line, all-skip empty-state note, **plus the
+    optimising skeleton + provider-down/nothing-serviceable error (↻ Retry · switch-area)** —
+    the full L1 state set, reachable via a demo state switcher (§6.3, audit L1).
 19. ✅ **Returning-user reconcile + re-anchor**; no over-correction of roll-over nutrients (§3.1)
     — a dismissible "welcome back" banner (demo toggle) offers [followed the plan · ate out · log it]
     and states calories (weekly) / B12·iron (~30-day) roll over so a short gap won't over-correct.
 20. ✅ **Two form-factor layouts** (desktop matrix · mobile day-picker) — audit F3. Both mock
     frames now reflect every new interaction (pin · extra-order · today · skip · drink-per-outlet).
+
+**Backend counterparts (the engine side of the above, `smartplate/`, `pytest` green):**
+
+21. ✅ **Usual-first in the solver** (§5.2) — every solve now reports a `usual_first`
+    diagnostic (`usual_kept` / `new_swapped` / `delivery_total`) off each pick's familiarity
+    (`domain/fatigue`), and an **optional soft preference** (`config.USUAL_FIRST`, default off)
+    adds a small premium to novel picks so the planner keeps the user's usuals unless a swap
+    buys goal-fit. `kernel/optimizer._diagnostics` + `_delivery_candidate`.
+22. ✅ **Returning-after-a-gap reconcile** (§3.1) — `ledger.reconcile_after_gap`: unknown days
+    stay **unknown** (never imputed as zero or on-plan), the rolling view recomputes over known
+    days only, and roll-over nutrients aren't catch-up corrected after a short gap — a nudge
+    fires *only* on a genuine sustained drift.
+23. ✅ **Medical exclude-AND-instruct** (§1.3, §4.3) — `allergens.order_instructions`: hard
+    exclusion stays the floor, and a *safe* item carries order-time cart notes ("no added
+    sugar", "less salt") only when relevant to that dish, so the menu isn't over-pruned.
 
 ---
 
