@@ -54,11 +54,24 @@ Mode weights (`config.MODE_WEIGHTS`): **Comfort** cranks `taste`, **Tight Week
 | Type | Constraint | Where |
 |---|---|---|
 | **Hard — selection** | `Σ_i x[s,i] = 1` ∀ s | one option per session |
-| **Hard — budget** | `Σ cost·x ≤ weekly_budget` | the ₹ ceiling |
-| **Hard — cook cap** | `Σ cook ≤ 6 / week` | realism (`MAX_COOK_PER_WEEK`) |
-| **Hard — variety** | `Σ x[same dish] ≤ 2 / week` | `MAX_ITEM_REPEAT` |
+| **Hard — budget** | `Σ cost·x ≤ weekly_budget` | user-set / recommender-proposed ₹ ceiling (§5) |
+| **Hard — cook cap** | `Σ cook ≤ cook_cap` | **user value**; `MAX_COOK_PER_WEEK = 6` is only the cold-start default |
+| **Hard — variety** | `Σ x[same dish] ≤ repeat_cap` | **user value**; `MAX_ITEM_REPEAT = 2` is only the cold-start default |
 | **Hard — pre-filters on `C_s`** | allergens, diet, ★ rating floor, fasting window, serviceability, calendar travel / festival suspension | candidates removed *before* scoring |
 | **Soft — objective terms** | nutrition, taste, health, carbon, surge, weather, festival bias | the weighted sum |
+
+> **No hardcoded caps — every limit above is a *user value with a computed default*, not a fixed
+> constant.** `weekly_budget` is set by the user or proposed by the budget recommender (§5); the
+> cook/repeat caps default to 6/2 but are editable per user; the nutrition target is personalised
+> from BMR (§3). The constants in code (`MAX_COOK_PER_WEEK`, `MAX_ITEM_REPEAT`, the seed kcal/macro
+> numbers) are **cold-start priors that entered/learned data replaces** (§10) — never a ceiling the
+> user can't move.
+>
+> **Medical = exclude *and* instruct.** Hard rules drop genuinely unsafe items (diabetes → remove
+> >20 g-sugar dishes). But many dishes are safe *with a request*, so the agent also attaches
+> **order-time special instructions** ("no added sugar", "less salt", "no mayo") to the Swiggy cart —
+> keeping adjustable dishes in the candidate set instead of over-pruning the menu. Exclusion is the
+> floor; the kitchen instruction is the refinement.
 
 ### 1.4 The honest read of "maximise nutrition while minimising cost"
 

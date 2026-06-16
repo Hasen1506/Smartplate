@@ -73,7 +73,7 @@ recommendations only — §2–§3, §5–§6.*
 
 | ID | Sev | Hurts | Finding (evidence) | Specific fix |
 |----|-----|-------|--------------------|--------------|
-| **F3** | **P1** | U, T | **It still reads as a wireframe, not a product.** "lo‑fi wireframe · v1" badge, hand‑drawn type, side‑by‑side DESKTOP/MOBILE mock frames inside fake browser chrome (01–05). Fine for internal review; a real user shown this would not trust it with a credit card. | For the product build, strip the wireframe scaffolding: **one** responsive layout (not two mock frames), a product typeface for data, and drop the "wireframe" badge. |
+| **F3** | **P1** | U, T | **It still reads as a wireframe, not a product.** "lo‑fi wireframe · v1" badge, hand‑drawn type, side‑by‑side DESKTOP/MOBILE mock frames inside fake browser chrome (01–05). Fine for internal review; a real user shown this would not trust it with a credit card. | For the product build, strip the wireframe scaffolding (fake browser chrome, hand‑drawn type, "wireframe" badge; product typeface for data). **Ship two form‑factor‑tailored experiences — a desktop app and a mobile app — instead of the side‑by‑side mock frames.** Each is designed for its device (desktop = the dense week‑matrix; mobile = the day‑picker flow), not one layout that merely reflows. *(Implementation can still be a single responsive codebase with two distinct breakpoint layouts — the requirement is two genuinely device‑specific designs, and the dual‑mock presentation goes away.)* |
 | **F4** | **P2** | U | **Two co‑equal views of the same week** — "Calendar grid" and "Command dashboard" (01–02) — with no guidance on which is "home". Power users like both; a first‑timer has to evaluate two layouts before doing anything. | Pick a **default** and make the other a toggle/"view as" — don't greet a new user with a fork. |
 
 ## 3. Navigation · hierarchy · consistency · states
@@ -94,10 +94,11 @@ The model carries six concern layers, in priority order:
 
 1. **Hard safety (never violated, even in Survival mode):** allergens, medical conditions,
    diet, a ★ rating floor, and the budget cap. Filtered out *before* optimisation.
-2. **Nutrition targets (soft):** daily **kcal 2000 · protein 60 g · carbs 250 g · fat 65 g ·
-   sugar 40 g** by default (`domain/nutrition.py`), **personalised** by the BMR/TDEE
-   calculator (Mifflin–St Jeor) in *Setup → Nutrition*. Split per meal (kcal 25/40/35 for
-   B/L/D; protein **evenly**, because backloading protein into one meal is suboptimal).
+2. **Nutrition targets (soft, never hardcoded):** **personalised from the user's own BMR/TDEE**
+   (Mifflin–St Jeor, *Setup → Nutrition*). The kcal/macro numbers in `domain/nutrition.py`
+   (≈ kcal 2000 · protein 60 g · carbs 250 g · fat 65 g · sugar 40 g) are **cold‑start defaults
+   shown only until the user enters their numbers**, not fixed targets. Split per meal (kcal
+   25/40/35 for B/L/D; protein **evenly**, because backloading protein into one meal is suboptimal).
 3. **Health:** protein floor, veg servings/day, optional fasting window (`domain/health.py`).
 4. **Variety / recipe‑fatigue:** boredom is the #1 churn driver, so it's a tracked dial.
 5. **Budget:** nested day/week/month caps; underspend rolls forward as a visible banked credit.
@@ -134,6 +135,16 @@ A user's profile stores two lists — `allergens` (e.g. `["peanut"]`) and `medic
 *hard* caps in the ledger** (never averaged or credited away like calories). **To add a new
 condition:** add one lambda over item fields to `MEDICAL_RULES` and surface a 🔒 chip in
 *Settings form → Locks*.
+
+> **Exclude *and* instruct — don't over‑prune the menu.** Hard exclusion is the floor, not the
+> whole answer. Many dishes are safe *with a request*, so at order time the agent also attaches
+> **special instructions to the Swiggy cart** — *"no added sugar", "less salt / no extra salt",
+> "no mayo"* — keeping adjustable items in the candidate set instead of dropping every sweet/salty
+> dish outright. A diabetic keeps far more of the menu when *"hold the sugar syrup"* is an option,
+> not just *"exclude all desserts."* So medical handling is **two‑layer**: (1) hard‑exclude the
+> genuinely unsafe, (2) **soft‑adjust the rest via cart instructions**. *(This needs the menu to
+> expose modifiable attributes / a free‑text instruction field — both exist on the Swiggy item
+> model; the local MCP can be built against them now.)*
 
 > **Design gap (P2, T):** this is the single strongest trust story — *"we can't break your
 > diabetes/allergen rules, ever"* — yet it lives mostly in Setup. **Surface a 🔒 low‑sugar /
