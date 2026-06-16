@@ -147,9 +147,14 @@ const unit = wc.num(tueD().cost), unitKcal = wc.kcalFor(tueD().item, 'DELIVER');
 ok(wc.eff(tueD(), '1-D').cost === unit, `1 portion = unit price ₹${unit}`);
 wc.stepQty(1, 'D', 1);
 ok(wc.eff(tueD(), '1-D').cost === unit * 2, `×2 portions → ₹${unit * 2}`);
+const di = wc.drinkInfo(tueD()); // per-outlet drink: price/kcal derived from the meal, not a literal 40/150
+ok(di.available && di.price >= 30 && di.price <= 60, `TUE dinner outlet serves a drink, priced per-outlet ₹${di.price}`);
 wc.toggleDrink(1, 'D');
-ok(wc.eff(tueD(), '1-D').cost === unit * 2 + 40, `+ drink adds ₹40 → ₹${unit * 2 + 40}`);
-ok(wc.eff(tueD(), '1-D').kcal === unitKcal * 2 + 150, `kcal scales with portions + drink (${unitKcal * 2 + 150})`);
+ok(wc.eff(tueD(), '1-D').cost === unit * 2 + di.price, `+ drink adds the per-outlet price ₹${di.price} → ₹${unit * 2 + di.price}`);
+ok(wc.eff(tueD(), '1-D').kcal === unitKcal * 2 + di.kcal, `kcal scales with portions + per-outlet drink kcal (${unitKcal * 2 + di.kcal})`);
+// some outlets serve NO drink → button hidden, toggle is a no-op (Murugan Idli is a tiffin counter)
+const noDrink = wc.optsForCtx(wc.baseDays()[0], 'B', wc.activeArea(0, 'B'))[0]; // MON breakfast = Murugan Idli
+ok(wc.drinkInfo(noDrink).available === false, 'an outlet exists that serves no drink (Murugan Idli) — 🥤 button hidden');
 const before = wc.renderVals().spent;
 wc.stepQty(1, 'D', 1); // ×3
 ok(wc.renderVals().spent === before + unit, 'whole-week spend tracks the extra portion');

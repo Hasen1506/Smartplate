@@ -185,7 +185,7 @@
               <div style="font:400 12px 'Gaegu',cursive; color:#7a746a; margin-top:2px;">of ₹2,000 weekly cap</div>
             </div>
             <div style="display:flex; gap:8px;">
-              <button style="font:700 14px 'Gaegu',cursive; padding:8px 13px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#fff; color:#2a2a28; box-shadow:2px 2px 0 rgba(42,42,40,.15); cursor:pointer;">↻ Re-optimise</button>
+              <button onClick="{{ reoptimiseUnpinned }}" title="Re-roll only the non-pinned slots — your 🔒 pinned favourites stay put" style="font:700 14px 'Gaegu',cursive; padding:8px 13px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#fff; color:#2a2a28; box-shadow:2px 2px 0 rgba(42,42,40,.15); cursor:pointer;">{{ reoptLabel }}</button>
               <button style="font:700 14px 'Gaegu',cursive; padding:8px 13px; border:2px solid #2a2a28; border-radius:11px 9px 11px 9px; background:#2a2a28; color:#fff; box-shadow:2px 2px 0 rgba(42,42,40,.22); cursor:pointer;">Auto-order ▶</button>
             </div>
           </div>
@@ -938,6 +938,10 @@ class Component extends DCLogic {
   constructor(props) {
     super(props);
     this.state = { tab: 'grid', week: 'this', sel: this.defaultSel(), picks: this.defaultSkips(), browse: null, mobDay: 1, areaOverride: {}, qty: {}, addons: {}, spice: {}, horizon: 'week',
+      // 🔒 pinned slots (key 'i-w' → true) survive a "re-optimise unpinned"; off-plan extras
+      // are one-off orders that write to the budget + kcal ledger (§6.2). welcomeBack toggles
+      // the returning-after-a-gap reconcile banner (§3.1).
+      pins: {}, extras: [], welcomeBack: false,
       // user-editable window times (24h HH:MM) — were hardcoded labels before
       times: { B: '08:30', L: '13:00', D: '20:30' } };
   }
@@ -1051,15 +1055,35 @@ class Component extends DCLogic {
   qtyOf(k) { return this.state.qty[k] || 1; }
   stepQty(i, w, d) { const k = i + '-' + w; this.setState((s) => ({ qty: { ...s.qty, [k]: Math.min(9, Math.max(1, (s.qty[k] || 1) + d)) } })); }
   drinkOn(k) { return !!(this.state.addons[k] && this.state.addons[k].drink); }
-  toggleDrink(i, w) { const k = i + '-' + w; this.setState((s) => ({ addons: { ...s.addons, [k]: { drink: !(s.addons[k] && s.addons[k].drink) } } })); }
+  // per-outlet drink/add-on: deterministic from the meal so it's stable across renders.
+  // Some outlets serve none (available:false → no 🥤 button, toggle is a no-op); the rest
+  // price it ₹30–60 / ~120–180 kcal off the outlet, replacing the old hardcoded ₹40/150.
+  drinkInfo(m) {
+    if (!m || m.tag !== 'DELIVER') return { available: false, price: 0, kcal: 0 };
+    const meta = (m.meta || '').toLowerCase();
+    // Murugan Idli is a pure tiffin counter — no drinks menu (button hidden).
+    if (meta.includes('murugan') || meta.includes('grab-and-go')) return { available: false, price: 0, kcal: 0 };
+    const seed = (String(m.item) + meta).split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    const price = 30 + (seed % 4) * 10;     // ₹30 / 40 / 50 / 60
+    const kcal = 120 + (seed % 4) * 20;     // 120 / 140 / 160 / 180
+    return { available: true, price, kcal };
+  }
+  toggleDrink(i, w) {
+    const k = i + '-' + w;
+    const opts = this.optsForCtx(this.baseDays()[i], w, this.activeArea(i, w));
+    const m = opts.length ? opts[(this.state.picks[k] || 0) % opts.length] : null;
+    if (!this.drinkInfo(m).available) return; // no-op when this outlet serves no drink
+    this.setState((s) => ({ addons: { ...s.addons, [k]: { drink: !(s.addons[k] && s.addons[k].drink) } } }));
+  }
   spiceOf(k) { return this.state.spice[k] == null ? 1 : this.state.spice[k]; }
   cycleSpice(i, w) { const k = i + '-' + w; this.setState((s) => ({ spice: { ...s.spice, [k]: ((s.spice[k] == null ? 1 : s.spice[k]) + 1) % 3 } })); }
   // effective cost & kcal for a meal once portions and add-ons are applied
   eff(m, k) {
     if (!m || m.tag === 'SKIP') return { qty: 1, drink: false, spice: this.spiceOf(k), cost: 0, kcal: 0 };
-    const qty = this.qtyOf(k), drink = this.drinkOn(k);
+    const di = this.drinkInfo(m);
+    const qty = this.qtyOf(k), drink = this.drinkOn(k) && di.available;
     let cost = this.num(m.cost) * qty, kcal = this.kcalFor(m.item, m.tag) * qty;
-    if (drink) { cost += 40; kcal += 150; }
+    if (drink) { cost += di.price; kcal += di.kcal; }
     return { qty, drink, cost, kcal, spice: this.spiceOf(k) };
   }
   chooseAlt(i, w, idx) {
@@ -1106,6 +1130,47 @@ class Component extends DCLogic {
     }
     this.setState({ picks, browse: null });
   }
+
+  // ---- week-level pin & re-optimise-the-rest (§6.2) ----
+  isPinned(k) { return !!this.state.pins[k]; }
+  togglePin(i, w) { const k = i + '-' + w; this.setState((s) => ({ pins: { ...s.pins, [k]: !s.pins[k] } })); }
+  pinnedCount() { return Object.values(this.state.pins).filter(Boolean).length; }
+  // re-roll every non-pinned, non-skipped slot to a fresh pick; pinned & skipped stay put.
+  reoptimiseUnpinned() {
+    const wins = ['B', 'L', 'D'];
+    const raw = this.baseDays();
+    const picks = { ...this.state.picks };
+    raw.forEach((dy, i) => wins.forEach((w) => {
+      const k = i + '-' + w;
+      if (this.isPinned(k)) return;
+      const opts = this.optsForCtx(dy, w, this.activeArea(i, w));
+      if (!opts.length) return;
+      const curTag = (opts[(picks[k] || 0) % opts.length] || {}).tag;
+      if (curTag === 'SKIP') return; // a chosen skip is left untouched
+      // pick a different, non-skip option (next deliver/cook in the ranked list)
+      const cur = (picks[k] || 0) % opts.length;
+      let next = cur;
+      for (let step = 1; step < opts.length; step++) {
+        const cand = (cur + step) % opts.length;
+        if (opts[cand].tag !== 'SKIP') { next = cand; break; }
+      }
+      picks[k] = next;
+    }));
+    this.setState({ picks, browse: null });
+  }
+
+  // ---- off-plan extra-order hatch (§6.2): writes to budget + kcal ledger ----
+  addExtra(label, cost, kcal) {
+    const e = { label: label || 'Extra order', cost: cost || 120, kcal: kcal || 350, t: Date.now() };
+    this.setState((s) => ({ extras: [...s.extras, e] }));
+  }
+  removeExtra(t) { this.setState((s) => ({ extras: s.extras.filter((x) => x.t !== t) })); }
+  extrasSpend() { return (this.state.extras || []).reduce((a, x) => a + x.cost, 0); }
+  extrasKcal() { return (this.state.extras || []).reduce((a, x) => a + x.kcal, 0); }
+
+  // ---- returning-after-a-gap reconcile (§3.1) ----
+  toggleWelcomeBack() { this.setState((s) => ({ welcomeBack: !s.welcomeBack })); }
+
   defaultSel() {
     // every window is in the plan; "not eating" is expressed as SKIP, not a separate off
     // state (we merged the old off+skip — there's only one "skip" now).
@@ -1269,6 +1334,21 @@ class Component extends DCLogic {
       const kcalColor = kcalLeft < 0 ? '#cf4a2f' : (kcalPct > 90 ? '#b8702a' : '#2f6d4a');
       return { ...dy, date: String(base + i), view, spendStr: '₹' + daySpend, daySpend, stripGlyphs: stripG.join(' ') || '·', dayKcal, kcalLeft, kcalPct, kcalColor };
     });
+    // off-plan extra orders write to the budget + kcal ledger so totals stay truthful (§6.2)
+    const extras = this.state.extras || [];
+    const extrasSpend = this.extrasSpend(), extrasKcal = this.extrasKcal();
+    // attribute extras to "today" so the day's kcal allowance reflects them
+    const todayIdx = 2; // WED — a fixed "today" for the demo
+    if (days[todayIdx]) {
+      days[todayIdx].daySpend += extrasSpend; days[todayIdx].dayKcal += extrasKcal;
+      days[todayIdx].kcalLeft = kcalTarget - days[todayIdx].dayKcal;
+      days[todayIdx].kcalPct = Math.min(100, Math.round((days[todayIdx].dayKcal / kcalTarget) * 100));
+      days[todayIdx].kcalColor = days[todayIdx].kcalLeft < 0 ? '#cf4a2f' : (days[todayIdx].kcalPct > 90 ? '#b8702a' : '#2f6d4a');
+      days[todayIdx].spendStr = '₹' + days[todayIdx].daySpend;
+    }
+    spent += extrasSpend;
+    // ---- day awareness (§6.3): mark today, de-emphasise past days, red-outline over-cap days ----
+    days.forEach((d, i) => { d.isToday = i === todayIdx; d.isPast = i < todayIdx; d.dayOver = d.daySpend > Math.round(cap / 7) * 1.6; });
     // walk the week in order to find where cumulative spend crosses the cap (money runs out)
     let cum = 0;
     days.forEach((d) => { const prev = cum; cum += d.daySpend; d.afterCap = cum > cap; d.crossCap = prev <= cap && cum > cap; });
@@ -1364,9 +1444,12 @@ class Component extends DCLogic {
             h('div', { style: { font: "400 13px 'Gaegu',cursive", color: '#bcb6a8' } }, '— paused —'));
         }
         const m = v.meal; const changed = v.idx > 0; const e = v.eff;
+        const pinned = this.isPinned(v.k);
         const head = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
           h('span', { style: { font: "700 10px 'Gaegu',cursive", letterSpacing: '1px', color: '#a8a294' } }, m.meal),
-          h('span', { style: { font: "700 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #2a2a28', borderRadius: '7px', background: '#f3efe6' } }, m.glyph + ' ' + m.tag));
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '4px' } },
+            m.tag !== 'SKIP' ? h('button', { onClick: () => this.togglePin(v.di, v.w), title: pinned ? 'Pinned — kept when you re-optimise the rest' : 'Pin this pick — re-optimise leaves it untouched', style: { font: "700 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #2a2a28', borderRadius: '7px', cursor: 'pointer', background: pinned ? '#2a2a28' : '#fff', color: pinned ? '#fff' : '#2a2a28' } }, pinned ? '🔒 pinned' : '🔓 pin') : null,
+            h('span', { style: { font: "700 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #2a2a28', borderRadius: '7px', background: '#f3efe6' } }, m.glyph + ' ' + m.tag)));
         const tags = h('div', null,
           ...(m.flags || []).map((f, fi) => h('div', { key: 'f' + fi, style: { display: 'inline-block', font: "400 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px dashed #8a8478', borderRadius: '7px', color: '#4a463f', background: '#faf8f2', marginTop: '5px', marginRight: '3px' } }, f)),
           isNew(m) ? h('div', { title: 'A new pick the agent is introducing — rate it to train your Taste DNA', style: { display: 'inline-block', font: "700 10px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px solid #cf4a2f', borderRadius: '7px', color: '#cf4a2f', background: '#fdf1ec', marginTop: '5px', marginRight: '3px' } }, '✦ new') : null,
@@ -1383,6 +1466,7 @@ class Component extends DCLogic {
           h('span', { style: { font: "400 10px 'Gaegu',cursive", color: v.noDelivery ? '#cf4a2f' : '#7a746a' } }, v.noDelivery ? '⊘ none here · cook/skip' : servLabel));
         const controls = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px', marginTop: '7px' } },
           h('button', { onClick: () => this.spin(v.di, v.w), title: 'Shuffle — another pick inside your rules', style: { font: "700 12px 'Gaegu',cursive", padding: '3px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#2a2a28', color: '#fff', cursor: 'pointer' } }, '↻ spin'),
+          h('button', { onClick: () => this.addExtra(m.meal + ' add-on', 90, 250), title: 'Add an off-plan item to this slot — a 2nd order; writes to budget + kcal', style: { font: "700 12px 'Gaegu',cursive", padding: '3px 8px', border: '1.5px dashed #cf4a2f', borderRadius: '8px', background: '#fff', color: '#cf4a2f', cursor: 'pointer' } }, '＋ item'),
           v.opts.length > 1 ? h('button', { onClick: () => this.toggleBrowse(v.k), title: 'Browse the ranked options', style: { font: "700 12px 'Gaegu',cursive", padding: '3px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#fff', color: '#2a2a28', cursor: 'pointer' } }, browseKey === v.k ? 'menu ▴' : 'menu ▾') : null);
         const spice = this.spiceNames();
         const custBtn = (active) => ({ font: "700 11px 'Gaegu',cursive", padding: '3px 8px', border: '1.5px solid #2a2a28', borderRadius: '7px', cursor: 'pointer', background: active ? '#2a2a28' : '#fff', color: active ? '#fff' : '#2a2a28' });
@@ -1396,7 +1480,8 @@ class Component extends DCLogic {
         const customBlock = m.tag !== 'SKIP' ? h('div', { style: { marginBottom: '7px', paddingBottom: '6px', borderBottom: '1.5px dashed #e6e1d6' } },
           h('div', { style: { font: "400 10px 'Gaegu',cursive", color: '#a8a294', marginBottom: '4px' } }, 'customise'),
           h('div', { style: { display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' } },
-            m.tag === 'DELIVER' ? h('button', { onClick: () => this.toggleDrink(v.di, v.w), title: 'add a drink (₹40 · 150 kcal)', style: custBtn(e.drink) }, '🥤 drink +₹40') : null,
+            (m.tag === 'DELIVER' && this.drinkInfo(m).available) ? h('button', { onClick: () => this.toggleDrink(v.di, v.w), title: 'add a drink (₹' + this.drinkInfo(m).price + ' · ' + this.drinkInfo(m).kcal + ' kcal)', style: custBtn(e.drink) }, '🥤 +₹' + this.drinkInfo(m).price) : null,
+            (m.tag === 'DELIVER' && !this.drinkInfo(m).available) ? h('span', { style: { font: "400 11px 'Gaegu',cursive", color: '#a8a294' } }, 'no drink here') : null,
             m.tag === 'DELIVER' ? h('button', { onClick: () => this.cycleSpice(v.di, v.w), title: 'spice / gravy level', style: custBtn(false) }, '🌶 ' + spice[e.spice] + ' ▾') : null,
             m.tag === 'COOK' ? h('span', { style: { font: "400 11px 'Gaegu',cursive", color: '#7a746a' } }, 'home-cooked — set portions with × above; logged to nutrition') : null)) : null;
         const panel = browseKey === v.k ? h('div', { style: { marginTop: '7px', borderTop: '2px dashed #cfc9bd', paddingTop: '6px' } },
@@ -1445,7 +1530,7 @@ class Component extends DCLogic {
         h('button', { onClick: () => this.stepQty(v.di, v.w, -1), title: 'fewer portions', style: mMini }, '−'),
         h('span', { style: { font: "700 13px 'Gaegu',cursive", minWidth: '26px', textAlign: 'center' } }, '×' + e.qty),
         h('button', { onClick: () => this.stepQty(v.di, v.w, 1), title: 'more portions', style: mMini }, '+'),
-        m.tag === 'DELIVER' ? h('button', { onClick: () => this.toggleDrink(v.di, v.w), title: 'add a drink (₹40 · 150 kcal)', style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', cursor: 'pointer', background: e.drink ? '#2a2a28' : '#fff', color: e.drink ? '#fff' : '#2a2a28' } }, '🥤') : null,
+        (m.tag === 'DELIVER' && this.drinkInfo(m).available) ? h('button', { onClick: () => this.toggleDrink(v.di, v.w), title: 'add a drink (₹' + this.drinkInfo(m).price + ' · ' + this.drinkInfo(m).kcal + ' kcal)', style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', cursor: 'pointer', background: e.drink ? '#2a2a28' : '#fff', color: e.drink ? '#fff' : '#2a2a28' } }, '🥤 +₹' + this.drinkInfo(m).price) : null,
         m.tag === 'DELIVER' ? h('button', { onClick: () => this.cycleSpice(v.di, v.w), title: 'spice / gravy level', style: { font: "700 12px 'Gaegu',cursive", padding: '4px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', cursor: 'pointer', background: '#fff' } }, '🌶 ' + this.spiceNames()[e.spice]) : null,
         h('span', { style: { marginLeft: 'auto', font: "700 14px 'Gaegu',cursive", padding: '3px 9px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#f3efe6' } }, '₹' + e.cost)) : null;
       const am = this.areaMeta();
@@ -1461,23 +1546,41 @@ class Component extends DCLogic {
         h('div', { style: { font: "400 12px 'Gaegu',cursive", color: '#7a746a' } }, (isFav(m) ? '⭐ ' : (isNew(m) ? '✦ ' : '')) + m.meta),
         areaRow, mCustom,
         h('div', null, ...(m.flags || []).map((f, fi) => h('div', { key: 'f' + fi, style: { display: 'inline-block', font: "400 11px 'Gaegu',cursive", padding: '2px 6px', border: '1.5px dashed #8a8478', borderRadius: '7px', background: '#faf8f2', marginTop: '6px', marginRight: '3px' } }, f))),
-        h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px' } },
+        h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px', flexWrap: 'wrap' } },
           h('button', { onClick: () => this.spin(v.di, v.w), style: { font: "700 12px 'Gaegu',cursive", padding: '3px 10px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: '#2a2a28', color: '#fff', cursor: 'pointer' } }, '↻ spin'),
+          m.tag !== 'SKIP' ? h('button', { onClick: () => this.togglePin(v.di, v.w), title: 'pin this pick', style: { font: "700 12px 'Gaegu',cursive", padding: '3px 10px', border: '1.5px solid #2a2a28', borderRadius: '8px', background: this.isPinned(v.k) ? '#2a2a28' : '#fff', color: this.isPinned(v.k) ? '#fff' : '#2a2a28', cursor: 'pointer' } }, this.isPinned(v.k) ? '🔒' : '🔓') : null,
+          m.tag !== 'SKIP' ? h('button', { onClick: () => this.addExtra(m.meal + ' add-on', 90, 250), title: 'add an off-plan item', style: { font: "700 12px 'Gaegu',cursive", padding: '3px 10px', border: '1.5px dashed #cf4a2f', borderRadius: '8px', background: '#fff', color: '#cf4a2f', cursor: 'pointer' } }, '＋ item') : null,
           v.idx > 0 ? h('span', { style: { font: "400 11px 'Gaegu',cursive", color: '#cf4a2f' } }, '✎ your pick') : null),
         modeRow);
     });
-    const mobGridEl = h('div', null, chips, mTitle, ...mCards);
+    // global one-off "＋ order now" + a list of the off-plan extras, shared by both layouts
+    const extrasListEls = (this.state.extras || []).map((x) => h('div', { key: 'x' + x.t, style: { display: 'flex', alignItems: 'center', gap: '6px', font: "700 12px 'Gaegu',cursive", padding: '3px 8px', border: '1.5px solid #cf4a2f', borderRadius: '8px', background: '#fdf1ec', color: '#cf4a2f' } },
+      h('span', null, '＋ ' + x.label + ' · ₹' + x.cost + ' · ' + x.kcal + ' kcal'),
+      h('button', { onClick: () => this.removeExtra(x.t), title: 'remove off-plan order', style: { font: "700 11px 'Gaegu',cursive", width: '16px', height: '16px', border: 'none', borderRadius: '50%', background: '#f3c9bd', color: '#cf4a2f', cursor: 'pointer', lineHeight: '1' } }, '×')));
+    const extraOrderEl = h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '14px', paddingTop: '12px', borderTop: '2px dashed #cfc9bd' } },
+      h('button', { onClick: () => this.addExtra('Order now (one-off)', 160, 480), title: 'A one-off off-plan order (N=1) — a separate Swiggy cart with its own fee/ETA; writes to the ledger', style: { font: "700 14px 'Gaegu',cursive", padding: '8px 14px', border: '2px solid #cf4a2f', borderRadius: '11px 9px 11px 9px', background: '#cf4a2f', color: '#fff', boxShadow: '2px 2px 0 rgba(42,42,40,.18)', cursor: 'pointer' } }, '＋ order now'),
+      h('span', { style: { font: "400 13px 'Gaegu',cursive", color: '#7a746a' } }, (this.state.extras || []).length ? ('off-plan: +₹' + this.extrasSpend() + ' · +' + this.extrasKcal() + ' kcal → budget & nutrition') : 'an off-plan exit — adds to spend & kcal so totals stay truthful'),
+      ...extrasListEls);
+    const mobGridEl = h('div', null, chips, mTitle, ...mCards, extraOrderEl);
 
     return {
       isGrid: this.state.tab === 'grid', isDash: this.state.tab === 'dash',
       goGrid: () => this.setState({ tab: 'grid' }), goDash: () => this.setState({ tab: 'dash' }),
-      days, weekToggleEl, selectorEl, burndownEl, burndownMobEl, gridEl, conflictEl, mobGridEl,
+      days, weekToggleEl, selectorEl, burndownEl, burndownMobEl, gridEl, conflictEl, mobGridEl, extraOrderEl,
       isNext, weekLabel: 'Jun ' + base + '–' + (base + 6),
       sessions, delivered, cooked, skipped, spent, left, leftColor, capLabel, capBg, spentPct, ringOffset,
       budgetFillSel: mkFill(spentPct), budgetFillGrid: mkFill(spentPct), budgetFillMob: mkFill(spentPct),
       kcalTargetStr: kcalTarget.toLocaleString(),
       usualN, newN, varietyStr: '⭐ ' + usualN + ' usual · ✦ ' + newN + ' new',
       nestedBudgetEl: this.nestedBudget(spent),
+      reoptimiseUnpinned: () => this.reoptimiseUnpinned(),
+      orderNow: () => this.addExtra('Order now (one-off)', 160, 480),
+      pinnedCount: this.pinnedCount(),
+      reoptLabel: '↻ Re-optimise' + (this.pinnedCount() ? ' unpinned (' + this.pinnedCount() + ' 🔒)' : ' unpinned'),
+      usualFirstEl,
+      planStateEl,
+      welcomeBackEl,
+      ruleGalleryEl: null,
       notes: this.props.showAnnotations ?? true,
     };
   }
