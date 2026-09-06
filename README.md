@@ -14,6 +14,10 @@ out of scope, as requested.
 > (yes) and "does agentic execution cost too much, should we hold?" (no — v1.1
 > runs at ≈₹0 per decision because the planner is a CPU solver, not a paid model).
 
+For the differentiated product thesis, revenue experiments, production gates, and
+terms-safe Swiggy/Swiggy Money rollout, see
+[the September 2026 strategy memo](docs/product-strategy-2026.md).
+
 ## Run it
 
 ```bash
@@ -63,6 +67,9 @@ always-feasible relief valve. Every decision emits plain-language reasons.
 At execution the plan is placed against the (simulated) Swiggy MCP with
 idempotency keys and a compensating saga; a menu-load failure (§1.2) triggers
 substitution to the next-best option **above** your rating floor, never below.
+The UI now retrieves a server-authored checkout preview and binds confirmation to
+its fingerprint and maximum total, so a plan changed after review is rejected
+instead of silently ordered.
 
 ## Configuration
 

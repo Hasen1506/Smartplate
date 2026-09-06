@@ -11,6 +11,7 @@ from flask_cors import CORS
 from . import config, service
 from .db import init_db
 from .domain import models, sentiment
+from .domain.checkout import CheckoutConflict
 from .kernel import agent_brain
 from .integrations import calendar_sync, swiggy_mcp
 
@@ -98,9 +99,22 @@ def create_app() -> Flask:
         return jsonify({"ok": True})
 
     # ---- execution: orders, substitution, idempotency ---- #
+    @app.get("/api/plan/<int:plan_id>/execute/preview")
+    def execute_preview(plan_id):
+        preview = service.execution_preview(plan_id)
+        return (jsonify(preview), 200) if preview else (jsonify({"error": "not found"}), 404)
+
     @app.post("/api/plan/<int:plan_id>/execute")
     def execute(plan_id):
-        return jsonify(service.execute(plan_id))
+        body = request.get_json(silent=True) or {}
+        try:
+            result = service.execute(
+                plan_id, expected_fingerprint=body.get("expected_fingerprint"),
+                max_total=body.get("max_total"))
+        except CheckoutConflict as exc:
+            return jsonify({"error": "checkout_conflict", "message": str(exc),
+                            "preview": service.execution_preview(plan_id)}), 409
+        return (jsonify(result), 200) if result else (jsonify({"error": "not found"}), 404)
 
     # ---- reverse mode / cooking coach ---- #
     @app.get("/api/plan/<int:plan_id>/basket")
