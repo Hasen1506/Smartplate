@@ -36,6 +36,7 @@ button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
 button.primary:hover{background:#9a3f15;color:#fff}
 button.ghost{background:transparent}
 button:disabled{opacity:.5;cursor:not-allowed}
+button:focus-visible,input:focus-visible,select:focus-visible,[role=button]:focus-visible{outline:3px solid rgba(181,77,28,.3);outline-offset:2px}
 
 /* tabs */
 .tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--rule);margin-bottom:22px}
@@ -177,5 +178,20 @@ tr:hover td{background:var(--paper-2)}
 /* within-cap affirmative state (F2) */
 .tag.good{background:var(--green-bg);color:var(--green);border-color:transparent}
 
+/* irreversible action review */
+.modal-bg{position:fixed;inset:0;z-index:100;background:rgba(28,25,23,.55);display:grid;place-items:center;padding:20px;backdrop-filter:blur(3px)}
+.checkout{width:min(620px,100%);max-height:min(780px,92vh);overflow:auto;background:var(--card);border:1px solid var(--rule);border-radius:16px;padding:26px;box-shadow:0 20px 60px rgba(28,25,23,.24);animation:modalin .18s ease}
+@keyframes modalin{from{transform:translateY(8px) scale(.98);opacity:.4}to{transform:none;opacity:1}}
+.checkout>.close{float:right;padding:6px 10px}
+.eyebrow{font-family:'JetBrains Mono',ui-monospace,monospace;text-transform:uppercase;letter-spacing:.1em;font-size:10px;color:var(--accent);font-weight:700;margin-bottom:4px}
+.checkout-list{border-top:1px solid var(--rule);margin:18px 0 0}
+.checkout-row{display:flex;justify-content:space-between;gap:18px;padding:11px 2px;border-bottom:1px solid var(--rule-2);font-size:13px}
+.checkout-row strong{display:block;text-transform:capitalize}.checkout-row span{display:block;color:var(--muted);margin-top:2px}.checkout-row b{white-space:nowrap}
+.checkout-total{display:flex;justify-content:space-between;align-items:center;padding:15px 2px;font-size:15px}.checkout-total strong{font-family:'Fraunces',Georgia,serif;font-size:27px}
+.consent,.demo-warning{display:flex;gap:9px;border-radius:9px;padding:11px 13px;font-size:12.5px;line-height:1.45}
+.consent{background:var(--green-bg);color:var(--ink-2)}.demo-warning{display:block;background:var(--blue-bg);color:var(--blue);margin-top:8px}
+.checkout-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px}
+
 @media(max-width:900px){.week{grid-template-columns:1fr;}.daycol{border:1px solid var(--rule);border-radius:10px;padding:8px}
   .approvebar .cta{align-items:stretch;width:100%}.approvebar .reassure{max-width:none}}
+@media(max-width:520px){.checkout{padding:20px 16px}.checkout-actions{flex-direction:column-reverse}.checkout-actions button{width:100%}.topbar .inner,.wrap{padding-left:14px;padding-right:14px}}

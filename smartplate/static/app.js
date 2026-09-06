@@ -5,7 +5,7 @@
 const S = {
   meta: null, users: [], userId: 1, planId: null, view: null,
   tab: "week", exec: null, community: [], receipts: null, drawer: null,
-  busy: false, error: null, hideCold: false,
+  busy: false, error: null, hideCold: false, orderReview: null,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
 const rupee = (n) => "₹" + (Math.round((n || 0) * 100) / 100).toLocaleString("en-IN");
@@ -93,11 +93,25 @@ async function quickCmd(text) {
   await runCommand();
 }
 async function execute() {
-  S.exec = await api(`/api/plan/${S.planId}/execute`, "POST", {});
+  const review = S.orderReview;
+  S.orderReview = null;
+  S.exec = await api(`/api/plan/${S.planId}/execute`, "POST", {
+    expected_fingerprint: review.fingerprint, max_total: review.total,
+  });
   S.view = await api(`/api/plan/${S.planId}`);
   S.tab = "orders";
   toast(`Placed ${S.exec.placed}/${S.exec.attempted} · ${S.exec.substituted} substituted`);
   render();
+}
+async function reviewOrders() {
+  const review = await api(`/api/plan/${S.planId}/execute/preview`);
+  if (!review.order_count) { toast("There are no delivery sessions to order"); return; }
+  S.orderReview = review; render();
+}
+function deliverySessions() {
+  return S.view.grid.flatMap((day, dayIndex) => MEALS.map(meal => ({
+    ...day.meals[meal], day: day.day, dayIndex, meal,
+  }))).filter(m => m.kind === "delivery" && !["skipped", "snoozed", "cooked", "ordered"].includes(m.status));
 }
 async function genReceipts() {
   await api(`/api/plan/${S.planId}/receipts`, "POST", {});
@@ -121,8 +135,30 @@ async function setSession(sid, status) {
 /* ---------------------------------------------------------------- render */
 function render() {
   document.getElementById("app").innerHTML = topbar() + `<div class="wrap">${errbar() + tabs() + tabBody()}</div>` +
-    (S.drawer ? drawer() : "");
+    (S.drawer ? drawer() : "") + (S.orderReview ? orderReviewDialog() : "");
   wire();
+}
+
+/* Explicit checkout hand-off: planning is reversible, ordering is not. */
+function orderReviewDialog() {
+  const review = S.orderReview;
+  const rows = review.items;
+  const provider = S.meta.swiggy_provider === "simulated" ? "SmartPlate demo provider" : S.meta.swiggy_provider;
+  return `<div class="modal-bg" data-close-review="1">
+    <section class="checkout" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+      <button class="close ghost" data-close-review="1" aria-label="Close order review">✕</button>
+      <p class="eyebrow">Final review · ${rows.length} scheduled deliveries</p>
+      <h2 class="sec" id="checkout-title">Approve before anything is ordered</h2>
+      <p class="sub">SmartPlate will submit these as separate orders now. Availability and the final payable amount are revalidated before placement.</p>
+      <div class="checkout-list">${rows.map(m => `<div class="checkout-row">
+        <div><strong>${esc(S.view.grid[m.day]?.day || "Scheduled")} · ${esc(m.meal)}</strong><span>${esc(m.item)} · ${esc(m.restaurant || "Restaurant pending")}</span></div>
+        <b>${rupee(m.amount)}</b>
+      </div>`).join("")}</div>
+      <div class="checkout-total"><span>Maximum approved total</span><strong>${rupee(review.total)}</strong></div>
+      <div class="consent"><span aria-hidden="true">🛡</span><span><strong>You stay in control.</strong> Hard allergy and rating rules remain locked; unavailable items may only be substituted above your floor. Payment is handled by ${esc(provider)}.</span></div>
+      ${S.meta.swiggy_provider === "simulated" ? `<div class="demo-warning"><strong>Demo mode:</strong> confirming creates simulated orders only. No payment or restaurant order will occur.</div>` : ""}
+      <div class="checkout-actions"><button class="ghost" data-close-review="1">Keep editing</button><button class="primary" data-act="confirm-exec" autofocus>Confirm ${rows.length} orders · ${rupee(review.total)}</button></div>
+    </section></div>`;
 }
 
 function errbar() {
@@ -279,7 +315,7 @@ function cellHTML(m, meal, dayIdx) {
   if (m.kind === "cook" && /Leftover/i.test(m.item)) badges.push(`<span class="b fridge">fridge</span>`);
   const cost = m.cost ? `<span class="cost">${rupee(m.cost)}</span>` : "";
   const meta = m.kind === "skip" ? "" : `<div class="meta">${esc(m.restaurant || "")} ${m.rating ? "· " + m.rating.toFixed(1) + "★" : ""} ${cost}</div>`;
-  return `<div class="cell ${m.kind}" data-cell="${dayIdx}:${meal}">
+  return `<div class="cell ${m.kind}" data-cell="${dayIdx}:${meal}" role="button" tabindex="0" aria-label="${esc(meal)}: ${esc(m.item)}. Open details">
     <div class="meal">${meal}</div>
     <div class="item">${esc(m.item)}</div>${meta}
     ${badges.length ? `<div class="badges">${badges.join("")}</div>` : ""}
@@ -436,18 +472,21 @@ function wire() {
   const md = document.getElementById("modeSel"); if (md) md.onchange = (e) => guard(() => setMode(e.target.value));
   on("[data-tab]", "click", (e) => { S.tab = e.currentTarget.dataset.tab; render(); });
   on("[data-cell]", "click", (e) => { S.drawer = e.currentTarget.dataset.cell; render(); });
+  on("[data-cell]", "keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); S.drawer = e.currentTarget.dataset.cell; render(); } });
   on("[data-close]", "click", (e) => { if (e.target.dataset.close) { S.drawer = null; render(); } });
   on("[data-close-err]", "click", () => { S.error = null; render(); });
   on("[data-close-cold]", "click", () => { S.hideCold = true; render(); });
+  on("[data-close-review]", "click", (e) => { if (e.target.dataset.closeReview) { S.orderReview = null; render(); } });
   on("[data-cmd]", "click", (e) => guard(() => quickCmd(e.currentTarget.dataset.cmd)));
   on("[data-adopt]", "click", (e) => guard(() => adopt(e.currentTarget.dataset.adopt)));
   on("[data-sess]", "click", (e) => { const [id, st] = e.currentTarget.dataset.sess.split(":"); guard(() => setSession(id, st)); });
   const cmd = document.getElementById("cmd"); if (cmd) cmd.addEventListener("keydown", (e) => { if (e.key === "Enter") guard(runCommand); });
   const acts = {
-    cmd: runCommand, reopt: reoptimize, exec: execute, savetpl: saveTemplate,
+    cmd: runCommand, reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute, savetpl: saveTemplate,
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan,
   };
   on("[data-act]", "click", (e) => { const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
+  if (S.orderReview) document.querySelector(".checkout [autofocus]")?.focus();
 }
 async function idempotencyDemo() {
   const d = await api("/api/demo/idempotency", "POST", {});

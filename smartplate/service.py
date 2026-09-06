@@ -8,7 +8,7 @@ the 17 features produce.
 import datetime as dt
 
 from . import config, db
-from .domain import (carbon, community, festivals, health, household, intake,
+from .domain import (carbon, checkout, community, festivals, health, household, intake,
                      ledger, models, nutrition, receipts, reverse_mode, weather)
 from .kernel import (agent_brain, budget, explainability, optimizer, recommender,
                      scheduler, variance)
@@ -208,7 +208,20 @@ def _week_context(user, plan, fests):
 # --------------------------------------------------------------------------- #
 # Execution (orders), community, receipts, reverse mode
 # --------------------------------------------------------------------------- #
-def execute(plan_id: int) -> dict:
+def execution_preview(plan_id: int) -> dict:
+    """Return the exact amount/items a client should show before authorisation."""
+    plan = models.get_plan(plan_id)
+    if not plan:
+        return {}
+    return checkout.preview(plan_id, models.decisions_for_plan(plan_id))
+
+
+def execute(plan_id: int, *, expected_fingerprint: str | None = None,
+            max_total: float | None = None) -> dict:
+    review = execution_preview(plan_id)
+    if not review:
+        return {}
+    checkout.validate(review, expected_fingerprint=expected_fingerprint, max_total=max_total)
     return variance.execute_plan(plan_id)
 
 
