@@ -37,6 +37,13 @@ def set_status(session_id: int, status: str, note: str = "") -> None:
     if status not in VALID_STATES:
         raise ValueError(f"bad status {status!r}")
     with db.cursor() as cur:
+        row = cur.execute('SELECT status FROM sessions WHERE id=?', (session_id,)).fetchone()
+        if not row:
+            raise ValueError('Session not found')
+        if row['status'] == 'ordered':
+            raise ValueError('An ordered meal cannot be changed or cancelled here')
+        if status == 'ordered':
+            raise ValueError('Use checkout to order a meal')
         cur.execute("UPDATE sessions SET status=?, note=? WHERE id=?", (status, note, session_id))
 
 

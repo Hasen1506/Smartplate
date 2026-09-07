@@ -195,3 +195,17 @@ tr:hover td{background:var(--paper-2)}
 @media(max-width:900px){.week{grid-template-columns:1fr;}.daycol{border:1px solid var(--rule);border-radius:10px;padding:8px}
   .approvebar .cta{align-items:stretch;width:100%}.approvebar .reassure{max-width:none}}
 @media(max-width:520px){.checkout{padding:20px 16px}.checkout-actions{flex-direction:column-reverse}.checkout-actions button{width:100%}.topbar .inner,.wrap{padding-left:14px;padding-right:14px}}
+
+.settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px}
+.preferences label{display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:600}
+.preferences input,.preferences select{font:inherit;min-width:0;max-width:100%;padding:11px;border:1px solid var(--rule);border-radius:8px;background:var(--card);color:var(--ink)}
+.preferences fieldset{margin:24px 0;padding:18px;border:1px solid var(--rule);border-radius:10px}
+.preferences legend{font-size:16px;font-weight:600;padding:0 6px}
+.checks{display:flex;gap:16px;flex-wrap:wrap}
+.preferences .check{flex-direction:row;align-items:center;font-weight:400;text-transform:capitalize}
+.preferences input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
+.preferences p{margin:14px 0 0}
+.card{overflow-x:auto}
+button:disabled{opacity:.6;cursor:wait}
+.checkout .eyebrow,.consent,.demo-warning,.coldstart,.legend{font-size:14px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;scroll-behavior:auto!important;transition:none!important}}

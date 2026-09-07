@@ -16,7 +16,7 @@ async function api(path, method = "GET", body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
   if (body) opt.body = JSON.stringify(body);
   const r = await fetch(path, opt);
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  if (!r.ok) { const data = await r.json().catch(() => ({})); throw new Error(data.message || data.error || r.statusText); }
   return r.json();
 }
 function toast(msg) {
@@ -39,6 +39,7 @@ function setBusy(b) {
 }
 // Wrap every user-triggered action: show progress, surface errors instead of failing silently.
 async function guard(fn) {
+  if (S.busy) return;
   setBusy(true); S.error = null;
   try { await fn(); }
   catch (e) { S.error = e.message || String(e); render(); }
@@ -51,24 +52,29 @@ async function boot() {
   ensureBusyBar();
   S.meta = await api("/api/meta");
   S.users = await api("/api/users");
-  S.userId = S.users[0].id;
+  let saved;
+  try { saved = Number(localStorage.getItem('smartplate.user')); } catch (_) {}
+  S.userId = S.users.find(u => u.id === saved)?.id || S.users[0]?.id;
+  if (!S.userId) throw new Error('No profiles available. Restart SmartPlate to initialize the trial.');
   await loadOrCreatePlan();
   render();
 }
 async function loadOrCreatePlan() {
-  // The seed creates plan #1 for user #1; otherwise create on demand.
-  if (S.userId === 1) {
-    try { S.view = await api("/api/plan/1"); S.planId = 1; return; } catch (e) {}
-  }
-  S.view = await api("/api/plan", "POST", { user_id: S.userId });
+  S.view = await api(`/api/user/${S.userId}/plan`);
   S.planId = S.view.plan.id;
+  S.exec = await api(`/api/plan/${S.planId}/orders`);
 }
 
 /* ---------------------------------------------------------------- actions */
 async function switchUser(id) {
-  S.userId = Number(id); S.exec = null;
+  S.userId = Number(id); S.exec = null; S.receipts = null; S.drawer = null; S.orderReview = null;
+  try { localStorage.setItem('smartplate.user', String(S.userId)); } catch (_) {}
+  await loadOrCreatePlan(); render();
+}
+async function newWeek() {
   S.view = await api("/api/plan", "POST", { user_id: S.userId });
-  S.planId = S.view.plan.id; render();
+  S.planId = S.view.plan.id; S.exec = null; S.receipts = null; S.orderReview = null;
+  toast('Started a new plan; previous orders remain in your expenses'); render();
 }
 async function setMode(mode) {
   S.view = await api(`/api/plan/${S.planId}/optimize`, "POST", { mode });
@@ -98,9 +104,11 @@ async function execute() {
   S.exec = await api(`/api/plan/${S.planId}/execute`, "POST", {
     expected_fingerprint: review.fingerprint, max_total: review.total,
   });
+  const outcome = S.exec;
+  S.exec = await api(`/api/plan/${S.planId}/orders`);
   S.view = await api(`/api/plan/${S.planId}`);
   S.tab = "orders";
-  toast(`Placed ${S.exec.placed}/${S.exec.attempted} · ${S.exec.substituted} substituted`);
+  toast(`Simulated ${outcome.placed}/${outcome.attempted} orders · ${outcome.failed} not ordered`);
   render();
 }
 async function reviewOrders() {
@@ -143,21 +151,20 @@ function render() {
 function orderReviewDialog() {
   const review = S.orderReview;
   const rows = review.items;
-  const provider = S.meta.swiggy_provider === "simulated" ? "SmartPlate demo provider" : S.meta.swiggy_provider;
   return `<div class="modal-bg" data-close-review="1">
     <section class="checkout" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
       <button class="close ghost" data-close-review="1" aria-label="Close order review">✕</button>
       <p class="eyebrow">Final review · ${rows.length} scheduled deliveries</p>
       <h2 class="sec" id="checkout-title">Approve before anything is ordered</h2>
-      <p class="sub">SmartPlate will submit these as separate orders now. Availability and the final payable amount are revalidated before placement.</p>
+      <p class="sub">Try the ordering flow for these meals. This simulation runs now; it does not schedule or send real deliveries.</p>
       <div class="checkout-list">${rows.map(m => `<div class="checkout-row">
         <div><strong>${esc(S.view.grid[m.day]?.day || "Scheduled")} · ${esc(m.meal)}</strong><span>${esc(m.item)} · ${esc(m.restaurant || "Restaurant pending")}</span></div>
         <b>${rupee(m.amount)}</b>
       </div>`).join("")}</div>
       <div class="checkout-total"><span>Maximum approved total</span><strong>${rupee(review.total)}</strong></div>
-      <div class="consent"><span aria-hidden="true">🛡</span><span><strong>You stay in control.</strong> Hard allergy and rating rules remain locked; unavailable items may only be substituted above your floor. Payment is handled by ${esc(provider)}.</span></div>
+      <div class="consent"><span aria-hidden="true">🛡</span><span><strong>Substitution limits.</strong> A replacement must satisfy the sample profile's filters and cost no more than that meal's reviewed price. Otherwise it is left unordered.</span></div>
       ${S.meta.swiggy_provider === "simulated" ? `<div class="demo-warning"><strong>Demo mode:</strong> confirming creates simulated orders only. No payment or restaurant order will occur.</div>` : ""}
-      <div class="checkout-actions"><button class="ghost" data-close-review="1">Keep editing</button><button class="primary" data-act="confirm-exec" autofocus>Confirm ${rows.length} orders · ${rupee(review.total)}</button></div>
+      <div class="checkout-actions"><button class="ghost" data-close-review="1">Keep editing</button><button class="primary" data-act="confirm-exec" autofocus>Simulate ${rows.length} orders · ${rupee(review.total)}</button></div>
     </section></div>`;
 }
 
@@ -188,7 +195,7 @@ function topbar() {
 
 function tabs() {
   const T = [["week", "Week plan"], ["insights", "Insights"], ["orders", "Orders & substitution"],
-    ["cooking", "Cooking coach"], ["community", "Community"], ["receipts", "Receipts"], ["features", "17 features"]];
+    ["settings", "Settings"], ["cooking", "Cooking coach"], ["community", "Community"], ["receipts", "Expenses"], ["connection", "Swiggy connection"]];
   return `<div class="tabs">${T.map(([k, l]) =>
     `<button class="tab ${S.tab === k ? "active" : ""}" data-tab="${k}">${l}</button>`).join("")}</div>`;
 }
@@ -202,6 +209,8 @@ function tabBody() {
     case "community": return communityPanel();
     case "receipts": return receiptsPanel();
     case "features": return featuresPanel();
+    case "settings": return settingsPanel();
+    case "connection": return connectionPanel();
   }
 }
 
@@ -212,7 +221,7 @@ function statStrip() {
   return `<div class="stats">
     <div class="stat"><div class="label">Weekly spend</div><div class="val">${rupee(b.spend)}<small> / ${rupee(b.budget)}</small></div>
       <div class="bar"><i style="width:${pct}%;background:${b.over ? "var(--red)" : "var(--accent)"}"></i></div></div>
-    <div class="stat"><div class="label">Sessions</div><div class="val">${c.delivery}<small> deliver</small> ${c.cook}<small> cook</small> ${c.skip}<small> skip</small></div></div>
+    <div class="stat"><div class="label">Sessions</div><div class="val">${c.delivery}<small> deliver</small> ${c.cook}<small> cook</small> ${c.skip + (c.snoozed || 0)}<small> skip / snooze</small></div></div>
     <div class="stat"><div class="label">Saved vs surge</div><div class="val">${rupee(v.surge_saved)}</div></div>
     <div class="stat"><div class="label">Carbon (week)</div><div class="val">${v.carbon.total_kg}<small> kg · ${v.carbon.band}</small></div></div>
     <div class="stat"><div class="label">Rating floor</div><div class="val">${v.user.rating_floor.toFixed(1)}<small> ★ min</small></div></div>
@@ -251,7 +260,7 @@ function controls() {
 function approveBar() {
   const v = S.view, b = v.budget, c = v.counts;
   const left = b.budget - b.spend;
-  const sessions = (c.delivery || 0) + (c.cook || 0) + (c.skip || 0);
+  const sessions = 21;
   return `<div class="approvebar">
     <div class="sum">
       <div class="n">${sessions}<small> sessions</small></div>
@@ -262,8 +271,8 @@ function approveBar() {
     </div>
     <div class="grow"></div>
     <div class="cta">
-      <button class="primary" data-act="exec">Review &amp; place orders →</button>
-      <span class="reassure"><span class="shield">🛡</span><span>Nothing is ordered until you approve — skip or swap any item, cancel anytime.</span></span>
+      <button class="primary" data-act="exec">Review simulated orders →</button>
+      <span class="reassure"><span class="shield">🛡</span><span>Try checkout without spending money. No real orders are sent.</span></span>
     </div>
   </div>`;
 }
@@ -272,7 +281,7 @@ function approveBar() {
 function coldStart() {
   if (S.hideCold) return "";
   return `<div class="coldstart"><span class="i">ℹ Demo week</span>
-    <span>Generated from a seeded sample Chennai catalog — not personal history yet. As you rate meals, the agent's taste model replaces these defaults.</span>
+    <span>Sample Chennai prices, menus, weather and profiles. The profile's medical and allergy selections are fictional examples. Change them in Settings to try different plans.</span>
     <button class="x" data-close-cold="1" title="Dismiss">✕</button></div>`;
 }
 
@@ -287,7 +296,7 @@ function weekGuide() {
     <span class="grp"><span class="b sub">subbed</span>swapped ≥ floor</span>
     <span class="grp"><span class="b fridge">fridge</span>leftovers</span>
     <span class="grp"><span class="b fest">festival</span></span>
-    <span class="hint">Tap any meal for the “why” &amp; swap options →</span>
+    <span class="hint">Tap a meal for reasons, skip, snooze or restore →</span>
   </div>`;
 }
 
@@ -312,6 +321,7 @@ function cellHTML(m, meal, dayIdx) {
   const badges = [];
   if (m.time_shift) badges.push(`<span class="b shift" title="saved ${rupee(m.time_shift.saving)}">⌚ ${esc(m.time_shift.offpeak_hhmm)}</span>`);
   if (m.substituted) badges.push(`<span class="b sub">subbed</span>`);
+  if (m.status === 'ordered') badges.push('<span class="tag good">Simulated order</span>');
   if (m.kind === "cook" && /Leftover/i.test(m.item)) badges.push(`<span class="b fridge">fridge</span>`);
   const cost = m.cost ? `<span class="cost">${rupee(m.cost)}</span>` : "";
   const meta = m.kind === "skip" ? "" : `<div class="meta">${esc(m.restaurant || "")} ${m.rating ? "· " + m.rating.toFixed(1) + "★" : ""} ${cost}</div>`;
@@ -333,10 +343,11 @@ function drawer() {
     ${["kcal", "protein_g", "carbs_g", "fat_g", "sugar_g"].filter(k => n[k] != null).map(k =>
       `<span class="tag">${k.replace("_g", "")}: ${n[k]}${k === "kcal" ? "" : "g"}</span>`).join("")}</div>` : "";
   const carbon = m.carbon_kg ? `<div class="kv"><span class="tag">carbon ≈ ${m.carbon_kg} kg CO₂e</span></div>` : "";
-  const actions = `<div class="row" style="margin-top:20px">
+  const actions = m.status === 'ordered' ? '<p class="callout">This simulated order is saved. It stays fixed when you replan.</p>' : `<div class="row" style="margin-top:20px">
       <button data-sess="${m.session_id}:skipped">Skip</button>
       <button data-sess="${m.session_id}:snoozed">Snooze</button>
-      <button data-sess="${m.session_id}:cooked">I cooked this</button></div>`;
+      <button data-sess="${m.session_id}:cooked">I cooked this</button>
+      ${m.status !== 'active' ? `<button data-sess="${m.session_id}:active">Restore to plan</button>` : ''}</div>`;
   return `<div class="drawer-bg" data-close="1"><div class="drawer">
     <button class="close ghost" data-close="1">✕</button>
     <h3 class="k">${S.view.grid[Number(di)].day} · ${meal}</h3>
@@ -385,17 +396,15 @@ function insights() {
 /* ---- orders / substitution / idempotency ---- */
 function ordersPanel() {
   const head = `<h2 class="sec">Order execution</h2>
-    <div class="sub">Saga: validate → cart → pay → place. Every write carries an idempotency key derived from
-      (user, plan, session, trigger) — a retried network blip can never double-order. Menu-load failures (§1.2)
-      trigger substitution above your rating floor, never below.</div>
-    <div class="row" style="margin:12px 0"><button class="primary" data-act="exec">Place this week's orders</button>
+    <div class="sub">Simulated orders are saved across refreshes. Unavailable meals can be replaced within their reviewed price and rating limits. No restaurant receives these orders.</div>
+    <div class="row" style="margin:12px 0"><button class="primary" data-act="exec">Review simulated orders</button>
       <button class="ghost" data-act="idem">Demo: place same order twice</button></div>`;
-  if (!S.exec) return head + `<div class="card empty">No orders placed yet. Hit “Place orders”.</div>`;
+  if (!S.exec?.attempted) return head + `<div class="card empty">No simulated orders yet. Review your meals to try checkout.</div>`;
   const e = S.exec;
   const rows = e.results.map(r => `<tr>
     <td>${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][r.day]} ${r.meal}</td>
     <td>${esc(r.item)}<br><span class="mono" style="font-size:11px;color:var(--muted)">${r.idempotency_key}</span></td>
-    <td>${r.substituted ? `<span class="b sub">subbed</span> ${esc(r.substitution.from)} → ${esc(r.substitution.to)}` : (r.deduped ? "<span class='tag'>deduped</span>" : "ok")}</td>
+    <td>${r.substituted ? `<span class="b sub">substituted</span>` : (r.placed ? 'simulated' : 'not ordered')}</td>
     <td>${esc(r.provider_order_id || "—")}</td>
     <td>${esc(r.state)}</td></tr>`).join("");
   return head + `<div class="stats">
@@ -424,26 +433,24 @@ function cookingPanel() {
 
 /* ---- community ---- */
 function communityPanel() {
-  if (!S.community.length) loadCommunity();
   const rows = S.community.map(t => `<div class="card"><div class="row" style="align-items:center">
     <div style="flex:1"><div style="font-weight:600">${esc(t.title)}</div>
       <div class="sub">by ${esc(t.author)} · ${esc(t.city)} · ${esc(t.mode)} · ${rupee(t.budget)}/wk · ${t.adopts} adopts</div></div>
     <button data-adopt="${t.id}">Adopt</button></div></div>`).join("") || `<div class="card empty">No templates yet.</div>`;
   return `<h2 class="sec">Community plan templates</h2>
-    <div class="sub">Power users publish Survival/Tight-Week plans; others browse and clone. Network effect.</div>
+    <div class="sub">Sample templates saved in this trial. “Adopt” bookmarks interest; it does not replace your meal plan.</div>
     <div class="row" style="margin-bottom:12px"><button class="primary" data-act="savetpl">Publish my current week</button></div>
     <div class="grid-cards">${rows}</div>`;
 }
 
 /* ---- receipts ---- */
 function receiptsPanel() {
-  if (!S.receipts) genReceiptsLazy();
   const r = S.receipts;
   const rows = r && r.rows.length ? r.rows.map(x => `<tr><td>${esc(x.iso_date)}</td>
     <td>${esc(x.note)}</td><td><span class="tag ${x.category === "business" ? "warn" : ""}">${esc(x.category)}</span></td>
     <td>${rupee(x.amount)}</td></tr>`).join("") : "";
-  return `<h2 class="sec">Receipts & expenses</h2>
-    <div class="sub">Auto-tags weekday lunches as business; export CSV for claims. Sticky for the users it serves.</div>
+  return `<h2 class="sec">Trial expenses</h2>
+    <div class="sub">Sample expense records from completed simulated orders. These are not payment receipts or tax invoices. Category suggestions need your review.</div>
     <div class="row" style="margin-bottom:12px"><button class="primary" data-act="genrcpt">Generate from this week's orders</button>
       <a href="/api/receipts/${S.userId}/export.csv"><button class="ghost">Export CSV ↓</button></a></div>
     ${r ? `<div class="stats"><div class="stat"><div class="label">Total</div><div class="val">${rupee(r.total)}</div></div>
@@ -470,7 +477,13 @@ function wire() {
   const on = (sel, ev, fn) => document.querySelectorAll(sel).forEach(el => el.addEventListener(ev, fn));
   const u = document.getElementById("userSel"); if (u) u.onchange = (e) => guard(() => switchUser(e.target.value));
   const md = document.getElementById("modeSel"); if (md) md.onchange = (e) => guard(() => setMode(e.target.value));
-  on("[data-tab]", "click", (e) => { S.tab = e.currentTarget.dataset.tab; render(); });
+  on("[data-tab]", "click", (e) => guard(async () => {
+    S.tab = e.currentTarget.dataset.tab;
+    if (S.tab === 'community') S.community = await api('/api/community');
+    if (S.tab === 'receipts') S.receipts = await api(`/api/receipts/${S.userId}`);
+    if (S.tab === 'orders') S.exec = await api(`/api/plan/${S.planId}/orders`);
+    render();
+  }));
   on("[data-cell]", "click", (e) => { S.drawer = e.currentTarget.dataset.cell; render(); });
   on("[data-cell]", "keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); S.drawer = e.currentTarget.dataset.cell; render(); } });
   on("[data-close]", "click", (e) => { if (e.target.dataset.close) { S.drawer = null; render(); } });
@@ -483,11 +496,63 @@ function wire() {
   const cmd = document.getElementById("cmd"); if (cmd) cmd.addEventListener("keydown", (e) => { if (e.key === "Enter") guard(runCommand); });
   const acts = {
     cmd: runCommand, reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute, savetpl: saveTemplate,
-    genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan,
+    genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
   };
   on("[data-act]", "click", (e) => { const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
   if (S.orderReview) document.querySelector(".checkout [autofocus]")?.focus();
+  const preferences = document.getElementById('preferences');
+  if (preferences) preferences.onsubmit = e => {
+    e.preventDefault();
+    const form = new FormData(preferences);
+    const body = Object.fromEntries(['name', 'diet'].map(k => [k, form.get(k)]));
+    for (const k of ['weekly_budget', 'rating_floor', 'kcal', 'protein_g', 'max_cook_per_week']) body[k] = Number(form.get(k));
+    for (const k of ['allergens', 'medical']) body[k] = form.getAll(k);
+    guard(async () => {
+      S.view = await api(`/api/user/${S.userId}`, 'PATCH', body);
+      S.users = await api('/api/users'); S.orderReview = null;
+      S.tab = 'week'; toast('Settings saved and unplaced meals replanned'); render();
+    });
+  };
 }
+
+function settingsPanel() {
+  const u = S.view.user, n = S.view.nutrition.daily_target;
+  const number = (key, label, value, min, max, step = 1) => `<label>${label}<input name="${key}" type="number" min="${min}" max="${max}" step="${step}" value="${value}" required></label>`;
+  const checks = (key, values) => values.map(v => `<label class="check"><input type="checkbox" name="${key}" value="${v}" ${u[key].includes(v) ? 'checked' : ''}>${esc(v.replace('_', ' '))}</label>`).join('');
+  return `<h2 class="sec">Your planning settings</h2><p class="sub">Change the sample profile and see how the week adapts. Already ordered meals stay fixed. The trial catalog covers Chennai.</p>
+    <form id="preferences" class="card preferences">
+      <div class="settings-grid"><label>Profile name<input name="name" maxlength="80" value="${esc(u.name)}" required></label>
+      <label>Diet<select name="diet">${[['nonveg','Non-vegetarian'],['veg','Vegetarian'],['vegan','Vegan']].map(([k,v])=>`<option value="${k}" ${u.diet===k?'selected':''}>${v}</option>`).join('')}</select></label>
+      ${number('weekly_budget','Weekly budget (₹)',u.weekly_budget,0,1000000)}
+      ${number('rating_floor','Minimum restaurant rating',u.rating_floor,0,5,0.1)}
+      ${number('kcal','Daily calorie target (kcal)',n.kcal,1,20000)}
+      ${number('protein_g','Daily protein target (g)',n.protein_g,1,1000)}
+      ${number('max_cook_per_week','Maximum cooking meals per week',u.health_targets.max_cook_per_week ?? 6,0,21)}</div>
+      <fieldset><legend>Exclude these allergens</legend><div class="checks">${checks('allergens',['peanut','dairy','gluten','egg','soy','shellfish','fish','sesame','tree_nut'])}</div></fieldset>
+      <fieldset><legend>Example medical filters</legend><div class="checks">${checks('medical',['diabetes','hypertension','celiac'])}</div><p class="sub">These simplified demo rules use sample nutrition labels; they do not establish that a restaurant meal is medically suitable or free of cross-contact.</p></fieldset>
+      <button type="submit" class="primary">Save &amp; replan</button>
+    </form><div class="card"><h3 class="k">Start another trial plan</h3><p class="sub">Create a fresh upcoming week using this profile. Your previous plan and simulated order records remain saved.</p><button data-act="newweek">Create new week</button></div>`;
+}
+
+function connectionPanel() {
+  return `<h2 class="sec">Swiggy connection</h2><div class="card"><span class="tag">Not connected</span>
+    <h3>Meal planning is ready to try. Real ordering is not enabled.</h3>
+    <p>The trial uses a sample catalog. It does not access your Swiggy account, wallet or saved addresses.</p>
+    <p>Real checkout needs a Swiggy sign-in, current menu identifiers, your selected address and payment method, and confirmation of the live cart total. Weekly automatic ordering is not enabled.</p>
+    <p>The documentation is now accessible. Its cart recipe conflicts with the detailed tool reference; the authenticated tool schemas must be checked before connecting real checkout.</p>
+    <a href="https://mcp.swiggy.com/builders/docs/start/authenticate/" target="_blank" rel="noopener">Swiggy sign-in documentation ↗</a>
+    </div>`;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && (S.drawer || S.orderReview)) { S.drawer = null; S.orderReview = null; render(); }
+  if (e.key === 'Tab' && S.orderReview) {
+    const items = [...document.querySelectorAll('.checkout button:not([disabled])')];
+    const first = items[0], last = items.at(-1);
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
 async function idempotencyDemo() {
   const d = await api("/api/demo/idempotency", "POST", {});
   toast(`Same order id: ${d.same_order_id} · 2nd deduped: ${d.second_was_deduped}`);

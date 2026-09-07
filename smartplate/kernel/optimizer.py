@@ -314,7 +314,9 @@ def optimize(plan_id: int) -> dict:
                 obj_terms.append(config.PROTEIN_EVEN_W * short / max(tgt, 1.0))
 
     prob += pulp.lpSum(obj_terms)
-    prob += pulp.lpSum(budget_terms) <= user["weekly_budget"]   # HARD budget envelope
+    committed = [d for d in models.decisions_for_plan(plan_id) if d['session_status'] == 'ordered']
+    spent = sum(d['cost'] for d in committed)
+    prob += pulp.lpSum(budget_terms) <= max(0, user["weekly_budget"] - spent)
     if cook_vars:
         prob += pulp.lpSum(cook_vars) <= _cook_cap(user)        # the user's cook rhythm, not a fixed 6
     for vlist in item_vars.values():                            # variety: cap repeats per dish

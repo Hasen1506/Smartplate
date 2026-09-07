@@ -6,6 +6,7 @@ household split, weather/festival annotations) so the UI can render everything
 the 17 features produce.
 """
 import datetime as dt
+import math
 
 from . import config, db
 from .domain import (carbon, checkout, community, festivals, health, household, intake,
@@ -19,7 +20,11 @@ from .kernel import (agent_brain, budget, explainability, optimizer, recommender
 # --------------------------------------------------------------------------- #
 def create_plan(user_id: int, mode: str | None = None) -> int:
     user = models.get_user(user_id)
+    if not user:
+        raise ValueError('Profile not found')
     mode = mode or user["mode"]
+    if mode not in config.MODE_LABELS:
+        raise ValueError('Unknown planning mode')
     ws = _next_monday()
     with db.cursor() as cur:
         cur.execute(
@@ -33,9 +38,70 @@ def create_plan(user_id: int, mode: str | None = None) -> int:
 
 def reoptimize(plan_id: int, mode: str | None = None) -> dict:
     if mode:
+        if mode not in config.MODE_LABELS:
+            raise ValueError('Unknown planning mode')
         with db.cursor() as cur:
             cur.execute("UPDATE plans SET mode=? WHERE id=?", (mode, plan_id))
     return optimizer.optimize(plan_id)
+
+
+def current_plan(user_id):
+    with db.cursor() as cur:
+        row = cur.execute('SELECT id FROM plans WHERE user_id=? ORDER BY id DESC LIMIT 1', (user_id,)).fetchone()
+    return plan_view(row['id'] if row else create_plan(user_id))
+
+
+def update_preferences(user_id, body):
+    """Validate the entire edit before writing. Replan only unplaced meals."""
+    user = models.get_user(user_id)
+    allowed = {'name', 'weekly_budget', 'rating_floor', 'diet', 'allergens', 'medical',
+               'kcal', 'protein_g', 'max_cook_per_week'}
+    if set(body) - allowed:
+        raise ValueError('Unsupported preference field')
+    updates = {}
+    if 'name' in body:
+        if not isinstance(body['name'], str) or not 1 <= len(body['name'].strip()) <= 80:
+            raise ValueError('Enter a name of 1–80 characters')
+        updates['name'] = body['name'].strip()
+    if 'diet' in body:
+        if body['diet'] not in ('veg', 'nonveg', 'vegan'):
+            raise ValueError('Choose vegetarian, non-vegetarian, or vegan')
+        updates['diet'] = body['diet']
+    for key, lo, hi in [('weekly_budget', 0, 1000000), ('rating_floor', 0, 5),
+                         ('kcal', 1, 20000), ('protein_g', 1, 1000), ('max_cook_per_week', 0, 21)]:
+        if key not in body:
+            continue
+        value = body[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not lo <= value <= hi:
+            raise ValueError(f'{key} must be a number between {lo} and {hi}')
+        if key == 'max_cook_per_week':
+            if int(value) != value:
+                raise ValueError('Cooking meals must be a whole number')
+            user['health_targets'][key] = int(value)
+            updates['health_targets'] = db.jd(user['health_targets'])
+        elif key in ('kcal', 'protein_g'):
+            user['nutrition_targets'][key] = value
+            updates['nutrition_targets'] = db.jd(user['nutrition_targets'])
+            if key == 'protein_g':
+                user['health_targets']['protein_floor_g'] = value
+                updates['health_targets'] = db.jd(user['health_targets'])
+        else:
+            updates[key] = value
+    for key, values in [('allergens', {'peanut', 'dairy', 'gluten', 'egg', 'soy', 'shellfish', 'fish', 'sesame', 'tree_nut'}),
+                        ('medical', {'diabetes', 'hypertension', 'celiac'})]:
+        if key in body:
+            if not isinstance(body[key], list) or any(not isinstance(v, str) or v not in values for v in body[key]):
+                raise ValueError(f'Unknown {key} selection')
+            updates[key] = db.jd(sorted(set(body[key])))
+    if not updates:
+        raise ValueError('No preferences supplied')
+    with db.cursor() as cur:
+        cur.execute('UPDATE users SET ' + ', '.join(f'{key}=?' for key in updates) + ' WHERE id=?',
+                    (*updates.values(), user_id))
+        row = cur.execute('SELECT id FROM plans WHERE user_id=? ORDER BY id DESC LIMIT 1', (user_id,)).fetchone()
+    pid = row['id'] if row else create_plan(user_id)
+    reoptimize(pid)
+    return plan_view(pid)
 
 
 def set_session_status(session_id: int, status: str, note: str = "") -> None:
@@ -92,7 +158,7 @@ def plan_view(plan_id: int) -> dict:
         "plan": {**plan, "mode_label": config.MODE_LABELS.get(plan["mode"], plan["mode"])},
         "user": {k: user[k] for k in ("id", "name", "city", "diet", "weekly_budget",
                                       "rating_floor", "mode", "allergens", "medical",
-                                      "health_targets", "carbon_pref")},
+                                      "health_targets", "nutrition_targets", "carbon_pref")},
         "budget": env,
         "nutrition": {"week": nut, "daily_avg": daily_nut, "daily_target": targets},
         "carbon": {"total_kg": carbon_total, "band": carbon.band(carbon_total / max(1, len(spend_rows)))},
@@ -153,8 +219,10 @@ def nutrition_ledger(user_id: int) -> dict:
 def _counts(decisions):
     c = {"delivery": 0, "cook": 0, "skip": 0, "snoozed": 0, "ordered": 0}
     for d in decisions:
-        k = d["chosen_kind"]
+        k = {'skipped': 'skip', 'cooked': 'cook'}.get(d['chosen_kind'], d['chosen_kind'])
         c[k] = c.get(k, 0) + 1
+        if d.get('session_status') == 'ordered' and k != 'ordered':
+            c['ordered'] += 1
     return c
 
 
@@ -169,7 +237,7 @@ def _grid(decisions):
             "substituted": bool(d.get("substituted")),
             "time_shift": d.get("time_shift"), "reasons": d.get("reasons", []),
             "nutrition": d.get("nutrition", {}), "carbon_kg": d.get("carbon_kg", 0),
-            "session_id": d["session_id"],
+            "session_id": d["session_id"], "status": d['session_status'],
         }
     return [grid[i] for i in range(7)]
 
@@ -222,7 +290,9 @@ def execute(plan_id: int, *, expected_fingerprint: str | None = None,
     if not review:
         return {}
     checkout.validate(review, expected_fingerprint=expected_fingerprint, max_total=max_total)
-    return variance.execute_plan(plan_id)
+    result = variance.execute_plan(plan_id)
+    record_receipts(plan_id)
+    return result
 
 
 def grocery_basket(plan_id: int) -> dict:
@@ -252,11 +322,27 @@ def record_receipts(plan_id: int) -> dict:
     user = models.get_user(plan["user_id"])
     n = 0
     for d in models.decisions_for_plan(plan_id):
-        if d["chosen_kind"] == "delivery":
+        if d["chosen_kind"] == "delivery" and d['session_status'] == 'ordered':
             iso = (dt.date.fromisoformat(plan["week_start"]) + dt.timedelta(days=d["day"])).isoformat()
             receipts.record(user["id"], d, iso)
             n += 1
     return {"recorded": n}
+
+
+def order_history(plan_id):
+    with db.cursor() as cur:
+        rows = cur.execute('''SELECT o.*, d.item_name, d.substituted, s.day, s.meal
+            FROM orders o JOIN decisions d ON d.id=o.decision_id
+            JOIN sessions s ON s.id=d.session_id WHERE d.plan_id=? ORDER BY o.id''', (plan_id,)).fetchall()
+    results = [{'item': r['item_name'], 'day': r['day'], 'meal': r['meal'],
+                'cost': r['amount'], 'placed': r['state'] == 'placed', 'state': r['state'],
+                'provider_order_id': r['provider_order_id'], 'idempotency_key': r['idempotency_key'],
+                'substituted': bool(r['substituted']), 'substitution': None,
+                'log': db.jl(r['log'])} for r in rows]
+    return {'results': results, 'attempted': len(results),
+            'placed': sum(r['placed'] for r in results),
+            'substituted': sum(r['substituted'] for r in results),
+            'failed': sum(not r['placed'] for r in results)}
 
 
 def receipts_view(user_id: int):

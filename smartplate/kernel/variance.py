@@ -24,6 +24,8 @@ def execute_plan(plan_id: int, *, provider=None) -> dict:
         if d["chosen_kind"] != "delivery":
             continue
         session = sessions[d["session_id"]]
+        if session['status'] != 'active':
+            continue
         results.append(_execute_one(user, plan, session, d, ctx, provider))
 
     placed = [r for r in results if r["placed"]]
@@ -50,7 +52,8 @@ def _execute_one(user, plan, session, decision, ctx, provider):
     sub_info = None
     if not res.ok and res.error == "menu_load":
         # substitute to next-best above the rating floor (never below) -------- #
-        alt = _next_best(user, plan, session, ctx, exclude_restaurant=decision["restaurant_id"])
+        alt = _next_best(user, plan, session, ctx, exclude_restaurant=decision["restaurant_id"],
+                         max_cost=decision['cost'])
         if alt and alt["kind"] == "delivery":
             substituted = True
             sub_info = {"from": decision["item_name"], "to": alt["item_name"],
@@ -62,7 +65,7 @@ def _execute_one(user, plan, session, decision, ctx, provider):
                 decision, restaurant, item, user_id=user["id"], plan_id=plan["id"],
                 session_id=session["id"], trigger_ts=trigger_ts, provider=provider)
         else:
-            _mark_skip(decision, "no in-range option above rating floor")
+            _mark_skip(decision, "No replacement within the approved price and rating floor; nothing ordered")
 
     if session["status"] == "active" and res.ok:
         with db.cursor() as cur:
@@ -77,7 +80,7 @@ def _execute_one(user, plan, session, decision, ctx, provider):
     }
 
 
-def _next_best(user, plan, session, ctx, exclude_restaurant):
+def _next_best(user, plan, session, ctx, exclude_restaurant, max_cost=None):
     cands = optimizer.build_candidates(user, plan, session, ctx)
     w = ctx["weights"]
     ref = max(1.0, user["weekly_budget"] / 21)
@@ -86,6 +89,8 @@ def _next_best(user, plan, session, ctx, exclude_restaurant):
             # the promise is hard at execution time regardless of the planner's
             # rating-floor mode: never substitute below the user's chosen ★.
             and c.get("rating", 0) >= user["rating_floor"]]
+    if max_cost is not None:
+        pool = [c for c in pool if c['cost'] <= max_cost]
     if not pool:
         return next((c for c in cands if c["kind"] in ("cook", "skip")), None)
     pool.sort(key=lambda c: optimizer._objective(c, w, ref, user["carbon_pref"], 3.0))
@@ -98,13 +103,17 @@ def _apply_substitution(decision, alt, sub_info):
                       f"stayed above your rating floor.")
     updated = {**decision, "restaurant_id": alt["restaurant_id"], "item_id": alt["item_id"],
                "item_name": alt["item_name"], "cost": alt["cost"], "substituted": 1,
-               "reasons": reasons}
+               "reasons": reasons, 'restaurant_name': alt['restaurant_name'],
+               'nutrition': alt.get('nutrition', {}), 'carbon_kg': alt.get('carbon_kg', 0),
+               'rating': alt.get('rating', 0), 'time_shift': alt.get('time_shift')}
     with db.cursor() as cur:
         cur.execute(
             "UPDATE decisions SET restaurant_id=?, item_id=?, item_name=?, cost=?, "
-            "substituted=1, reasons=? WHERE id=?",
+            "substituted=1, reasons=?, restaurant_name=?, nutrition=?, carbon_kg=?, rating=?, time_shift=? WHERE id=?",
             (alt["restaurant_id"], alt["item_id"], alt["item_name"], alt["cost"],
-             db.jd(reasons), decision["id"]))
+             db.jd(reasons), updated['restaurant_name'], db.jd(updated['nutrition']),
+             updated['carbon_kg'], updated['rating'], db.jd(updated['time_shift']) if updated['time_shift'] else None,
+             decision["id"]))
     return updated
 
 

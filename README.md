@@ -1,4 +1,4 @@
-# SmartPlate v1.1
+# SmartPlate — private trial
 
 A **scheduling** AI agent for food delivery — the white space the
 [strategic brainstorm](SmartPlate_Brainstorm.html) identified: scheduled +
@@ -18,7 +18,15 @@ For the differentiated product thesis, revenue experiments, production gates, an
 terms-safe Swiggy/Swiggy Money rollout, see
 [the September 2026 strategy memo](docs/product-strategy-2026.md).
 
-## Run it
+## Try it in your browser
+
+[Open SmartPlate in GitHub Codespaces](https://codespaces.new/Hasen1506/Smartplate/tree/codex/finish-smartplate-trial?quickstart=1)
+
+Choose **Create codespace**, wait for setup, then open **Ports → SmartPlate / 5057 → Open in Browser**. The trial starts automatically. It uses the real Python planner with sample Chennai data and simulated orders. Settings, latest plans and order history persist in the Codespace database. Keep the port private.
+
+**Real Swiggy ordering is not finished.** The documentation is accessible now, but its recipe and reference disagree. OAuth, authenticated tool schemas, real catalog mapping and live checkout still need integration. See [verified findings](docs/vendor/swiggy/README.md) and [trial instructions](docs/TRY-SMARTPLATE.md). Earlier architectural documents describe intentions beyond the trial’s current behavior.
+
+## Run it locally
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -30,7 +38,7 @@ No build step, no Node, no API keys. The database is created and seeded with a
 demo Chennai catalog, three users, and a sample week on first run.
 
 ```bash
-pytest                              # 37 tests: allergen safety, idempotency, MILP, substitution, features
+python -m pytest -q                 # current backend regression suite
 ```
 
 ## What's in the box
@@ -77,12 +85,9 @@ instead of silently ordered.
 |---|---|---|
 | `PORT` | `5057` | HTTP port |
 | `SMARTPLATE_BRAIN` | `deterministic` | `llm` opts into the paid narrator (off the critical path) |
-| `SMARTPLATE_SWIGGY` | `simulated` | `live` swaps in the real MCP adapter (requires gated access) |
+| `SMARTPLATE_SWIGGY` | `simulated` | `live` is unsupported and checkout returns a clear error |
 | `SMARTPLATE_DB` | `smartplate.db` | SQLite path |
 
-## The one thing not built here
+## Live integration status
 
-Live Swiggy *order placement* needs gated MCP access + a ToS clause permitting
-scheduled/unattended orders (the brainstorm's #1 legal risk, §7.1). Everything is
-built against the `SwiggyMCP` adapter with a simulated provider; swapping in the
-live provider is the only remaining external dependency. See FEASIBILITY.md §4.
+The current provider is simulated. The real Swiggy path is not a drop-in replacement: it needs OAuth, live identifiers and cart schemas, address/payment selection, pending-payment handling and order reconciliation. No background worker places scheduled orders. See [the verified integration notes](docs/vendor/swiggy/README.md).

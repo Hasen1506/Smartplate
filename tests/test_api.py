@@ -33,12 +33,17 @@ def test_plan_view_shape(client):
 
 def test_optimize_and_execute_flow(client):
     assert client.post("/api/plan/1/optimize", json={"mode": "balanced"}).status_code == 200
-    ex = client.post("/api/plan/1/execute").get_json()
-    assert ex["placed"] == ex["attempted"]
+    review = client.get('/api/plan/1/execute/preview').get_json()
+    response = client.post('/api/plan/1/execute', json={
+        'expected_fingerprint': review['fingerprint'], 'max_total': review['total']})
+    assert response.status_code == 200
+    ex = response.get_json()
+    assert ex['placed'] + ex['failed'] == ex['attempted']
+    assert sum(r['cost'] for r in ex['results'] if r['placed']) <= review['total']
 
 
 def test_idempotency_demo_endpoint(client):
-    d = client.post("/api/demo/idempotency").get_json()
+    d = client.post("/api/demo/idempotency", json={}).get_json()
     assert d["same_order_id"] is True
     assert d["second_was_deduped"] is True
 

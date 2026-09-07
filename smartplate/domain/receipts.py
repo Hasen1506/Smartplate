@@ -19,6 +19,11 @@ def autocategory(day: int, meal: str) -> str:
 def record(user_id: int, decision: dict, iso_date: str) -> int:
     cat = autocategory(decision["day"], decision["meal"])
     with db.cursor() as cur:
+        cur.execute('BEGIN IMMEDIATE')
+        previous = cur.execute('SELECT id FROM receipts WHERE user_id=? AND decision_id=?',
+                               (user_id, decision.get('id'))).fetchone()
+        if previous:
+            return previous['id']
         cur.execute(
             "INSERT INTO receipts(user_id, decision_id, amount, category, note, iso_date) "
             "VALUES (?,?,?,?,?,?)",
