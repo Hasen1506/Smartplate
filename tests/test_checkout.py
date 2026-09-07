@@ -39,7 +39,7 @@ def test_execute_rejects_stale_fingerprint(seeded):
     app = create_app()
     app.config.update(TESTING=True)
     response = app.test_client().post(f"/api/plan/{seeded['plan_id']}/execute", json={
-        "expected_fingerprint": "stale-review"})
+        "expected_fingerprint": "stale-review", "max_total": 100000})
     assert response.status_code == 409
     assert "plan changed" in response.get_json()["message"]
 
@@ -49,4 +49,4 @@ def test_preview_and_execute_unknown_plan_are_404(seeded):
     app.config.update(TESTING=True)
     client = app.test_client()
     assert client.get("/api/plan/99999/execute/preview").status_code == 404
-    assert client.post("/api/plan/99999/execute").status_code == 404
+    assert client.post("/api/plan/99999/execute", json={}).status_code == 404

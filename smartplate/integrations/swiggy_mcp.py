@@ -15,8 +15,18 @@ import hashlib
 import json
 import random
 import time
+from functools import wraps
 
 from .. import config, db
+from ..runtime import state_lock
+
+
+def serialized(fn):
+    @wraps(fn)
+    def call(*args, **kwargs):
+        with state_lock:
+            return fn(*args, **kwargs)
+    return call
 
 
 class MenuLoadError(RuntimeError):
@@ -100,6 +110,7 @@ def get_provider():
 # --------------------------------------------------------------------------- #
 # Order saga (validate -> cart -> pay -> place), idempotent + compensating
 # --------------------------------------------------------------------------- #
+@serialized
 def place_order(decision: dict, restaurant: dict, item: dict, *, user_id, plan_id,
                 session_id, trigger_ts, provider=None) -> OrderResult:
     provider = provider or get_provider()
@@ -110,9 +121,12 @@ def place_order(decision: dict, restaurant: dict, item: dict, *, user_id, plan_i
         existing = cur.execute(
             "SELECT * FROM orders WHERE idempotency_key=?", (key,)
         ).fetchone()
-    if existing and existing["state"] in ("placed", "confirmed"):
+    if existing and existing["state"] == 'placed' and existing['provider_order_id']:
         return OrderResult(True, key, existing["provider_order_id"], existing["state"],
                            existing["amount"], db.jl(existing["log"]), deduped=True)
+    if existing and existing['state'] in ('confirmed', 'unknown', 'carted'):
+        return OrderResult(False, key, existing['provider_order_id'], 'unknown', existing['amount'],
+                           db.jl(existing['log']), deduped=True, error='reconciliation_required')
 
     amount = float(decision.get("cost", 0))
     log, state, order_id = [], "validated", None
@@ -146,7 +160,9 @@ def place_order(decision: dict, restaurant: dict, item: dict, *, user_id, plan_i
         log.append(f"FAILED: {e}"); state = "failed"; record(state)
         return OrderResult(False, key, None, state, amount, log, error="menu_load")
     except Exception as e:  # pragma: no cover - defensive DLQ path (§6)
-        log.append(f"FAILED: {e}"); state = "failed"; record(state)
+        log.append('Provider operation failed; review order history before retrying')
+        state = 'unknown' if state in ('carted', 'confirmed') else 'failed'
+        record(state)
         return OrderResult(False, key, None, state, amount, log, error=str(e))
 
 

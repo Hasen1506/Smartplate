@@ -1,5 +1,6 @@
 """§1.2 / §3.1 — substitution never drops below the rating floor; retries are idempotent."""
 from smartplate.domain import models
+from smartplate import service
 from smartplate.integrations import swiggy_mcp
 from smartplate.kernel import optimizer, variance
 
@@ -25,6 +26,8 @@ def test_execution_is_idempotent(seeded):
     optimizer.optimize(pid)
     prov = swiggy_mcp.SimulatedSwiggyProvider(flaky_fail_rate=1.0)
     first = variance.execute_plan(pid, provider=prov)
+    before = service.order_history(pid)
     second = variance.execute_plan(pid, provider=prov)
-    assert second["placed"] == first["placed"]
-    assert all(r["deduped"] for r in second["results"])   # nothing re-charged
+    assert first['placed'] > 0
+    assert second['attempted'] == second['placed'] == 0
+    assert service.order_history(pid) == before  # no new order, charge or history row

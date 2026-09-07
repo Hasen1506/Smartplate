@@ -6,3 +6,8 @@ __pycache__/
 /tmp/
 node_modules/
 package-lock.json
+smartplate-trial.log
+.env
+.env.*
+!.env.example
+swiggy-contract.local.json

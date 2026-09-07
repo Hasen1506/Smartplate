@@ -1,0 +1,12 @@
+{
+  "name": "SmartPlate trial",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "forwardPorts": [5057],
+  "portsAttributes": {
+    "5057": {"label": "SmartPlate", "onAutoForward": "openBrowser", "protocol": "http"}
+  },
+  "postCreateCommand": "python -m pip install -r requirements.txt",
+  "postStartCommand": "python scripts/start_trial.py",
+  "containerEnv": {"SMARTPLATE_SWIGGY": "simulated", "PORT": "5057"},
+  "remoteUser": "vscode"
+}

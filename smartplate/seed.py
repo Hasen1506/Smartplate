@@ -47,7 +47,7 @@ def _households():
 def _users():
     rows = [
         # id, name, city, diet, budget, floor, mode, allergens, medical, nutri, health, carbon, household
-        (1, "Hasen", "Chennai", "nonveg", 2800, 4.0, "survival",
+        (1, "Sample profile", "Chennai", "nonveg", 2800, 4.0, "survival",
          '["peanut"]', '["diabetes"]', '{}',
          '{"protein_floor_g":60,"veg_servings":2,"fasting_start_min":1290,"fasting_end_min":480}', 0.3, None),
         (2, "Meera", "Chennai", "vegan", 1500, 4.2, "balanced",

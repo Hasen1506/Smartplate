@@ -7,6 +7,7 @@ coupling this domain layer to a payment provider.
 """
 import hashlib
 import json
+import math
 
 
 class CheckoutConflict(ValueError):
@@ -14,7 +15,8 @@ class CheckoutConflict(ValueError):
 
 
 def preview(plan_id: int, decisions: list[dict]) -> dict:
-    deliveries = [d for d in decisions if d["chosen_kind"] == "delivery"]
+    deliveries = [d for d in decisions if d["chosen_kind"] == "delivery"
+                  and d.get('session_status', 'active') == 'active']
     items = [{
         "decision_id": d["id"],
         "session_id": d["session_id"],
@@ -31,7 +33,7 @@ def preview(plan_id: int, decisions: list[dict]) -> dict:
         "currency": "INR",
         "fingerprint": _fingerprint(items),
         "items": items,
-        "disclosure": "Final price and availability are revalidated by the provider at placement.",
+        "disclosure": "Simulation only. No payment or restaurant order. Substitutions stay within each reviewed meal's price ceiling.",
     }
 
 
@@ -45,7 +47,7 @@ def validate(review: dict, *, expected_fingerprint: str | None = None,
             ceiling = float(max_total)
         except (TypeError, ValueError) as exc:
             raise CheckoutConflict("max_total must be a non-negative number") from exc
-        if ceiling < 0:
+        if not math.isfinite(ceiling) or ceiling < 0:
             raise CheckoutConflict("max_total must be a non-negative number")
         if review["total"] > ceiling:
             raise CheckoutConflict(

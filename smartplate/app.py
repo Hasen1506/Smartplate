@@ -1,27 +1,67 @@
-"""Flask app — JSON API + serves the single-file React UI.
-
-No build step: the frontend is plain React loaded from a CDN and served from
-/static, so `python run.py` is the whole setup.
-"""
+"""Flask JSON API and vanilla JavaScript UI; no frontend build step."""
 import os
 
-from flask import Flask, Response, jsonify, request, send_from_directory
-from flask_cors import CORS
+from flask import Flask, Response, g, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 from . import config, service
-from .db import init_db
 from .domain import models, sentiment
 from .domain.checkout import CheckoutConflict
 from .kernel import agent_brain
 from .integrations import calendar_sync, swiggy_mcp
+from .runtime import initialize, state_lock
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
 def create_app() -> Flask:
-    init_db()
+    initialize()
     app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
-    CORS(app)
+    app.config['MAX_CONTENT_LENGTH'] = 256 * 1024
+
+    @app.before_request
+    def validate_request():
+        # The trial is same-origin and single-process. Prevent another browser
+        # origin from using the private forwarded port to edit the plan.
+        if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            if request.headers.get('Sec-Fetch-Site') == 'cross-site':
+                return jsonify(error='Cross-site requests are not allowed'), 403
+            if not request.is_json or not isinstance(request.get_json(silent=True), dict):
+                return jsonify(error='Send a JSON object'), 400
+        if request.path.startswith('/api/'):
+            state_lock.acquire()
+            g.state_locked = True
+        args = request.view_args or {}
+        for key, table in (('plan_id', 'plans'), ('user_id', 'users'), ('session_id', 'sessions')):
+            if key in args:
+                from . import db
+                with db.cursor() as cur:
+                    found = cur.execute(f'SELECT id FROM {table} WHERE id=?', (args[key],)).fetchone()
+                if not found:
+                    return jsonify(error='not found'), 404
+
+    @app.teardown_request
+    def release_state_lock(error):
+        if g.pop('state_locked', False):
+            state_lock.release()
+
+    @app.errorhandler(ValueError)
+    @app.errorhandler(KeyError)
+    @app.errorhandler(TypeError)
+    def invalid_input(error):
+        return jsonify(error=str(error)), 400
+
+    @app.errorhandler(HTTPException)
+    def http_error(error):
+        return jsonify(error=error.description), error.code
+
+    @app.after_request
+    def response_headers(response):
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Referrer-Policy'] = 'same-origin'
+        if request.path.startswith('/api/'):
+            response.headers['Cache-Control'] = 'no-store'
+        return response
 
     # ---- UI ---- #
     @app.get("/")
@@ -36,7 +76,7 @@ def create_app() -> Flask:
             "version": "1.1.0",
             "brain": brain.name,
             "brain_cost_per_decision": brain.cost_per_decision,
-            "swiggy_provider": config.SWIGGY_PROVIDER,
+            "swiggy_provider": 'simulated' if config.SWIGGY_PROVIDER == 'simulated' else 'unavailable',
             "order_edit_window_min": config.ORDER_EDIT_WINDOW_MIN,
             "modes": config.MODE_LABELS,
             "mode_outcomes": {k: v["outcome"] for k, v in config.MODE_META.items()},
@@ -48,6 +88,18 @@ def create_app() -> Flask:
     @app.get("/api/users")
     def users():
         return jsonify(models.list_users())
+
+    @app.get('/api/user/<int:user_id>/plan')
+    def current_plan(user_id):
+        return jsonify(service.current_plan(user_id))
+
+    @app.patch('/api/user/<int:user_id>')
+    def update_preferences(user_id):
+        return jsonify(service.update_preferences(user_id, request.get_json()))
+
+    @app.get('/api/plan/<int:plan_id>/orders')
+    def order_history(plan_id):
+        return jsonify(service.order_history(plan_id))
 
     @app.post("/api/plan")
     def create_plan():
@@ -107,6 +159,11 @@ def create_app() -> Flask:
     @app.post("/api/plan/<int:plan_id>/execute")
     def execute(plan_id):
         body = request.get_json(silent=True) or {}
+        if config.SWIGGY_PROVIDER != 'simulated':
+            return jsonify(error='Live Swiggy checkout is not connected. The demo catalog cannot be ordered on Swiggy.'), 503
+        if body.get('expected_fingerprint') is None or body.get('max_total') is None:
+            return jsonify(error='checkout_conflict', message='Review the orders and approve the total first',
+                           preview=service.execution_preview(plan_id)), 409
         try:
             result = service.execute(
                 plan_id, expected_fingerprint=body.get("expected_fingerprint"),
@@ -181,7 +238,7 @@ def create_app() -> Flask:
 
     @app.get("/api/health")
     def health():
-        return jsonify({"ok": True, "version": "1.1.0"})
+        return jsonify({"ok": True, "app": "smartplate", "version": "1.1.0"})
 
     return app
 
