@@ -270,7 +270,9 @@ button.primary:hover,.handoff:hover{background:var(--accent);border-color:var(--
 .onboard:has(.setup){max-width:1080px}.setup{border-top:2px solid var(--ink);margin-top:25px;padding-top:18px}
 .setup h3{font:700 23px Georgia,serif;margin:0 0 8px}.setup-presets{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
 .setup .matrix-scroll{margin:12px 0}.setup .matrix-grid{grid-template-columns:90px repeat(7,minmax(92px,1fr));min-width:770px}
-.setup .matrix-cell{min-height:39px}.setup .preferences{margin-top:20px}.setup fieldset{margin:15px 0}
+.setup .matrix-cell{min-height:39px}.setup form.preferences{display:block;margin-top:20px}
+.setup fieldset{margin:15px 0}.setup .checks .check{min-width:0;flex:0 0 auto}
+.setup form.preferences>.sub{margin:14px 0 16px}
 @media(max-width:900px){.wrap{padding:16px}.week{grid-template-columns:1fr}.daycol{display:none;padding:10px;background:var(--card)}.daycol.mobile-active{display:block}
   .mobile-daypick{display:flex;gap:4px;margin:12px 0}.mobile-daypick button{flex:1;padding:6px 0}.mobile-daypick button.active{background:var(--ink);color:white}
   .cell{min-height:90px}.matrix-period{display:none}.approvebar{position:static}
