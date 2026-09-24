@@ -320,14 +320,20 @@ def create_app() -> Flask:
     # ---- community ---- #
     @app.get("/api/community")
     def community_list():
+        if config.APP_MODE != 'demo':
+            return jsonify(error='not found'), 404
         return jsonify(service.list_community(request.args.get("city")))
 
     @app.post("/api/community/<int:template_id>/adopt")
     def community_adopt(template_id):
+        if config.APP_MODE != 'demo':
+            return jsonify(error='not found'), 404
         return jsonify(service.adopt_template(template_id) or {"error": "not found"})
 
     @app.post("/api/plan/<int:plan_id>/save-template")
     def save_template(plan_id):
+        if config.APP_MODE != 'demo':
+            return jsonify(error='not found'), 404
         body = request.get_json(force=True, silent=True) or {}
         tid = service.save_template(plan_id, body.get("title", "My plan"))
         return jsonify({"template_id": tid})

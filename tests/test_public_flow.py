@@ -155,3 +155,5 @@ def test_public_api_discovery_to_plan(seeded, monkeypatch):
     assert view['carbon'] is None and view['surge_saved'] is None
     assert client.post(f"/api/plan/{view['plan']['id']}/execute", json={}).status_code == 503
     assert client.post(f"/api/plan/{view['plan']['id']}/receipts", json={}).status_code == 503
+    assert client.get('/api/community').status_code == 404
+    assert client.post(f"/api/plan/{view['plan']['id']}/save-template", json={'title':'Private'}).status_code == 404
