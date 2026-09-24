@@ -26,6 +26,8 @@ def reviewed_execute(client, pid=1):
 
 
 def test_factory_seeds_existing_empty_database(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, 'APP_MODE', 'demo')
+    monkeypatch.setattr(config, 'SWIGGY_PROVIDER', 'simulated')
     path = tmp_path / 'empty.db'
     path.touch()
     monkeypatch.setattr(config, 'DB_PATH', str(path))

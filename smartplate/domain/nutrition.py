@@ -27,7 +27,11 @@ OVER_KCAL_WEIGHT = 0.6
 
 def targets_for(user: dict) -> dict:
     t = dict(DEFAULT_TARGETS)
-    t.update(user.get("nutrition_targets") or {})
+    # The same stored object historically held planning preferences such as
+    # "variety".  Only numeric nutrient targets belong in arithmetic below.
+    for key, value in (user.get("nutrition_targets") or {}).items():
+        if key in DEFAULT_TARGETS and isinstance(value, (int, float)) and not isinstance(value, bool):
+            t[key] = value
     return t
 
 

@@ -16,6 +16,7 @@ priors when there's no personal history (cold-start honesty).
 This is an *estimate* over the candidate menu, deliberately labelled as such — it
 is not a second MILP. The planner remains the source of truth for an actual plan.
 """
+from .. import config
 from ..domain import allergens, fatigue, models, nutrition, surge
 
 MIN_OPTIONS_PER_MEAL = 3      # a ★ floor that leaves fewer than this is "too tight"
@@ -42,7 +43,9 @@ def _adequate(item: dict, meal: str, tgt: dict) -> bool:
 
 def _eligible(safe: list[dict], floor: float) -> list[dict]:
     return [it for it in safe
-            if it.get("restaurant_rating", 0) >= floor and it.get("item_rating", 0) >= floor - 0.3]
+            if it.get("restaurant_rating", 0) >= floor and
+            (it.get("item_rating") is None and it.get("live") or
+             it.get("item_rating") is not None and it["item_rating"] >= floor - 0.3)]
 
 
 def _per_meal_costs(eligible: list[dict], meal: str, user: dict, history) -> dict | None:
@@ -66,7 +69,19 @@ def _per_meal_costs(eligible: list[dict], meal: str, user: dict, history) -> dic
 def recommend(user: dict, meals: list[str], *, history: dict | None = None,
               menu: list[dict] | None = None) -> dict:
     """Recommend a budget band for the given session meals (one entry per session)."""
-    menu = menu if menu is not None else models.menu_for_city(user["city"])
+    menu = menu if menu is not None else models.menu_for_user(user)
+    if config.APP_MODE != "demo":
+        eligible = _eligible(allergens.safe_items(user, menu), float(user.get("rating_floor", 4.0)))
+        if not eligible:
+            return {"sessions": len(meals), "feasible": False,
+                    "assumptions": ["No verified eligible Swiggy menu items for this address and profile."]}
+        prices = sorted(it["price"] for it in eligible)
+        return {"sessions": len(meals), "feasible": True,
+                "floor": {"total": round(prices[0] * len(meals), 2)},
+                "usual": {"total": round(prices[len(prices)//2] * len(meals), 2)},
+                "variety": {"total": round(prices[-1] * len(meals), 2)},
+                "assumptions": ["Listed item prices only. Delivery fees, taxes and live checkout prices are unavailable.",
+                                "Swiggy browse menus do not provide verified nutrition or allergen data."]}
     safe = allergens.safe_items(user, menu)
     user_floor = float(user.get("rating_floor", 4.0))
     level = fatigue.variety_pref(user)

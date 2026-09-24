@@ -6,14 +6,23 @@ v1.1 incurs no per-decision LLM cost (see FEASIBILITY.md §2).
 """
 import os
 
+# The sample catalog is available only when demo mode is selected explicitly.
+APP_MODE = os.environ.get("SMARTPLATE_MODE", "production")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
+SESSION_SECRET = os.environ.get("SMARTPLATE_SESSION_SECRET", "")
+PUBLIC_BASE_URL = os.environ.get("SMARTPLATE_PUBLIC_BASE_URL", "").rstrip("/")
+INVITED_EMAILS = {email.strip().lower() for email in os.environ.get("SMARTPLATE_INVITED_EMAILS", "").split(",") if email.strip()}
+
 # Persistence
 DB_PATH = os.environ.get("SMARTPLATE_DB", "smartplate.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # Brain selection — "deterministic" (free, default) or "llm" (optional, paid).
 AGENT_BRAIN = os.environ.get("SMARTPLATE_BRAIN", "deterministic")
 
 # Swiggy MCP provider — "simulated" (default) or "live" (requires real access).
-SWIGGY_PROVIDER = os.environ.get("SMARTPLATE_SWIGGY", "simulated")
+SWIGGY_PROVIDER = os.environ.get("SMARTPLATE_SWIGGY", "simulated" if APP_MODE == "demo" else "live")
 
 # Default order-execution policy. Swiggy's cautious posture (§7.1) means we
 # default to an editable window rather than silent auto-placement.

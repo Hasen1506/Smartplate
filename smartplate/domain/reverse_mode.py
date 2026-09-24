@@ -10,6 +10,7 @@ cooking — that's the point (widens the moat).
 RECIPES = [
     {
         "key": "dal_rice", "name": "Dal + rice", "cost": 45, "veg": 1,
+        "allergens": [], "tags": None,
         "kcal": 520, "protein_g": 18, "carbs_g": 82, "fat_g": 9, "sugar_g": 3, "carbon_kg": 0.6,
         "basket": [{"name": "Toor dal 500g", "qty": 1, "price": 90},
                    {"name": "Rice 1kg", "qty": 1, "price": 70},
@@ -18,6 +19,7 @@ RECIPES = [
     },
     {
         "key": "veg_pulao", "name": "Veg pulao", "cost": 60, "veg": 1,
+        "allergens": [], "tags": None,
         "kcal": 600, "protein_g": 14, "carbs_g": 95, "fat_g": 14, "sugar_g": 5, "carbon_kg": 0.8,
         "basket": [{"name": "Basmati rice 1kg", "qty": 1, "price": 120},
                    {"name": "Mixed veg 500g", "qty": 1, "price": 60},
@@ -26,6 +28,7 @@ RECIPES = [
     },
     {
         "key": "egg_curry", "name": "Egg curry + roti", "cost": 70, "veg": 0,
+        "allergens": ["egg", "gluten"], "tags": None,
         "kcal": 640, "protein_g": 28, "carbs_g": 60, "fat_g": 26, "sugar_g": 6, "carbon_kg": 1.1,
         "basket": [{"name": "Eggs (6)", "qty": 1, "price": 60},
                    {"name": "Atta 1kg", "qty": 1, "price": 55},
@@ -34,6 +37,7 @@ RECIPES = [
     },
     {
         "key": "oats_bowl", "name": "Masala oats + veg", "cost": 35, "veg": 1,
+        "allergens": ["gluten"], "tags": None,
         "kcal": 380, "protein_g": 13, "carbs_g": 58, "fat_g": 8, "sugar_g": 4, "carbon_kg": 0.4,
         "basket": [{"name": "Oats 1kg", "qty": 1, "price": 110},
                    {"name": "Mixed veg 250g", "qty": 1, "price": 35}],
@@ -53,14 +57,15 @@ def recipe(key: str) -> dict | None:
 
 
 def cook_candidate(user: dict, meal: str) -> dict | None:
-    """Pick the cheapest meal-appropriate recipe that fits the user's diet."""
+    """Pick the cheapest recipe that clears the user's stated exclusions."""
+    from .allergens import violates
     keys = RECIPE_BY_MEAL.get(meal, [])
     best = None
     for k in keys:
         r = recipe(k)
         if not r:
             continue
-        if user.get("diet") in ("veg", "vegan") and not r["veg"]:
+        if violates(user, r):
             continue
         if best is None or r["cost"] < best["cost"]:
             best = r

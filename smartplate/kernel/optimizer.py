@@ -19,7 +19,6 @@ from ..domain import (allergens, carbon, fatigue, festivals, health, leftovers,
 from ..integrations import calendar_sync
 from . import explainability, scheduler
 
-MAX_DELIVERY_CANDIDATES = 6
 # People cook a few nights, not every meal (§1.3 "cook 3 nights and order 2").
 # These are DEFAULT priors, not fixed truths (docs/optimization-and-ux.md §2): a
 # global "everyone cooks ≤6" and "cooking always costs 0.35" are exactly the fake
@@ -68,7 +67,9 @@ def _rating_filter(user: dict, items: list[dict]) -> list[dict]:
         floor = min(user_floor, config.HARD_SAFETY_FLOOR)
         return [it for it in items if it["restaurant_rating"] >= floor]
     return [it for it in items
-            if it["restaurant_rating"] >= user_floor and it["item_rating"] >= user_floor - 0.3]
+            if it["restaurant_rating"] >= user_floor and
+            (it.get("item_rating") is None and it.get("live") or
+             it.get("item_rating") is not None and it["item_rating"] >= user_floor - 0.3)]
 
 
 def _rating_pen(user: dict, item: dict) -> float:
@@ -84,7 +85,7 @@ def _rating_pen(user: dict, item: dict) -> float:
 # --------------------------------------------------------------------------- #
 def build_context(user: dict, plan: dict) -> dict:
     return {
-        "menu": models.menu_for_city(user["city"]),
+        "menu": models.menu_for_user(user),
         "festivals": festivals.for_week(plan["week_start"]),
         "leftovers": leftovers.for_user(user["id"]),
         "calendar": calendar_sync.events_for(user["id"]),
@@ -110,6 +111,24 @@ def _taste(user: dict, item: dict) -> tuple[float, dict]:
 
 def _delivery_candidate(user, plan, session, item, ctx):
     day, meal = session["day"], session["meal"]
+    if item.get("live"):
+        # Swiggy's browse schema does not promise delivery fees, surge, macros,
+        # allergens or carbon. Do not turn missing fields into invented facts.
+        rating = (item["item_rating"] if item["item_rating"] is not None
+                  else item["restaurant_rating"]) / 5.0
+        return {
+            "kind": "delivery", "restaurant_id": item["restaurant_id"],
+            "restaurant_name": item["restaurant_name"], "item_id": item["id"],
+            "item_name": item["name"], "rating": item["restaurant_rating"],
+            "cost": item["price"], "base_cost": item["price"], "surge_mult": 1.0,
+            "time_shift": None, "rating_pen": _rating_pen(user, item),
+            "is_usual": False, "familiarity": 0.0, "usual_pen": 0.0,
+            "novelty_bonus": 0.0, "taste": rating,
+            "sentiment": {"score": 0, "n": 0, "label": "unavailable"},
+            "nutri": 0.0, "health": 0.0, "carbon_pen": 0.0, "carbon_kg": 0.0,
+            "weather_bias": 0.0, "festival_bias": 0.0, "nutrition": {},
+            "tags": [], "live": True,
+        }
     cond = weather.for_day(user["city"], day)["condition"]
     base_cost = item["price"] + item["delivery_fee"]
 
@@ -174,6 +193,9 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     """All options for one session, hard constraints already applied. Always
     returns at least a 'skip' so the MILP stays feasible."""
     day, meal = session["day"], session["meal"]
+    desired = session.get("desired_kind", "auto")
+    if desired == "skip":
+        return [_skip(forced=True, reason="You marked this meal as a skip.")]
 
     # --- forced-skip conditions (hard) ----------------------------------- #
     travel = calendar_sync.day_is_travel(ctx["calendar"], day)
@@ -200,18 +222,16 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     scheduled_min = models.MEAL_WINDOWS[meal][1]
     fasting = health.in_fasting_window(user, scheduled_min)
     cands = []
-    if not fasting:
+    if not fasting and desired != "cook":
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
         safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
-        # keep the most promising few (cheap-but-decent) to bound the MILP
-        safe.sort(key=lambda it: (it["price"] + it["delivery_fee"]) - 40 * (it["item_rating"] / 5))
-        for it in safe[: MAX_DELIVERY_CANDIDATES * 2]:
+        # A fixed per-slot shortlist can force skips: the repeat limit applies
+        # across the whole week, so the solver needs access to every eligible dish.
+        for it in safe:
             cands.append(_delivery_candidate(user, plan, session, it, ctx))
-        cands.sort(key=lambda c: c["cost"] - 60 * c["taste"])
-        cands = cands[:MAX_DELIVERY_CANDIDATES]
 
     cook = _cook_candidate(user, session, ctx)
-    if cook:
+    if cook and desired != "delivery":
         cands.append(cook)
 
     skip_reason = "No safe option within your rating floor and budget — session skipped."
@@ -323,6 +343,8 @@ def optimize(plan_id: int) -> dict:
         if len(vlist) > MAX_ITEM_REPEAT:
             prob += pulp.lpSum(vlist) <= MAX_ITEM_REPEAT
     prob.solve(pulp.PULP_CBC_CMD(msg=False))
+    if pulp.LpStatus[prob.status] != "Optimal":
+        raise RuntimeError(f"Planning failed: {pulp.LpStatus[prob.status]}")
 
     decisions = _persist_decisions(plan, user, sessions, active, cand_map, x, ctx)
     return {
@@ -395,13 +417,15 @@ def _decision_context(user, session, chosen, ctx):
     if chosen["kind"] == "delivery" and nut.get("protein_g", 0) >= 25:
         nflag = f"Protein-forward ({nut['protein_g']:.0f}g) — supports your health target."
     return {
+        "live": bool(chosen.get("live")),
         "rating_floor": user["rating_floor"],
         "sentiment": chosen.get("sentiment"),
         "weather_note": weather.note(cond),
         "festival": fest["name"] if (fest and chosen.get("festival_bias", 0) < 0) else None,
         "leftover": chosen.get("leftover"),
         "nutrition_flag": nflag,
-        "carbon_band": carbon.band(chosen.get("carbon_kg", 0)) if chosen["kind"] == "delivery" else None,
+        "carbon_band": (carbon.band(chosen.get("carbon_kg", 0))
+                        if chosen["kind"] == "delivery" and not chosen.get("live") else None),
     }
 
 

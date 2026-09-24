@@ -20,8 +20,13 @@ def reasons_for(decision: dict, context: dict) -> list[str]:
         return r
 
     # delivery
-    r.append(f"Ordered {decision['item_name']} from {decision['restaurant_name']} "
-             f"(₹{decision['cost']:.0f}, rated {decision['rating']:.1f}).")
+    if context.get("live"):
+        r.append(f"Planned {decision['item_name']} from {decision['restaurant_name']} "
+                 f"(listed ₹{decision['cost']:.0f}, rated {decision['rating']:.1f}). "
+                 "Swiggy availability and total must be checked at handoff.")
+    else:
+        r.append(f"Ordered {decision['item_name']} from {decision['restaurant_name']} "
+                 f"(₹{decision['cost']:.0f}, rated {decision['rating']:.1f}).")
     if decision.get("substituted"):
         r.append(f"Substituted: first choice '{decision['original_name']}' "
                  f"({decision.get('sub_reason', 'unavailable')}) — picked the next best above your "

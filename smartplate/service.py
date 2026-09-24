@@ -18,21 +18,64 @@ from .kernel import (agent_brain, budget, explainability, optimizer, recommender
 # --------------------------------------------------------------------------- #
 # Plan lifecycle
 # --------------------------------------------------------------------------- #
-def create_plan(user_id: int, mode: str | None = None) -> int:
+def create_plan(user_id: int, mode: str | None = None, schedule: list | None = None) -> int:
     user = models.get_user(user_id)
     if not user:
         raise ValueError('Profile not found')
     mode = mode or user["mode"]
     if mode not in config.MODE_LABELS:
         raise ValueError('Unknown planning mode')
+    address_id = None
+    if config.APP_MODE != 'demo':
+        from .integrations import live_catalog, swiggy_oauth
+        address_id = swiggy_oauth.selected_address(user_id)
+        live_catalog.refresh_selected(user_id)
+        if not live_catalog.planning_menu(user_id):
+            raise ValueError('Choose an open Swiggy restaurant with a published rating and priced menu items')
+    if config.APP_MODE != 'demo':
+        if schedule is None:
+            with db.cursor() as cur:
+                previous = cur.execute('SELECT id FROM plans WHERE user_id=? AND address_id=? '
+                                       'ORDER BY id DESC LIMIT 1', (user_id, address_id)).fetchone()
+            if previous:
+                schedule = [{'day': s['day'], 'meal': s['meal'], 'kind': s['desired_kind']}
+                            for s in models.sessions_for_plan(previous['id'])
+                            if s['desired_kind'] != 'skip']
+        if not isinstance(schedule, list) or not schedule or len(schedule) > 21:
+            raise ValueError('Choose at least one meal for your week')
+        chosen = set()
+        for slot in schedule:
+            if not isinstance(slot, dict) or type(slot.get('day')) is not int or \
+               slot['day'] not in range(7) or slot.get('meal') not in models.MEALS or \
+               slot.get('kind') not in ('auto', 'delivery', 'cook'):
+                raise ValueError('Invalid meal selection')
+            key = (slot['day'], slot['meal'])
+            if key in chosen:
+                raise ValueError('Duplicate meal selection')
+            chosen.add(key)
     ws = _next_monday()
     with db.cursor() as cur:
         cur.execute(
-            "INSERT INTO plans(user_id, week_start, mode, status, created_ts) VALUES (?,?,?,?,?)",
-            (user_id, ws, mode, "active", dt.datetime.now().isoformat()))
+            "INSERT INTO plans(user_id, address_id, week_start, mode, status, created_ts) VALUES (?,?,?,?,?,?)",
+            (user_id, address_id, ws, mode, "active", dt.datetime.now().isoformat()))
         plan_id = cur.lastrowid
-    scheduler.build_week(plan_id, ws)
-    optimizer.optimize(plan_id)
+    try:
+        scheduler.build_week(plan_id, ws)
+        if config.APP_MODE != 'demo':
+            with db.cursor() as cur:
+                cur.execute("UPDATE sessions SET desired_kind='skip' WHERE plan_id=?", (plan_id,))
+                for slot in schedule:
+                    cur.execute('UPDATE sessions SET desired_kind=? WHERE plan_id=? AND day=? AND meal=?',
+                                (slot['kind'], plan_id, slot['day'], slot['meal']))
+        optimizer.optimize(plan_id)
+    except Exception:
+        # Session generation and solving use separate transactions. Do not
+        # leave a half-built plan as the user's current week after a failure.
+        with db.cursor() as cur:
+            cur.execute('DELETE FROM decisions WHERE plan_id=?', (plan_id,))
+            cur.execute('DELETE FROM sessions WHERE plan_id=?', (plan_id,))
+            cur.execute('DELETE FROM plans WHERE id=?', (plan_id,))
+        raise
     return plan_id
 
 
@@ -46,8 +89,16 @@ def reoptimize(plan_id: int, mode: str | None = None) -> dict:
 
 
 def current_plan(user_id):
+    address_id = None
+    if config.APP_MODE != 'demo':
+        from .integrations import swiggy_oauth
+        address_id = swiggy_oauth.selected_address(user_id)
     with db.cursor() as cur:
-        row = cur.execute('SELECT id FROM plans WHERE user_id=? ORDER BY id DESC LIMIT 1', (user_id,)).fetchone()
+        row = cur.execute('SELECT id,address_id FROM plans WHERE user_id=? ORDER BY id DESC LIMIT 1', (user_id,)).fetchone()
+    if row and row['address_id'] != address_id:
+        row = None
+    if not row and config.APP_MODE != 'demo':
+        return None
     return plan_view(row['id'] if row else create_plan(user_id))
 
 
@@ -99,13 +150,38 @@ def update_preferences(user_id, body):
         cur.execute('UPDATE users SET ' + ', '.join(f'{key}=?' for key in updates) + ' WHERE id=?',
                     (*updates.values(), user_id))
         row = cur.execute('SELECT id FROM plans WHERE user_id=? ORDER BY id DESC LIMIT 1', (user_id,)).fetchone()
-    pid = row['id'] if row else create_plan(user_id)
+    if not row:
+        return profile_view(user_id)
+    pid = row['id']
     reoptimize(pid)
     return plan_view(pid)
 
 
+def profile_view(user_id: int) -> dict:
+    user = models.get_user(user_id)
+    if not user:
+        raise ValueError('Profile not found')
+    return {key: user[key] for key in ('id', 'name', 'city', 'diet', 'weekly_budget',
+            'rating_floor', 'mode', 'allergens', 'medical', 'health_targets', 'nutrition_targets')}
+
+
 def set_session_status(session_id: int, status: str, note: str = "") -> None:
     scheduler.set_status(session_id, status, note)
+
+
+def set_session_kind(session_id: int, kind: str) -> dict:
+    if kind not in ('auto', 'delivery', 'cook', 'skip'):
+        raise ValueError('Choose auto, delivery, cook or skip')
+    with db.cursor() as cur:
+        row = cur.execute('SELECT plan_id,status FROM sessions WHERE id=?', (session_id,)).fetchone()
+        if not row:
+            raise ValueError('Meal not found')
+        if row['status'] == 'ordered':
+            raise ValueError('An ordered meal cannot be changed')
+        cur.execute('UPDATE sessions SET desired_kind=?,status=? WHERE id=?',
+                    (kind, 'active', session_id))
+    reoptimize(row['plan_id'])
+    return plan_view(row['plan_id'])
 
 
 def command(plan_id: int, text: str) -> dict:
@@ -155,27 +231,37 @@ def plan_view(plan_id: int) -> dict:
     grid = _grid(decisions)
 
     view = {
+        "data_source": "demo" if config.APP_MODE == "demo" else "swiggy",
         "plan": {**plan, "mode_label": config.MODE_LABELS.get(plan["mode"], plan["mode"])},
         "user": {k: user[k] for k in ("id", "name", "city", "diet", "weekly_budget",
                                       "rating_floor", "mode", "allergens", "medical",
                                       "health_targets", "nutrition_targets", "carbon_pref")},
         "budget": env,
         "nutrition": {"week": nut, "daily_avg": daily_nut, "daily_target": targets},
-        "carbon": {"total_kg": carbon_total, "band": carbon.band(carbon_total / max(1, len(spend_rows)))},
-        "surge_saved": round(surge_saved, 2),
+        "carbon": {"total_kg": carbon_total, "band": carbon.band(carbon_total / max(1, len(spend_rows)))}
+                  if config.APP_MODE == "demo" else None,
+        "surge_saved": round(surge_saved, 2) if config.APP_MODE == "demo" else None,
         "counts": counts,
         "summary_reasons": explainability.plan_summary_reasons({
             "spend": env["spend"], "budget": env["budget"],
             "skipped": counts["skip"], "cooked": counts["cook"], "surge_saved": surge_saved}),
         "coach": coach,
         "grid": grid,
+        "schedule": [{"id": s["id"], "day": s["day"], "meal": s["meal"],
+                      "desired_kind": s.get("desired_kind", "auto"), "status": s["status"]}
+                     for s in models.sessions_for_plan(plan_id)],
         "week_context": _week_context(user, plan, fests),
         # inverse-optimisation budget band for the planned sessions (docs §5):
         # don't make the user guess the cap — recommend it.
-        "recommendation": recommender.recommend(user, [d["meal"] for d in decisions]),
+        "recommendation": recommender.recommend(
+            user, [s["meal"] for s in models.sessions_for_plan(plan_id)
+                   if config.APP_MODE == "demo" or s.get("desired_kind") != "skip"]),
     }
     if user.get("household_id"):
         view["household"] = _household_view(user, env["spend"])
+    if config.APP_MODE != "demo":
+        view["summary_reasons"][0] = (f"Planned cost about ₹{env['spend']:.0f}, using Swiggy-listed item prices "
+                                      "and home-cooking estimates. Delivery fees, taxes and checkout prices are not included.")
     return view
 
 
@@ -185,7 +271,8 @@ def recommend_budget(plan_id: int) -> dict:
     if not plan:
         return {}
     user = models.get_user(plan["user_id"])
-    meals = [s["meal"] for s in models.sessions_for_plan(plan_id)]
+    meals = [s["meal"] for s in models.sessions_for_plan(plan_id)
+             if config.APP_MODE == "demo" or s.get("desired_kind") != "skip"]
     return recommender.recommend(user, meals)
 
 
@@ -263,6 +350,11 @@ def _household_view(user, spend):
 def _week_context(user, plan, fests):
     out = []
     for i in range(7):
+        if config.APP_MODE != 'demo':
+            out.append({"day": models.DAYS[i], "weather": None, "temp_c": None,
+                        "weather_note": "Not connected", "festival": None,
+                        "festival_effect": None})
+            continue
         w = weather.for_day(user["city"], i)
         f = fests.get(i)
         out.append({
@@ -286,6 +378,8 @@ def execution_preview(plan_id: int) -> dict:
 
 def execute(plan_id: int, *, expected_fingerprint: str | None = None,
             max_total: float | None = None) -> dict:
+    if config.APP_MODE != 'demo':
+        raise ValueError('Live orders are completed on Swiggy')
     review = execution_preview(plan_id)
     if not review:
         return {}

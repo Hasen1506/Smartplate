@@ -60,21 +60,30 @@ def _instruction_relevant(condition: str, item: dict) -> bool:
 def violates(user: dict, item: dict) -> str | None:
     """Return a human reason string if the item is unsafe for the user, else None."""
     user_allergens = set(user.get("allergens", []))
-    item_allergens = set(item.get("allergens", []))
+    listed_allergens = item.get("allergens")
+    if listed_allergens is None and (user_allergens or user.get("medical") or user.get("diet") == "vegan"):
+        return "allergen information unavailable"
+    item_allergens = set(listed_allergens or [])
     clash = user_allergens & item_allergens
     if clash:
         return f"contains {', '.join(sorted(clash))} (allergen)"
 
     for condition in user.get("medical", []):
+        if condition == "diabetes" and item.get("sugar_g") is None:
+            return "sugar information unavailable"
+        if condition == "hypertension" and item.get("tags") is None:
+            return "sodium information unavailable"
         rule = MEDICAL_RULES.get(condition)
         if rule and not rule(item):
             return f"unsafe for {condition}"
 
     diet = user.get("diet", "nonveg")
-    if diet in ("veg", "vegan") and not item.get("veg", 1):
+    if diet in ("veg", "vegan") and item.get("veg") is None:
+        return "vegetarian information unavailable"
+    if diet in ("veg", "vegan") and not item["veg"]:
         return f"not {diet}"
-    if diet == "vegan" and "dairy" in item_allergens:
-        return "contains dairy (vegan)"
+    if diet == "vegan" and item_allergens & {"dairy", "egg", "honey", "fish", "shellfish"}:
+        return "animal ingredient (vegan)"
     return None
 
 

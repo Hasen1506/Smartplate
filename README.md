@@ -1,10 +1,10 @@
-# SmartPlate — private trial
+# SmartPlate — invite beta
 
 A **scheduling** AI agent for food delivery — the white space the
 [strategic brainstorm](SmartPlate_Brainstorm.html) identified: scheduled +
 predictive + budget-constrained + delivery-integrated + autonomous substitution.
 
-This repo is the **working v1.1 app**. It plans a week of meals with a real
+This repo has a public invite-beta path and an explicit local demo mode. It plans a week of meals with a real
 mixed-integer optimiser (the "agent" is a solver, **not** an LLM — see
 [FEASIBILITY.md](FEASIBILITY.md)) and integrates **all 17 gap features** from
 §5.1, §5.2 and §5.3 of the brainstorm. The Debt/EMI integration is intentionally
@@ -18,24 +18,39 @@ For the differentiated product thesis, revenue experiments, production gates, an
 terms-safe Swiggy/Swiggy Money rollout, see
 [the September 2026 strategy memo](docs/product-strategy-2026.md).
 
-## Try it in your browser
+## Public invite beta
+
+Public mode uses Supabase email OTP for invited accounts, PostgreSQL for persistent plans,
+and a per-user Swiggy OAuth connection. A user chooses a saved Swiggy delivery address,
+searches open restaurants, browses their returned menus, selects up to eight restaurants,
+sets budget and dietary limits, then explicitly chooses meal slots before planning.
+No sample restaurant or prefilled week is available to the public planner.
+The weekly grid's auto / deliver / cook / skip controls affect the solver.
+
+The Swiggy handoff opens Swiggy for final availability, safety details, price, and order
+placement. SmartPlate **does not place or schedule live orders**. Swiggy browse results
+usually omit allergen and nutrition evidence; when a user's safety restriction requires
+missing evidence, the planner excludes that dish. Listed prices omit delivery fees, taxes,
+and checkout changes. See [release setup](docs/INVITE-BETA.md) and [ranked roadmap](docs/BETA-ROADMAP.md).
+
+## Local demo
 
 [Open SmartPlate in GitHub Codespaces](https://codespaces.new/Hasen1506/Smartplate/tree/codex/finish-smartplate-trial?quickstart=1)
 
-Choose **Create codespace**, wait for setup, then open **Ports → SmartPlate / 5057 → Open in Browser**. The trial starts automatically. It uses the real Python planner with sample Chennai data and simulated orders. Settings, latest plans and order history persist in the Codespace database. Keep the port private.
+Choose **Create codespace**, wait for setup, then open **Ports → SmartPlate / 5057 → Open in Browser**. Set `SMARTPLATE_MODE=demo` when running locally. The demo uses sample Chennai data and simulated orders. Keep the port private.
 
-**Real Swiggy ordering is not finished.** The documentation is accessible now, but its recipe and reference disagree. OAuth, authenticated tool schemas, real catalog mapping and live checkout still need integration. See [verified findings](docs/vendor/swiggy/README.md) and [trial instructions](docs/TRY-SMARTPLATE.md). Earlier architectural documents describe intentions beyond the trial’s current behavior.
+**Live ordering is intentionally outside this beta.** The read-only Swiggy discovery adapter checks tool availability at connection time; a real account and Swiggy access are required to validate production responses. See [verified findings](docs/vendor/swiggy/README.md) and [trial instructions](docs/TRY-SMARTPLATE.md).
 
 ## Run it locally
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python run.py                       # → http://localhost:5057
+SMARTPLATE_MODE=demo python run.py # → http://localhost:5057
 ```
 
-No build step, no Node, no API keys. The database is created and seeded with a
-demo Chennai catalog, three users, and a sample week on first run.
+No build step, no Node, no API keys in demo mode. The database is created and seeded with a
+sample Chennai catalog, three users, and a sample week on first demo run.
 
 ```bash
 python -m pytest -q                 # current backend regression suite
@@ -43,11 +58,15 @@ python -m pytest -q                 # current backend regression suite
 
 ## What's in the box
 
+The 17 experimental gap features below belong to the local demo. The public
+beta exposes the smaller, real-data planning path and suppresses simulated
+orders, receipts, surge savings, weather, and carbon claims.
+
 | Layer | Modules |
 |---|---|
 | **Kernel** (domain-agnostic, the reusable skeleton from §2) | `scheduler`, `budget`, `optimizer` (MILP/CBC), `variance` (substitution), `explainability`, `agent_brain` (deterministic vs optional LLM) |
 | **Domain** (the 17 features as constraints/signals) | `allergens`, `nutrition`, `household`, `leftovers`, `festivals`, `weather`, `surge`, `reverse_mode`, `community`, `receipts`, `health`, `carbon`, `cooking_coach`, `sentiment` |
-| **Integrations** | `swiggy_mcp` (Simulated \| Live), `calendar_sync` (.ics) |
+| **Integrations** | `swiggy_discovery` (read-only live menus), `swiggy_oauth` (per-user authorization), `swiggy_mcp` (simulated demo), `calendar_sync` (.ics) |
 
 ### The 17 gap features (all integrated)
 
@@ -85,9 +104,16 @@ instead of silently ordered.
 |---|---|---|
 | `PORT` | `5057` | HTTP port |
 | `SMARTPLATE_BRAIN` | `deterministic` | `llm` opts into the paid narrator (off the critical path) |
-| `SMARTPLATE_SWIGGY` | `simulated` | `live` is unsupported and checkout returns a clear error |
-| `SMARTPLATE_DB` | `smartplate.db` | SQLite path |
+| `SMARTPLATE_MODE` | `production` | `demo` explicitly enables sample data and simulated orders |
+| `SMARTPLATE_DB` | `smartplate.db` | SQLite path for local demo |
+| `DATABASE_URL` | unset | Supabase PostgreSQL URL for public mode |
+| `SUPABASE_URL` | unset | Supabase project URL for invite sign-in |
+| `SUPABASE_PUBLISHABLE_KEY` | unset | Supabase publishable key |
+| `SMARTPLATE_INVITED_EMAILS` | unset | Comma-separated invited addresses |
+| `SMARTPLATE_SESSION_SECRET` | unset | Long random signing and token-encryption secret |
+| `SMARTPLATE_PUBLIC_BASE_URL` | unset | Exact HTTPS origin for Swiggy callback |
 
 ## Live integration status
 
-The current provider is simulated. The real Swiggy path is not a drop-in replacement: it needs OAuth, live identifiers and cart schemas, address/payment selection, pending-payment handling and order reconciliation. No background worker places scheduled orders. See [the verified integration notes](docs/vendor/swiggy/README.md).
+The beta's Swiggy path is read-only and per-user. Real cart and payment flows require
+separate implementation and review. No background worker places scheduled orders.

@@ -69,6 +69,14 @@ def menu_for_city(city: str) -> list[dict]:
     return items
 
 
+def menu_for_user(user: dict) -> list[dict]:
+    from .. import config
+    if config.APP_MODE == "demo":
+        return menu_for_city(user["city"])
+    from ..integrations import live_catalog
+    return live_catalog.planning_menu(user["id"])
+
+
 def get_plan(plan_id: int) -> dict | None:
     with db.cursor() as cur:
         row = cur.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
