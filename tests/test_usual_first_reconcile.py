@@ -80,10 +80,10 @@ def test_reconcile_does_not_over_correct_rollover_nutrients():
 
 def test_reconcile_nudges_only_on_genuine_sustained_drift():
     # several known days all far UNDER target → a real drift the agent should nudge
-    entries = {_day(d): {"kcal": 900, "protein_g": 60} for d in (10, 11, 12, 13)}
-    window = [_day(d) for d in range(10, 15)]
+    entries = {_day(d): {"kcal": 900, "protein_g": 60} for d in (16, 17, 18, 19)}
+    window = [_day(d) for d in range(16, 21)]
     r = ledger.reconcile_after_gap(entries, window, kcal_target=2000, protein_floor=60,
-                                   today=_day(15))
+                                   today=_day(21))
     assert r["nudge_needed"] is True
     assert r["over_correct"] is False     # still never a catch-up *pile-on*
 

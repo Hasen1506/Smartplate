@@ -3,3 +3,8 @@ flask-cors==6.0.0
 PuLP==3.3.2
 icalendar==6.1.0
 pytest==8.3.4
+mcp==2.0.0
+requests==2.32.3
+cryptography==44.0.2
+psycopg[binary]==3.2.9
+gunicorn==23.0.0

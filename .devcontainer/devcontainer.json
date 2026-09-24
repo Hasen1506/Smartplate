@@ -7,6 +7,6 @@
   },
   "postCreateCommand": "python -m pip install -r requirements.txt",
   "postStartCommand": "python scripts/start_trial.py",
-  "containerEnv": {"SMARTPLATE_SWIGGY": "simulated", "PORT": "5057"},
+  "containerEnv": {"SMARTPLATE_MODE": "demo", "SMARTPLATE_SWIGGY": "simulated", "PORT": "5057"},
   "remoteUser": "vscode"
 }

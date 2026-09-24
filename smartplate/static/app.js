@@ -6,6 +6,10 @@ const S = {
   meta: null, users: [], userId: 1, planId: null, view: null,
   tab: "week", exec: null, community: [], receipts: null, drawer: null,
   busy: false, error: null, hideCold: false, orderReview: null,
+  auth: null, connection: null, addresses: null, selected: [], restaurants: [],
+  restaurantQuery: "", menu: null,
+  profile: null, setupSchedule: {}, setupDraft: null,
+  mobileDay: 0,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
 const rupee = (n) => "₹" + (Math.round((n || 0) * 100) / 100).toLocaleString("en-IN");
@@ -51,6 +55,18 @@ async function reloadPlan() { S.view = await api(`/api/plan/${S.planId}`); rende
 async function boot() {
   ensureBusyBar();
   S.meta = await api("/api/meta");
+  S.auth = await api("/api/auth/session");
+  if (S.meta.app_mode !== "demo") {
+    if (!S.auth.authenticated) { render(); return; }
+    S.userId = S.auth.user_id;
+    S.profile = await api(`/api/user/${S.userId}/profile`);
+    S.connection = await api("/api/swiggy/status");
+    if (!S.connection.connected || !S.connection.address_id) { render(); return; }
+    S.selected = await api("/api/swiggy/selected");
+    if (!S.selected.some(r => r.item_count > 0)) { render(); return; }
+    S.users = await api("/api/users");
+    await loadOrCreatePlan(); render(); return;
+  }
   S.users = await api("/api/users");
   let saved;
   try { saved = Number(localStorage.getItem('smartplate.user')); } catch (_) {}
@@ -61,8 +77,187 @@ async function boot() {
 }
 async function loadOrCreatePlan() {
   S.view = await api(`/api/user/${S.userId}/plan`);
+  if (!S.view) { S.planId = null; return; }
   S.planId = S.view.plan.id;
-  S.exec = await api(`/api/plan/${S.planId}/orders`);
+  S.exec = S.meta.app_mode === 'demo' ? await api(`/api/plan/${S.planId}/orders`) : null;
+}
+
+function onboarding() {
+  const brand = `<div class="onboard-brand">Smart<em>Plate</em><span> Plan your week with real Swiggy restaurants</span></div>`;
+  if (!S.auth?.authenticated) return `<main class="onboard">${brand}${errbar()}
+    <section class="card onboard-card"><p class="eyebrow">Invite beta</p><h1>Make room for a better food week.</h1>
+    <p>Sign in with your invited email. We will send a one-time code.</p>
+    <form id="auth-email"><label>Email address<input name="email" type="email" autocomplete="email" value="${esc(S.loginEmail || '')}" required></label><button class="primary">Send code</button></form>
+    ${S.loginEmail ? `<form id="auth-code"><label>Code sent to ${esc(S.loginEmail)}<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,8}" required></label><button class="primary">Sign in</button></form>` : ''}
+    </section></main>`;
+  return `<main class="onboard">${brand}${errbar()}<section class="card onboard-card">
+    <p class="eyebrow">Your food week</p><h1>Set up your week.</h1>
+    ${discoveryContent()}</section><button class="ghost" id="onboard-logout">Sign out</button></main>`;
+}
+
+function discoveryContent() {
+  if (S.meta.app_mode === 'demo') return `<p>This local demo uses sample restaurants and simulated orders.</p>`;
+  if (!S.connection?.connected) return `<p>Connect your own Swiggy account to discover restaurants and menus available to your address. SmartPlate cannot place orders.</p>
+    <button class="primary" id="swiggy-connect">Connect Swiggy</button>
+    <p class="sub">Swiggy authorization happens on Swiggy. Your access token stays encrypted on our server.</p>`;
+  const address = S.connection.address_id;
+  const addressRows = S.addresses?.addresses || [];
+  const addressList = addressRows.length ? `<div class="address-list">${addressRows.map(a =>
+    `<button class="address-option" data-address="${esc(a.id)}"><strong>${esc(a.label)}</strong><small>${esc(a.address || '')}</small></button>`).join('')}</div>
+    ${S.addresses?.pagination?.hasMore ? `<button class="ghost" id="more-addresses">More addresses</button>` : ''}` : '';
+  if (!address) return `<p>Select a saved Swiggy delivery address. We will search only for restaurants available there.</p>
+    <button id="load-addresses">Show my addresses</button>${addressList}
+    ${S.changingAddress ? '<button class="ghost" id="cancel-change-address">Keep current address</button>' : ''}
+    ${S.addresses && !addressRows.length ? `<p>No saved addresses found. Add one in Swiggy, then refresh this list.</p>` : ''}`;
+  const selected = S.selected.length ? `<h3>Restaurants in your plan</h3><div class="selected-list">${S.selected.map(r =>
+    `<div><strong>${esc(r.name)}</strong><span>${r.item_count} menu items · ${r.rating == null ? 'rating unavailable' : esc(r.rating) + '★'}</span><button class="ghost" data-unselect="${esc(r.provider_id)}">Remove</button></div>`).join('')}</div>` : '';
+  const results = S.restaurants.length ? `<div class="result-list">${S.restaurants.map(r =>
+    `<div class="restaurant-result"><strong>${esc(r.name)}</strong><span>${esc((r.cuisines || []).join(', '))} · ${r.rating == null ? 'rating unavailable' : esc(r.rating) + '★'} · ${esc(r.area || '')}</span><button data-menu="${esc(r.id)}">See menu</button></div>`).join('')}</div>` : '';
+  const menu = S.menu ? `<div class="menu-preview"><h3>Menu · ${esc(S.restaurants.find(r => r.id === S.menu.restaurant_id)?.name || 'restaurant')}</h3>
+    <p>${S.menu.items.length} currently listed items${S.menu.truncated ? ' · menu is truncated by Swiggy' : ''}. Prices exclude delivery fees and checkout changes.</p>
+    <div class="menu-items">${S.menu.items.slice(0, 15).map(i => `<div>${esc(i.name)} <span>${i.price == null ? 'price unavailable' : rupee(i.price)}</span></div>`).join('')}</div>
+    ${S.menu.items.some(i => i.price != null) ? `<button class="primary" data-select="${esc(S.menu.restaurant_id)}">Add to my week</button>` : '<p>No priced dishes are available here. Search another restaurant.</p>'}</div>` : '';
+  return `<div class="connection-status"><strong>Connected</strong><span>Address: ${esc(S.connection.address_label || 'Selected on Swiggy')}</span></div>
+    <button class="ghost" id="change-address">Change address</button><button class="ghost" id="swiggy-disconnect">Disconnect Swiggy</button>
+    ${selected}<form id="restaurant-search"><label>Find open restaurants near your address<input name="query" value="${esc(S.restaurantQuery)}" placeholder="e.g. biryani, thali, salads" required minlength="2" maxlength="80"></label><button>Search Swiggy</button></form>
+    ${results}${menu}${S.selected.some(r => r.item_count > 0 && r.rating != null) && !S.view ? setupPanel() : ''}
+    ${S.selected.some(r => r.item_count > 0 && r.rating == null) && !S.selected.some(r => r.rating != null && r.item_count > 0) ? '<p>These restaurants have no published rating. Choose a rated restaurant so your rating limit can be checked.</p>' : ''}
+    <p class="sub">Discovery is live. Nutrition and allergen details missing from Swiggy cannot be inferred; meals with unverified safety data are excluded when you set those restrictions. Opening Swiggy is the final handoff for any order.</p>`;
+}
+
+function setupPanel() {
+  const u = S.setupDraft ? {...S.profile, ...S.setupDraft,
+    health_targets: {...S.profile.health_targets, max_cook_per_week: S.setupDraft.max_cook_per_week}} : S.profile;
+  if (!u) return '';
+  const checks = (name, values) => values.map(value =>
+    `<label class="check"><input type="checkbox" name="${name}" value="${value}" ${u[name].includes(value) ? 'checked' : ''}>${esc(value.replace('_', ' '))}</label>`).join('');
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const cells = MEALS.map(meal => `<div class="matrix-label">${meal}</div>` + days.map((day, index) => {
+    const key = `${index}:${meal}`, kind = S.setupSchedule[key] || 'skip';
+    const label = {skip:'Add', auto:'Auto', delivery:'Deliver', cook:'Cook'}[kind];
+    return `<button type="button" class="matrix-cell ${kind}" data-setup-slot="${key}" aria-label="${day} ${meal}: ${label}; tap to change">${label}</button>`;
+  }).join('')).join('');
+  const count = Object.values(S.setupSchedule).filter(kind => kind !== 'skip').length;
+  return `<section class="setup"><h3>Choose your week</h3><p class="sub">Start empty. Pick only the meals you want planned. Tap a slot to cycle Add → Auto → Deliver → Cook → Add.</p>
+    <div class="setup-presets"><button type="button" data-preset="weekdays-lunch">Weekday lunches</button><button type="button" data-preset="dinners">Dinners</button><button type="button" data-preset="clear">Clear</button></div>
+    <div class="matrix-scroll"><div class="matrix-grid"><div></div>${days.map(day => `<div class="matrix-day">${day}</div>`).join('')}${cells}</div></div>
+    <p class="sub">${count} selected ${count === 1 ? 'meal' : 'meals'}</p>
+    <form id="setup-preferences" class="preferences"><h3>Your limits</h3>
+      <div class="settings-grid"><label>Weekly budget (₹)<input name="weekly_budget" type="number" min="0" max="1000000" step="1" value="${esc(u.weekly_budget)}" required></label>
+      <label>Diet<select name="diet">${[['nonveg','Non-vegetarian'],['veg','Vegetarian'],['vegan','Vegan']].map(([value,label])=>`<option value="${value}" ${u.diet === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      <label>Minimum restaurant rating<input name="rating_floor" type="number" min="0" max="5" step="0.1" value="${esc(u.rating_floor)}" required></label>
+      <label>Maximum cooking meals<input name="max_cook_per_week" type="number" min="0" max="21" step="1" value="${esc(u.health_targets.max_cook_per_week ?? 6)}" required></label></div>
+      <fieldset><legend>Allergens to exclude</legend><div class="checks">${checks('allergens',['peanut','dairy','gluten','egg','soy','shellfish','fish','sesame','tree_nut'])}</div></fieldset>
+      <fieldset><legend>Medical filters</legend><div class="checks">${checks('medical',['diabetes','hypertension','celiac'])}</div></fieldset>
+      <p class="sub">Swiggy menus may omit safety details. Restricted items with unknown data are excluded; always confirm with the restaurant.</p>
+      <button class="primary" type="submit" ${count ? '' : 'disabled'}>Build my week</button>
+    </form></section>`;
+}
+
+function wireOnboarding() { wireDiscovery(); }
+
+function readSetupForm() {
+  const form = document.getElementById('setup-preferences');
+  if (!form) return null;
+  const data = new FormData(form);
+  return {diet: data.get('diet'), weekly_budget: Number(data.get('weekly_budget')),
+    rating_floor: Number(data.get('rating_floor')), max_cook_per_week: Number(data.get('max_cook_per_week')),
+    allergens: data.getAll('allergens'), medical: data.getAll('medical')};
+}
+
+function wireDiscovery() {
+  const one = id => document.getElementById(id);
+  if (one('auth-email')) one('auth-email').onsubmit = e => { e.preventDefault(); guard(async () => {
+    S.loginEmail = new FormData(e.target).get('email').trim().toLowerCase();
+    await api('/api/auth/request-code', 'POST', {email: S.loginEmail}); render();
+  }); };
+  if (one('auth-code')) one('auth-code').onsubmit = e => { e.preventDefault(); guard(async () => {
+    await api('/api/auth/verify-code', 'POST', {email: S.loginEmail, code: new FormData(e.target).get('code')});
+    S.view = null; await boot();
+  }); };
+  if (one('onboard-logout')) one('onboard-logout').onclick = () => guard(logout);
+  if (one('swiggy-connect')) one('swiggy-connect').onclick = () => guard(async () => {
+    const result = await api('/api/swiggy/connect', 'POST', {}); window.location.assign(result.url);
+  });
+  if (one('load-addresses')) one('load-addresses').onclick = () => guard(async () => { S.addresses = await api('/api/swiggy/addresses'); render(); });
+  if (one('more-addresses')) one('more-addresses').onclick = () => guard(async () => {
+    const next = (S.addresses.pagination.page || 1) + 1;
+    const more = await api(`/api/swiggy/addresses?page=${next}`);
+    S.addresses.addresses.push(...more.addresses); S.addresses.pagination = more.pagination; render();
+  });
+  document.querySelectorAll('[data-address]').forEach(el => el.onclick = () => guard(async () => {
+    await api('/api/swiggy/address', 'POST', {address_id: el.dataset.address});
+    S.connection = await api('/api/swiggy/status'); S.addresses = null; S.selected = []; S.view = null;
+    S.changingAddress = false; render();
+  }));
+  if (one('change-address')) one('change-address').onclick = () => guard(async () => {
+    S.addresses = await api('/api/swiggy/addresses');
+    S.connection.address_id = null; S.view = null; S.changingAddress = true; render();
+  });
+  if (one('cancel-change-address')) one('cancel-change-address').onclick = () => guard(async () => {
+    S.connection = await api('/api/swiggy/status'); S.changingAddress = false;
+    S.selected = await api('/api/swiggy/selected');
+    if (S.selected.some(r => r.item_count > 0)) await loadOrCreatePlan();
+    render();
+  });
+  if (one('swiggy-disconnect')) one('swiggy-disconnect').onclick = () => guard(async () => {
+    await api('/api/swiggy/disconnect', 'POST', {}); S.connection = await api('/api/swiggy/status');
+    S.view = null; S.selected = []; render();
+  });
+  if (one('restaurant-search')) one('restaurant-search').onsubmit = e => { e.preventDefault(); guard(async () => {
+    S.restaurantQuery = new FormData(e.target).get('query').trim();
+    const result = await api(`/api/swiggy/restaurants?query=${encodeURIComponent(S.restaurantQuery)}`);
+    S.restaurants = result.restaurants; S.menu = null; render();
+  }); };
+  document.querySelectorAll('[data-menu]').forEach(el => el.onclick = () => guard(async () => {
+    S.menu = await api(`/api/swiggy/restaurant/${encodeURIComponent(el.dataset.menu)}/menu`);
+    if (S.selected.some(r => r.provider_id === S.menu.restaurant_id)) S.selected = await api('/api/swiggy/selected');
+    if (S.view && S.selected.some(r => r.provider_id === S.menu.restaurant_id))
+      S.view = await api(`/api/plan/${S.planId}/optimize`, 'POST', {});
+    render();
+  }));
+  document.querySelectorAll('[data-select]').forEach(el => el.onclick = () => guard(async () => {
+    await api(`/api/swiggy/restaurant/${encodeURIComponent(el.dataset.select)}/select`, 'POST', {selected: true});
+    S.selected = await api('/api/swiggy/selected');
+    if (S.view) S.view = await api(`/api/plan/${S.planId}/optimize`, 'POST', {});
+    render();
+  }));
+  document.querySelectorAll('[data-unselect]').forEach(el => el.onclick = () => guard(async () => {
+    await api(`/api/swiggy/restaurant/${encodeURIComponent(el.dataset.unselect)}/select`, 'POST', {selected: false});
+    S.selected = await api('/api/swiggy/selected');
+    if (S.view) S.view = await api(`/api/plan/${S.planId}/optimize`, 'POST', {});
+    render();
+  }));
+  document.querySelectorAll('[data-setup-slot]').forEach(el => el.onclick = () => {
+    S.setupDraft = readSetupForm();
+    const key = el.dataset.setupSlot, kinds = ['skip', 'auto', 'delivery', 'cook'];
+    S.setupSchedule[key] = kinds[(kinds.indexOf(S.setupSchedule[key] || 'skip') + 1) % kinds.length]; render();
+  });
+  document.querySelectorAll('[data-preset]').forEach(el => el.onclick = () => {
+    S.setupDraft = readSetupForm(); S.setupSchedule = {};
+    if (el.dataset.preset === 'dinners') for (let day = 0; day < 7; day++) S.setupSchedule[`${day}:dinner`] = 'auto';
+    if (el.dataset.preset === 'weekdays-lunch') for (let day = 0; day < 5; day++) S.setupSchedule[`${day}:lunch`] = 'auto';
+    render();
+  });
+  if (one('setup-preferences')) {
+    one('setup-preferences').oninput = () => { S.setupDraft = readSetupForm(); };
+    one('setup-preferences').onchange = () => { S.setupDraft = readSetupForm(); };
+    one('setup-preferences').onsubmit = e => { e.preventDefault(); guard(async () => {
+    const body = readSetupForm();
+    const schedule = Object.entries(S.setupSchedule).filter(([,kind]) => kind !== 'skip')
+      .map(([key,kind]) => { const [day,meal] = key.split(':'); return {day:Number(day),meal,kind}; });
+    if (!schedule.length) throw new Error('Choose at least one meal');
+    S.profile = await api(`/api/user/${S.userId}`, 'PATCH', body);
+    S.users = await api('/api/users');
+    S.view = await api('/api/plan', 'POST', {user_id: S.userId, schedule});
+    S.planId = S.view.plan.id; S.tab = 'week'; S.exec = null; S.setupDraft = null; render();
+    }); };
+  }
+}
+
+async function logout() {
+  await api('/api/auth/logout', 'POST', {});
+  S.auth = {authenticated: false}; S.connection = null; S.view = null; render();
 }
 
 /* ---------------------------------------------------------------- actions */
@@ -139,9 +334,17 @@ async function setSession(sid, status) {
   S.view = await api(`/api/plan/${S.planId}/optimize`, "POST", {});
   S.drawer = null; toast(`Session ${status}`); render();
 }
+async function setKind(id, kind) {
+  S.view = await api(`/api/session/${id}/kind`, 'POST', {kind});
+  S.orderReview = null; render();
+}
 
 /* ---------------------------------------------------------------- render */
 function render() {
+  if (!S.view) {
+    document.getElementById("app").innerHTML = onboarding();
+    wireOnboarding(); return;
+  }
   document.getElementById("app").innerHTML = topbar() + `<div class="wrap">${errbar() + tabs() + tabBody()}</div>` +
     (S.drawer ? drawer() : "") + (S.orderReview ? orderReviewDialog() : "");
   wire();
@@ -184,7 +387,7 @@ function topbar() {
   return `<div class="topbar"><div class="inner">
     <div class="brand">Smart<em>Plate</em><span class="v">v${m.version}</span></div>
     <span class="ctx"><span class="chip" title="planning area">📍 ${esc(S.view.user.city)}</span>${hh ? `<span class="chip" title="group plan">👥 ${esc(hh.name)}</span>` : ""}</span>
-    <select id="userSel">${userOpts}</select>
+    ${S.meta.app_mode === "demo" ? `<select id="userSel">${userOpts}</select>` : `<button class="ghost" data-act="logout">Sign out</button>`}
     <select id="modeSel">${modeOpts}</select>
     <span class="spacer"></span>
     <span class="pill ok" title="${esc(m.note)}">brain: ${m.brain} · ${rupee(0)}/decision</span>
@@ -194,15 +397,18 @@ function topbar() {
 }
 
 function tabs() {
-  const T = [["week", "Week plan"], ["insights", "Insights"], ["orders", "Orders & substitution"],
-    ["settings", "Settings"], ["cooking", "Cooking coach"], ["community", "Community"], ["receipts", "Expenses"], ["connection", "Swiggy connection"]];
+  const T = S.meta.app_mode === 'demo'
+    ? [["week", "Week plan"], ["insights", "Insights"], ["orders", "Orders & substitution"],
+       ["settings", "Settings"], ["cooking", "Cooking coach"], ["community", "Community"], ["receipts", "Expenses"], ["connection", "Swiggy connection"]]
+    : [["week", "Week plan"], ["insights", "Insights"], ["settings", "Settings"],
+       ["cooking", "Cooking coach"], ["connection", "Swiggy restaurants"]];
   return `<div class="tabs">${T.map(([k, l]) =>
     `<button class="tab ${S.tab === k ? "active" : ""}" data-tab="${k}">${l}</button>`).join("")}</div>`;
 }
 
 function tabBody() {
   switch (S.tab) {
-    case "week": return coldStart() + statStrip() + controls() + weekGuide() + weekGrid() + approveBar();
+    case "week": return coldStart() + planningMatrix() + statStrip() + controls() + weekGuide() + weekGrid() + approveBar();
     case "insights": return insights();
     case "orders": return ordersPanel();
     case "cooking": return cookingPanel();
@@ -215,15 +421,29 @@ function tabBody() {
 }
 
 /* ---- week ---- */
+function planningMatrix() {
+  const schedule = S.view.schedule || [];
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const symbol = {auto: '◇', delivery: '▣', cook: '⌂', skip: '⊘'};
+  const title = {auto: 'Auto', delivery: 'Deliver', cook: 'Cook', skip: 'Skip'};
+  const cells = MEALS.map(meal => `<div class="matrix-label"><strong>${esc(meal)}</strong><small>${meal === 'breakfast' ? '08:30' : meal === 'lunch' ? '13:00' : '20:00'}</small></div>` +
+    days.map((_, day) => { const s = schedule.find(v => v.day === day && v.meal === meal);
+      return s ? `<button class="matrix-cell ${esc(s.desired_kind)}" data-kind="${s.id}:${esc(s.desired_kind)}" aria-label="${days[day]} ${meal}: ${title[s.desired_kind]}. Change meal mode" title="${title[s.desired_kind]} — tap to change">${symbol[s.desired_kind]}<span>${title[s.desired_kind]}</span></button>` : '<div></div>';
+    }).join('')).join('');
+  return `<section class="card planning-matrix"><div class="matrix-head"><div><p class="eyebrow">01 · Set the rhythm</p><h2 class="sec">When should SmartPlate plan?</h2><p class="sub">Tap each meal to choose auto, deliver, cook or skip. The week below updates immediately.</p></div><span class="matrix-period">${esc(S.view.plan.week_start)} · ${esc(S.view.plan.mode_label)}</span></div>
+    <div class="matrix-scroll"><div class="matrix-grid"><div></div>${days.map(d => `<div class="matrix-day">${d}</div>`).join('')}${cells}</div></div>
+    <div class="matrix-foot"><span>${schedule.filter(s => s.desired_kind !== 'skip').length} meals in scope</span><span>◇ auto · ▣ deliver · ⌂ cook · ⊘ skip</span></div></section>`;
+}
 function statStrip() {
   const v = S.view, b = v.budget, c = v.counts;
   const pct = Math.min(100, b.pct_used);
   return `<div class="stats">
-    <div class="stat"><div class="label">Weekly spend</div><div class="val">${rupee(b.spend)}<small> / ${rupee(b.budget)}</small></div>
+    <div class="stat"><div class="label">${S.meta.app_mode === 'demo' ? 'Weekly spend' : 'Planned cost'}</div><div class="val">${rupee(b.spend)}<small> / ${rupee(b.budget)}</small></div>
       <div class="bar"><i style="width:${pct}%;background:${b.over ? "var(--red)" : "var(--accent)"}"></i></div></div>
     <div class="stat"><div class="label">Sessions</div><div class="val">${c.delivery}<small> deliver</small> ${c.cook}<small> cook</small> ${c.skip + (c.snoozed || 0)}<small> skip / snooze</small></div></div>
-    <div class="stat"><div class="label">Saved vs surge</div><div class="val">${rupee(v.surge_saved)}</div></div>
-    <div class="stat"><div class="label">Carbon (week)</div><div class="val">${v.carbon.total_kg}<small> kg · ${v.carbon.band}</small></div></div>
+    ${S.meta.app_mode === 'demo' ? `<div class="stat"><div class="label">Saved vs surge</div><div class="val">${rupee(v.surge_saved)}</div></div>
+    <div class="stat"><div class="label">Carbon (week)</div><div class="val">${v.carbon.total_kg}<small> kg · ${v.carbon.band}</small></div></div>` :
+      `<div class="stat"><div class="label">Source</div><div class="val">Swiggy<small> live menu</small></div></div>`}
     <div class="stat"><div class="label">Rating floor</div><div class="val">${v.user.rating_floor.toFixed(1)}<small> ★ min</small></div></div>
   </div>`;
 }
@@ -251,16 +471,16 @@ function controls() {
     </div>
     <div class="guarantee"><span class="lock">🔒 Hard rules locked:</span> ${safety}
       <span class="tag">≤ ${rupee(u.weekly_budget)} cap</span>
-      <span style="color:var(--muted)">— the agent can't violate these, even in Survival mode.</span></div>
+    <span style="color:var(--muted)">— the planner keeps these limits in every mode.</span></div>
     <ul class="reasonlist">${reasons}</ul>
   </div>`;
 }
 
-/* sticky approve bar — the one primary action for the week view (V1/C1/T1) */
+/* Week action bar — the primary action for the week view. */
 function approveBar() {
   const v = S.view, b = v.budget, c = v.counts;
   const left = b.budget - b.spend;
-  const sessions = 21;
+  const sessions = (v.schedule || []).filter(s => s.desired_kind !== 'skip').length;
   return `<div class="approvebar">
     <div class="sum">
       <div class="n">${sessions}<small> sessions</small></div>
@@ -271,8 +491,10 @@ function approveBar() {
     </div>
     <div class="grow"></div>
     <div class="cta">
-      <button class="primary" data-act="exec">Review simulated orders →</button>
-      <span class="reassure"><span class="shield">🛡</span><span>Try checkout without spending money. No real orders are sent.</span></span>
+      ${S.meta.app_mode === 'demo' ? `<button class="primary" data-act="exec">Review simulated orders →</button>
+      <span class="reassure"><span class="shield">🛡</span><span>Try checkout without spending money. No real orders are sent.</span></span>` :
+      `<a class="primary handoff" href="https://www.swiggy.com/" target="_blank" rel="noopener noreferrer">Open Swiggy to order ↗</a>
+      <span class="reassure"><span class="shield">↗</span><span>Check availability, safety details and final price in Swiggy. SmartPlate does not place or schedule orders.</span></span>`}
     </div>
   </div>`;
 }
@@ -280,6 +502,9 @@ function approveBar() {
 /* cold-start honesty — don't imply learned precision before data exists (L2) */
 function coldStart() {
   if (S.hideCold) return "";
+  if (S.meta.app_mode !== 'demo') return `<div class="coldstart"><span class="i">ℹ Live discovery</span>
+    <span>Restaurants and listed item prices come from Swiggy for your selected address. Delivery fees, nutrition, allergens and future availability are unverified.</span>
+    <button class="x" data-close-cold="1" title="Dismiss">✕</button></div>`;
   return `<div class="coldstart"><span class="i">ℹ Demo week</span>
     <span>Sample Chennai prices, menus, weather and profiles. The profile's medical and allergy selections are fictional examples. Change them in Settings to try different plans.</span>
     <button class="x" data-close-cold="1" title="Dismiss">✕</button></div>`;
@@ -287,6 +512,10 @@ function coldStart() {
 
 /* persistent legend + "cards are interactive" hint (V3, helps H1 discoverability) */
 function weekGuide() {
+  if (S.meta.app_mode !== 'demo') return `<div class="legend"><span class="grp"><span class="swatch" style="background:var(--accent)"></span>Swiggy menu suggestion</span>
+    <span class="grp"><span class="swatch" style="background:var(--green)"></span>cook</span>
+    <span class="grp"><span class="swatch" style="background:var(--muted-2)"></span>not planned</span>
+    <span class="hint">Tap a meal to inspect its reason and change it →</span></div>`;
   return `<div class="legend">
     <span class="grp"><span class="swatch" style="background:var(--accent)"></span>deliver</span>
     <span class="grp"><span class="swatch" style="background:var(--green)"></span>cook</span>
@@ -302,14 +531,15 @@ function weekGuide() {
 
 function weekGrid() {
   const ctx = S.view.week_context;
-  return `<div class="week">${S.view.grid.map((day, i) => {
+  return `<div class="mobile-daypick">${S.view.grid.map((day, i) => `<button class="${i === S.mobileDay ? 'active' : ''}" data-mobile-day="${i}">${day.day}</button>`).join('')}</div>
+  <div class="week">${S.view.grid.map((day, i) => {
     const wc = ctx[i];
     const cls = wc.festival && wc.festival_effect === "feast" ? "feast"
       : (day.meals.breakfast && day.meals.breakfast.kind === "skip" && day.meals.lunch && day.meals.lunch.kind === "skip") ? "travel" : "";
-    const wx = { clear: "☀", rain: "🌧", hot: "🔥", storm: "⛈" }[wc.weather] || "";
+    const wx = S.meta.app_mode === 'demo' ? ({ clear: "☀", rain: "🌧", hot: "🔥", storm: "⛈" }[wc.weather] || "") : "";
     const fest = wc.festival ? `<div class="cell-fest b ${wc.festival_effect === "fast" ? "fast" : "fest"}" style="margin-bottom:6px" title="${esc(wc.festival)}">${esc(wc.festival.slice(0, 14))}</div>` : "";
-    return `<div class="daycol ${cls}">
-      <div class="dhead"><span>${day.day}</span><span class="wx" title="${esc(wc.weather_note)}">${wx} ${Math.round(wc.temp_c)}°</span></div>
+    return `<div class="daycol ${cls} ${i === S.mobileDay ? 'mobile-active' : ''}">
+      <div class="dhead"><span>${day.day}</span>${S.meta.app_mode === 'demo' ? `<span class="wx" title="${esc(wc.weather_note)}">${wx} ${Math.round(wc.temp_c)}°</span>` : ''}</div>
       ${fest}
       ${MEALS.map(meal => cellHTML(day.meals[meal], meal, i)).join("")}
     </div>`;
@@ -342,7 +572,9 @@ function drawer() {
   const nut = Object.keys(n).length ? `<h3 class="k" style="margin-top:18px">Nutrition</h3><div class="kv">
     ${["kcal", "protein_g", "carbs_g", "fat_g", "sugar_g"].filter(k => n[k] != null).map(k =>
       `<span class="tag">${k.replace("_g", "")}: ${n[k]}${k === "kcal" ? "" : "g"}</span>`).join("")}</div>` : "";
-  const carbon = m.carbon_kg ? `<div class="kv"><span class="tag">carbon ≈ ${m.carbon_kg} kg CO₂e</span></div>` : "";
+  const carbon = S.meta.app_mode === 'demo' && m.carbon_kg ? `<div class="kv"><span class="tag">carbon ≈ ${m.carbon_kg} kg CO₂e</span></div>` : "";
+  const handoff = S.meta.app_mode !== 'demo' && m.kind === 'delivery' ? `<div class="row" style="margin-top:16px"><button data-copy-meal="${esc(S.drawer)}">Copy dish and restaurant</button><a class="handoff" href="https://www.swiggy.com/" target="_blank" rel="noopener noreferrer">Open Swiggy ↗</a></div>
+    <p class="sub">Find this dish on Swiggy, then confirm the restaurant, ingredients, availability and final price there.</p>` : '';
   const actions = m.status === 'ordered' ? '<p class="callout">This simulated order is saved. It stays fixed when you replan.</p>' : `<div class="row" style="margin-top:20px">
       <button data-sess="${m.session_id}:skipped">Skip</button>
       <button data-sess="${m.session_id}:snoozed">Snooze</button>
@@ -355,13 +587,20 @@ function drawer() {
     <div class="sub">${esc(m.restaurant || "")} ${m.rating ? "· " + m.rating.toFixed(1) + "★" : ""} ${m.cost ? "· " + rupee(m.cost) : ""}</div>
     <h3 class="k" style="margin-top:18px">Why the agent chose this</h3>
     <ul class="reasonlist">${reasons}</ul>
-    ${nut}${carbon}${actions}
+    ${nut}${carbon}${handoff}${actions}
   </div></div>`;
 }
 
 /* ---- insights ---- */
 function insights() {
   const v = S.view, N = v.nutrition;
+  if (S.meta.app_mode !== 'demo') return `<div class="grid-cards" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+    <div class="card"><h3 class="k">Budget</h3><h2 class="sec">${rupee(v.budget.spend)} planned cost</h2>
+    <p>Budget ${rupee(v.budget.budget)}. Swiggy item prices and home-cooking estimates omit delivery fees, taxes, offers and checkout changes.</p></div>
+    <div class="card"><h3 class="k">Plan choices</h3><h2 class="sec">${v.counts.delivery} delivery · ${v.counts.cook} cook</h2>
+    <p>${v.counts.skip} skipped. Swiggy browse menus do not verify nutrition or allergens; restricted meals are excluded when data is missing.</p></div>
+    <div class="card"><h3 class="k">Current source</h3><h2 class="sec">${S.selected.length} Swiggy restaurants</h2>
+    <p>Open restaurants selected for your saved address. Refresh a menu in Swiggy before ordering.</p></div></div>`;
   const macro = (k, unit) => {
     const cur = N.daily_avg[k] || 0, tgt = N.daily_target[k] || 1;
     const pct = Math.min(140, (cur / tgt) * 100);
@@ -485,6 +724,12 @@ function wire() {
     render();
   }));
   on("[data-cell]", "click", (e) => { S.drawer = e.currentTarget.dataset.cell; render(); });
+  on("[data-copy-meal]", "click", (e) => guard(async () => {
+    const [dayIndex, meal] = e.currentTarget.dataset.copyMeal.split(':');
+    const day = S.view.grid[Number(dayIndex)], choice = day.meals[meal];
+    await navigator.clipboard.writeText(`${day.day} ${meal}: ${choice.item} — ${choice.restaurant}. Listed item price: ${rupee(choice.cost)}. Verify availability, ingredients and final price in Swiggy.`);
+    toast('Dish and restaurant copied');
+  }));
   on("[data-cell]", "keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); S.drawer = e.currentTarget.dataset.cell; render(); } });
   on("[data-close]", "click", (e) => { if (e.target.dataset.close) { S.drawer = null; render(); } });
   on("[data-close-err]", "click", () => { S.error = null; render(); });
@@ -493,10 +738,13 @@ function wire() {
   on("[data-cmd]", "click", (e) => guard(() => quickCmd(e.currentTarget.dataset.cmd)));
   on("[data-adopt]", "click", (e) => guard(() => adopt(e.currentTarget.dataset.adopt)));
   on("[data-sess]", "click", (e) => { const [id, st] = e.currentTarget.dataset.sess.split(":"); guard(() => setSession(id, st)); });
+  on("[data-kind]", "click", (e) => { const [id, current] = e.currentTarget.dataset.kind.split(":");
+    const kinds = ['auto','delivery','cook','skip']; guard(() => setKind(id, kinds[(kinds.indexOf(current) + 1) % kinds.length])); });
+  on("[data-mobile-day]", "click", (e) => { S.mobileDay = Number(e.currentTarget.dataset.mobileDay); render(); });
   const cmd = document.getElementById("cmd"); if (cmd) cmd.addEventListener("keydown", (e) => { if (e.key === "Enter") guard(runCommand); });
   const acts = {
     cmd: runCommand, reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute, savetpl: saveTemplate,
-    genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
+    genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek, logout,
   };
   on("[data-act]", "click", (e) => { const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
   if (S.orderReview) document.querySelector(".checkout [autofocus]")?.focus();
@@ -513,13 +761,14 @@ function wire() {
       S.tab = 'week'; toast('Settings saved and unplaced meals replanned'); render();
     });
   };
+  wireDiscovery();
 }
 
 function settingsPanel() {
   const u = S.view.user, n = S.view.nutrition.daily_target;
   const number = (key, label, value, min, max, step = 1) => `<label>${label}<input name="${key}" type="number" min="${min}" max="${max}" step="${step}" value="${value}" required></label>`;
   const checks = (key, values) => values.map(v => `<label class="check"><input type="checkbox" name="${key}" value="${v}" ${u[key].includes(v) ? 'checked' : ''}>${esc(v.replace('_', ' '))}</label>`).join('');
-  return `<h2 class="sec">Your planning settings</h2><p class="sub">Change the sample profile and see how the week adapts. Already ordered meals stay fixed. The trial catalog covers Chennai.</p>
+  return `<h2 class="sec">Your planning settings</h2><p class="sub">${S.meta.app_mode === 'demo' ? 'Change the sample profile and see how the week adapts. Already ordered meals stay fixed. The trial catalog covers Chennai.' : 'Set your own budget, diet and safety filters. Swiggy browse menus often omit allergen and nutrition data, so restricted meals may have no eligible delivery options.'}</p>
     <form id="preferences" class="card preferences">
       <div class="settings-grid"><label>Profile name<input name="name" maxlength="80" value="${esc(u.name)}" required></label>
       <label>Diet<select name="diet">${[['nonveg','Non-vegetarian'],['veg','Vegetarian'],['vegan','Vegan']].map(([k,v])=>`<option value="${k}" ${u.diet===k?'selected':''}>${v}</option>`).join('')}</select></label>
@@ -529,19 +778,13 @@ function settingsPanel() {
       ${number('protein_g','Daily protein target (g)',n.protein_g,1,1000)}
       ${number('max_cook_per_week','Maximum cooking meals per week',u.health_targets.max_cook_per_week ?? 6,0,21)}</div>
       <fieldset><legend>Exclude these allergens</legend><div class="checks">${checks('allergens',['peanut','dairy','gluten','egg','soy','shellfish','fish','sesame','tree_nut'])}</div></fieldset>
-      <fieldset><legend>Example medical filters</legend><div class="checks">${checks('medical',['diabetes','hypertension','celiac'])}</div><p class="sub">These simplified demo rules use sample nutrition labels; they do not establish that a restaurant meal is medically suitable or free of cross-contact.</p></fieldset>
+      <fieldset><legend>Medical filters</legend><div class="checks">${checks('medical',['diabetes','hypertension','celiac'])}</div><p class="sub">Missing ingredient and nutrition data is treated as unknown, never as proof that a restaurant meal is safe. Confirm with the restaurant before ordering.</p></fieldset>
       <button type="submit" class="primary">Save &amp; replan</button>
-    </form><div class="card"><h3 class="k">Start another trial plan</h3><p class="sub">Create a fresh upcoming week using this profile. Your previous plan and simulated order records remain saved.</p><button data-act="newweek">Create new week</button></div>`;
+    </form><div class="card"><h3 class="k">Start another plan</h3><p class="sub">Create a fresh upcoming week using this profile.</p><button data-act="newweek">Create new week</button></div>`;
 }
 
 function connectionPanel() {
-  return `<h2 class="sec">Swiggy connection</h2><div class="card"><span class="tag">Not connected</span>
-    <h3>Meal planning is ready to try. Real ordering is not enabled.</h3>
-    <p>The trial uses a sample catalog. It does not access your Swiggy account, wallet or saved addresses.</p>
-    <p>Real checkout needs a Swiggy sign-in, current menu identifiers, your selected address and payment method, and confirmation of the live cart total. Weekly automatic ordering is not enabled.</p>
-    <p>The documentation is now accessible. Its cart recipe conflicts with the detailed tool reference; the authenticated tool schemas must be checked before connecting real checkout.</p>
-    <a href="https://mcp.swiggy.com/builders/docs/start/authenticate/" target="_blank" rel="noopener">Swiggy sign-in documentation ↗</a>
-    </div>`;
+  return `<h2 class="sec">Swiggy restaurants</h2><div class="card">${discoveryContent()}</div>`;
 }
 
 document.addEventListener('keydown', e => {

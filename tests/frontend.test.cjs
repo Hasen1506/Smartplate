@@ -18,8 +18,9 @@ function fixture() {
     nutrition: { daily_target: { kcal: 1800, protein_g: 55 } },
   };
   const replies = {
-    '/api/meta': { modes: { balanced: 'Balanced' }, mode_outcomes: {}, version: '1.1.0', swiggy_provider: 'simulated' },
+    '/api/meta': { app_mode: 'demo', modes: { balanced: 'Balanced' }, mode_outcomes: {}, version: '1.1.0', swiggy_provider: 'simulated' },
     '/api/users': [{ id: 1, name: 'Sample profile' }, { id: 2, name: 'Meera' }],
+    '/api/auth/session': { authenticated: false, mode: 'demo' },
     '/api/user/2/plan': view,
     '/api/plan/42/orders': { attempted: 1, placed: 1, substituted: 0, failed: 0,
       results: [{ day: 0, meal: 'lunch', item: 'Meal', state: 'placed', placed: true, substituted: true, substitution: null }] },
@@ -76,4 +77,19 @@ test('busy action guard ignores a second click during the same action', async ()
     await guard(async () => { actionCount++; }); release(); await first;
   })()`, context);
   assert.equal(context.actionCount, 1);
+});
+
+test('first-use setup starts with no selected meals and preserves explicit choices', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.profile = {diet:'veg', weekly_budget:900, rating_floor:4.2,
+    allergens:['peanut'], medical:[], health_targets:{max_cook_per_week:2}};
+    S.setupSchedule = {};`, context);
+  const empty = vm.runInContext('setupPanel()', context);
+  assert.match(empty, /0 selected meals/);
+  assert.match(empty, /Build my week<\/button>/);
+  assert.match(empty, /value="peanut" checked/);
+  vm.runInContext("S.setupSchedule['0:lunch'] = 'delivery'", context);
+  const selected = vm.runInContext('setupPanel()', context);
+  assert.match(selected, /1 selected meal/);
+  assert.match(selected, /Mon lunch: Deliver/);
 });

@@ -13,6 +13,8 @@ def seeded(monkeypatch):
     # config reads the env var at import time; patch the already-imported value too.
     from smartplate import config, db, seed
     monkeypatch.setattr(config, "DB_PATH", path)
+    monkeypatch.setattr(config, "APP_MODE", "demo")
+    monkeypatch.setattr(config, "SWIGGY_PROVIDER", "simulated")
     db.init_db()
     info = seed.seed_all()
     yield info

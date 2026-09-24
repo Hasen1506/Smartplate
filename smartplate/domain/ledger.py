@@ -181,7 +181,8 @@ def rolling_view(entries_by_day: dict, *, kcal_target: float, protein_floor: flo
     import datetime as _dt
     today = today or _dt.date.today().isoformat()
     days = sorted(entries_by_day)
-    prior = [d for d in days if d < today]
+    week_start = (_dt.date.fromisoformat(today) - _dt.timedelta(days=_dt.date.fromisoformat(today).weekday())).isoformat()
+    prior = [d for d in days if week_start <= d < today]
     cal = calorie_credit([entries_by_day[d]["kcal"] for d in prior], kcal_target)
     protein_days = [entries_by_day[d]["protein_g"] for d in days]
     pro = protein_adherence(protein_days, protein_floor) if protein_days else _empty_protein()
