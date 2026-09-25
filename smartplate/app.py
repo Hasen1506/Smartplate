@@ -11,7 +11,7 @@ from . import access, accounts, config, everyday, push, ratelimit, service
 from .domain import models, sentiment
 from .domain.checkout import CheckoutConflict
 from .kernel import agent_brain
-from .integrations import calendar_sync, swiggy_connect, swiggy_mcp
+from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp
 from .runtime import initialize, state_lock
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -377,6 +377,26 @@ def create_app() -> Flask:
     @app.post("/api/user/<int:user_id>/swiggy/discover")
     def swiggy_discover(user_id):
         return jsonify(swiggy_connect.discover(user_id))
+
+    # gates 2–3 (swiggy_live.py): addresses, live menus, fill the cart. Never order or pay.
+    @app.get("/api/user/<int:user_id>/swiggy/addresses")
+    def swiggy_addresses(user_id):
+        return jsonify(swiggy_live.addresses(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/address")
+    def swiggy_choose_address(user_id):
+        return jsonify(swiggy_live.choose_address(user_id, request.get_json().get("address_id")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/menu")
+    def swiggy_menu(user_id):
+        name = request.args.get("restaurant", "")
+        if not name:
+            raise ValueError("Say which restaurant")
+        return jsonify(swiggy_live.menu_for(user_id, name, fresh=request.args.get("fresh") == "1"))
+
+    @app.post("/api/session/<int:session_id>/swiggy-cart")
+    def swiggy_fill_cart(session_id):
+        return jsonify(swiggy_live.fill_cart(session_id))
 
     @app.post("/api/user/<int:user_id>/swiggy/disconnect")
     def swiggy_disconnect(user_id):

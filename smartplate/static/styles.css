@@ -29,7 +29,7 @@ a{color:var(--accent)}
 .pill.ok{color:var(--green);background:var(--green-bg);border-color:transparent}
 .pill.accent{color:var(--accent);background:var(--accent-bg);border-color:transparent}
 select,button,input{font-family:inherit;font-size:14px}
-select,input[type=text]{padding:8px 12px;border:1px solid var(--rule);border-radius:8px;background:var(--card);color:var(--ink)}
+select,input[type=text],input[type=password]{padding:8px 12px;border:1px solid var(--rule);border-radius:8px;background:var(--card);color:var(--ink)}
 button{cursor:pointer;border:1px solid var(--rule);background:var(--card);color:var(--ink);padding:8px 14px;border-radius:8px;transition:all .15s;font-weight:600}
 button:hover{border-color:var(--accent);color:var(--accent)}
 button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
@@ -413,3 +413,14 @@ details summary{cursor:pointer;font-weight:600;font-size:14px;padding:8px 0}
 .devrow .fine{grid-column:1}
 .devrow button{grid-column:2;grid-row:1 / span 2}
 #account{margin:10px 0 6px}
+
+/* live Swiggy menu + cart */
+.livemenu{position:relative;margin-bottom:16px}
+.livemenu .close{position:absolute;top:10px;right:10px}
+.livemenu .eyebrow{padding-right:44px}
+.lmlist{max-height:360px;overflow-y:auto;margin-top:8px}
+.lmrow{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--rule-2);font-size:14px}
+.lmrow b{font-variant-numeric:tabular-nums;white-space:nowrap}
+.cartnote{display:grid;gap:8px}
+.cartnote .btn{justify-self:start}
+.signin .inline-err{margin:0;padding:8px 12px;border-radius:8px;background:var(--red-bg);color:var(--red);font-size:14px}

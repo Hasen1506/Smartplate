@@ -39,6 +39,21 @@ Two ways to run the real app (Flask + SQLite + PuLP, not the HTML wireframe):
 Want to look around first? On the welcome screen open **Or look around a sample
 profile**. Its allergy and medical selections are fictional examples.
 
+### On your phone (hosted copy)
+
+- **Reminders:** on Today, tap *Remind me at order time* and allow notifications. A
+  test notification arrives straight away, then one at each order-by time. On iPhone
+  (iOS 16.4+), first use Share → *Add to Home Screen* and open SmartPlate from there.
+  On Render's free plan the server sleeps after ~15 minutes idle, so reminders can be
+  late or missed; the calendar file always works.
+- **Second device:** More → Profiles → *Sign in anywhere*, choose a name and
+  password. On the other device, choose *I already have a profile · Sign in*.
+- **Swiggy:** More → Swiggy connection → *Connect Swiggy*. After signing in on
+  Swiggy's page, choose your delivery address. Places then shows *Today's Swiggy
+  menu* for your usual places, and Today offers *Put it in my Swiggy cart*. Pay in
+  Swiggy. This is the first time it runs against the real service: if something
+  fails, the message says which step, and the reply shapes are saved for fixing.
+
 The restaurant catalogue and prices are samples for Chennai. Weather is a live
 Open-Meteo forecast when the machine is online and a sample pattern otherwise.
 Holiday dates cover Sep 2026 – Mar 2027. Nutrition targets are general wellness

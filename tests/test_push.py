@@ -44,7 +44,7 @@ def test_vapid_header_is_a_valid_es256_jwt_for_the_push_origin():
                   f"{head}.{claims}".encode(), ec.ECDSA(hashes.SHA256()))       # raises if invalid
 
 
-def _browser_subscription(endpoint="https://push.example.com/send/1"):
+def _browser_subscription(endpoint="https://fcm.googleapis.com/fcm/send/device-1"):
     ua = w.private_key_from(w.new_private_key())
     return {"endpoint": endpoint, "keys": {"p256dh": w.b64u(w._public_bytes(ua)), "auth": w.b64u(b"0123456789abcdef")}}
 
@@ -61,7 +61,11 @@ class FakeService:
 def test_subscribe_validates_and_reports_this_device(client):
     st = client.get("/api/user/1/push").get_json()
     assert len(w.unb64u(st["public_key"])) == 65 and st["devices"] == 0
-    for bad in [{"endpoint": "http://insecure"}, {"endpoint": "https://x", "keys": {"p256dh": "short", "auth": "x"}}]:
+    good_keys = _browser_subscription()["keys"]
+    for bad in [{"endpoint": "http://insecure"}, {"endpoint": "https://fcm.googleapis.com/x", "keys": {"p256dh": "short", "auth": "x"}},
+                {"endpoint": "https://169.254.169.254/latest", "keys": good_keys},              # not a push service
+                {"endpoint": "https://fcm.googleapis.com.evil.example/x", "keys": good_keys},
+                {"endpoint": "https://fcm.googleapis.com:8443/x", "keys": good_keys}]:
         assert client.post("/api/user/1/push/subscribe", json={"subscription": bad}).status_code == 400
     sub = _browser_subscription()
     r = client.post("/api/user/1/push/subscribe", json={"subscription": sub}).get_json()
@@ -107,9 +111,15 @@ def test_test_message_and_private_profiles_need_their_key(client, monkeypatch):
     v = client.post("/api/profiles", json={"name": "P", "diet": "veg", "weekly_budget": 2000,
                                            "meals": ["dinner"], "favourites": [6]}).get_json()
     uid = v["user"]["id"]
-    assert client.post(f"/api/user/{uid}/push/subscribe", json={"subscription": _browser_subscription("https://p/2")}).status_code == 401
-    assert client.post(f"/api/user/{uid}/push/subscribe", json={"subscription": _browser_subscription("https://p/2")},
+    assert client.post(f"/api/user/{uid}/push/subscribe", json={"subscription": _browser_subscription("https://updates.push.services.mozilla.com/wpush/v2/abc")}).status_code == 401
+    assert client.post(f"/api/user/{uid}/push/subscribe", json={"subscription": _browser_subscription("https://updates.push.services.mozilla.com/wpush/v2/abc")},
                        headers={"X-SmartPlate-Key": v["access_key"]}).status_code == 200
+
+
+def test_known_push_services_are_accepted(client):
+    for ep in ["https://fcm.googleapis.com/fcm/send/a", "https://updates.push.services.mozilla.com/wpush/v2/b",
+               "https://web.push.apple.com/c", "https://wns2-par02p.notify.windows.com/w/?token=d"]:
+        assert client.post("/api/user/1/push/subscribe", json={"subscription": _browser_subscription(ep)}).status_code == 200, ep
 
 
 def test_worker_respects_the_switch(monkeypatch):

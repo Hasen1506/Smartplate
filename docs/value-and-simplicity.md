@@ -94,7 +94,7 @@ and verified savings exist.
 | When to order | ✅ Order-by time per delivery (arrival − ETA − buffer, +15 min in rain) |
 | Weather | ✅ Live Open-Meteo 16-day forecast, cached, with an offline fallback to the sample feed. Free for non-commercial use; production needs their paid plan |
 | Holidays | ✅ Indian calendar Sep 2026 → Mar 2027 (Gandhi Jayanti, Navratri, Dussehra, Karva Chauth, Diwali, Bhai Dooj, Guru Nanak Jayanti, Christmas, NYE, Pongal, Republic Day, Ramadan, Eid al-Fitr, Holi); lunar dates flagged; holiday dinners carry a surge bump |
-| Swiggy | 🟡 **Hand-off**: opens Swiggy's public search for the restaurant + dish; the person orders and taps *I had it*. The simulated auto-ordering (idempotent, spend-limited) remains in More |
+| Swiggy | 🟡 **Hand-off** by default (Swiggy's public search). With a sign-in: addresses, live menus and cart filling, never ordering or paying. Not yet run against the live service |
 | Restaurants and prices | 🟡 Sample Chennai catalogue (12 real chain names, illustrative prices) |
 | Solver | ✅ 0.1% optimality gap + 10 s cap. A tight vegan week that took CBC 143 s now solves in 0.3 s with the same plan |
 
@@ -115,19 +115,27 @@ and verified savings exist.
   mcp.swiggy.com**, which was unreachable from the build environment. The first
   real sign-in is the verification step.
 
+**Done in the second follow-up:**
+- **Hosting**: one-click Render blueprint (`render.yaml`), gunicorn entry point,
+  health check.
+- **Accounts**: optional name + password per private profile, per-device sign-in
+  and sign-out, rate limits. Swiggy tokens are encrypted at rest.
+- **Push reminders**: Web Push at each order-by time, even with the app closed.
+  Encryption is checked against RFC 8291's worked example.
+- **Swiggy menus and cart**: addresses, live menus for usual places, and *Put it in
+  my Swiggy cart* with the real amount to pay. Ordering and payment tools are
+  refused in code. This is tested against a fake server, not yet the real one.
+
 **Still to do, in order:**
 
-1. **Real menus and prices.** Using the discovered schemas: `get_addresses`,
-   `search_restaurants`, `get_restaurant_menu` (150-item limit) for the user's
-   address. This replaces the sample catalogue and makes "usual places" real.
-2. **Cart hand-off.** `update_food_cart` + `get_food_cart` so *Order on Swiggy*
-   opens a filled cart. The person still confirms and pays in Swiggy.
-   Placement is not idempotent: check `get_food_orders` before any retry.
-3. **Push reminders.** Calendar alarms and in-tab alerts exist. True push (or
-   WhatsApp) at the order-by time still needs a background worker, Web Push keys
-   and consent.
-4. **Accounts.** Profile keys protect a shared trial. A public launch needs real
-   sign-in, recovery, and encryption of stored Swiggy tokens.
+1. **First real Swiggy sign-in** on the hosted URL, then adjust the argument and
+   reply mapping from the recorded shapes (docs/vendor/swiggy/README.md).
+2. **Real catalogue for planning.** Plan from live menus rather than the sample
+   Chennai catalogue once replies are verified (prices, veg marks, availability).
+3. **Durable hosting.** A paid instance with a disk (or Postgres) so profiles
+   survive restarts, and an always-on worker so push reminders fire on time.
+4. **Account recovery by email or phone** before a public launch, plus a privacy
+   policy and data export/delete.
 5. **Unattended ordering.** Only if Swiggy's terms explicitly allow it. The
    spend-limited, fingerprinted consent flow is already built for that day.
 

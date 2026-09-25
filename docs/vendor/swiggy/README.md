@@ -64,12 +64,47 @@ Verified only against a strict fake server (tests/test_followups.py). The first
 real sign-in will show whether dynamic registration is accepted for the Codespaces
 URL or whether the redirect must be allow-listed with Builders Club.
 
+## Menus and cart (gates 2–3, 25 September 2026)
+
+`smartplate/integrations/swiggy_live.py` uses the sign-in for:
+
+| In the app | Tools called | Notes |
+|---|---|---|
+| More → Swiggy connection → *Choose delivery address* | `get_addresses` | The chosen `addressId` is stored with the connection |
+| Places → *Today's Swiggy menu* (usual places) | `search_restaurants`, `get_restaurant_menu` | Best name match ≥ 0.6; up to 150 items; cached 6 hours; non-veg hidden for veg/vegan profiles |
+| Today → *Put it in my Swiggy cart* | `search_restaurants`, `get_restaurant_menu`, `update_food_cart`, `get_food_cart` | Planned dish matched by name ≥ 0.55; `cartItems`, `restaurantId`, `addressId` per the reference; shows `to_pay` vs the planned cost |
+
+Every call goes through one function with an allow-list (`get_addresses`,
+`search_restaurants`, `get_restaurant_menu`, `search_menu`, `get_food_cart`,
+`update_food_cart`, `flush_food_cart`). `place_food_order`, payment options and
+coupons are refused in code, and a test checks it. The person opens Swiggy to
+review the cart and pay.
+
+Because real schemas are only visible after sign-in, arguments are built from each
+tool's discovered `inputSchema`: documented names first, then common spellings. A
+required field SmartPlate can't fill is named in the error, not guessed. Replies are
+read from `structuredContent` or JSON text content, and records are found by their
+fields. The last reply **shape** per tool (field names and types, no values) is saved
+in `swiggy_connections.samples`, so the first real run shows what to adjust.
+
+Unverified assumptions, to check on the first real sign-in:
+- **Prices:** menu prices of 1000 or more are treated as paise (Swiggy's web data uses
+  paise). The cart's `to_pay` is authoritative.
+- **Cart items:** the item id key is taken from the `cartItems` item schema
+  (`menu_item_id` in the reference). Dishes that require a variant or add-on will fail
+  with Swiggy's message.
+- **Search:** `search_restaurants` is expected to take a free-text query plus
+  `addressId`.
+
 ## What remains before real ordering
 
-1. Complete the user's OAuth authorization and verify the registered callback.
-2. Capture negotiated protocol and authenticated tool schemas; reconcile the differences above.
-3. Build account-scoped discovery, explicit address selection, menu customization, cart review, available payment selection, and confirmed single-order checkout against those verified responses.
-4. Keep pending/unknown payment outcomes separate from success; reconcile uncertain order outcomes without automatic duplicate placement.
-5. Verify support/refund behavior and any agreement governing unattended scheduling before enabling it.
+1. Run the first real sign-in on a hosted HTTPS URL. Confirm dynamic registration or
+   allow-list the redirect with Builders Club.
+2. Read `samples` and adjust argument and reply mapping where the real shapes differ.
+3. Variants and add-ons in the cart; coupons only if they show a real saving.
+4. Keep pending/unknown payment outcomes separate from success, and never retry
+   placement without checking `get_food_orders`, if placement is ever enabled.
+5. Verify support/refund behaviour and any agreement governing unattended scheduling
+   before enabling it.
 
-No real cart, address, payment, or order was modified during this work. The app now returns a clear 503 if legacy `SMARTPLATE_SWIGGY=live` is selected, rather than attempting the placeholder against simulated identifiers. These are remaining integration tasks, not a claim that production is complete.
+No real cart, address, payment or order was touched while building this.

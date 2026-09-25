@@ -32,11 +32,26 @@ def public_key() -> str:
     return webpush.public_key_b64u(vapid_private())
 
 
+# Browsers' push services. The server POSTs to a subscription's endpoint, so only these
+# hosts are accepted (anything else would let a caller aim the server at other sites).
+PUSH_HOSTS = ("fcm.googleapis.com", ".push.services.mozilla.com", ".notify.windows.com",
+              "web.push.apple.com", ".push.apple.com")
+
+
+def _push_host(endpoint: str) -> bool:
+    from urllib.parse import urlsplit
+    parts = urlsplit(endpoint)
+    host = (parts.hostname or "").lower()
+    return parts.port in (None, 443) and any(host == h.lstrip(".") or (h.startswith(".") and host.endswith(h))
+                                             for h in PUSH_HOSTS)
+
+
 def subscribe(user_id: int, body: dict) -> dict:
     sub = body.get("subscription") if isinstance(body.get("subscription"), dict) else body
     endpoint = sub.get("endpoint")
     keys = sub.get("keys") if isinstance(sub.get("keys"), dict) else {}
-    if not isinstance(endpoint, str) or not endpoint.startswith("https://") or len(endpoint) > 1000:
+    if not isinstance(endpoint, str) or not endpoint.startswith("https://") or len(endpoint) > 1000 \
+            or not _push_host(endpoint):
         raise ValueError("That isn't a push subscription this app can use")
     p256dh, auth = keys.get("p256dh"), keys.get("auth")
     try:
