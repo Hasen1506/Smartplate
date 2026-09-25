@@ -27,6 +27,15 @@ MAX_DELIVERY_CANDIDATES = 6
 DISCOVERY_PER_SESSION = 2
 DISCOVERY_PEN = 0.3          # a new place must beat a usual one by this much to win
 HOLIDAY_DINNER_SURGE = 1.1   # holidays: everyone orders dinner at once
+
+
+def _choice_key(c: dict) -> tuple:
+    kind = c.get("kind") or c.get("chosen_kind")
+    if kind == "delivery":
+        return ("delivery", c.get("item_id"))
+    if kind == "cook":
+        return ("cook", c.get("recipe_key"))
+    return (kind,)
 # People cook a few nights, not every meal (§1.3 "cook 3 nights and order 2").
 # These are DEFAULT priors, not fixed truths (docs/optimization-and-ux.md §2): a
 # global "everyone cooks ≤6" and "cooking always costs 0.35" are exactly the fake
@@ -333,7 +342,9 @@ def pinned_candidate(user, plan, session, ctx) -> dict | None:
     return cand
 
 
-def optimize(plan_id: int) -> dict:
+def optimize(plan_id: int, *, stable: bool = True) -> dict:
+    """Re-plan the open meals. `stable=False` (a mode switch) lets every unpinned meal
+    move freely; otherwise current picks are kept unless changing them buys something."""
     plan = models.get_plan(plan_id)
     user = models.get_user(plan["user_id"])
     ctx = build_context(user, plan)
@@ -353,6 +364,11 @@ def optimize(plan_id: int) -> dict:
                 cur.execute("UPDATE sessions SET pinned=NULL WHERE id=?", (s["id"],))
     active = [s for s in open_sessions if s["id"] not in pinned]
 
+    # Stability: one tap should change what the user touched, not reshuffle the week.
+    # Each meal's current choice gets a small bonus, so it only changes when that buys
+    # real budget/nutrition room (or a hard rule forces it).
+    previous = ({d["session_id"]: _choice_key(d) for d in models.decisions_for_plan(plan_id)}
+                if stable else {})
     cap = week_cap(user, plan)
     ref_cost = max(1.0, cap / max(1, len(open_sessions)))
     skip_penalty = SKIP_PENALTY.get(plan["mode"], 3.0)
@@ -373,7 +389,8 @@ def optimize(plan_id: int) -> dict:
             v = pulp.LpVariable(f"x_{s['id']}_{i}", cat="Binary")
             x[(s["id"], i)] = v
             choice_vars.append(v)
-            obj_terms.append(_objective(c, w, ref_cost, user["carbon_pref"], skip_penalty) * v)
+            keep = config.STABILITY_W if previous.get(s["id"]) == _choice_key(c) else 0.0
+            obj_terms.append((_objective(c, w, ref_cost, user["carbon_pref"], skip_penalty) - keep) * v)
             budget_terms.append(c["cost"] * v)
             day_terms.setdefault(s["day"], []).append(c["cost"] * v)
             if c["kind"] == "cook" and c.get("recipe_key"):   # countable cook (not free leftover)

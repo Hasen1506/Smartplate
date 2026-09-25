@@ -14,7 +14,8 @@ def reasons_for(decision: dict, context: dict) -> list[str]:
         r.append(decision.get("skip_reason", "No safe option within budget and rating floor — session skipped."))
         return r
     if kind == "cook":
-        r.append(f"Cook day: {decision['item_name']} (₹{decision['cost']:.0f}) — cheaper and lighter than delivery.")
+        dish = str(decision['item_name']).removeprefix("Cook: ")
+        r.append(f"Cook day: {dish} (₹{decision['cost']:.0f} in groceries), cheaper and lighter than delivery.")
         if context.get("leftover"):
             r.append(f"You logged a leftover ({context['leftover']}), so we kept this off Swiggy.")
         return r
@@ -34,7 +35,7 @@ def reasons_for(decision: dict, context: dict) -> list[str]:
                  f"{context['rating_floor']:.1f} rating floor.")
     if context.get("sentiment") and context["sentiment"]["n"]:
         s = context["sentiment"]
-        r.append(f"Reviews look {s['label']} (sentiment {s['score']:+.2f} over {s['n']} notes).")
+        r.append(f"Recent reviews: {s['label']} ({s['n']} read).")
     if decision.get("time_shift"):
         ts = decision["time_shift"]
         r.append(f"Time-shifted to {ts['offpeak_hhmm']} to clear the surge window — saved ₹{ts['saving']:.0f}.")

@@ -54,7 +54,10 @@ def reoptimize(plan_id: int, mode: str | None = None) -> dict:
         if mode not in config.MODE_LABELS:
             raise ValueError('Unknown planning mode')
         with db.cursor() as cur:
+            changed = cur.execute("SELECT mode FROM plans WHERE id=?", (plan_id,)).fetchone()["mode"] != mode
             cur.execute("UPDATE plans SET mode=? WHERE id=?", (mode, plan_id))
+        if changed:                       # a new mode is an explicit ask for a different week
+            return optimizer.optimize(plan_id, stable=False)
     return optimizer.optimize(plan_id)
 
 
