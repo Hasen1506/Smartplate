@@ -1,0 +1,23 @@
+{
+  "name": "SmartPlate — your week of food, sorted",
+  "short_name": "SmartPlate",
+  "description": "Plans your week of meals within your budget, around your allergies, from your usual places, and tells you when to order.",
+  "id": "/",
+  "start_url": "/?source=home-screen",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f1ea",
+  "theme_color": "#1c1917",
+  "categories": ["food", "lifestyle", "health"],
+  "icons": [
+    {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "/static/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    {"src": "/static/icons/icon.svg", "sizes": "any", "type": "image/svg+xml"}
+  ],
+  "shortcuts": [
+    {"name": "Today", "url": "/?tab=today", "icons": [{"src": "/static/icons/icon-192.png", "sizes": "192x192"}]},
+    {"name": "Week", "url": "/?tab=week", "icons": [{"src": "/static/icons/icon-192.png", "sizes": "192x192"}]}
+  ]
+}

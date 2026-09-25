@@ -68,6 +68,18 @@ def create_app() -> Flask:
     def index():
         return send_from_directory(STATIC_DIR, "index.html")
 
+    # Installable app: the manifest and the service worker are served from the root
+    # so the worker's scope covers the whole app.
+    @app.get("/manifest.webmanifest")
+    def manifest():
+        return send_from_directory(STATIC_DIR, "manifest.webmanifest", mimetype="application/manifest+json")
+
+    @app.get("/sw.js")
+    def service_worker():
+        response = send_from_directory(STATIC_DIR, "sw.js", mimetype="text/javascript")
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
     # ---- meta / cost transparency ---- #
     @app.get("/api/meta")
     def meta():
@@ -261,6 +273,19 @@ def create_app() -> Flask:
     @app.post("/api/user/<int:user_id>/favourites/<int:restaurant_id>")
     def toggle_favourite(user_id, restaurant_id):
         return jsonify(everyday.toggle_favourite(user_id, restaurant_id))
+
+    @app.get("/api/user/<int:user_id>/reminders")
+    def reminders_list(user_id):
+        from .domain import reminders
+        return jsonify(reminders.upcoming(service.current_plan(user_id)))
+
+    @app.get("/api/user/<int:user_id>/reminders.ics")
+    def reminders_ics(user_id):
+        from .domain import reminders
+        view = service.current_plan(user_id)
+        body = reminders.to_ics(reminders.upcoming(view), plan_id=view["plan"]["id"], name=view["user"]["name"])
+        return Response(body, mimetype="text/calendar", headers={
+            "Content-Disposition": "attachment; filename=smartplate-reminders.ics"})
 
     @app.get("/api/user/<int:user_id>/calendar")
     def upcoming_calendar(user_id):

@@ -71,14 +71,17 @@ async function boot() {
   S.userId = S.users.find(u => u.id === saved)?.id || null;
   if (!S.userId) { S.welcome = true; render(); return; }
   await loadOrCreatePlan();
+  const wanted = typeof location !== "undefined" ? new URLSearchParams(location.search).get("tab") : null;
+  if (["today", "week", "places", "more"].includes(wanted)) S.tab = wanted;
   render();
+  scheduleAlerts().catch(() => {});
 }
 async function loadOrCreatePlan() {
   S.view = await api(`/api/user/${S.userId}/plan`);
   S.planId = S.view.plan.id;
   S.exec = await api(`/api/plan/${S.planId}/orders`);
 }
-function adoptView(view) { S.view = view; S.planId = view.plan.id; }
+function adoptView(view) { S.view = view; S.planId = view.plan.id; scheduleAlerts().catch(() => {}); }
 
 /* ---------------------------------------------------------------- actions */
 async function switchUser(id) {
@@ -257,6 +260,7 @@ function todayScreen() {
     ${budgetCard()}
     ${nu ? nextUpCard(nu) : `<div class="card empty">Nothing left to plan this week. <button data-act="newweek">Plan next week</button></div>`}
     ${todayRest(nu)}
+    ${reminderRow()}
     ${headsUp()}
     ${learningLine()}`;
 }
@@ -308,6 +312,43 @@ function todayRest(nu) {
   return `<section class="later"><h3 class="k">Later ${nu.when === "Today" ? "today" : esc(nu.when.toLowerCase())}</h3>
     ${rest.map(m => mealRow(day.meals[m], m, nu.day_index)).join("")}</section>`;
 }
+function reminderRow() {
+  const notifyOn = store.get("smartplate.notify") === "1" && typeof Notification !== "undefined" && Notification.permission === "granted";
+  return `<section class="remind" aria-label="Reminders"><span class="fine">Never miss an order-by time:</span>
+    <a class="btn ghost small" href="/api/user/${S.userId}/reminders.ics" download>📅 Add reminders to my calendar</a>
+    ${typeof Notification !== "undefined" ? `<button class="ghost small" data-act="notify">${notifyOn ? "🔔 Browser alerts on" : "🔔 Alert me in this browser"}</button>` : ""}</section>`;
+}
+/* Browser alerts only fire while SmartPlate is open in a tab; the calendar file works always. */
+const alertTimers = [];
+async function scheduleAlerts() {
+  alertTimers.splice(0).forEach(clearTimeout);
+  if (typeof Notification === "undefined" || Notification.permission !== "granted" || store.get("smartplate.notify") !== "1" || !S.userId) return 0;
+  const due = await api(`/api/user/${S.userId}/reminders`);
+  const now = Date.now();
+  let n = 0;
+  for (const r of due) {
+    const ms = new Date(r.at).getTime() - now;
+    if (ms <= 0 || ms > 24 * 3600 * 1000) continue;
+    n += 1;
+    alertTimers.push(setTimeout(() => {
+      const note = new Notification(r.title, { body: r.body, tag: `smartplate-${r.session_id}` });
+      if (r.link) note.onclick = () => window.open(r.link, "_blank", "noopener");
+    }, ms));
+  }
+  return n;
+}
+async function toggleAlerts() {
+  if (store.get("smartplate.notify") === "1" && Notification.permission === "granted") {
+    store.del("smartplate.notify"); alertTimers.splice(0).forEach(clearTimeout); toast("Browser alerts off"); render(); return;
+  }
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") { toast("Alerts are blocked in this browser. Use the calendar reminders instead."); return; }
+  store.set("smartplate.notify", "1");
+  const n = await scheduleAlerts();
+  toast(n ? `${n} alert${n === 1 ? "" : "s"} set for the next 24 hours (while this tab is open)` : "Alerts on. Nothing due in the next 24 hours.");
+  render();
+}
+
 function headsUp() {
   const hs = S.view.heads_up || [];
   if (!hs.length) return "";
@@ -820,7 +861,7 @@ function wire() {
   const acts = {
     cmd: runCommand, reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute, savetpl: saveTemplate,
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
-    "start-onboard": async () => startOnboard(), "cancel-move": async () => { S.moving = null; render(); },
+    "start-onboard": async () => startOnboard(), notify: toggleAlerts, "cancel-move": async () => { S.moving = null; render(); },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
   if (S.orderReview) document.querySelector(".checkout [autofocus]")?.focus();
@@ -878,4 +919,13 @@ async function idempotencyDemo() {
   toast(d.same_order_id && d.second_was_deduped ? "Safe: the repeat returned the same order, no duplicate charge" : "Duplicate detected: check order history");
 }
 
-boot().catch(e => { document.getElementById("app").innerHTML = `<div class="boot">Failed to start: ${esc(e.message)}</div>`; });
+function bootFailed(e) {
+  const offline = (typeof navigator !== "undefined" && navigator.onLine === false) || /fetch|network/i.test(e?.message || "");
+  document.getElementById("app").innerHTML = offline
+    ? `<main class="welcome"><div class="brand big">Smart<em>Plate</em></div><h1 class="hero">You're offline.</h1>
+       <p class="lede">Plans and budgets are always live, so SmartPlate needs a connection. It will reload by itself when you're back online.</p>
+       <button class="primary big" onclick="location.reload()">Try again</button></main>`
+    : `<div class="boot">Failed to start: ${esc(e.message)}</div>`;
+  if (offline && typeof window !== "undefined") window.addEventListener("online", () => location.reload(), { once: true });
+}
+boot().catch(bootFailed);

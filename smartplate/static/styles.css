@@ -399,3 +399,5 @@ details summary{cursor:pointer;font-weight:600;font-size:14px;padding:8px 0}
   .calrow{grid-template-columns:1fr}
   .calrow .fine{grid-column:1}
 }
+
+.remind{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 14px}
