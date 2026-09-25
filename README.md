@@ -40,11 +40,30 @@ worth building, connector or app, who pays, and how do we keep it simple?", see
 
 ## Try it in your browser
 
-[Open SmartPlate in GitHub Codespaces](https://codespaces.new/Hasen1506/Smartplate/tree/codex/finish-smartplate-trial?quickstart=1)
+**Host your own copy (free, about 5 minutes):**
 
-Choose **Create codespace**, wait for setup, then open **Ports → SmartPlate / 5057 → Open in Browser**. The trial starts automatically. It uses the real Python planner with sample Chennai data and simulated orders. Settings, latest plans and order history persist in the Codespace database. Keep the port private.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Hasen1506/Smartplate)
 
-**Real Swiggy ordering is not finished.** The documentation is accessible now, but its recipe and reference disagree. OAuth, authenticated tool schemas, real catalog mapping and live checkout still need integration. See [verified findings](docs/vendor/swiggy/README.md) and [trial instructions](docs/TRY-SMARTPLATE.md). Earlier architectural documents describe intentions beyond the trial’s current behavior.
+Sign in to Render with GitHub, keep the defaults and choose **Deploy Blueprint**.
+When the build finishes, open the `https://smartplate-….onrender.com` link on your
+phone and use **Add to Home Screen**. The blueprint is [render.yaml](render.yaml).
+
+On Render's free plan the app sleeps after about 15 minutes idle, so the first visit
+afterwards takes about a minute. Its disk is also wiped on every restart or redeploy:
+treat profiles there as a demo. For data that lasts, use a paid instance with a disk
+and set `SMARTPLATE_DB` to a path on it. Any host that runs a `Procfile` (Railway,
+Koyeb, Heroku) works the same way; run **one** worker process.
+
+**Or use GitHub Codespaces (private to you):**
+[Open SmartPlate in GitHub Codespaces](https://codespaces.new/Hasen1506/Smartplate?quickstart=1).
+Choose **Create codespace**, wait for setup, then open **Ports → SmartPlate / 5057 →
+Open in Browser**. Keep the port private.
+
+Both use the real Python planner with a sample Chennai catalogue. Sample profiles
+are shared by everyone who opens the app; a profile you create is private.
+Swiggy ordering is a hand-off to Swiggy's own search (see
+[verified findings](docs/vendor/swiggy/README.md) and
+[trial instructions](docs/TRY-SMARTPLATE.md)).
 
 ## Run it locally
 

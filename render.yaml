@@ -1,0 +1,22 @@
+# One-click hosting on Render: https://render.com/deploy?repo=https://github.com/Hasen1506/Smartplate
+# The free plan sleeps after ~15 minutes idle (first visit then takes ~1 minute) and
+# its disk is wiped on every restart or redeploy, so profiles made there are a demo.
+# For data that survives, switch to a paid instance and add a disk mounted at /data
+# (then set SMARTPLATE_DB=/data/smartplate.db).
+services:
+  - type: web
+    name: smartplate
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app --workers 1 --threads 8 --timeout 60 --bind 0.0.0.0:$PORT
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: SMARTPLATE_SECRET
+        generateValue: true
+      - key: SMARTPLATE_SWIGGY
+        value: simulated

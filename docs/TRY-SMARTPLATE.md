@@ -1,8 +1,14 @@
 # Try SmartPlate
 
-[Open the trial branch in GitHub Codespaces](https://codespaces.new/Hasen1506/Smartplate/tree/codex/finish-smartplate-trial?quickstart=1).
+Two ways to run the real app (Flask + SQLite + PuLP, not the HTML wireframe):
 
-Choose **Create codespace** (or resume it). Setup installs the Python dependencies and starts SmartPlate automatically. Open **Ports → SmartPlate / 5057 → Open in Browser** if a tab does not open automatically. Keep port visibility **Private**. This is the actual Flask + SQLite + PuLP application, not the separate HTML wireframe. Your Codespaces account controls availability and usage.
+- **Hosted:** [Deploy to Render](https://render.com/deploy?repo=https://github.com/Hasen1506/Smartplate)
+  (free plan; see the README for its limits), then open the `onrender.com` link on
+  your phone.
+- **Codespaces:** [open the main branch](https://codespaces.new/Hasen1506/Smartplate?quickstart=1).
+  Setup installs the Python dependencies and starts SmartPlate automatically. Open
+  **Ports → SmartPlate / 5057 → Open in Browser** if a tab does not open. Keep port
+  visibility **Private**.
 
 ## Trial walkthrough
 
@@ -57,7 +63,14 @@ The app initializes and seeds an empty database automatically even when launched
 
 ## Runtime boundaries
 
-This is a private, single-process trial. In-process locking serializes API reads/edits/checkout and duplicate simulation calls. Do not expose it publicly or launch multiple independent workers: app-owned authentication and cross-process transactional order coordination are not implemented. The Codespaces port supplies the private access boundary. The Flask development server is appropriate for this trial, not a production service.
+Run a single process (`gunicorn wsgi:app --workers 1 --threads 8`, as in `render.yaml`
+and the `Procfile`). In-process locking serialises API reads, edits and checkout, and
+SQLite lives on local disk, so several worker processes would not coordinate.
+
+On a public URL, profiles created through setup are private: every request for them
+needs the profile's key or a signed-in device. The sample profiles are open and shared
+by every visitor. Ordering is simulated or handed off to Swiggy's own search; no real
+cart, payment or order is touched.
 
 ## Verification
 
