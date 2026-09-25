@@ -4,7 +4,7 @@ import os
 from flask import Flask, Response, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
-from . import config, everyday, service
+from . import access, config, everyday, service
 from .domain import models, sentiment
 from .domain.checkout import CheckoutConflict
 from .kernel import agent_brain
@@ -39,6 +39,15 @@ def create_app() -> Flask:
                     found = cur.execute(f'SELECT id FROM {table} WHERE id=?', (args[key],)).fetchone()
                 if not found:
                     return jsonify(error='not found'), 404
+        if request.path.startswith('/api/'):
+            presented = request.headers.get(access.HEADER) or (
+                request.args.get('key') if request.method == 'GET' else None)
+            body = request.get_json(silent=True) if request.method == 'POST' else None
+            owners = access.owners_of(args, body if isinstance(body, dict) else None,
+                                      request.args.get('user_id', type=int))
+            if not all(access.allowed(uid, presented) for uid in owners):
+                return jsonify(error='This profile is private. Open it on the device that created it, '
+                                     'or add it with its recovery code.'), 401
 
     @app.teardown_request
     def release_state_lock(error):

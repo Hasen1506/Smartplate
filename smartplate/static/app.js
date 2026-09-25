@@ -27,8 +27,23 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch (_) {} },
 };
 
+/* Private profiles: the key lives only in this browser ({id: {key, name}}). */
+const keys = {
+  all() { try { const v = JSON.parse(store.get("smartplate.keys") || "{}"); return v && typeof v === "object" && !Array.isArray(v) ? v : {}; } catch (_) { return {}; } },
+  get(id) { return this.all()[id]?.key || null; },
+  put(id, key, name) { const a = this.all(); a[id] = { key, name }; store.set("smartplate.keys", JSON.stringify(a)); },
+  drop(id) { const a = this.all(); delete a[id]; store.set("smartplate.keys", JSON.stringify(a)); },
+};
+const withKey = (url) => { const k = keys.get(S.userId); return k ? `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(k)}` : url; };
+function mergeUsers(open) {
+  const priv = Object.entries(keys.all()).map(([id, v]) => ({ id: Number(id), name: v.name || "My profile", city: "Chennai", setup_done: true, private: true }));
+  return [...priv, ...open.filter(u => !priv.some(p => p.id === u.id))];
+}
+
 async function api(path, method = "GET", body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
+  const k = S.userId ? keys.get(S.userId) : null;
+  if (k) opt.headers["X-SmartPlate-Key"] = k;
   if (body) opt.body = JSON.stringify(body);
   const r = await fetch(path, opt);
   if (!r.ok) { const data = await r.json().catch(() => ({})); throw new Error(data.message || data.error || r.statusText); }
@@ -66,11 +81,16 @@ async function reloadPlan() { S.view = await api(`/api/plan/${S.planId}`); rende
 async function boot() {
   ensureBusyBar();
   S.meta = await api("/api/meta");
-  S.users = await api("/api/users");
+  S.users = mergeUsers(await api("/api/users"));
   const saved = Number(store.get("smartplate.user"));
   S.userId = S.users.find(u => u.id === saved)?.id || null;
   if (!S.userId) { S.welcome = true; render(); return; }
-  await loadOrCreatePlan();
+  try { await loadOrCreatePlan(); }
+  catch (e) {
+    if (!/private/i.test(e.message)) throw e;
+    keys.drop(S.userId); store.del("smartplate.user"); S.userId = null; S.view = null;
+    S.users = mergeUsers(await api("/api/users")); S.welcome = true; render(); return;
+  }
   const wanted = typeof location !== "undefined" ? new URLSearchParams(location.search).get("tab") : null;
   if (["today", "week", "places", "more"].includes(wanted)) S.tab = wanted;
   render();
@@ -315,7 +335,7 @@ function todayRest(nu) {
 function reminderRow() {
   const notifyOn = store.get("smartplate.notify") === "1" && typeof Notification !== "undefined" && Notification.permission === "granted";
   return `<section class="remind" aria-label="Reminders"><span class="fine">Never miss an order-by time:</span>
-    <a class="btn ghost small" href="/api/user/${S.userId}/reminders.ics" download>📅 Add reminders to my calendar</a>
+    <a class="btn ghost small" href="${esc(withKey(`/api/user/${S.userId}/reminders.ics`))}" download>📅 Add reminders to my calendar</a>
     ${typeof Notification !== "undefined" ? `<button class="ghost small" data-act="notify">${notifyOn ? "🔔 Browser alerts on" : "🔔 Alert me in this browser"}</button>` : ""}</section>`;
 }
 /* Browser alerts only fire while SmartPlate is open in a tab; the calendar file works always. */
@@ -504,9 +524,31 @@ function calendarPanel() {
 }
 
 function profilesPanel() {
-  const opts = S.users.map(u => `<button class="mitem ${u.id === S.userId ? "on" : ""}" data-user="${u.id}"><b>${esc(u.name)}</b><span>${esc(u.city)}${u.id === S.userId ? " · current" : ""}</span></button>`).join("");
+  const opts = S.users.map(u => `<button class="mitem ${u.id === S.userId ? "on" : ""}" data-user="${u.id}"><b>${esc(u.name)}${u.private ? " 🔒" : ""}</b><span>${u.private ? "Private to this browser" : "Sample · open to anyone"}${u.id === S.userId ? " · current" : ""}</span></button>`).join("");
+  const k = keys.get(S.userId);
+  const recovery = k ? `<div class="card"><h3 class="k">Recovery code</h3>
+      <p class="sub">This profile is private. Its key is stored only in this browser. To open it on another device, or after clearing your browser, you need this code. Keep it somewhere safe.</p>
+      <div class="row" style="align-items:center"><code class="rcode">${esc(`${S.userId}.${k}`)}</code><button class="small" data-act="copy-recovery">Copy</button></div></div>` : "";
   return `<h2 class="sec">Profiles</h2><div class="mlist">${opts}</div>
-    <button class="primary" data-act="start-onboard">+ Set up a new profile</button>`;
+    <button class="primary" data-act="start-onboard">+ Set up a new profile</button>
+    ${recovery}
+    <div class="card"><h3 class="k">Open a profile from another device</h3>
+      <form id="recover" class="row" style="align-items:center"><input id="rcode" type="text" placeholder="Paste recovery code" style="flex:1;min-width:200px" autocomplete="off"><button type="submit">Open</button></form></div>`;
+}
+async function useRecoveryCode(code) {
+  const m = /^\s*(\d+)\.([A-Za-z0-9_-]{16,})\s*$/.exec(code || "");
+  if (!m) throw new Error("That doesn't look like a recovery code (it looks like 12.AbC…)");
+  const id = Number(m[1]), key = m[2];
+  const prev = keys.all()[id];
+  keys.put(id, key, prev?.name);
+  try {
+    const r = await fetch(`/api/user/${id}/plan`, { headers: { "X-SmartPlate-Key": key } });
+    if (!r.ok) throw new Error(r.status === 401 ? "That code doesn't match a profile here" : "Profile not found");
+    const view = await r.json();
+    keys.put(id, key, view.user.name);
+  } catch (e) { if (prev) keys.put(id, prev.key, prev.name); else keys.drop(id); throw e; }
+  S.users = mergeUsers(await api("/api/users"));
+  await switchUser(id); toast("Profile opened on this device");
 }
 
 /* Explicit checkout hand-off: planning is reversible, ordering is not. */
@@ -631,7 +673,7 @@ function receiptsPanel() {
   return `<h2 class="sec">Expenses</h2>
     <div class="sub">Meals you confirmed and simulated orders. These are not tax invoices. Check the business/personal suggestions before you use them.</div>
     <div class="row" style="margin-bottom:12px"><button class="primary" data-act="genrcpt">Update from this week</button>
-      <a class="btn ghost" href="/api/receipts/${S.userId}/export.csv">Export CSV ↓</a></div>
+      <a class="btn ghost" href="${esc(withKey(`/api/receipts/${S.userId}/export.csv`))}">Export CSV ↓</a></div>
     ${r ? `<div class="stats"><div class="stat"><div class="label">Total</div><div class="val">${rupee(r.total)}</div></div>
       <div class="stat"><div class="label">Business</div><div class="val">${rupee(r.business_total)}</div></div></div>
       <div class="card scroll-x"><table><tr><th>date</th><th>item</th><th>category</th><th>amount</th></tr>${rows || `<tr><td class="empty" colspan="4">No expenses yet. Confirm a meal with “I had it”.</td></tr>`}</table></div>` : `<div class="card empty">Loading…</div>`}`;
@@ -793,7 +835,8 @@ async function onboardNav(dir) {
     if (!body.body) delete body.body;
     if (!body.daily_cap) delete body.daily_cap;
     const view = await api("/api/profiles", "POST", body);
-    S.users = await api("/api/users");
+    if (view.access_key) keys.put(view.user.id, view.access_key, view.user.name);
+    S.users = mergeUsers(await api("/api/users"));
     S.onboard = null; S.userId = view.user.id; store.set("smartplate.user", String(S.userId));
     adoptView(view); S.exec = await api(`/api/plan/${S.planId}/orders`);
     S.tab = "today"; S.more = null; toast("Your week is planned. Here's what's next."); render(); return;
@@ -861,18 +904,22 @@ function wire() {
   const acts = {
     cmd: runCommand, reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute, savetpl: saveTemplate,
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
-    "start-onboard": async () => startOnboard(), notify: toggleAlerts, "cancel-move": async () => { S.moving = null; render(); },
+    "start-onboard": async () => startOnboard(), notify: toggleAlerts,
+    "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); }, "cancel-move": async () => { S.moving = null; render(); },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
   if (S.orderReview) document.querySelector(".checkout [autofocus]")?.focus();
   if (S.sheet?.data) document.querySelector(".sheet .close")?.focus();
+  const recover = document.getElementById("recover");
+  if (recover) recover.onsubmit = (e) => { e.preventDefault(); guard(() => useRecoveryCode(document.getElementById("rcode").value)); };
   const preferences = document.getElementById('preferences');
   if (preferences) preferences.onsubmit = e => {
     e.preventDefault();
     const body = readSettings(preferences);
     guard(async () => {
       adoptView(await api(`/api/user/${S.userId}/setup`, 'PATCH', body));
-      S.users = await api('/api/users'); S.orderReview = null;
+      if (keys.get(S.userId)) keys.put(S.userId, keys.get(S.userId), S.view.user.name);
+      S.users = mergeUsers(await api('/api/users')); S.orderReview = null;
       S.tab = 'today'; S.more = null; toast('Saved. Upcoming meals re-planned.'); render();
     });
   };

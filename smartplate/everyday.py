@@ -13,7 +13,7 @@ the hard rules inconsistent.
 """
 import datetime as dt
 
-from . import db, service
+from . import access, db, service
 from .domain import allergens, festivals, intake, models, profile, reverse_mode, taste
 from .kernel import optimizer, recommender, scheduler
 
@@ -47,6 +47,7 @@ def create_profile(body: dict) -> dict:
     data.setdefault("goal", "none")
     data.setdefault("meals", list(profile.MEALS))
     nt, targets, working = _targets_blob(data)
+    key, key_hash = access.new_key()
     ht = {"protein_floor_g": targets["protein_g"], "max_cook_per_week": COOK_BY_ANSWER[cook]}
     prefs = {"setup_done": True, "meals": data["meals"], "daily_cap": data.get("daily_cap"),
              "goal": data["goal"], "body": data.get("body"), "area": data.get("area", ""),
@@ -54,16 +55,17 @@ def create_profile(body: dict) -> dict:
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO users(name, city, diet, weekly_budget, rating_floor, mode, allergens, medical, "
-            "nutrition_targets, health_targets, carbon_pref, observances, prefs) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "nutrition_targets, health_targets, carbon_pref, observances, prefs, access_hash) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (data["name"], CITY, data.get("diet", "nonveg"), data["weekly_budget"],
              data.get("rating_floor", 4.0), "balanced", db.jd(data.get("allergens", [])),
              db.jd(data.get("medical", [])), db.jd(nt), db.jd(ht), 0.0,
-             db.jd(data.get("observances", [])), db.jd(prefs)))
+             db.jd(data.get("observances", [])), db.jd(prefs), key_hash))
         user_id = cur.lastrowid
     taste.set_favourites(user_id, data.get("favourites", []))
     pid = service.create_plan(user_id)
-    return service.plan_view(pid)
+    # the key is returned exactly once; only its hash is stored
+    return {**service.plan_view(pid), "access_key": key, "recovery_code": f"{user_id}.{key}"}
 
 
 def update_setup(user_id: int, body: dict) -> dict:
