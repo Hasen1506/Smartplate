@@ -10,7 +10,7 @@ import math
 
 from . import config, db
 from .domain import (carbon, checkout, community, festivals, health, household, intake,
-                     ledger, models, nutrition, receipts, reverse_mode, weather)
+                     ledger, models, nutrition, profile, receipts, reverse_mode, taste, timing, weather)
 from .kernel import (agent_brain, budget, explainability, optimizer, recommender,
                      scheduler, variance)
 
@@ -18,22 +18,35 @@ from .kernel import (agent_brain, budget, explainability, optimizer, recommender
 # --------------------------------------------------------------------------- #
 # Plan lifecycle
 # --------------------------------------------------------------------------- #
-def create_plan(user_id: int, mode: str | None = None) -> int:
+def create_plan(user_id: int, mode: str | None = None, week_start: str | None = None) -> int:
+    """Plan the current week (the rest of it, budget prorated) — or, when that week
+    is already planned or nearly over, the next one."""
     user = models.get_user(user_id)
     if not user:
         raise ValueError('Profile not found')
     mode = mode or user["mode"]
     if mode not in config.MODE_LABELS:
         raise ValueError('Unknown planning mode')
-    ws = _next_monday()
+    ws = week_start or _plan_week_start(user_id)
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO plans(user_id, week_start, mode, status, created_ts) VALUES (?,?,?,?,?)",
-            (user_id, ws, mode, "active", dt.datetime.now().isoformat()))
+            (user_id, ws, mode, "active", optimizer.now().isoformat()))
         plan_id = cur.lastrowid
-    scheduler.build_week(plan_id, ws)
+    scheduler.build_week(plan_id, ws, meals=profile.meals_planned(user))
     optimizer.optimize(plan_id)
     return plan_id
+
+
+def _plan_week_start(user_id: int) -> str:
+    today = optimizer.now().date()
+    monday = today - dt.timedelta(days=today.weekday())
+    start = monday if today.weekday() <= 5 else monday + dt.timedelta(days=7)   # Sunday → next week
+    with db.cursor() as cur:
+        taken = {r["week_start"] for r in cur.execute("SELECT week_start FROM plans WHERE user_id=?", (user_id,))}
+    while start.isoformat() in taken:                    # "plan another week" → the following one
+        start += dt.timedelta(days=7)
+    return start.isoformat()
 
 
 def reoptimize(plan_id: int, mode: str | None = None) -> dict:
@@ -46,8 +59,12 @@ def reoptimize(plan_id: int, mode: str | None = None) -> dict:
 
 
 def current_plan(user_id):
+    """The plan to show now: the latest one, rolled forward once its week is over."""
     with db.cursor() as cur:
-        row = cur.execute('SELECT id FROM plans WHERE user_id=? ORDER BY id DESC LIMIT 1', (user_id,)).fetchone()
+        row = cur.execute('SELECT id, week_start FROM plans WHERE user_id=? ORDER BY week_start DESC, id DESC LIMIT 1',
+                          (user_id,)).fetchone()
+    if row and dt.date.fromisoformat(row['week_start']) + dt.timedelta(days=7) <= optimizer.now().date():
+        row = None
     return plan_view(row['id'] if row else create_plan(user_id))
 
 
@@ -105,7 +122,11 @@ def update_preferences(user_id, body):
 
 
 def set_session_status(session_id: int, status: str, note: str = "") -> None:
+    before = models.get_session(session_id)
     scheduler.set_status(session_id, status, note)
+    if before and before["status"] == "confirmed" and status != "confirmed":
+        with db.cursor() as cur:        # undoing "I had it" also removes its logged intake
+            cur.execute("DELETE FROM intake_log WHERE note=?", (f"session:{session_id}",))
 
 
 def command(plan_id: int, text: str) -> dict:
@@ -139,12 +160,23 @@ def plan_view(plan_id: int) -> dict:
         return {}
     user = models.get_user(plan["user_id"])
     decisions = models.decisions_for_plan(plan_id)
-    spend_rows = [d for d in decisions if d["chosen_kind"] in ("delivery", "cook")]
-    env = budget.envelope(user["weekly_budget"], spend_rows)
+    at = optimizer.now()
+    for d in decisions:
+        d["past"] = d["session_status"] == "active" and scheduler.is_past(d, at)
+    # a past meal the user never confirmed is unknown, not spent (reconcile, don't assume)
+    spend_rows = [d for d in decisions if d["chosen_kind"] in ("delivery", "cook") and not d["past"]]
+    cap = optimizer.week_cap(user, plan)
+    env = budget.envelope(cap, spend_rows)
+    env["weekly_budget"] = user["weekly_budget"]
+    env["prorated"] = cap < user["weekly_budget"]
+    env["daily_cap"] = profile.daily_cap(user)
 
     nut = nutrition.summary([d["nutrition"] for d in spend_rows if d.get("nutrition")])
     targets = nutrition.targets_for(user)
-    daily_nut = {k: round(v / 7, 1) for k, v in nut.items()}
+    # average over the days that actually have planned meals (a plan made on Friday
+    # covers 3 days; dividing by 7 would make every target look badly missed)
+    planned_days = max(1, len({d["day"] for d in spend_rows}))
+    daily_nut = {k: round(v / planned_days, 1) for k, v in nut.items()}
 
     surge_saved = sum((d.get("time_shift") or {}).get("saving", 0) for d in decisions)
     carbon_total = round(sum(d.get("carbon_kg", 0) for d in spend_rows), 2)
@@ -152,15 +184,18 @@ def plan_view(plan_id: int) -> dict:
 
     coach = _coach(decisions)
     fests = festivals.for_week(plan["week_start"])
-    grid = _grid(decisions)
+    wx = weather.week(user["city"], plan["week_start"])
+    sig = taste.signals(user["id"])
+    grid = _grid(decisions, plan=plan, user=user, wx=wx, sig=sig)
 
     view = {
         "plan": {**plan, "mode_label": config.MODE_LABELS.get(plan["mode"], plan["mode"])},
-        "user": {k: user[k] for k in ("id", "name", "city", "diet", "weekly_budget",
-                                      "rating_floor", "mode", "allergens", "medical",
-                                      "health_targets", "nutrition_targets", "carbon_pref")},
+        "user": {**{k: user[k] for k in ("id", "name", "city", "diet", "weekly_budget",
+                                         "rating_floor", "mode", "allergens", "medical", "observances",
+                                         "health_targets", "nutrition_targets", "carbon_pref", "prefs")},
+                 "favourites": sorted(sig["favourites"]), "meals": profile.meals_planned(user)},
         "budget": env,
-        "nutrition": {"week": nut, "daily_avg": daily_nut, "daily_target": targets},
+        "nutrition": {"week": nut, "daily_avg": daily_nut, "daily_target": targets, "days": planned_days},
         "carbon": {"total_kg": carbon_total, "band": carbon.band(carbon_total / max(1, len(spend_rows)))},
         "surge_saved": round(surge_saved, 2),
         "counts": counts,
@@ -169,13 +204,18 @@ def plan_view(plan_id: int) -> dict:
             "skipped": counts["skip"], "cooked": counts["cook"], "surge_saved": surge_saved}),
         "coach": coach,
         "grid": grid,
-        "week_context": _week_context(user, plan, fests),
+        "week_context": _week_context(user, plan, fests, wx),
+        "weather_source": "live" if any(w["source"] == "live" for w in wx.values()) else "sample",
+        "learning": {"ratings": sig["ratings"], "orders": sig["orders"], "favourites": len(sig["favourites"])},
         # inverse-optimisation budget band for the planned sessions (docs §5):
         # don't make the user guess the cap — recommend it.
         "recommendation": recommender.recommend(user, [d["meal"] for d in decisions]),
     }
     if user.get("household_id"):
         view["household"] = _household_view(user, env["spend"])
+    from . import everyday
+    view["next_up"] = everyday.next_up(view, at)
+    view["heads_up"] = everyday.heads_up(view, user, plan, decisions, at)
     return view
 
 
@@ -226,10 +266,33 @@ def _counts(decisions):
     return c
 
 
-def _grid(decisions):
+def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
     """Shape decisions into a day→meals grid for the UI."""
     grid = {i: {"day": models.DAYS[i], "meals": {}} for i in range(7)}
+    if plan:
+        for i in range(7):
+            grid[i]["date"] = models.session_date(plan, i)
+    ratings = {}
+    if user:
+        with db.cursor() as cur:
+            ratings = {r["session_id"]: r["score"] for r in cur.execute(
+                "SELECT session_id, score FROM ratings WHERE user_id=?", (user["id"],))}
+    etas = {}
+    with db.cursor() as cur:
+        etas = {r["id"]: r["eta_min"] for r in cur.execute("SELECT id, eta_min FROM restaurants")}
     for d in decisions:
+        extra = {}
+        if plan is not None:
+            status = "past" if d.get("past") else d["session_status"]
+            extra = {"status": status, "pinned": bool(d.get("pinned")), "restaurant_id": d.get("restaurant_id"),
+                     "item_id": d.get("item_id"), "recipe_key": d.get("recipe_key"),
+                     "rating_given": ratings.get(d["session_id"]),
+                     "usual": bool(sig and d.get("restaurant_id") in sig["favourites"])}
+            if d["chosen_kind"] == "delivery":
+                cond = (wx or {}).get(d["day"], {}).get("condition", "clear")
+                extra["order"] = timing.order_plan(d["meal"], eta_min=etas.get(d.get("restaurant_id")),
+                                                   time_shift=d.get("time_shift"), condition=cond)
+                extra["handoff_url"] = timing.swiggy_handoff(d.get("restaurant_name") or "", d.get("item_name") or "")
         grid[d["day"]]["meals"][d["meal"]] = {
             "kind": d["chosen_kind"], "item": d["item_name"],
             "restaurant": d.get("restaurant_name") or "",
@@ -238,6 +301,7 @@ def _grid(decisions):
             "time_shift": d.get("time_shift"), "reasons": d.get("reasons", []),
             "nutrition": d.get("nutrition", {}), "carbon_kg": d.get("carbon_kg", 0),
             "session_id": d["session_id"], "status": d['session_status'],
+            **extra,
         }
     return [grid[i] for i in range(7)]
 
@@ -260,15 +324,23 @@ def _household_view(user, spend):
     }
 
 
-def _week_context(user, plan, fests):
+def _week_context(user, plan, fests, wx=None):
+    wx = wx or weather.week(user["city"], plan["week_start"])
+    all_fests = festivals.for_week_all(plan["week_start"])
     out = []
     for i in range(7):
-        w = weather.for_day(user["city"], i)
+        w = wx[i]
         f = fests.get(i)
+        fast = festivals.fast_for(all_fests.get(i), user)
+        if f and f["effect"] == "fast" and not festivals.applies_to(f, user):
+            f = None                                   # someone else's fast is not this user's news
         out.append({
-            "day": models.DAYS[i], "weather": w["condition"], "temp_c": w["temp_c"],
-            "weather_note": weather.note(w["condition"]),
+            "day": models.DAYS[i], "date": models.session_date(plan, i),
+            "weather": w["condition"], "temp_c": w["temp_c"], "rain_prob": w.get("rain_prob", 0),
+            "weather_source": w.get("source", "sample"), "weather_note": weather.note(w["condition"]),
             "festival": f["name"] if f else None, "festival_effect": f["effect"] if f else None,
+            "festival_note": f.get("note") if f else None, "festival_approx": bool(f and f.get("approx")),
+            "your_fast": fast["name"] if fast else None,
         })
     return out
 
@@ -322,7 +394,7 @@ def record_receipts(plan_id: int) -> dict:
     user = models.get_user(plan["user_id"])
     n = 0
     for d in models.decisions_for_plan(plan_id):
-        if d["chosen_kind"] == "delivery" and d['session_status'] == 'ordered':
+        if d["chosen_kind"] == "delivery" and d['session_status'] in ('ordered', 'confirmed'):
             iso = (dt.date.fromisoformat(plan["week_start"]) + dt.timedelta(days=d["day"])).isoformat()
             receipts.record(user["id"], d, iso)
             n += 1
@@ -351,7 +423,3 @@ def receipts_view(user_id: int):
     return {"rows": rows, "business_total": round(business, 2),
             "total": round(sum(r["amount"] for r in rows), 2)}
 
-
-def _next_monday() -> str:
-    from .seed import demo_week_start
-    return demo_week_start()

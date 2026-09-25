@@ -18,7 +18,7 @@ def _clear():
     tables = ["users", "households", "restaurants", "menu_items", "plans", "sessions",
               "decisions", "orders", "calendar_events", "leftovers", "weather",
               "surge_history", "festivals", "community_templates", "receipts", "grocery_baskets",
-              "intake_log"]
+              "intake_log", "favourites", "ratings", "weather_cache"]
     with db.cursor() as cur:
         for t in tables:
             cur.execute(f"DELETE FROM {t}")
@@ -31,6 +31,7 @@ def seed_all(optimize_starter: bool = True) -> dict:
     rmap = _restaurants()
     _menu(rmap)
     _contexts()
+    _favourites(rmap)
     _community()
     plan_id = _starter_plan()
     if optimize_starter and plan_id:
@@ -45,21 +46,23 @@ def _households():
 
 
 def _users():
+    sample = '{"setup_done":true,"sample":true,"area":"Adyar","goal":"none"}'
     rows = [
-        # id, name, city, diet, budget, floor, mode, allergens, medical, nutri, health, carbon, household
+        # id, name, city, diet, budget, floor, mode, allergens, medical, nutri, health, carbon, household, prefs
         (1, "Sample profile", "Chennai", "nonveg", 2800, 4.0, "survival",
          '["peanut"]', '["diabetes"]', '{}',
-         '{"protein_floor_g":60,"veg_servings":2,"fasting_start_min":1290,"fasting_end_min":480}', 0.3, None),
+         '{"protein_floor_g":60,"veg_servings":2,"fasting_start_min":1290,"fasting_end_min":480}', 0.3, None,
+         sample),
         (2, "Meera", "Chennai", "vegan", 1500, 4.2, "balanced",
-         '["dairy"]', '[]', '{"kcal":1800}', '{"protein_floor_g":55,"veg_servings":3}', 0.6, 1),
+         '["dairy"]', '[]', '{"kcal":1800}', '{"protein_floor_g":55,"veg_servings":3}', 0.6, 1, sample),
         (3, "Arjun", "Chennai", "nonveg", 2500, 3.8, "comfort",
-         '[]', '[]', '{}', '{}', 0.0, 1),
+         '[]', '[]', '{}', '{}', 0.0, 1, sample),
     ]
     with db.cursor() as cur:
         cur.executemany(
             "INSERT INTO users(id,name,city,diet,weekly_budget,rating_floor,mode,allergens,"
-            "medical,nutrition_targets,health_targets,carbon_pref,household_id) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            "medical,nutrition_targets,health_targets,carbon_pref,household_id,prefs) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
 
 
 def _restaurants() -> dict:
@@ -73,6 +76,10 @@ def _restaurants() -> dict:
         ("Hotel Saravana Bhavan", 4.5, '["south indian","veg"]', 20, 25, 0),
         ("Faasos", 3.9, '["rolls","nonveg"]', 25, 30, 0),
         ("Sangeetha Veg", 4.2, '["south indian","veg"]', 20, 30, 0),
+        ("Murugan Idli Shop", 4.3, '["south indian","veg","breakfast"]', 25, 25, 0),
+        ("Dindigul Thalappakatti", 4.1, '["biryani","nonveg"]', 35, 40, 0),
+        ("The Bowl Company", 4.0, '["bowls","healthy"]', 30, 35, 0),
+        ("Chai Kings", 4.2, '["cafe","snacks"]', 20, 20, 0),
     ]
     rmap = {}
     with db.cursor() as cur:
@@ -128,6 +135,26 @@ def _menu(rmap: dict):
          ["comforting", "fresh"]),
         ("Sangeetha Veg", "Vegan Sambar Rice", 90, "vegan", 520, 14, 88, 8, 6, 1, [], ["light","veg"], 0.5, 4.2, 0.6,
          ["clean and tasty", "fresh", "great value"]),
+        ("Murugan Idli Shop", "Idli Sambar (4 pc)", 90, "south indian", 400, 12, 72, 6, 3, 1, [], ["light","veg"], 0.5, 4.5, 0.8,
+         ["soft idlis", "great sambar", "fresh"]),
+        ("Murugan Idli Shop", "Ghee Podi Dosa", 130, "south indian", 520, 11, 70, 20, 3, 1, ["dairy"], ["comfort","veg"], 0.7, 4.4, 0.7,
+         ["crispy", "loved the podi", "a bit oily"]),
+        ("Murugan Idli Shop", "Pesarattu + Chutney", 120, "south indian", 450, 20, 62, 12, 3, 1, [], ["light","veg"], 0.5, 4.2, 0.5,
+         ["protein-rich", "fresh and tasty"]),
+        ("Dindigul Thalappakatti", "Chicken Biryani", 290, "chicken", 880, 40, 95, 34, 5, 0, [], ["comfort","festive","nonveg"], 2.2, 4.3, 0.8,
+         ["amazing flavour", "generous", "a little oily"]),
+        ("Dindigul Thalappakatti", "Veg Biryani", 210, "veg", 700, 14, 104, 22, 6, 1, [], ["comfort","veg"], 0.9, 4.0, 0.5,
+         ["decent", "good value"]),
+        ("The Bowl Company", "Rajma Chawal Bowl", 190, "veg", 620, 22, 98, 12, 6, 1, [], ["comfort","veg"], 0.7, 4.1, 0.6,
+         ["homely", "filling", "value for money"]),
+        ("The Bowl Company", "Chicken Tikka Rice Bowl", 240, "chicken", 650, 36, 72, 20, 6, 0, ["dairy"], ["nonveg"], 1.6, 4.1, 0.6,
+         ["tasty", "good portion"]),
+        ("The Bowl Company", "Chana Masala Bowl", 180, "vegan", 590, 20, 90, 14, 7, 1, [], ["veg","light"], 0.6, 4.0, 0.5,
+         ["fresh", "healthy and tasty"]),
+        ("Chai Kings", "Masala Chai + Bun Butter", 70, "cafe", 350, 7, 48, 14, 18, 1, ["dairy","gluten"], ["light"], 0.5, 4.2, 0.7,
+         ["perfect chai", "quick"]),
+        ("Chai Kings", "Egg Puff + Chai", 85, "cafe", 380, 11, 40, 18, 12, 1, ["egg","gluten","dairy"], ["light"], 0.6, 4.0, 0.6,
+         ["good snack", "sometimes cold"]),
         ("Sangeetha Veg", "Parotta + Veg Kurma", 120, "south indian", 720, 14, 92, 28, 7, 1, ["gluten","dairy"], ["comfort","veg"], 0.9, 4.1, 0.6,
          ["comfort classic", "a bit oily"]),
     ]
@@ -158,14 +185,9 @@ def _contexts():
         cur.executemany(
             "INSERT INTO surge_history(city,day,meal,condition,multiplier) VALUES (?,?,?,?,?)", surge)
 
-        # Festivals in the demo week (§5.2.9): a feast (Fri) and a fast (Sat)
-        start = dt.date.fromisoformat(demo_week_start())
-        fri = (start + dt.timedelta(days=4)).isoformat()
-        sat = (start + dt.timedelta(days=5)).isoformat()
-        cur.executemany(
-            "INSERT INTO festivals(name,iso_date,effect,note) VALUES (?,?,?,?)",
-            [("Varalakshmi Vratham", fri, "feast", "festive meals favoured"),
-             ("Fasting Observance", sat, "fast", "daytime sessions suspended")])
+        # Real India holiday/festival calendar (§5.2.9). Fasts apply only to users who keep them.
+        from .domain import festivals
+        festivals.seed_calendar(cur)
 
         # Calendar for Hasen (user 1): client lunch Tue (conflict→time-shift), travel Thu (suspend) (§5.1.2)
         cur.executemany(
@@ -175,6 +197,14 @@ def _contexts():
 
         # Leftovers for Hasen: cooked dal → Wed dinner covered (§5.2.8)
         cur.execute("INSERT INTO leftovers(user_id,day,meal,label,servings) VALUES (1,2,'dinner','Home dal + rice',2)")
+
+
+def _favourites(rmap: dict):
+    """The sample profile's usual places — what a new user taps at onboarding."""
+    with db.cursor() as cur:
+        cur.executemany("INSERT INTO favourites(user_id, restaurant_id) VALUES (?,?)",
+                        [(1, rmap[n]) for n in ("Adyar Ananda Bhavan", "Junior Kuppanna",
+                                                "Hotel Saravana Bhavan", "FreshMenu", "Murugan Idli Shop")])
 
 
 def _community():

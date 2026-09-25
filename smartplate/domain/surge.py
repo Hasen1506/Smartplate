@@ -29,9 +29,11 @@ def offpeak_multiplier(peak_mult: float) -> float:
     return round(1.0 + (peak_mult - 1.0) * 0.35, 3)
 
 
-def time_shift_option(city: str, day: int, meal: str, condition: str, base_cost: float) -> dict | None:
-    """Return a cheaper off-peak slot if it saves money, else None."""
-    peak = predict(city, day, meal, condition)
+def time_shift_option(city: str, day: int, meal: str, condition: str, base_cost: float,
+                      peak: float | None = None) -> dict | None:
+    """Return a cheaper off-peak slot if it saves money, else None. `peak` lets the
+    caller pass a multiplier already adjusted for holidays."""
+    peak = peak if peak is not None else predict(city, day, meal, condition)
     if peak <= 1.02:
         return None
     off = offpeak_multiplier(peak)

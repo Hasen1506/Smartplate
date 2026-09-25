@@ -51,12 +51,30 @@ def test_leftover_forces_zero_cost_cook(seeded):
     assert wed_dinner["cost"] == 0
 
 
-# §5.2.9 festivals
-def test_festival_fast_suspends_daytime(seeded):
-    fests = festivals.for_week(seeded["week_start"])
-    fast = next(f for f in fests.values() if f["effect"] == "fast")
-    assert festivals.suspends_session(fast, "lunch")
-    assert not festivals.suspends_session(fast, "dinner")
+# §5.2.9 festivals — a fast binds only the users who keep it
+def test_festival_fast_suspends_daytime_only_for_observers(seeded):
+    fast = {"name": "Navratri", "effect": "fast", "observance": "navratri"}
+    keeps, doesnt = {"observances": ["navratri"]}, {"observances": []}
+    assert festivals.suspends_session(fast, "lunch", keeps)
+    assert not festivals.suspends_session(fast, "dinner", keeps)
+    assert not festivals.suspends_session(fast, "lunch", doesnt)
+
+
+def test_observed_fast_skips_daytime_meals_in_plan(seeded):
+    from smartplate import db
+    pid, ws = seeded["plan_id"], seeded["week_start"]
+    wed = (dt.date.fromisoformat(ws) + dt.timedelta(days=2)).isoformat()
+    with db.cursor() as cur:
+        cur.execute("INSERT INTO festivals(name, iso_date, effect, observance) "
+                    "VALUES ('Test fast', ?, 'fast', 'navratri')", (wed,))
+    optimizer.optimize(pid)
+    assert service.plan_view(pid)["grid"][2]["meals"]["lunch"]["kind"] != "skip"   # not observed
+    with db.cursor() as cur:
+        cur.execute("UPDATE users SET observances='[\"navratri\"]' WHERE id=1")
+    optimizer.optimize(pid)
+    wed_meals = service.plan_view(pid)["grid"][2]["meals"]
+    assert wed_meals["breakfast"]["kind"] == wed_meals["lunch"]["kind"] == "skip"
+    assert wed_meals["dinner"]["kind"] != "skip" or "Test fast" not in " ".join(wed_meals["dinner"]["reasons"])
 
 
 # §5.2.10 weather

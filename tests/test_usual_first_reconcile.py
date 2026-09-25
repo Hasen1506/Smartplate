@@ -40,9 +40,17 @@ def test_usual_pen_is_zero_when_disabled(seeded):
     session = {"day": "Mon", "meal": "lunch"}
     cands = optimizer.build_candidates(user, plan, session, ctx)
     delivery = [c for c in cands if c["kind"] == "delivery"]
-    assert delivery and all(c["usual_pen"] == 0.0 for c in delivery)
+    # the sample profile has usual places: those carry no premium; only the few
+    # "something new" options do (the mostly-usual default)
+    assert delivery and all(c["usual_pen"] == 0.0 for c in delivery if not c["discovery"])
+    assert all(c["usual_pen"] == optimizer.DISCOVERY_PEN for c in delivery if c["discovery"])
+    assert sum(c["discovery"] for c in delivery) <= optimizer.DISCOVERY_PER_SESSION
     # the familiarity signal is still attached for the diagnostic
     assert all("is_usual" in c and "familiarity" in c for c in delivery)
+    # a profile with no usual places is unchanged: no premium anywhere
+    arjun = models.get_user(3)
+    cands = optimizer.build_candidates(arjun, plan, session, optimizer.build_context(arjun, plan))
+    assert all(c["usual_pen"] == 0.0 for c in cands if c["kind"] == "delivery")
 
 
 # --------------------------------------------------------------------------- #

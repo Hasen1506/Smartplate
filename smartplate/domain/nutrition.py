@@ -26,8 +26,11 @@ OVER_KCAL_WEIGHT = 0.6
 
 
 def targets_for(user: dict) -> dict:
+    """Numeric daily targets only — the same blob also stores non-numeric prefs
+    (e.g. the variety level), which must never reach the per-meal arithmetic."""
     t = dict(DEFAULT_TARGETS)
-    t.update(user.get("nutrition_targets") or {})
+    t.update({k: v for k, v in (user.get("nutrition_targets") or {}).items()
+              if isinstance(v, (int, float)) and not isinstance(v, bool)})
     return t
 
 

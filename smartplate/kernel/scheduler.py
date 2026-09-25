@@ -9,7 +9,15 @@ import datetime as dt
 from .. import db
 from ..domain.models import MEAL_WINDOWS, MEALS
 
-VALID_STATES = {"active", "snoozed", "skipped", "cooked", "ordered"}
+VALID_STATES = {"active", "snoozed", "skipped", "cooked", "ordered", "confirmed"}
+# A meal stays actionable for a while after its planned time (it may still be on its way).
+PAST_GRACE = dt.timedelta(minutes=90)
+
+
+def is_past(session: dict, at: dt.datetime) -> bool:
+    """True once a meal's planned time (+ grace) is behind us — never re-planned then."""
+    ts = session.get("scheduled_ts")
+    return bool(ts) and dt.datetime.fromisoformat(ts) + PAST_GRACE < at
 
 
 def trigger_ts(week_start_iso: str, day: int, meal: str, minute: int | None = None) -> str:
@@ -21,7 +29,8 @@ def trigger_ts(week_start_iso: str, day: int, meal: str, minute: int | None = No
 
 
 def build_week(plan_id: int, week_start_iso: str, meals=MEALS, days=7) -> None:
-    """Create the session grid for a plan (idempotent per plan)."""
+    """Create the session grid for a plan (idempotent per plan). `meals` is the
+    user's own rhythm — someone who only orders dinner gets 7 sessions, not 21."""
     with db.cursor() as cur:
         cur.execute("DELETE FROM sessions WHERE plan_id=?", (plan_id,))
         for day in range(days):
@@ -44,7 +53,10 @@ def set_status(session_id: int, status: str, note: str = "") -> None:
             raise ValueError('An ordered meal cannot be changed or cancelled here')
         if status == 'ordered':
             raise ValueError('Use checkout to order a meal')
-        cur.execute("UPDATE sessions SET status=?, note=? WHERE id=?", (status, note, session_id))
+        if status == 'confirmed':
+            raise ValueError('Use “I had it” to confirm a meal')
+        # choosing skip/cook/snooze over a meal replaces the user's earlier pick
+        cur.execute("UPDATE sessions SET status=?, note=?, pinned=NULL WHERE id=?", (status, note, session_id))
 
 
 def snooze_day(plan_id: int, day: int, status: str = "snoozed", note: str = "") -> int:

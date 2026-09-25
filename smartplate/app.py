@@ -4,7 +4,7 @@ import os
 from flask import Flask, Response, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
-from . import config, service
+from . import config, everyday, service
 from .domain import models, sentiment
 from .domain.checkout import CheckoutConflict
 from .kernel import agent_brain
@@ -81,6 +81,8 @@ def create_app() -> Flask:
             "modes": config.MODE_LABELS,
             "mode_outcomes": {k: v["outcome"] for k, v in config.MODE_META.items()},
             "note": "v1.1 plans with a MILP solver — no per-decision LLM cost (see FEASIBILITY.md).",
+            "weather_provider": config.WEATHER_PROVIDER,
+            "catalog_city": everyday.CITY,
             "features": _FEATURE_MAP,
         })
 
@@ -235,6 +237,58 @@ def create_app() -> Flask:
         return jsonify({"first": first, "second": second,
                         "same_order_id": first["provider_order_id"] == second["provider_order_id"],
                         "second_was_deduped": second["deduped"]})
+
+    # ---- everyday flows: set up, shortlist, pick, move, confirm, rate ---- #
+    @app.get("/api/restaurants")
+    def restaurants():
+        split = lambda k: [v for v in request.args.get(k, "").split(",") if v]   # noqa: E731
+        uid = request.args.get("user_id", type=int)
+        return jsonify(everyday.list_restaurants(uid, diet=request.args.get("diet"),
+                                                 allergens_=split("allergens"), medical=split("medical")))
+
+    @app.post("/api/suggest-budget")
+    def suggest_budget():
+        return jsonify(everyday.suggest_budget(request.get_json()))
+
+    @app.post("/api/profiles")
+    def create_profile():
+        return jsonify(everyday.create_profile(request.get_json())), 201
+
+    @app.patch("/api/user/<int:user_id>/setup")
+    def update_setup(user_id):
+        return jsonify(everyday.update_setup(user_id, request.get_json()))
+
+    @app.post("/api/user/<int:user_id>/favourites/<int:restaurant_id>")
+    def toggle_favourite(user_id, restaurant_id):
+        return jsonify(everyday.toggle_favourite(user_id, restaurant_id))
+
+    @app.get("/api/user/<int:user_id>/calendar")
+    def upcoming_calendar(user_id):
+        return jsonify(everyday.upcoming_calendar(user_id, request.args.get("days", 60, type=int)))
+
+    @app.get("/api/session/<int:session_id>/options")
+    def session_options(session_id):
+        return jsonify(everyday.options(session_id))
+
+    @app.post("/api/session/<int:session_id>/choose")
+    def session_choose(session_id):
+        return jsonify(everyday.choose(session_id, request.get_json()))
+
+    @app.post("/api/session/<int:session_id>/confirm")
+    def session_confirm(session_id):
+        return jsonify(everyday.confirm(session_id))
+
+    @app.post("/api/session/<int:session_id>/rate")
+    def session_rate(session_id):
+        return jsonify(everyday.rate(session_id, request.get_json().get("score")))
+
+    @app.post("/api/plan/<int:plan_id>/swap")
+    def plan_swap(plan_id):
+        body = request.get_json()
+        a, b = body.get("a"), body.get("b")
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (a, b)):
+            raise ValueError("Send the two meal ids to swap as a and b")
+        return jsonify(everyday.swap(plan_id, a, b))
 
     @app.get("/api/health")
     def health():

@@ -26,13 +26,20 @@ def get_user(user_id: int) -> dict | None:
     u["medical"] = db.jl(u["medical"])
     u["nutrition_targets"] = db.jl(u["nutrition_targets"], {})
     u["health_targets"] = db.jl(u["health_targets"], {})
+    u["observances"] = db.jl(u.get("observances"))
+    u["prefs"] = db.jl(u.get("prefs"), {})
     return u
 
 
 def list_users() -> list[dict]:
     with db.cursor() as cur:
-        rows = cur.execute("SELECT id, name, city, mode FROM users ORDER BY id").fetchall()
-    return [db.row_to_dict(r) for r in rows]
+        rows = cur.execute("SELECT id, name, city, mode, prefs FROM users ORDER BY id").fetchall()
+    out = []
+    for r in rows:
+        u = db.row_to_dict(r)
+        u["setup_done"] = bool(db.jl(u.pop("prefs"), {}).get("setup_done"))
+        out.append(u)
+    return out
 
 
 def get_household_members(household_id: int) -> list[dict]:
@@ -69,6 +76,35 @@ def menu_for_city(city: str) -> list[dict]:
     return items
 
 
+def restaurants_for_city(city: str) -> list[dict]:
+    with db.cursor() as cur:
+        rows = cur.execute("SELECT * FROM restaurants WHERE city=? ORDER BY rating DESC, name",
+                           (city,)).fetchall()
+    out = []
+    for r in rows:
+        d = db.row_to_dict(r)
+        d["cuisines"] = db.jl(d["cuisines"])
+        out.append(d)
+    return out
+
+
+def get_restaurant(restaurant_id: int) -> dict | None:
+    with db.cursor() as cur:
+        row = cur.execute("SELECT * FROM restaurants WHERE id=?", (restaurant_id,)).fetchone()
+    return db.row_to_dict(row) if row else None
+
+
+def get_session(session_id: int) -> dict | None:
+    with db.cursor() as cur:
+        row = cur.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+    return db.row_to_dict(row) if row else None
+
+
+def session_date(plan: dict, day: int) -> str:
+    import datetime as _dt
+    return (_dt.date.fromisoformat(plan["week_start"]) + _dt.timedelta(days=day)).isoformat()
+
+
 def get_plan(plan_id: int) -> dict | None:
     with db.cursor() as cur:
         row = cur.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
@@ -88,7 +124,8 @@ def sessions_for_plan(plan_id: int) -> list[dict]:
 def decisions_for_plan(plan_id: int) -> list[dict]:
     with db.cursor() as cur:
         rows = cur.execute(
-            "SELECT d.*, s.day AS day, s.meal AS meal, s.status AS session_status "
+            "SELECT d.*, s.day AS day, s.meal AS meal, s.status AS session_status, "
+            "s.scheduled_ts AS scheduled_ts, s.pinned AS pinned "
             "FROM decisions d JOIN sessions s ON s.id = d.session_id "
             "WHERE d.plan_id=? ORDER BY s.day, "
             "CASE s.meal WHEN 'breakfast' THEN 0 WHEN 'lunch' THEN 1 ELSE 2 END",
