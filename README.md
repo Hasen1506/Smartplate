@@ -33,10 +33,14 @@ worth building, connector or app, who pays, and how do we keep it simple?", see
    nutrition re-balance, and nothing else in the week gets shuffled.
 5. **Heads-up**: rain, heat, holidays, the fasts you keep, meals that didn't fit
    the budget, and past meals to confirm.
-6. **Reminders**: one tap adds every order-by time to your phone calendar, with
-   alarms. Browser alerts also work while the app is open.
+6. **Reminders**: *Remind me at order time* sends a push notification at each
+   order-by time, even with the app closed (on iPhone, add it to the Home Screen
+   first). One tap also adds every order-by time to your phone calendar.
 7. **Installable and private**: add it to your home screen. A profile you create
-   is private to your browser; its recovery code opens it on another device.
+   is private; add a sign-in name and password to open it on your other devices.
+8. **Swiggy, when you sign in**: pick your delivery address, see today's Swiggy menu
+   for your usual places, and put the planned dish in your Swiggy cart with the real
+   amount to pay. You review and pay in Swiggy; SmartPlate never orders or pays.
 
 ## Try it in your browser
 
@@ -87,7 +91,8 @@ python -m pytest -q                 # current backend regression suite
 | **Kernel** (domain-agnostic, the reusable skeleton from §2) | `scheduler`, `budget`, `optimizer` (MILP/CBC), `variance` (substitution), `explainability`, `agent_brain` (deterministic vs optional LLM) |
 | **Domain** (the 17 features as constraints/signals) | `allergens`, `nutrition`, `household`, `leftovers`, `festivals`, `weather`, `surge`, `reverse_mode`, `community`, `receipts`, `health`, `carbon`, `cooking_coach`, `sentiment` |
 | **Everyday flows** | `everyday` (onboarding, shortlist, pick, swap, confirm, rate, heads-up), `domain/profile` (goals → targets), `domain/taste` (usual places, ratings), `domain/timing` (order-by, hand-off) |
-| **Integrations** | `swiggy_mcp` (Simulated \| Live), `calendar_sync` (.ics), Open-Meteo weather (`domain/weather`) |
+| **Integrations** | `swiggy_connect` (sign-in + tool discovery), `swiggy_live` (addresses, menus, cart; never orders), `swiggy_mcp` (simulated ordering), `webpush` (RFC 8291/8292), `calendar_sync` (.ics), Open-Meteo weather (`domain/weather`) |
+| **Accounts and reminders** | `access` (profile keys), `accounts` (sign-in, devices), `vault` (token encryption), `ratelimit`, `push` (order-time push worker), `domain/reminders` |
 
 ### The 17 gap features (all integrated)
 
@@ -134,10 +139,23 @@ instead of silently ordered.
 | `SMARTPLATE_PUBLIC_URL` | derived | Public base URL for the Swiggy OAuth redirect when a proxy hides it |
 | `SMARTPLATE_TZ` | `Asia/Kolkata` | Timezone for meal times, "today" and past meals (servers often run in UTC) |
 | `SMARTPLATE_STABILITY` | `0.3` | Bonus for keeping a meal's current pick on re-plans (0 disables) |
+| `SMARTPLATE_SECRET` | generated | Key for encrypting stored Swiggy tokens. Set it in production (render.yaml generates one); without it a key is kept in the database |
+| `SMARTPLATE_PUSH` | `on` | `off` stops the push-reminder worker |
+| `SMARTPLATE_VAPID_PRIVATE` | generated | Web Push signing key (base64url P-256). Keep it stable or browsers must re-subscribe |
+| `SMARTPLATE_PUSH_CONTACT` | `mailto:smartplate@example.invalid` | Contact the push services see; use a real address in production |
+| `SMARTPLATE_BEHIND_PROXY` | `1` on Render | Trust one proxy hop's `X-Forwarded-*` headers (rate limits, redirect URLs) |
 
 ## Live integration status
 
-Ordering today is a **hand-off**: *Order on Swiggy* opens Swiggy's public search for
-that restaurant and dish, the person orders there, then taps *I had it* so the budget
-and nutrition stay accurate. The simulated auto-ordering path (idempotent,
-spend-limited) remains under More. The real Swiggy path is not a drop-in replacement: it needs OAuth, live identifiers and cart schemas, address/payment selection, pending-payment handling and order reconciliation. No background worker places scheduled orders. See [the verified integration notes](docs/vendor/swiggy/README.md).
+Without a Swiggy sign-in, ordering is a **hand-off**: *Order on Swiggy* opens Swiggy's
+public search for that restaurant and dish, the person orders there, then taps *I had
+it* so the budget and nutrition stay accurate.
+
+With a sign-in (More → Swiggy connection), SmartPlate reads the person's saved
+addresses, searches their usual places, shows the live menu, and fills the Swiggy cart
+with the planned dish, then reads back the amount to pay. It refuses every tool that
+orders or pays (`place_food_order`, payment options, coupons). The person reviews and
+pays in Swiggy. This follows Swiggy's public docs and is tested against a fake server;
+**it has not yet run against mcp.swiggy.com**, so the first real sign-in is the test.
+The simulated auto-ordering path (idempotent, spend-limited) remains under More. No
+background worker places orders. See [the integration notes](docs/vendor/swiggy/README.md).

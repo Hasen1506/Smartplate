@@ -11,7 +11,8 @@ def seeded(monkeypatch):
     os.close(fd)
     os.environ["SMARTPLATE_DB"] = path
     # config reads the env var at import time; patch the already-imported value too.
-    from smartplate import config, db, seed
+    from smartplate import config, db, ratelimit, seed
+    ratelimit.reset()
     monkeypatch.setattr(config, "DB_PATH", path)
     # deterministic plans: never let a live forecast change what the solver picks
     monkeypatch.setattr(config, "WEATHER_PROVIDER", "simulated")

@@ -238,6 +238,45 @@ CREATE TABLE IF NOT EXISTS weather_cache (       -- live forecast, cached per ci
     fetched_ts TEXT NOT NULL,
     PRIMARY KEY (city, iso_date)
 );
+
+CREATE TABLE IF NOT EXISTS logins (              -- optional sign-in for a private profile
+    user_id INTEGER PRIMARY KEY,
+    login TEXT NOT NULL UNIQUE,                    -- lower-case name or email; never emailed
+    pw_hash TEXT NOT NULL,                         -- werkzeug scrypt hash
+    created_ts TEXT NOT NULL,
+    updated_ts TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS devices (             -- one row per signed-in browser
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,               -- sha256 of the device token
+    label TEXT NOT NULL DEFAULT '',
+    created_ts TEXT NOT NULL,
+    last_seen_ts TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (  -- Web Push endpoints a person opted into
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_ts TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS push_sent (           -- one reminder per meal per subscription
+    subscription_id INTEGER NOT NULL,
+    session_id INTEGER NOT NULL,
+    at TEXT NOT NULL,                              -- the reminder time it was sent for
+    sent_ts TEXT NOT NULL,
+    PRIMARY KEY (subscription_id, session_id, at)
+);
+
+CREATE TABLE IF NOT EXISTS app_secrets (         -- generated keys when no env secret is set
+    name TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 # Columns added after the first trial shipped. CREATE TABLE IF NOT EXISTS does not

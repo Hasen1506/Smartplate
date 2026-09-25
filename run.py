@@ -13,6 +13,9 @@ from smartplate.app import create_app
 
 def main() -> None:
     app = create_app()
+    if not (os.environ.get("DEBUG") == "1" and os.environ.get("WERKZEUG_RUN_MAIN") != "true"):
+        from smartplate import push
+        push.start_worker()                 # once, in the process that serves requests
     port = int(os.environ.get("PORT", "5057"))
     print(f"SmartPlate v1.1 running → http://localhost:{port}")
     app.run(host="0.0.0.0", port=port, debug=os.environ.get("DEBUG") == "1")

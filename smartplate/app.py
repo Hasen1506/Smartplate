@@ -5,12 +5,13 @@ from urllib.parse import quote
 
 from flask import Flask, Response, g, jsonify, redirect, request, send_from_directory
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, config, everyday, service
+from . import access, accounts, config, everyday, push, ratelimit, service
 from .domain import models, sentiment
 from .domain.checkout import CheckoutConflict
 from .kernel import agent_brain
-from .integrations import calendar_sync, swiggy_connect, swiggy_mcp
+from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp
 from .runtime import initialize, state_lock
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -20,6 +21,8 @@ def create_app() -> Flask:
     initialize()
     app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
     app.config['MAX_CONTENT_LENGTH'] = 256 * 1024
+    if config.BEHIND_PROXY:                  # one trusted hop sets X-Forwarded-For/Proto/Host
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     @app.before_request
     def validate_request():
@@ -61,6 +64,12 @@ def create_app() -> Flask:
     @app.errorhandler(TypeError)
     def invalid_input(error):
         return jsonify(error=str(error)), 400
+
+    @app.errorhandler(ratelimit.TooMany)
+    def too_many(error):
+        response = jsonify(error=str(error))
+        response.headers['Retry-After'] = str(error.wait_s)
+        return response, 429
 
     @app.errorhandler(swiggy_connect.SwiggyError)
     def swiggy_error(error):
@@ -283,7 +292,32 @@ def create_app() -> Flask:
 
     @app.post("/api/profiles")
     def create_profile():
+        ratelimit.check(f"profiles:{request.remote_addr}", 20, 3600)
         return jsonify(everyday.create_profile(request.get_json())), 201
+
+    # ---- sign-in (accounts.py): a name + password that opens a private profile anywhere ---- #
+    def _presented():
+        return request.headers.get(access.HEADER)
+
+    @app.post("/api/signin")
+    def sign_in():
+        return jsonify(accounts.sign_in(request.get_json(), request.remote_addr or ""))
+
+    @app.get("/api/user/<int:user_id>/account")
+    def account(user_id):
+        return jsonify(accounts.summary(user_id, _presented()))
+
+    @app.post("/api/user/<int:user_id>/account")
+    def set_account(user_id):
+        return jsonify(accounts.set_login(user_id, request.get_json(), _presented()))
+
+    @app.post("/api/user/<int:user_id>/devices/<int:device_id>/remove")
+    def remove_device(user_id, device_id):
+        return jsonify(accounts.remove_device(user_id, device_id))
+
+    @app.post("/api/user/<int:user_id>/signout")
+    def sign_out(user_id):
+        return jsonify(accounts.sign_out(user_id, _presented()))
 
     @app.patch("/api/user/<int:user_id>/setup")
     def update_setup(user_id):
@@ -306,6 +340,24 @@ def create_app() -> Flask:
         return Response(body, mimetype="text/calendar", headers={
             "Content-Disposition": "attachment; filename=smartplate-reminders.ics"})
 
+    # ---- push reminders at the order-by time (push.py) ---- #
+    @app.get("/api/user/<int:user_id>/push")
+    def push_status(user_id):
+        return jsonify(push.status(user_id, request.args.get("endpoint")))
+
+    @app.post("/api/user/<int:user_id>/push/subscribe")
+    def push_subscribe(user_id):
+        return jsonify(push.subscribe(user_id, request.get_json()))
+
+    @app.post("/api/user/<int:user_id>/push/unsubscribe")
+    def push_unsubscribe(user_id):
+        return jsonify(push.unsubscribe(user_id, request.get_json()))
+
+    @app.post("/api/user/<int:user_id>/push/test")
+    def push_test(user_id):
+        ratelimit.check(f"push-test:{user_id}", 5, 600)
+        return jsonify(push.test_message(user_id))
+
     # ---- Swiggy sign-in + read-only discovery (no ordering) ---- #
     def _public_base():
         if config.PUBLIC_URL:
@@ -325,6 +377,26 @@ def create_app() -> Flask:
     @app.post("/api/user/<int:user_id>/swiggy/discover")
     def swiggy_discover(user_id):
         return jsonify(swiggy_connect.discover(user_id))
+
+    # gates 2–3 (swiggy_live.py): addresses, live menus, fill the cart. Never order or pay.
+    @app.get("/api/user/<int:user_id>/swiggy/addresses")
+    def swiggy_addresses(user_id):
+        return jsonify(swiggy_live.addresses(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/address")
+    def swiggy_choose_address(user_id):
+        return jsonify(swiggy_live.choose_address(user_id, request.get_json().get("address_id")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/menu")
+    def swiggy_menu(user_id):
+        name = request.args.get("restaurant", "")
+        if not name:
+            raise ValueError("Say which restaurant")
+        return jsonify(swiggy_live.menu_for(user_id, name, fresh=request.args.get("fresh") == "1"))
+
+    @app.post("/api/session/<int:session_id>/swiggy-cart")
+    def swiggy_fill_cart(session_id):
+        return jsonify(swiggy_live.fill_cart(session_id))
 
     @app.post("/api/user/<int:user_id>/swiggy/disconnect")
     def swiggy_disconnect(user_id):

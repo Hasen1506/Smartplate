@@ -34,6 +34,19 @@ SWIGGY_TIMEOUT_S = float(os.environ.get("SMARTPLATE_SWIGGY_TIMEOUT", "10"))
 # Render sets RENDER_EXTERNAL_URL for every web service, so hosted installs need no setup.
 PUBLIC_URL = (os.environ.get("SMARTPLATE_PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
+# Server secret for encrypting stored tokens. render.yaml generates one; without it a
+# random key is created once and kept in the database (fine for a trial, not for
+# production, where the key must live outside the data it protects).
+SECRET = os.environ.get("SMARTPLATE_SECRET", "")
+# Behind one reverse proxy (Render, Codespaces): trust its X-Forwarded-* headers.
+BEHIND_PROXY = os.environ.get("SMARTPLATE_BEHIND_PROXY", "1" if os.environ.get("RENDER") else "0") == "1"
+
+# Web Push (order-time reminders). Keys are generated on first use when unset.
+PUSH_CONTACT = os.environ.get("SMARTPLATE_PUSH_CONTACT", "mailto:smartplate@example.invalid")
+PUSH_TICK_S = float(os.environ.get("SMARTPLATE_PUSH_TICK", "60"))
+PUSH_ENABLED = os.environ.get("SMARTPLATE_PUSH", "on") == "on"
+VAPID_PRIVATE = os.environ.get("SMARTPLATE_VAPID_PRIVATE", "")   # base64url P-256 key; generated if unset
+
 # Default order-execution policy. Swiggy's cautious posture (§7.1) means we
 # default to an editable window rather than silent auto-placement.
 ORDER_EDIT_WINDOW_MIN = int(os.environ.get("SMARTPLATE_EDIT_WINDOW", "30"))

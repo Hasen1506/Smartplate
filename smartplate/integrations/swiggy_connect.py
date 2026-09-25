@@ -19,9 +19,8 @@ Status: written against Swiggy's public docs and exercised against a fake server
 tests/test_followups.py. It has NOT been run against mcp.swiggy.com (unreachable from
 the build environment); the first real sign-in is the verification step.
 
-The access token is kept server-side in SQLite, never returned by the API, and
-deleted on disconnect. Encrypting it at rest needs real key management (with
-accounts) — a production gate, not a trial one.
+The access token is kept server-side, encrypted at rest (vault.py, keyed by
+SMARTPLATE_SECRET), never returned by the API, and deleted on disconnect.
 """
 import base64
 import datetime as dt
@@ -32,7 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .. import clock, config, db
+from .. import clock, config, db, vault
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS swiggy_clients (      -- dynamic client registration, per redirect URI
@@ -50,7 +49,7 @@ CREATE TABLE IF NOT EXISTS swiggy_pending (      -- in-flight sign-ins (single-u
 );
 CREATE TABLE IF NOT EXISTS swiggy_connections (
     user_id INTEGER PRIMARY KEY,
-    access_token TEXT NOT NULL,                  -- never returned by the API
+    access_token TEXT NOT NULL,                  -- sealed by vault.py; never returned by the API
     expires_ts TEXT,
     protocol_version TEXT,
     server_info TEXT NOT NULL DEFAULT '{}',
@@ -58,7 +57,19 @@ CREATE TABLE IF NOT EXISTS swiggy_connections (
     connected_ts TEXT NOT NULL,
     discovered_ts TEXT
 );
+CREATE TABLE IF NOT EXISTS swiggy_menus (        -- live menus, cached briefly (swiggy_live.py)
+    user_id INTEGER NOT NULL,
+    restaurant TEXT NOT NULL,                    -- the SmartPlate restaurant name searched for
+    payload TEXT NOT NULL,
+    fetched_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, restaurant)
+);
 """
+COLUMNS = [                                      # added after gate 1 shipped
+    ("swiggy_connections", "address_id", "TEXT"),
+    ("swiggy_connections", "address_label", "TEXT"),
+    ("swiggy_connections", "samples", "TEXT NOT NULL DEFAULT '{}'"),
+]
 CLIENT_VERSION = "2025-06-18"          # protocol we offer; the server's reply is what we record
 PENDING_TTL = dt.timedelta(minutes=15)
 READ_PREFIXES = ("get_", "search_", "fetch_", "track_", "list_")
@@ -71,6 +82,9 @@ class SwiggyError(RuntimeError):
 def init_schema() -> None:
     with db.cursor() as cur:
         cur.executescript(SCHEMA)
+        for table, column, decl in COLUMNS:
+            if column not in {r["name"] for r in cur.execute(f"PRAGMA table_info({table})")}:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 # --------------------------------------------------------------------------- #
@@ -214,8 +228,9 @@ def finish(state: str, code: str) -> int:
         raise SwiggyError("Swiggy's reply had no access token")
     expires = (clock.now() + dt.timedelta(seconds=int(tok["expires_in"]))).isoformat() if tok.get("expires_in") else None
     with db.cursor() as cur:
-        cur.execute("INSERT OR REPLACE INTO swiggy_connections(user_id, access_token, expires_ts, connected_ts) "
-                    "VALUES (?,?,?,?)", (row["user_id"], tok["access_token"], expires, clock.now().isoformat()))
+        cur.execute("INSERT INTO swiggy_connections(user_id, access_token, expires_ts, connected_ts) VALUES (?,?,?,?) "
+                    "ON CONFLICT(user_id) DO UPDATE SET access_token=excluded.access_token, "   # keeps the chosen address
+                    "expires_ts=excluded.expires_ts, connected_ts=excluded.connected_ts", (row["user_id"], vault.seal(tok["access_token"]), expires, clock.now().isoformat()))
     discover(row["user_id"])
     return row["user_id"]
 
@@ -249,6 +264,8 @@ def discover(user_id: int) -> dict:
     conn = _connection(user_id)
     if not conn:
         raise SwiggyError("Not connected to Swiggy")
+    if not conn["access_token"]:
+        raise SwiggyError("Your Swiggy sign-in can no longer be read on this server. Connect again.")
     headers, init = _rpc(conn["access_token"], "initialize", {
         "protocolVersion": CLIENT_VERSION, "capabilities": {},
         "clientInfo": {"name": "SmartPlate", "version": "1.1.0"}}, 1)
@@ -274,7 +291,11 @@ def _connection(user_id: int) -> dict | None:
     init_schema()
     with db.cursor() as cur:
         row = cur.execute("SELECT * FROM swiggy_connections WHERE user_id=?", (user_id,)).fetchone()
-    return db.row_to_dict(row) if row else None
+    if not row:
+        return None
+    conn = db.row_to_dict(row)
+    conn["access_token"] = vault.unseal(conn["access_token"])      # None if the server key changed
+    return conn
 
 
 def status(user_id: int) -> dict:
@@ -289,7 +310,8 @@ def status(user_id: int) -> dict:
             "protocol_version": conn["protocol_version"], "server": db.jl(conn["server_info"], {}),
             "tools": [{k: t[k] for k in ("name", "description", "kind")} for t in tools],
             "read_tools": sum(t["kind"] == "read" for t in tools),
-            "write_tools": sum(t["kind"] == "write" for t in tools)}
+            "write_tools": sum(t["kind"] == "write" for t in tools),
+            "address": {"id": conn["address_id"], "label": conn["address_label"]} if conn.get("address_id") else None}
 
 
 def disconnect(user_id: int) -> dict:
@@ -297,4 +319,5 @@ def disconnect(user_id: int) -> dict:
     with db.cursor() as cur:
         cur.execute("DELETE FROM swiggy_connections WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_pending WHERE user_id=?", (user_id,))
+        cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (user_id,))
     return {"connected": False}
