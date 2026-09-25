@@ -5,11 +5,11 @@ always line up with the plan grid, whenever you run it.
 """
 import datetime as dt
 
-from . import db
+from . import clock, db
 
 
 def demo_week_start() -> str:
-    today = dt.date.today()
+    today = clock.today()
     monday = today + dt.timedelta(days=(7 - today.weekday()) % 7 or 7)
     return monday.isoformat()
 
@@ -221,13 +221,12 @@ def _community():
 
 
 def _starter_plan() -> int:
-    import datetime as _dt
     from .kernel import scheduler
     ws = demo_week_start()
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO plans(user_id, week_start, mode, status, created_ts) VALUES (1, ?, 'survival', 'active', ?)",
-            (ws, _dt.datetime.now().isoformat()))
+            (ws, clock.now().isoformat()))
         plan_id = cur.lastrowid
     scheduler.build_week(plan_id, ws)
     return plan_id

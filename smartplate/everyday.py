@@ -452,7 +452,10 @@ def next_up(view: dict, at: dt.datetime) -> dict | None:
                 continue
             if _slot_time(day["date"], meal) + scheduler.PAST_GRACE < at:
                 continue
-            if cell["kind"] in ("delivery", "cook") or cell.get("status") in ("confirmed", "ordered"):
+            done = cell.get("status") in ("confirmed", "ordered")
+            if done and cell.get("rating_given") is not None:
+                continue                                 # had it and rated it: move on
+            if cell["kind"] in ("delivery", "cook") or done:
                 return {"day_index": i, "day": day["day"], "date": day["date"], "meal": meal,
                         "when": _when(day["date"], at.date()), "cell": cell}
     return None

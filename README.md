@@ -16,7 +16,23 @@ out of scope, as requested.
 
 For the differentiated product thesis, revenue experiments, production gates, and
 terms-safe Swiggy/Swiggy Money rollout, see
-[the September 2026 strategy memo](docs/product-strategy-2026.md).
+[the September 2026 strategy memo](docs/product-strategy-2026.md). For "is this
+worth building, connector or app, who pays, and how do we keep it simple?", see
+[value and simplicity](docs/value-and-simplicity.md).
+
+## What using it feels like
+
+1. **Set up in five answers**: diet and allergies, which meals, your usual places,
+   a weekly budget (suggested from those places), an optional goal.
+2. **Today** shows the next meal, what it costs including delivery, and **when to
+   order it** (ahead of the rush, with extra time on rainy days). Tap *Order on
+   Swiggy*, *Change* or *I had it*.
+3. **Change** opens a short list: your usual places, three dishes each, plus three
+   new picks, all already filtered for your allergies and budget. No endless menu.
+4. **Week**: drag a meal onto another day (or tap *Move*) to swap. The budget and
+   nutrition re-balance, and nothing else in the week gets shuffled.
+5. **Heads-up**: rain, heat, holidays, the fasts you keep, meals that didn't fit
+   the budget, and past meals to confirm.
 
 ## Try it in your browser
 
@@ -47,7 +63,8 @@ python -m pytest -q                 # current backend regression suite
 |---|---|
 | **Kernel** (domain-agnostic, the reusable skeleton from §2) | `scheduler`, `budget`, `optimizer` (MILP/CBC), `variance` (substitution), `explainability`, `agent_brain` (deterministic vs optional LLM) |
 | **Domain** (the 17 features as constraints/signals) | `allergens`, `nutrition`, `household`, `leftovers`, `festivals`, `weather`, `surge`, `reverse_mode`, `community`, `receipts`, `health`, `carbon`, `cooking_coach`, `sentiment` |
-| **Integrations** | `swiggy_mcp` (Simulated \| Live), `calendar_sync` (.ics) |
+| **Everyday flows** | `everyday` (onboarding, shortlist, pick, swap, confirm, rate, heads-up), `domain/profile` (goals → targets), `domain/taste` (usual places, ratings), `domain/timing` (order-by, hand-off) |
+| **Integrations** | `swiggy_mcp` (Simulated \| Live), `calendar_sync` (.ics), Open-Meteo weather (`domain/weather`) |
 
 ### The 17 gap features (all integrated)
 
@@ -87,7 +104,15 @@ instead of silently ordered.
 | `SMARTPLATE_BRAIN` | `deterministic` | `llm` opts into the paid narrator (off the critical path) |
 | `SMARTPLATE_SWIGGY` | `simulated` | `live` is unsupported and checkout returns a clear error |
 | `SMARTPLATE_DB` | `smartplate.db` | SQLite path |
+| `SMARTPLATE_WEATHER` | `live` | `live` = Open-Meteo forecast (cached, falls back to the sample feed offline); `simulated` = sample feed only |
+| `SMARTPLATE_SOLVER_GAP` | `0.001` | Relative optimality gap for the weekly MILP |
+| `SMARTPLATE_SOLVER_TIME_LIMIT` | `10` | Seconds per solve before returning the best plan found |
+| `SMARTPLATE_TZ` | `Asia/Kolkata` | Timezone for meal times, "today" and past meals (servers often run in UTC) |
+| `SMARTPLATE_STABILITY` | `0.3` | Bonus for keeping a meal's current pick on re-plans (0 disables) |
 
 ## Live integration status
 
-The current provider is simulated. The real Swiggy path is not a drop-in replacement: it needs OAuth, live identifiers and cart schemas, address/payment selection, pending-payment handling and order reconciliation. No background worker places scheduled orders. See [the verified integration notes](docs/vendor/swiggy/README.md).
+Ordering today is a **hand-off**: *Order on Swiggy* opens Swiggy's public search for
+that restaurant and dish, the person orders there, then taps *I had it* so the budget
+and nutrition stay accurate. The simulated auto-ordering path (idempotent,
+spend-limited) remains under More. The real Swiggy path is not a drop-in replacement: it needs OAuth, live identifiers and cart schemas, address/payment selection, pending-payment handling and order reconciliation. No background worker places scheduled orders. See [the verified integration notes](docs/vendor/swiggy/README.md).

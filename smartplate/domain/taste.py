@@ -13,7 +13,7 @@ Rules the planner reads from here:
 """
 import datetime as dt
 
-from .. import db
+from .. import clock, db
 
 DISLIKE_DAYS = 45
 LIKE_BONUS = 0.12
@@ -60,7 +60,7 @@ def rate(user_id: int, *, session_id: int, score: int, item_id=None, restaurant_
             "INSERT INTO ratings(user_id, session_id, item_id, restaurant_id, recipe_key, score, "
             "iso_date, created_ts) VALUES (?,?,?,?,?,?,?,datetime('now'))",
             (user_id, session_id, item_id, restaurant_id, recipe_key, score,
-             iso_date or dt.date.today().isoformat()))
+             iso_date or clock.today().isoformat()))
         return cur.lastrowid
 
 
@@ -74,7 +74,7 @@ def rating_for_session(user_id: int, session_id: int) -> int | None:
 def signals(user_id: int, today: str | None = None) -> dict:
     """Everything the planner needs in one read: disliked items (still inside the
     exclusion window), liked items, and a familiarity history keyed by item id."""
-    today_d = dt.date.fromisoformat(today) if today else dt.date.today()
+    today_d = dt.date.fromisoformat(today) if today else clock.today()
     with db.cursor() as cur:
         ratings = cur.execute("SELECT * FROM ratings WHERE user_id=?", (user_id,)).fetchall()
         orders = cur.execute(

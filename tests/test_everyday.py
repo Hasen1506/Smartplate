@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from smartplate import config, db, everyday, service
+from smartplate import config, db, everyday
 from smartplate.app import create_app
 from smartplate.domain import festivals, models, profile, taste, timing, weather
 from smartplate.kernel import optimizer
@@ -308,7 +308,8 @@ def test_live_forecast_is_used_and_offline_falls_back(seeded, monkeypatch):
             return json.dumps(payload).encode()
     monkeypatch.setattr(weather.urllib.request, "urlopen", lambda *a, **k: Resp())
     monkeypatch.setattr(weather, "_last_failure", {"ts": 0.0})
-    monkeypatch.setattr(weather.dt, "date", type("D", (dt.date,), {"today": staticmethod(lambda: start)}))
+    from smartplate import clock
+    monkeypatch.setattr(clock, "today", lambda: start)
     wk = weather.week("Chennai", ws)
     assert wk[0]["source"] == "live" and wk[0]["condition"] == "rain" and wk[0]["rain_prob"] == 90
     assert wk[1]["condition"] == "clear"
@@ -388,3 +389,21 @@ def test_mode_switch_still_replans_freely(client):
     comfort = client.post("/api/plan/1/optimize", json={"mode": "comfort"}).get_json()
     tight = client.post("/api/plan/1/optimize", json={"mode": "survival"}).get_json()
     assert tight["budget"]["spend"] <= comfort["budget"]["spend"]
+
+
+def test_clock_uses_app_timezone_not_server_utc():
+    from smartplate import clock
+    utc = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+    if clock._TZ is None:
+        pytest.skip("no timezone database on this machine")
+    offset = (clock.now() - utc).total_seconds() / 3600
+    assert abs(offset - 5.5) < 0.01                                  # IST is UTC+5:30
+
+
+def test_next_up_moves_on_once_meal_is_had_and_rated(client):
+    v = client.get("/api/plan/1").get_json()
+    first = v["next_up"]["cell"]["session_id"]
+    v = client.post(f"/api/session/{first}/confirm", json={}).get_json()
+    assert v["next_up"]["cell"]["session_id"] == first            # stays up to be rated
+    v = client.post(f"/api/session/{first}/rate", json={"score": 1}).get_json()["plan"]
+    assert v["next_up"]["cell"]["session_id"] != first

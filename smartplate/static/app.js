@@ -253,7 +253,7 @@ function todayScreen() {
   const v = S.view, nu = v.next_up;
   const hello = greeting();
   const sample = v.user?.prefs?.sample ? `<div class="coldstart"><span class="i">Sample</span><span>This is a sample profile with fictional allergies. <a href="#" data-act="start-onboard">Set up your own</a>.</span></div>` : "";
-  return `${sample}<h1 class="greet">${hello}${v.user?.name && v.user.name !== "Me" ? ", " + esc(v.user.name.split(" ")[0]) : ""}</h1>
+  return `${sample}<h1 class="greet">${hello}${v.user?.name && v.user.name !== "Me" && !v.user?.prefs?.sample ? ", " + esc(v.user.name.split(" ")[0]) : ""}</h1>
     ${budgetCard()}
     ${nu ? nextUpCard(nu) : `<div class="card empty">Nothing left to plan this week. <button data-act="newweek">Plan next week</button></div>`}
     ${todayRest(nu)}
@@ -319,7 +319,8 @@ function headsUp() {
 function learningLine() {
   const l = S.view.learning || {};
   const src = S.view.weather_source === "live" ? "Live weather: Open-Meteo (CC BY 4.0)." : "Sample weather (offline).";
-  return `<p class="fine center">Learning from ${l.favourites || 0} usual places · ${l.ratings || 0} ratings · ${l.orders || 0} meals had. ${src}</p>`;
+  const n = (k, one, many) => `${k || 0} ${k === 1 ? one : many}`;
+  return `<p class="fine center">Learning from ${n(l.favourites, "usual place", "usual places")} · ${n(l.ratings, "rating", "ratings")} · ${n(l.orders, "meal had", "meals had")}. ${src}</p>`;
 }
 function rateRow(c) {
   const g = c.rating_given;

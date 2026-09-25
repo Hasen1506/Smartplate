@@ -16,7 +16,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from .. import config, db
+from .. import clock, config, db
 
 CITY_COORDS = {
     "Chennai": (13.0827, 80.2707), "Bengaluru": (12.9716, 77.5946), "Mumbai": (19.0760, 72.8777),
@@ -91,7 +91,7 @@ def week(city: str, week_start: str) -> dict:
     start = dt.date.fromisoformat(week_start)
     dates = [(start + dt.timedelta(days=i)).isoformat() for i in range(7)]
     cached = {i: _cached(city, iso) for i, iso in enumerate(dates)}
-    today = dt.date.today()
+    today = clock.today()
     horizon = [i for i in range(7) if 0 <= (start + dt.timedelta(days=i) - today).days <= 15]
     wants_fetch = any(cached[i] is None or cached[i]["stale"] for i in horizon)
     if config.WEATHER_PROVIDER == "live" and wants_fetch and _fetch_live(city):

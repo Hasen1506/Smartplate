@@ -15,7 +15,7 @@ import datetime as dt
 
 import pulp
 
-from .. import config, db
+from .. import clock, config, db
 from ..domain import (allergens, carbon, fatigue, festivals, health, leftovers,
                       models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
 from ..integrations import calendar_sync
@@ -99,8 +99,8 @@ def _rating_pen(user: dict, item: dict) -> float:
 # Context assembled once per plan
 # --------------------------------------------------------------------------- #
 def now() -> dt.datetime:
-    """Clock seam (tests pin it)."""
-    return dt.datetime.now()
+    """Clock seam (tests pin it). Local time in the app's timezone (see clock.py)."""
+    return clock.now()
 
 
 def week_cap(user: dict, plan: dict) -> float:
