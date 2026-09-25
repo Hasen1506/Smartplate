@@ -9,6 +9,8 @@ state_lock = RLock()
 def initialize():
     with state_lock:
         db.init_db()
+        from .integrations import swiggy_connect
+        swiggy_connect.init_schema()
         with db.cursor() as cur:
             empty = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
         if empty:

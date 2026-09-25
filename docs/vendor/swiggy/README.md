@@ -43,6 +43,27 @@ Until OAuth is wired, the app uses a **hand-off**: a link to Swiggy's public web
 search for the planned restaurant + dish (`https://www.swiggy.com/search?query=…`).
 The person orders in Swiggy and confirms in SmartPlate.
 
+## Sign-in + discovery implementation (gate 1)
+
+`smartplate/integrations/swiggy_connect.py` implements the steps above:
+- OAuth metadata discovery.
+- Dynamic client registration (public client; one registration per redirect URI).
+- A PKCE S256 authorization URL with `state`, `scope=mcp:tools` and `resource`.
+- A single-use `state` callback at `/swiggy/callback`.
+- Token exchange.
+- MCP Streamable HTTP: `initialize` (JSON or SSE) → `notifications/initialized` →
+  paginated `tools/list`, carrying `Mcp-Session-Id`.
+
+It stores the negotiated protocol version, server info and every tool's
+`inputSchema`, then stops. **No tool is called.** The token stays server-side and
+is deleted on disconnect. Behind a proxy (Codespaces), the redirect URI comes from
+`X-Forwarded-Proto/Host`, or `SMARTPLATE_PUBLIC_URL` if set. It must match what
+Swiggy allows.
+
+Verified only against a strict fake server (tests/test_followups.py). The first
+real sign-in will show whether dynamic registration is accepted for the Codespaces
+URL or whether the redirect must be allow-listed with Builders Club.
+
 ## What remains before real ordering
 
 1. Complete the user's OAuth authorization and verify the registered callback.

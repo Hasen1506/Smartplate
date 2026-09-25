@@ -91,8 +91,15 @@ async function boot() {
     keys.drop(S.userId); store.del("smartplate.user"); S.userId = null; S.view = null;
     S.users = mergeUsers(await api("/api/users")); S.welcome = true; render(); return;
   }
-  const wanted = typeof location !== "undefined" ? new URLSearchParams(location.search).get("tab") : null;
+  const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new Map();
+  const wanted = params.get("tab");
   if (["today", "week", "places", "more"].includes(wanted)) S.tab = wanted;
+  if (params.get("swiggy") || params.get("swiggy_error")) {             // back from Swiggy sign-in
+    S.tab = "more"; S.more = "connection"; S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
+    if (params.get("swiggy_error")) S.error = `Swiggy: ${params.get("swiggy_error")}`;
+    else toast("Connected to Swiggy");
+    if (typeof history !== "undefined") history.replaceState(null, "", "/");
+  }
   render();
   scheduleAlerts().catch(() => {});
 }
@@ -727,7 +734,20 @@ function readSettings(form) {
 }
 
 function connectionPanel() {
-  return `<h2 class="sec">Swiggy connection</h2><div class="card"><span class="tag">Hand-off mode</span>
+  const sw = S.swiggy;
+  const live = !sw ? `<p class="fine">Checking Swiggy connection…</p>` : sw.connected ? `
+    <div class="card"><span class="tag good">Connected</span>
+      <h3>Signed in to Swiggy${sw.server?.name ? ` · ${esc(sw.server.name)}` : ""}</h3>
+      <p class="sub">Protocol ${esc(sw.protocol_version || "?")} · ${sw.tools.length} tools found (${sw.read_tools} read, ${sw.write_tools} write)${sw.expires ? ` · sign-in expires ${esc(sw.expires.slice(0, 16).replace("T", " "))}` : ""}.
+        SmartPlate has only <b>listed</b> these tools. It has not called any of them, and nothing is carted or ordered.</p>
+      <details><summary>What Swiggy offers this account</summary>${sw.tools.map(t => `<div class="calrow"><b>${esc(t.name)}</b><span class="tag ${t.kind === "write" ? "warn" : ""}">${t.kind}</span><span class="fine">${esc(t.description)}</span></div>`).join("")}</details>
+      <div class="row gap"><button data-act="swiggy-discover">Refresh tools</button><button class="ghost" data-act="swiggy-disconnect">Disconnect</button></div></div>`
+    : `<div class="card"><span class="tag">${sw.expired ? "Sign-in expired" : "Not connected"}</span>
+      <h3>Connect your Swiggy account</h3>
+      <p class="sub">You sign in on Swiggy's own page (phone + OTP). SmartPlate then only lists which tools your account offers. It doesn't read orders, build carts or pay. Swiggy sign-ins last about 5 days.</p>
+      <button class="primary" data-act="swiggy-connect">Connect Swiggy</button>
+      <p class="fine">First real test pending: this sign-in follows Swiggy's published docs but hasn't yet been run against the live service.</p></div>`;
+  return `<h2 class="sec">Swiggy connection</h2>${live}<div class="card"><span class="tag">Hand-off mode</span>
     <h3>Planning works now. You place each order on Swiggy yourself.</h3>
     <p><b>Today:</b> “Order on Swiggy” opens Swiggy's search for that restaurant and dish. You check the real price there and order. Then tap “I had it” so your budget and nutrition stay accurate.</p>
     <p><b>Next:</b> signing in to Swiggy would let SmartPlate build the cart for you (you still confirm and pay in Swiggy). Scheduled orders stay off until Swiggy's terms clearly allow them.</p>
@@ -905,6 +925,9 @@ function wire() {
     cmd: runCommand, reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute, savetpl: saveTemplate,
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
     "start-onboard": async () => startOnboard(), notify: toggleAlerts,
+    "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); location.href = r.authorize_url; },
+    "swiggy-discover": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/discover`, "POST", {}); toast("Tool list refreshed"); render(); },
+    "swiggy-disconnect": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/disconnect`, "POST", {}); toast("Disconnected from Swiggy"); render(); },
     "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); }, "cancel-move": async () => { S.moving = null; render(); },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
@@ -945,6 +968,7 @@ async function goTab(tab, sub = null) {
   if (S.more === "receipts") S.receipts = await api(`/api/receipts/${S.userId}`);
   if (S.more === "orders") S.exec = await api(`/api/plan/${S.planId}/orders`);
   if (S.more === "calendar") S.calendar = await api(`/api/user/${S.userId}/calendar`);
+  if (S.more === "connection") S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
   render();
   if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);
 }

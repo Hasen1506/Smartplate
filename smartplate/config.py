@@ -27,6 +27,12 @@ STABILITY_W = float(os.environ.get("SMARTPLATE_STABILITY", "0.3"))
 WEATHER_PROVIDER = os.environ.get("SMARTPLATE_WEATHER", "live")
 WEATHER_TIMEOUT_S = float(os.environ.get("SMARTPLATE_WEATHER_TIMEOUT", "3"))
 
+# Swiggy sign-in + read-only discovery (docs/vendor/swiggy/README.md).
+SWIGGY_MCP_BASE = os.environ.get("SMARTPLATE_SWIGGY_MCP", "https://mcp.swiggy.com").rstrip("/")
+SWIGGY_TIMEOUT_S = float(os.environ.get("SMARTPLATE_SWIGGY_TIMEOUT", "10"))
+# Public base URL for the OAuth redirect when a proxy hides it (else derived per request).
+PUBLIC_URL = os.environ.get("SMARTPLATE_PUBLIC_URL", "").rstrip("/")
+
 # Default order-execution policy. Swiggy's cautious posture (§7.1) means we
 # default to an editable window rather than silent auto-placement.
 ORDER_EDIT_WINDOW_MIN = int(os.environ.get("SMARTPLATE_EDIT_WINDOW", "30"))

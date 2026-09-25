@@ -23,7 +23,11 @@ Choose **Create codespace** (or resume it). Setup installs the Python dependenci
    allergies, fasts you keep, goal), Coming up (holidays), nutrition insights,
    simulated auto-ordering with a spend limit, cooking and groceries, expenses (CSV),
    community weeks, the Swiggy status and profile switching.
-6. Refresh the page: your profile and plan are restored. After the week ends, the
+6. Tap **Add reminders to my calendar** on Today to get an alarm at each order-by time.
+   Your profile is private to this browser: **More → Profiles** shows its recovery code.
+   To try Swiggy sign-in, use **More → Swiggy connection**. It only lists what your
+   account offers; nothing is ordered.
+7. Refresh the page: your profile and plan are restored. After the week ends, the
    next one is planned automatically.
 
 Want to look around first? On the welcome screen open **Or look around a sample

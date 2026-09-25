@@ -131,3 +131,153 @@ def test_sample_profiles_stay_open(client):
     assert client.get("/api/user/1/plan").status_code == 200
     assert client.post("/api/plan/1/optimize", json={}).status_code == 200
     assert {1, 2, 3} <= {u["id"] for u in client.get("/api/users").get_json()}
+
+
+# --------------------------------------------------------------------------- #
+# Swiggy sign-in + read-only discovery, against a strict fake server
+# --------------------------------------------------------------------------- #
+import base64
+import hashlib
+import json
+import urllib.parse
+
+from smartplate.integrations import swiggy_connect
+
+TOOLS = ["get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu", "update_food_cart",
+         "get_food_cart", "flush_food_cart", "fetch_food_coupons", "apply_food_coupon", "place_food_order",
+         "get_food_orders", "track_food_order", "get_payment_options", "report_error"]
+
+
+class FakeSwiggy:
+    base = "https://mcp.swiggy.com"
+
+    def __init__(self):
+        self.registrations, self.codes, self.calls = 0, {}, []
+        self.token, self.session = "tok-abc", "sess-1"
+
+    def __call__(self, method, url, headers, body):
+        self.calls.append((method, url, dict(headers), body))
+        path = url.split("mcp.swiggy.com", 1)[1].split("?")[0]
+        if path == "/.well-known/oauth-authorization-server":
+            return 200, {}, json.dumps({"issuer": self.base, "authorization_endpoint": f"{self.base}/auth/authorize",
+                                        "token_endpoint": f"{self.base}/auth/token",
+                                        "registration_endpoint": f"{self.base}/auth/register",
+                                        "code_challenge_methods_supported": ["S256"]}).encode()
+        if path == "/auth/register":
+            self.registrations += 1
+            meta = json.loads(body)
+            assert meta["token_endpoint_auth_method"] == "none"
+            return 201, {}, json.dumps({"client_id": "client-1", **meta}).encode()
+        if path == "/auth/token":
+            form = dict(urllib.parse.parse_qsl(body.decode()))
+            challenge = self.codes.pop(form["code"], None)
+            if not challenge:
+                return 400, {}, b'{"error":"invalid_grant"}'
+            got = base64.urlsafe_b64encode(hashlib.sha256(form["code_verifier"].encode()).digest()).rstrip(b"=").decode()
+            if got != challenge or form["client_id"] != "client-1":
+                return 400, {}, b'{"error":"invalid_grant"}'
+            return 200, {}, json.dumps({"access_token": self.token, "token_type": "Bearer", "expires_in": 432000}).encode()
+        if path == "/food":
+            if headers.get("Authorization") != f"Bearer {self.token}":
+                return 401, {}, b""
+            msg = json.loads(body)
+            if msg["method"] == "initialize":
+                reply = {"jsonrpc": "2.0", "id": msg["id"], "result": {
+                    "protocolVersion": "2025-03-26", "serverInfo": {"name": "swiggy-food", "version": "1.0"},
+                    "capabilities": {"tools": {}}}}
+                return 200, {"content-type": "text/event-stream", "mcp-session-id": self.session}, \
+                    f"event: message\ndata: {json.dumps(reply)}\n\n".encode()
+            assert headers.get("Mcp-Session-Id") == self.session
+            if msg["method"] == "notifications/initialized":
+                return 202, {}, b""
+            if msg["method"] == "tools/list":
+                page2 = (msg.get("params") or {}).get("cursor") == "p2"
+                names = TOOLS[7:] if page2 else TOOLS[:7]
+                tools = [{"name": n, "description": f"{n} tool", "inputSchema": {"type": "object"}} for n in names]
+                for t in tools:                     # the server's hint beats the name heuristic
+                    if t["name"] == "fetch_food_coupons":
+                        t["annotations"] = {"readOnlyHint": False}
+                result = {"tools": tools} if page2 else {"tools": tools, "nextCursor": "p2"}
+                return 200, {"content-type": "application/json"}, json.dumps({"jsonrpc": "2.0", "id": msg["id"],
+                                                                              "result": result}).encode()
+        return 404, {}, b""
+
+    def approve(self, authorize_url):
+        """What Swiggy's sign-in page does: issue a code bound to the PKCE challenge."""
+        q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(authorize_url).query))
+        assert q["code_challenge_method"] == "S256" and q["scope"] == "mcp:tools"
+        self.codes["code-1"] = q["code_challenge"]
+        return q
+
+
+@pytest.fixture
+def swiggy(monkeypatch):
+    fake = FakeSwiggy()
+    monkeypatch.setattr(swiggy_connect, "_http", fake)
+    return fake
+
+
+def _connect(client, swiggy, uid=1):
+    url = client.post(f"/api/user/{uid}/swiggy/connect", json={},
+                      headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example"}).get_json()["authorize_url"]
+    q = swiggy.approve(url)
+    assert q["redirect_uri"] == "https://app.example/swiggy/callback"
+    return client.get(f"/swiggy/callback?state={q['state']}&code=code-1"), q
+
+
+def test_swiggy_sign_in_and_discovery_end_to_end(client, swiggy):
+    r, q = _connect(client, swiggy)
+    assert r.status_code == 302 and r.headers["Location"].endswith("swiggy=connected")
+    s = client.get("/api/user/1/swiggy").get_json()
+    assert s["connected"] and s["protocol_version"] == "2025-03-26" and s["server"]["name"] == "swiggy-food"
+    assert [t["name"] for t in s["tools"]] == TOOLS                                 # both pages
+    kinds = {t["name"]: t["kind"] for t in s["tools"]}
+    assert kinds["get_addresses"] == "read" and kinds["search_restaurants"] == "read"
+    assert kinds["place_food_order"] == "write" and kinds["update_food_cart"] == "write"
+    assert kinds["fetch_food_coupons"] == "write"                                   # readOnlyHint=False wins
+    assert swiggy.token not in json.dumps(s)                                        # token never exposed
+    called = [json.loads(b)["method"] for m, u, h, b in swiggy.calls if u.endswith("/food")]
+    assert called == ["initialize", "notifications/initialized", "tools/list", "tools/list"]  # nothing else
+
+
+def test_swiggy_state_is_single_use_and_checked(client, swiggy):
+    r, q = _connect(client, swiggy)
+    replay = client.get(f"/swiggy/callback?state={q['state']}&code=code-1")
+    assert "swiggy_error" in replay.headers["Location"]
+    forged = client.get("/swiggy/callback?state=forged&code=code-1")
+    assert "swiggy_error" in forged.headers["Location"]
+    denied = client.get("/swiggy/callback?error=access_denied&error_description=User+cancelled")
+    assert "User%20cancelled" in denied.headers["Location"]
+
+
+def test_swiggy_registration_reused_and_pkce_enforced(client, swiggy):
+    _connect(client, swiggy)
+    url = client.post("/api/user/1/swiggy/connect", json={},
+                      headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example"}).get_json()["authorize_url"]
+    assert swiggy.registrations == 1                                                 # one client per redirect URI
+    q = swiggy.approve(url)
+    swiggy.codes["code-1"] = "not-the-challenge"                                    # tampered verifier/challenge
+    bad = client.get(f"/swiggy/callback?state={q['state']}&code=code-1")
+    assert "swiggy_error" in bad.headers["Location"]
+
+
+def test_swiggy_requires_https_and_handles_expiry_and_disconnect(client, swiggy, monkeypatch):
+    r = client.post("/api/user/1/swiggy/connect", json={}, headers={"X-Forwarded-Host": "evil.example"})
+    assert r.status_code == 502 and "HTTPS" in r.get_json()["error"]
+    _connect(client, swiggy)
+    swiggy.token = "rotated"                                                        # server no longer accepts ours
+    r = client.post("/api/user/1/swiggy/discover", json={})
+    assert r.status_code == 502 and "expired" in r.get_json()["error"]
+    from smartplate import clock
+    later = clock.now() + dt.timedelta(days=6)
+    monkeypatch.setattr(clock, "now", lambda: later)
+    assert client.get("/api/user/1/swiggy").get_json()["expired"] is True
+    assert client.post("/api/user/1/swiggy/disconnect", json={}).get_json() == {"connected": False}
+    assert client.get("/api/user/1/swiggy").get_json() == {"connected": False}
+
+
+def test_swiggy_connection_is_private_to_the_profile(client, swiggy):
+    uid, key, _ = _private(client)
+    assert client.get(f"/api/user/{uid}/swiggy").status_code == 401
+    assert client.post(f"/api/user/{uid}/swiggy/connect", json={}).status_code == 401
+    assert client.get(f"/api/user/{uid}/swiggy", headers={"X-SmartPlate-Key": key}).get_json() == {"connected": False}
