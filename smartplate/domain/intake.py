@@ -12,7 +12,7 @@ to widen coverage; the interface stays the same.
 import datetime as dt
 import re
 
-from .. import db
+from .. import clock, db
 
 MACROS = ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")
 
@@ -113,7 +113,7 @@ def parse(text: str) -> dict:
 # --------------------------------------------------------------------------- #
 def record(user_id: int, nutrition: dict, *, iso_date: str | None = None, meal: str = "",
            source: str = "manual", plan_id: int | None = None, note: str = "") -> int:
-    iso_date = iso_date or dt.date.today().isoformat()
+    iso_date = iso_date or clock.today().isoformat()
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO intake_log(user_id, plan_id, iso_date, meal, source, "
@@ -126,7 +126,7 @@ def record(user_id: int, nutrition: dict, *, iso_date: str | None = None, meal: 
 
 
 def recent(user_id: int, days: int = 30) -> list[dict]:
-    since = (dt.date.today() - dt.timedelta(days=max(1, days) - 1)).isoformat()
+    since = (clock.today() - dt.timedelta(days=max(1, days) - 1)).isoformat()
     with db.cursor() as cur:
         rows = cur.execute(
             "SELECT * FROM intake_log WHERE user_id=? AND iso_date>=? ORDER BY iso_date, id",

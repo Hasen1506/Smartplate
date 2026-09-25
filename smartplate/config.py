@@ -15,6 +15,18 @@ AGENT_BRAIN = os.environ.get("SMARTPLATE_BRAIN", "deterministic")
 # Swiggy MCP provider — "simulated" (default) or "live" (requires real access).
 SWIGGY_PROVIDER = os.environ.get("SMARTPLATE_SWIGGY", "simulated")
 
+# Solver limits: relative optimality gap and a hard time cap per weekly solve.
+SOLVER_GAP = float(os.environ.get("SMARTPLATE_SOLVER_GAP", "0.001"))
+SOLVER_TIME_LIMIT_S = float(os.environ.get("SMARTPLATE_SOLVER_TIME_LIMIT", "10"))
+
+# Plan stability: bonus for keeping a meal's current pick on a re-plan (0 disables).
+STABILITY_W = float(os.environ.get("SMARTPLATE_STABILITY", "0.3"))
+
+# Weather — "live" (Open-Meteo forecast, cached; falls back to the sample feed when
+# offline) or "simulated" (sample feed only; used by the test-suite for determinism).
+WEATHER_PROVIDER = os.environ.get("SMARTPLATE_WEATHER", "live")
+WEATHER_TIMEOUT_S = float(os.environ.get("SMARTPLATE_WEATHER_TIMEOUT", "3"))
+
 # Default order-execution policy. Swiggy's cautious posture (§7.1) means we
 # default to an editable window rather than silent auto-placement.
 ORDER_EDIT_WINDOW_MIN = int(os.environ.get("SMARTPLATE_EDIT_WINDOW", "30"))

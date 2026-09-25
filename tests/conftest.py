@@ -13,6 +13,8 @@ def seeded(monkeypatch):
     # config reads the env var at import time; patch the already-imported value too.
     from smartplate import config, db, seed
     monkeypatch.setattr(config, "DB_PATH", path)
+    # deterministic plans: never let a live forecast change what the solver picks
+    monkeypatch.setattr(config, "WEATHER_PROVIDER", "simulated")
     db.init_db()
     info = seed.seed_all()
     yield info

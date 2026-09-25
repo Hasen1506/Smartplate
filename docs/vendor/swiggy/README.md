@@ -27,6 +27,22 @@ The recipe describes a ₹1,000 Builders Club cart cap, a single-restaurant cart
 
 [Production guidance](https://mcp.swiggy.com/builders/docs/build/ship-to-production/) requires user-visible cart confirmation and check-before-retry handling for non-idempotent placement, and describes production onboarding. The reviewed sources do not explicitly permit SmartPlate to place an entire scheduled week unattended. Do not enable unattended ordering based on an inference from ordinary tool availability.
 
+## Tool inventory and the history limit (update, 25 September 2026)
+
+Public references list 14 Food tools: `get_addresses`, `search_restaurants`,
+`get_restaurant_menu` (150-item limit per call), `search_menu`, `update_food_cart`,
+`get_food_cart`, `flush_food_cart`, `fetch_food_coupons`, `apply_food_coupon`,
+`place_food_order`, `get_food_orders`, `track_food_order`, `get_payment_options`,
+`report_error`. `get_food_orders` returns only about 5 recent orders as prose, with no
+pagination ([Swiggy/swiggy-mcp-server-manifest#74](https://github.com/Swiggy/swiggy-mcp-server-manifest/issues/74)).
+So "usual places" cannot be imported from Swiggy history. SmartPlate collects them at
+onboarding and learns from ratings instead. This inventory comes from public docs and
+community projects. Authenticated `tools/list` is still the source of truth.
+
+Until OAuth is wired, the app uses a **hand-off**: a link to Swiggy's public web
+search for the planned restaurant + dish (`https://www.swiggy.com/search?query=…`).
+The person orders in Swiggy and confirms in SmartPlate.
+
 ## What remains before real ordering
 
 1. Complete the user's OAuth authorization and verify the registered callback.

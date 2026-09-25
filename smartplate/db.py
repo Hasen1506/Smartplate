@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS users (
     nutrition_targets TEXT NOT NULL DEFAULT '{}',  -- kcal/protein etc (§5.2.6)
     health_targets TEXT NOT NULL DEFAULT '{}',     -- protein/veg/fasting (§5.3.15)
     carbon_pref REAL NOT NULL DEFAULT 0.0,         -- 0..1 weight (§5.3.16)
-    household_id INTEGER                            -- group mode (§5.2.7)
+    household_id INTEGER,                           -- group mode (§5.2.7)
+    observances TEXT NOT NULL DEFAULT '[]',        -- fasts the user keeps (opt-in, never assumed)
+    prefs TEXT NOT NULL DEFAULT '{}'               -- meals planned, daily cap, goal, body, area
 );
 
 CREATE TABLE IF NOT EXISTS households (
@@ -80,8 +82,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     day INTEGER NOT NULL,                          -- 0=Mon .. 6=Sun
     meal TEXT NOT NULL,                            -- breakfast | lunch | dinner
     scheduled_ts TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',         -- active|snoozed|skipped|cooked|ordered (§5.1.5)
-    note TEXT NOT NULL DEFAULT ''
+    status TEXT NOT NULL DEFAULT 'active',         -- active|snoozed|skipped|cooked|ordered|confirmed (§5.1.5)
+    note TEXT NOT NULL DEFAULT '',
+    pinned TEXT                                    -- the user's own pick: {"kind","item_id"|"recipe_key"}
 );
 
 CREATE TABLE IF NOT EXISTS decisions (
@@ -157,8 +160,10 @@ CREATE TABLE IF NOT EXISTS festivals (           -- §5.2.9
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     iso_date TEXT NOT NULL,
-    effect TEXT NOT NULL DEFAULT 'feast',         -- feast | fast | suspend
-    note TEXT NOT NULL DEFAULT ''
+    effect TEXT NOT NULL DEFAULT 'feast',         -- feast | fast | suspend | holiday
+    note TEXT NOT NULL DEFAULT '',
+    observance TEXT NOT NULL DEFAULT '',           -- a fast applies only to users who keep it
+    approx INTEGER NOT NULL DEFAULT 0              -- lunar/sighting date: may shift by a day
 );
 
 CREATE TABLE IF NOT EXISTS community_templates ( -- §5.3.13
@@ -204,7 +209,45 @@ CREATE TABLE IF NOT EXISTS intake_log (          -- "I made/ate X" → rolling n
     note TEXT NOT NULL DEFAULT '',
     created_ts TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS favourites (          -- "my usual places": the only list the user browses
+    user_id INTEGER NOT NULL,
+    restaurant_id INTEGER NOT NULL,
+    PRIMARY KEY (user_id, restaurant_id)
+);
+
+CREATE TABLE IF NOT EXISTS ratings (             -- one-tap 👍/👎 after a meal → taste + history
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    session_id INTEGER,
+    item_id INTEGER,
+    restaurant_id INTEGER,
+    recipe_key TEXT,
+    score INTEGER NOT NULL,                        -- +1 liked | -1 not again
+    iso_date TEXT NOT NULL,
+    created_ts TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS weather_cache (       -- live forecast, cached per city/date
+    city TEXT NOT NULL,
+    iso_date TEXT NOT NULL,
+    condition TEXT NOT NULL,
+    temp_c REAL NOT NULL,
+    rain_prob REAL NOT NULL DEFAULT 0,
+    fetched_ts TEXT NOT NULL,
+    PRIMARY KEY (city, iso_date)
+);
 """
+
+# Columns added after the first trial shipped. CREATE TABLE IF NOT EXISTS does not
+# alter an existing table, so a saved Codespace database is upgraded in place.
+MIGRATIONS = [
+    ("users", "observances", "TEXT NOT NULL DEFAULT '[]'"),
+    ("users", "prefs", "TEXT NOT NULL DEFAULT '{}'"),
+    ("sessions", "pinned", "TEXT"),
+    ("festivals", "observance", "TEXT NOT NULL DEFAULT ''"),
+    ("festivals", "approx", "INTEGER NOT NULL DEFAULT 0"),
+]
 
 
 def connect() -> sqlite3.Connection:
@@ -227,6 +270,10 @@ def cursor():
 def init_db() -> None:
     with cursor() as cur:
         cur.executescript(SCHEMA)
+        for table, column, decl in MIGRATIONS:
+            have = {r["name"] for r in cur.execute(f"PRAGMA table_info({table})")}
+            if column not in have:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 # --- small json helpers so callers don't sprinkle json.loads everywhere ---

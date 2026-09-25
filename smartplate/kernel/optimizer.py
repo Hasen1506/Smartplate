@@ -11,15 +11,31 @@ Objective per candidate (minimised):
     + w_carbon·carbon·(0.5+pref)  + w_surge·surge_premium  + weather_bias + festival_bias
 Budget is a HARD constraint; 'skip' is the always-feasible relief valve.
 """
+import datetime as dt
+
 import pulp
 
-from .. import config, db
+from .. import clock, config, db
 from ..domain import (allergens, carbon, fatigue, festivals, health, leftovers,
-                      models, nutrition, reverse_mode, sentiment, surge, weather)
+                      models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
 from ..integrations import calendar_sync
 from . import explainability, scheduler
 
 MAX_DELIVERY_CANDIDATES = 6
+# With usual places set, each meal also sees this many "something new" options; the
+# week-level count of new picks is capped by the user's variety level.
+DISCOVERY_PER_SESSION = 2
+DISCOVERY_PEN = 0.3          # a new place must beat a usual one by this much to win
+HOLIDAY_DINNER_SURGE = 1.1   # holidays: everyone orders dinner at once
+
+
+def _choice_key(c: dict) -> tuple:
+    kind = c.get("kind") or c.get("chosen_kind")
+    if kind == "delivery":
+        return ("delivery", c.get("item_id"))
+    if kind == "cook":
+        return ("cook", c.get("recipe_key"))
+    return (kind,)
 # People cook a few nights, not every meal (§1.3 "cook 3 nights and order 2").
 # These are DEFAULT priors, not fixed truths (docs/optimization-and-ux.md §2): a
 # global "everyone cooks ≤6" and "cooking always costs 0.35" are exactly the fake
@@ -82,10 +98,28 @@ def _rating_pen(user: dict, item: dict) -> float:
 # --------------------------------------------------------------------------- #
 # Context assembled once per plan
 # --------------------------------------------------------------------------- #
+def now() -> dt.datetime:
+    """Clock seam (tests pin it). Local time in the app's timezone (see clock.py)."""
+    return clock.now()
+
+
+def week_cap(user: dict, plan: dict) -> float:
+    """The weekly budget, prorated when a plan starts part-way through its week —
+    a plan made on Thursday covers 4 days, so it gets 4/7 of the weekly budget."""
+    created = dt.date.fromisoformat((plan.get("created_ts") or plan["week_start"])[:10])
+    start = dt.date.fromisoformat(plan["week_start"])
+    covered = 7 - min(6, max(0, (created - start).days))
+    return round(user["weekly_budget"] * covered / 7, 2)
+
+
 def build_context(user: dict, plan: dict) -> dict:
+    sig = taste.signals(user["id"])
     return {
         "menu": models.menu_for_city(user["city"]),
         "festivals": festivals.for_week(plan["week_start"]),
+        "festivals_all": festivals.for_week_all(plan["week_start"]),
+        "weather": weather.week(user["city"], plan["week_start"]),
+        "taste": sig,
         "leftovers": leftovers.for_user(user["id"]),
         "calendar": calendar_sync.events_for(user["id"]),
         "weights": config.MODE_WEIGHTS.get(plan["mode"], config.MODE_WEIGHTS["balanced"]),
@@ -99,6 +133,10 @@ def build_context(user: dict, plan: dict) -> dict:
     }
 
 
+def _wx(ctx: dict, day) -> dict:
+    return ctx["weather"].get(day) or {"condition": "clear", "temp_c": 30.0}
+
+
 def _taste(user: dict, item: dict) -> tuple[float, dict]:
     senti = sentiment.aggregate(item.get("reviews", []))
     base = item.get("item_rating", 4.0) / 5.0
@@ -110,13 +148,16 @@ def _taste(user: dict, item: dict) -> tuple[float, dict]:
 
 def _delivery_candidate(user, plan, session, item, ctx):
     day, meal = session["day"], session["meal"]
-    cond = weather.for_day(user["city"], day)["condition"]
+    cond = _wx(ctx, day)["condition"]
     base_cost = item["price"] + item["delivery_fee"]
 
     # Surge + optional time-shift (calendar-aware) -------------------------- #
     peak_mult = surge.predict(user["city"], day, meal, cond)
+    fest = ctx["festivals"].get(day)
+    if fest and fest["effect"] in ("holiday", "feast") and meal == "dinner":
+        peak_mult = round(peak_mult * HOLIDAY_DINNER_SURGE, 3)
     conflict = calendar_sync.conflicts_with_peak(ctx["calendar"], day, meal)
-    shift = surge.time_shift_option(user["city"], day, meal, cond, base_cost)
+    shift = surge.time_shift_option(user["city"], day, meal, cond, base_cost, peak=peak_mult)
     time_shift = None
     surge_mult = peak_mult
     if conflict and shift:                         # meeting at peak → move it (§5.1.2)
@@ -127,24 +168,31 @@ def _delivery_candidate(user, plan, session, item, ctx):
         surge_mult = shift["offpeak_mult"]
     cost = round(base_cost * surge_mult, 2)
 
-    taste, senti = _taste(user, item)
+    taste_score, senti = _taste(user, item)
+    if item["id"] in ctx["taste"]["liked"]:
+        taste_score = round(taste_score + taste.LIKE_BONUS, 4)
+    discovery = bool(ctx["taste"]["favourites"]) and item["restaurant_id"] not in ctx["taste"]["favourites"]
     nutri = nutrition.penalty(user, meal, item, tol=ctx["nutri_tol"])
     hp = health.protein_penalty(user, item)
     cpen = carbon.penalty(item)
     # usual-first (§5.2): a familiar pick is the "usual"; a novel one pays a small soft
     # premium when USUAL_FIRST is on, so the planner keeps the user's usuals unless a
     # swap buys goal-fit. `is_usual` drives the kept/swapped diagnostic (always computed).
-    novel = fatigue.novelty(item)
+    history = ctx["taste"]["history"] or None
+    novel = fatigue.novelty(item, history)
     return {
         "kind": "delivery",
         "restaurant_id": item["restaurant_id"], "restaurant_name": item["restaurant_name"],
         "item_id": item["id"], "item_name": item["name"], "rating": item["restaurant_rating"],
         "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3),
         "time_shift": time_shift, "flaky": item.get("flaky", 0), "rating_pen": _rating_pen(user, item),
-        "is_usual": not fatigue.is_novel(item), "familiarity": round(1.0 - novel, 4),
-        "usual_pen": round(config.USUAL_FIRST_W * novel, 4) if config.USUAL_FIRST == "on" else 0.0,
-        "novelty_bonus": round(config.VARIETY_NUDGE_W * fatigue.novelty(item) * ctx.get("variety_frac", 0.0), 4),
-        "taste": taste, "sentiment": senti, "nutri": nutri, "health": hp, "carbon_pen": cpen,
+        "is_usual": (not discovery) if ctx["taste"]["favourites"] else not fatigue.is_novel(item, history),
+        "familiarity": round(1.0 - novel, 4), "discovery": discovery,
+        "eta_min": item.get("eta_min", 35),
+        "usual_pen": (DISCOVERY_PEN if discovery else 0.0)
+                     + (round(config.USUAL_FIRST_W * novel, 4) if config.USUAL_FIRST == "on" else 0.0),
+        "novelty_bonus": round(config.VARIETY_NUDGE_W * novel * ctx.get("variety_frac", 0.0), 4),
+        "taste": taste_score, "sentiment": senti, "nutri": nutri, "health": hp, "carbon_pen": cpen,
         "carbon_kg": carbon.estimate(item), "weather_cond": cond,
         "weather_bias": weather.taste_bias(cond, item),
         "festival_bias": festivals.taste_bias(ctx["festivals"].get(day), item),
@@ -153,8 +201,8 @@ def _delivery_candidate(user, plan, session, item, ctx):
     }
 
 
-def _cook_candidate(user, session, ctx):
-    r = reverse_mode.cook_candidate(user, session["meal"])
+def _cook_candidate(user, session, ctx, recipe=None):
+    r = recipe or reverse_mode.cook_candidate(user, session["meal"])
     if not r:
         return None
     nutri = nutrition.penalty(user, session["meal"], r, tol=ctx["nutri_tol"])
@@ -179,10 +227,10 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     travel = calendar_sync.day_is_travel(ctx["calendar"], day)
     if travel:
         return [_skip(forced=True, reason=f"Out of town ({travel['title']}) — day suspended.")]
-    fest = ctx["festivals"].get(day)
-    if festivals.suspends_session(fest, meal):
-        eff = "fasting" if fest["effect"] == "fast" else "holiday"
-        return [_skip(forced=True, reason=f"{fest['name']} ({eff}) — session suspended.")]
+    for fest in ctx["festivals_all"].get(day, []):
+        if festivals.suspends_session(fest, meal, user):
+            eff = "your fast" if fest["effect"] == "fast" else "holiday"
+            return [_skip(forced=True, reason=f"{fest['name']} ({eff}) — no {meal} planned.")]
 
     # --- leftover forces a zero-cost cook (respect the fridge) ----------- #
     lo = leftovers.covers(ctx["leftovers"], day, meal)
@@ -203,12 +251,18 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     if not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
         safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
+        safe = [it for it in safe if it["id"] not in ctx["taste"]["disliked"]]   # "not again" is a lock
         # keep the most promising few (cheap-but-decent) to bound the MILP
         safe.sort(key=lambda it: (it["price"] + it["delivery_fee"]) - 40 * (it["item_rating"] / 5))
-        for it in safe[: MAX_DELIVERY_CANDIDATES * 2]:
-            cands.append(_delivery_candidate(user, plan, session, it, ctx))
-        cands.sort(key=lambda c: c["cost"] - 60 * c["taste"])
-        cands = cands[:MAX_DELIVERY_CANDIDATES]
+        favs = ctx["taste"]["favourites"]
+        usual = [it for it in safe if not favs or it["restaurant_id"] in favs]
+        fresh = [it for it in safe if favs and it["restaurant_id"] not in favs]
+
+        def best(pool, n):
+            picked = [_delivery_candidate(user, plan, session, it, ctx) for it in pool[: n * 2]]
+            picked.sort(key=lambda c: c["cost"] - 60 * c["taste"])
+            return picked[:n]
+        cands = best(usual, MAX_DELIVERY_CANDIDATES) + best(fresh, DISCOVERY_PER_SESSION)
 
     cook = _cook_candidate(user, session, ctx)
     if cook:
@@ -261,22 +315,71 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
 SKIP_PENALTY = {"comfort": 5.0, "balanced": 3.0, "survival": 1.6}
 
 
-def optimize(plan_id: int) -> dict:
+def _is_past(session: dict, at: dt.datetime | None = None) -> bool:
+    return scheduler.is_past(session, at or now())
+
+
+def pinned_candidate(user, plan, session, ctx) -> dict | None:
+    """The user's own pick for a session, rebuilt at today's prices — or None when
+    the pick is no longer possible (dish gone, or now unsafe for a changed profile)."""
+    pin = db.jl(session.get("pinned"), None) if session.get("pinned") else None
+    if not pin:
+        return None
+    if pin.get("kind") == "delivery":
+        item = next((it for it in ctx["menu"] if it["id"] == pin.get("item_id")), None)
+        if not item or allergens.violates(user, item):
+            return None
+        cand = _delivery_candidate(user, plan, session, item, ctx)
+    elif pin.get("kind") == "cook":
+        r = reverse_mode.recipe(pin.get("recipe_key") or "")
+        if not r or (user.get("diet") in ("veg", "vegan") and not r["veg"]):
+            return None
+        cand = _cook_candidate(user, session, ctx, recipe=r)
+    else:
+        return None
+    cand["pinned"] = True
+    cand["usual_pen"] = 0.0
+    return cand
+
+
+def optimize(plan_id: int, *, stable: bool = True) -> dict:
+    """Re-plan the open meals. `stable=False` (a mode switch) lets every unpinned meal
+    move freely; otherwise current picks are kept unless changing them buys something."""
     plan = models.get_plan(plan_id)
     user = models.get_user(plan["user_id"])
     ctx = build_context(user, plan)
     w = ctx["weights"]
+    at = now()
     sessions = [s for s in models.sessions_for_plan(plan_id)]
-    active = [s for s in sessions if s["status"] == "active"]
+    open_sessions = [s for s in sessions if s["status"] == "active" and not _is_past(s, at)]
 
-    ref_cost = max(1.0, user["weekly_budget"] / max(1, len(active)))
+    # The user's own picks are fixed spend, not choices for the solver.
+    pinned = {}
+    for s in open_sessions:
+        cand = pinned_candidate(user, plan, s, ctx)
+        if cand:
+            pinned[s["id"]] = cand
+        elif s.get("pinned"):
+            with db.cursor() as cur:                       # stale pin: drop it, replan the slot
+                cur.execute("UPDATE sessions SET pinned=NULL WHERE id=?", (s["id"],))
+    active = [s for s in open_sessions if s["id"] not in pinned]
+
+    # Stability: one tap should change what the user touched, not reshuffle the week.
+    # Each meal's current choice gets a small bonus, so it only changes when that buys
+    # real budget/nutrition room (or a hard rule forces it).
+    previous = ({d["session_id"]: _choice_key(d) for d in models.decisions_for_plan(plan_id)}
+                if stable else {})
+    cap = week_cap(user, plan)
+    ref_cost = max(1.0, cap / max(1, len(open_sessions)))
     skip_penalty = SKIP_PENALTY.get(plan["mode"], 3.0)
 
     prob = pulp.LpProblem("smartplate_week", pulp.LpMinimize)
     x = {}                     # (session_id, idx) -> binary var
     cand_map = {}              # session_id -> [candidates]
-    obj_terms, budget_terms, cook_vars = [], [], []
+    obj_terms, budget_terms, cook_vars, discovery_vars = [], [], [], []
+    day_terms = {}             # day -> [cost·var] for the optional daily cap
     item_vars = {}             # item_id -> [vars] for the variety cap
+    item_day_vars = {}         # (item_id, day) -> [vars]: never the same dish twice in a day
 
     for s in active:
         cands = build_candidates(user, plan, s, ctx)
@@ -286,12 +389,17 @@ def optimize(plan_id: int) -> dict:
             v = pulp.LpVariable(f"x_{s['id']}_{i}", cat="Binary")
             x[(s["id"], i)] = v
             choice_vars.append(v)
-            obj_terms.append(_objective(c, w, ref_cost, user["carbon_pref"], skip_penalty) * v)
+            keep = config.STABILITY_W if previous.get(s["id"]) == _choice_key(c) else 0.0
+            obj_terms.append((_objective(c, w, ref_cost, user["carbon_pref"], skip_penalty) - keep) * v)
             budget_terms.append(c["cost"] * v)
+            day_terms.setdefault(s["day"], []).append(c["cost"] * v)
             if c["kind"] == "cook" and c.get("recipe_key"):   # countable cook (not free leftover)
                 cook_vars.append(v)
             if c["kind"] == "delivery":
                 item_vars.setdefault(c["item_id"], []).append(v)
+                item_day_vars.setdefault((c["item_id"], s["day"]), []).append(v)
+                if c.get("discovery"):
+                    discovery_vars.append(v)
         prob += pulp.lpSum(choice_vars) == 1            # exactly one option per session
 
     # Protein evenness (day-level): penalise backloading protein into one meal.
@@ -314,26 +422,59 @@ def optimize(plan_id: int) -> dict:
                 obj_terms.append(config.PROTEIN_EVEN_W * short / max(tgt, 1.0))
 
     prob += pulp.lpSum(obj_terms)
-    committed = [d for d in models.decisions_for_plan(plan_id) if d['session_status'] == 'ordered']
-    spent = sum(d['cost'] for d in committed)
-    prob += pulp.lpSum(budget_terms) <= max(0, user["weekly_budget"] - spent)
+    committed = committed_spend(plan_id)
+    fixed_by_day = {}
+    for sid, c in pinned.items():
+        day = next(s["day"] for s in sessions if s["id"] == sid)
+        fixed_by_day[day] = fixed_by_day.get(day, 0.0) + c["cost"]
+    for day, amount in committed["by_day"].items():
+        fixed_by_day[day] = fixed_by_day.get(day, 0.0) + amount
+    fixed = committed["total"] + sum(c["cost"] for c in pinned.values())
+    prob += pulp.lpSum(budget_terms) <= max(0, cap - fixed)
+    dcap = profile.daily_cap(user)
+    if dcap:
+        for day, terms in day_terms.items():
+            prob += pulp.lpSum(terms) <= max(0, dcap - fixed_by_day.get(day, 0.0))
     if cook_vars:
-        prob += pulp.lpSum(cook_vars) <= _cook_cap(user)        # the user's cook rhythm, not a fixed 6
+        pinned_cooks = sum(1 for c in pinned.values() if c["kind"] == "cook")
+        prob += pulp.lpSum(cook_vars) <= max(0, _cook_cap(user) - pinned_cooks)
+    if discovery_vars:
+        # "mostly my usual places": new places get at most the variety level's share
+        n_new = max(1, fatigue.target_novel_count(fatigue.variety_pref(user), len(active)))
+        prob += pulp.lpSum(discovery_vars) <= n_new
     for vlist in item_vars.values():                            # variety: cap repeats per dish
         if len(vlist) > MAX_ITEM_REPEAT:
             prob += pulp.lpSum(vlist) <= MAX_ITEM_REPEAT
-    prob.solve(pulp.PULP_CBC_CMD(msg=False))
+    for (item_id, day), vlist in item_day_vars.items():
+        pinned_same = sum(1 for sid, c in pinned.items() if c.get("item_id") == item_id
+                          and next(s["day"] for s in sessions if s["id"] == sid) == day)
+        if len(vlist) + pinned_same > 1:
+            prob += pulp.lpSum(vlist) <= max(0, 1 - pinned_same)
+    # Proving exact optimality on a tight week (few safe dishes, small budget) can take
+    # CBC minutes; a 0.1% objective gap returns the same plan in well under a second.
+    prob.solve(pulp.PULP_CBC_CMD(msg=False, gapRel=config.SOLVER_GAP, timeLimit=config.SOLVER_TIME_LIMIT_S))
 
-    decisions = _persist_decisions(plan, user, sessions, active, cand_map, x, ctx)
+    decisions = _persist_decisions(plan, user, sessions, active, cand_map, x, ctx, pinned, at)
     return {
         "status": pulp.LpStatus[prob.status],
         "plan_id": plan_id,
         "decisions": decisions,
-        "diagnostics": _diagnostics(user, decisions),
+        "diagnostics": _diagnostics(user, decisions, cap),
     }
 
 
-def _diagnostics(user: dict, decisions: list[dict]) -> dict:
+def committed_spend(plan_id: int) -> dict:
+    """Money already spent in this plan week: simulated checkout orders plus meals
+    the user confirmed they had (ordered themselves, e.g. through the Swiggy hand-off)."""
+    total, by_day = 0.0, {}
+    for d in models.decisions_for_plan(plan_id):
+        if d["session_status"] in ("ordered", "confirmed") and d["chosen_kind"] in ("delivery", "cook"):
+            total += d["cost"]
+            by_day[d["day"]] = by_day.get(d["day"], 0.0) + d["cost"]
+    return {"total": round(total, 2), "by_day": by_day}
+
+
+def _diagnostics(user: dict, decisions: list[dict], cap: float | None = None) -> dict:
     """Feasibility + shortfall surface (docs §1): what bound, and by how much.
 
     Reports spend vs the budget ceiling and the per-day nutrition gap, plus the
@@ -341,7 +482,7 @@ def _diagnostics(user: dict, decisions: list[dict]) -> dict:
     "budget is the wall here")."""
     spend_rows = [d for d in decisions if d.get("chosen_kind") in ("delivery", "cook")]
     spend = round(sum(d.get("cost", 0) for d in spend_rows), 2)
-    budget = user["weekly_budget"]
+    budget = cap if cap is not None else user["weekly_budget"]
     planned_days = len({d["day"] for d in spend_rows}) or 1
     sf = nutrition.shortfall([d.get("nutrition") or {} for d in spend_rows],
                              nutrition.targets_for(user), days=planned_days)
@@ -364,20 +505,27 @@ def _diagnostics(user: dict, decisions: list[dict]) -> dict:
             "usual_first": usual_first}
 
 
-def _persist_decisions(plan, user, sessions, active, cand_map, x, ctx):
+def _persist_decisions(plan, user, sessions, active, cand_map, x, ctx, pinned=None, at=None):
     decisions = []
-    # Rebuild decisions for every session EXCEPT those already 'ordered' (a real
-    # placed order we must not lose). Active sessions get re-planned; snooze/skip/
-    # cook are user overrides that replace any stale plan decision.
-    with db.cursor() as cur:
-        cur.execute(
-            "DELETE FROM decisions WHERE plan_id=? AND session_id IN "
-            "(SELECT id FROM sessions WHERE plan_id=? AND status!='ordered')",
-            (plan["id"], plan["id"]))
+    pinned = pinned or {}
+    # Rebuild decisions for every session EXCEPT those already spent ('ordered' by
+    # checkout, 'confirmed' by the user) and meals whose time has passed — history is
+    # never rewritten. Open sessions get re-planned; snooze/skip/cook are user
+    # overrides that replace any stale plan decision.
+    frozen = {s["id"] for s in sessions
+              if s["status"] in ("ordered", "confirmed") or (s["status"] == "active" and _is_past(s, at))}
+    replan = [s["id"] for s in sessions if s["id"] not in frozen]
+    if replan:
+        with db.cursor() as cur:
+            cur.execute(f"DELETE FROM decisions WHERE plan_id=? AND session_id IN "
+                        f"({','.join('?' * len(replan))})", (plan["id"], *replan))
     for s in sessions:
-        if s["status"] != "active":
-            # honour snoozed/skipped/cooked/ordered sessions as-is
-            decisions.append(_carry_session(plan, s))
+        if s["id"] in pinned:
+            decisions.append(_write_decision(plan, user, s, pinned[s["id"]], ctx))
+            continue
+        if s["status"] != "active" or s["id"] in frozen:
+            # honour snoozed/skipped/cooked/ordered/confirmed/past sessions as-is
+            decisions.append(_carry_session(plan, s, past=s["id"] in frozen and s["status"] == "active"))
             continue
         cands = cand_map[s["id"]]
         chosen = next((cands[i] for i in range(len(cands))
@@ -388,7 +536,7 @@ def _persist_decisions(plan, user, sessions, active, cand_map, x, ctx):
 
 def _decision_context(user, session, chosen, ctx):
     day = session["day"]
-    cond = chosen.get("weather_cond", weather.for_day(user["city"], day)["condition"])
+    cond = chosen.get("weather_cond", _wx(ctx, day)["condition"])
     fest = ctx["festivals"].get(day)
     nut = chosen.get("nutrition", {})
     nflag = None
@@ -402,6 +550,9 @@ def _decision_context(user, session, chosen, ctx):
         "leftover": chosen.get("leftover"),
         "nutrition_flag": nflag,
         "carbon_band": carbon.band(chosen.get("carbon_kg", 0)) if chosen["kind"] == "delivery" else None,
+        "pinned": chosen.get("pinned", False),
+        "discovery": chosen.get("discovery", False),
+        "liked": chosen.get("item_id") in ctx["taste"]["liked"],
     }
 
 
@@ -441,11 +592,13 @@ def _write_decision(plan, user, session, chosen, ctx):
             "status": "planned"}
 
 
-def _carry_session(plan, session):
-    mapping = {"snoozed": "Snoozed", "skipped": "Skipped", "cooked": "Cooked at home", "ordered": "Ordered"}
-    status = session["status"]
-    # A placed order keeps its persisted decision so cost/history stay in the view.
-    if status == "ordered":
+def _carry_session(plan, session, past=False):
+    mapping = {"snoozed": "Snoozed", "skipped": "Skipped", "cooked": "Cooked at home", "ordered": "Ordered",
+               "confirmed": "Had it"}
+    status = "past" if past else session["status"]
+    # A placed/confirmed order — or a meal whose time has passed — keeps its
+    # persisted decision so cost/history stay in the view.
+    if status in ("ordered", "confirmed", "past"):
         with db.cursor() as cur:
             row = cur.execute(
                 "SELECT * FROM decisions WHERE session_id=? ORDER BY id DESC LIMIT 1",
@@ -457,8 +610,10 @@ def _carry_session(plan, session):
             d["time_shift"] = db.jl(d["time_shift"], None) if d.get("time_shift") else None
             d["day"], d["meal"], d["status"] = session["day"], session["meal"], status
             return d
+        if past:
+            status, label = "past", "Not planned"
     # User overrides (snooze/skip/cook): persist a carry row so it shows in the grid.
-    label = mapping.get(status, status)
+    label = mapping.get(status, status) if status != "past" else "Not planned"
     reasons = db.jd([session["note"] or label])
     with db.cursor() as cur:
         cur.execute(

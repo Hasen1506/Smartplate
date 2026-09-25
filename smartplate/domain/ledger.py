@@ -178,8 +178,8 @@ def rolling_view(entries_by_day: dict, *, kcal_target: float, protein_floor: flo
     """Assemble the rolling ledger from accumulated daily intake, each nutrient on
     its own clock: calories bank over prior days (explicit credit toward today),
     protein is daily adherence + today's distribution, sugar is a daily cap."""
-    import datetime as _dt
-    today = today or _dt.date.today().isoformat()
+    from .. import clock
+    today = today or clock.today().isoformat()
     days = sorted(entries_by_day)
     prior = [d for d in days if d < today]
     cal = calorie_credit([entries_by_day[d]["kcal"] for d in prior], kcal_target)

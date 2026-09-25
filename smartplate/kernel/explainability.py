@@ -14,21 +14,28 @@ def reasons_for(decision: dict, context: dict) -> list[str]:
         r.append(decision.get("skip_reason", "No safe option within budget and rating floor — session skipped."))
         return r
     if kind == "cook":
-        r.append(f"Cook day: {decision['item_name']} (₹{decision['cost']:.0f}) — cheaper and lighter than delivery.")
+        dish = str(decision['item_name']).removeprefix("Cook: ")
+        r.append(f"Cook day: {dish} (₹{decision['cost']:.0f} in groceries), cheaper and lighter than delivery.")
         if context.get("leftover"):
             r.append(f"You logged a leftover ({context['leftover']}), so we kept this off Swiggy.")
         return r
 
     # delivery
-    r.append(f"Ordered {decision['item_name']} from {decision['restaurant_name']} "
-             f"(₹{decision['cost']:.0f}, rated {decision['rating']:.1f}).")
+    if context.get("pinned"):
+        r.append("Your pick — the rest of the week was re-balanced around it.")
+    r.append(f"{decision['item_name']} from {decision['restaurant_name']} "
+             f"(₹{decision['cost']:.0f} incl. delivery, rated {decision['rating']:.1f}).")
+    if context.get("discovery"):
+        r.append("Something new from outside your usual places — within your variety setting.")
+    if context.get("liked"):
+        r.append("You liked this before.")
     if decision.get("substituted"):
         r.append(f"Substituted: first choice '{decision['original_name']}' "
                  f"({decision.get('sub_reason', 'unavailable')}) — picked the next best above your "
                  f"{context['rating_floor']:.1f} rating floor.")
     if context.get("sentiment") and context["sentiment"]["n"]:
         s = context["sentiment"]
-        r.append(f"Reviews look {s['label']} (sentiment {s['score']:+.2f} over {s['n']} notes).")
+        r.append(f"Recent reviews: {s['label']} ({s['n']} read).")
     if decision.get("time_shift"):
         ts = decision["time_shift"]
         r.append(f"Time-shifted to {ts['offpeak_hhmm']} to clear the surge window — saved ₹{ts['saving']:.0f}.")
