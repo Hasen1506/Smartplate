@@ -7,16 +7,17 @@ present it in the `X-SmartPlate-Key` header — or, for plain download links (CS
 as `?key=` on a GET. Sample profiles, and profiles made before keys existed, have no
 key and stay open.
 
-What this is not: sign-in, password recovery or multi-device sync. Losing the key
-(clearing the browser) loses access; the "recovery code" (`<id>.<key>`) shown in the
-app is the way to move a profile to another device. Real accounts are the next step
-before a public launch.
+A profile can also get a name + password (accounts.py). Each browser that signs in
+gets its own device token, which this check accepts alongside the profile key. Without
+a sign-in, the "recovery code" (`<id>.<key>`) shown in the app is the way to move a
+profile to another device.
 """
+import datetime as dt
 import hashlib
 import hmac
 import secrets
 
-from . import db
+from . import clock, db
 
 HEADER = "X-SmartPlate-Key"
 
@@ -61,4 +62,20 @@ def allowed(user_id: int | None, presented: str | None) -> bool:
         row = cur.execute("SELECT access_hash FROM users WHERE id=?", (user_id,)).fetchone()
     if not row or not row["access_hash"]:
         return True                                     # sample / legacy profile: open
-    return bool(presented) and hmac.compare_digest(row["access_hash"], digest(presented))
+    if not presented:
+        return False
+    hashed = digest(presented)
+    if hmac.compare_digest(row["access_hash"], hashed):
+        return True
+    return _device(user_id, hashed)                     # a browser signed in with a password
+
+
+def _device(user_id: int, hashed: str) -> bool:
+    now = clock.now()
+    with db.cursor() as cur:
+        dev = cur.execute("SELECT id FROM devices WHERE user_id=? AND token_hash=?", (user_id, hashed)).fetchone()
+        if dev:
+            cur.execute("UPDATE devices SET last_seen_ts=? WHERE id=? AND last_seen_ts < ?",
+                        (now.isoformat(timespec="seconds"), dev["id"],
+                         (now - dt.timedelta(hours=1)).isoformat(timespec="seconds")))
+    return bool(dev)

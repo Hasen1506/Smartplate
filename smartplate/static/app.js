@@ -11,7 +11,7 @@ const S = {
   meta: null, users: [], userId: null, planId: null, view: null,
   tab: "today", more: null, exec: null, community: [], receipts: null, drawer: null,
   busy: false, error: null, hideCold: false, orderReview: null,
-  sheet: null, moving: null, onboard: null, places: null, calendar: null, welcome: false,
+  sheet: null, moving: null, onboard: null, places: null, calendar: null, welcome: false, signin: false, account: null,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
 const MEAL_ICON = { breakfast: "☀", lunch: "◐", dinner: "☾" };
@@ -103,6 +103,7 @@ async function boot() {
   }
   render();
   scheduleAlerts().catch(() => {});
+  syncPush().catch(() => {});
 }
 async function loadOrCreatePlan() {
   S.view = await api(`/api/user/${S.userId}/plan`);
@@ -114,7 +115,7 @@ function adoptView(view) { S.view = view; S.planId = view.plan.id; scheduleAlert
 /* ---------------------------------------------------------------- actions */
 async function switchUser(id) {
   S.userId = Number(id); S.exec = null; S.receipts = null; S.drawer = null; S.orderReview = null;
-  S.sheet = null; S.moving = null; S.places = null; S.calendar = null; S.welcome = false; S.tab = "today"; S.more = null;
+  S.sheet = null; S.moving = null; S.places = null; S.calendar = null; S.welcome = false; S.tab = "today"; S.more = null; S.account = null;
   store.set("smartplate.user", String(S.userId));
   try { await loadOrCreatePlan(); }
   catch (e) {
@@ -248,7 +249,15 @@ function welcomeScreen() {
       <li><b>Knows when to order.</b> Order-by times that avoid the rush and allow for rain and holidays.</li>
       <li><b>Never breaks your rules.</b> Allergies and budget are hard limits, even when you change a meal.</li>
     </ul>
+    ${errbar()}
     <button class="primary big" data-act="start-onboard">Set up my week · 2 minutes</button>
+    ${S.signin ? `<form id="signin" class="card signin">
+        <h3 class="k">Sign in to your profile</h3>
+        <label>Sign-in name<input id="si-login" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+        <label>Password<input id="si-pw" type="password" autocomplete="current-password" required></label>
+        <div class="row"><button type="submit" class="primary">Sign in</button><button type="button" class="ghost" data-act="signin-close">Cancel</button></div>
+        <p class="fine">No sign-in yet? Open your profile where you made it, then More → Profiles → Sign in anywhere.</p></form>`
+      : `<button class="ghost big" data-act="signin-open">I already have a profile · Sign in</button>`}
     ${samples.length ? `<details class="samples"><summary>Or look around a sample profile</summary>
       ${samples.map(u => `<button class="ghost" data-user="${u.id}">${esc(u.name)} · ${esc(u.city)}</button>`).join("")}</details>` : ""}
     <p class="fine">Trial: sample Chennai restaurants and prices. Weather is live when online. Ordering opens Swiggy for you to confirm. SmartPlate never pays or orders on its own.</p>
@@ -348,16 +357,57 @@ function todayRest(nu) {
     ${rest.map(m => mealRow(day.meals[m], m, nu.day_index)).join("")}</section>`;
 }
 function reminderRow() {
-  const notifyOn = store.get("smartplate.notify") === "1" && typeof Notification !== "undefined" && Notification.permission === "granted";
+  const push = pushState();
+  let btn = "";
+  if (push === "on") btn = `<button class="ghost small on" data-act="notify">🔔 Reminders on for this device</button>`;
+  else if (push === "ready") btn = `<button class="ghost small" data-act="notify">🔔 Remind me at order time</button>`;
+  else if (push === "ios-install") btn = `<span class="fine">On iPhone, tap Share → Add to Home Screen, then open SmartPlate from there to get reminders.</span>`;
+  else if (typeof Notification !== "undefined") {
+    const on = store.get("smartplate.notify") === "1" && Notification.permission === "granted";
+    btn = `<button class="ghost small" data-act="notify">${on ? "🔔 Browser alerts on" : "🔔 Alert me in this browser"}</button>`;
+  }
   return `<section class="remind" aria-label="Reminders"><span class="fine">Never miss an order-by time:</span>
-    <a class="btn ghost small" href="${esc(withKey(`/api/user/${S.userId}/reminders.ics`))}" download>📅 Add reminders to my calendar</a>
-    ${typeof Notification !== "undefined" ? `<button class="ghost small" data-act="notify">${notifyOn ? "🔔 Browser alerts on" : "🔔 Alert me in this browser"}</button>` : ""}</section>`;
+    ${btn}
+    <a class="btn ghost small" href="${esc(withKey(`/api/user/${S.userId}/reminders.ics`))}" download>📅 Add to my calendar</a></section>`;
 }
-/* Browser alerts only fire while SmartPlate is open in a tab; the calendar file works always. */
+
+/* Push reminders arrive at the order-by time even when SmartPlate is closed
+   (smartplate/push.py). Browsers without Web Push fall back to in-tab alerts. */
+const hasPush = () => typeof navigator !== "undefined" && "serviceWorker" in navigator && typeof window !== "undefined"
+  && "PushManager" in window && typeof Notification !== "undefined";
+function pushState() {
+  if (hasPush()) return store.get("smartplate.push") === String(S.userId) && Notification.permission === "granted" ? "on" : "ready";
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+  const standalone = typeof navigator !== "undefined" && (navigator.standalone
+    || (typeof matchMedia === "function" && matchMedia("(display-mode: standalone)").matches));
+  return /iPhone|iPad|iPod/.test(ua) && !standalone ? "ios-install" : "none";
+}
+function keyBytes(b64) {
+  const raw = atob((b64 + "=".repeat((4 - b64.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+async function subscribePush() {
+  const reg = await navigator.serviceWorker.ready;
+  const st = await api(`/api/user/${S.userId}/push`);
+  const old = await reg.pushManager.getSubscription();
+  if (old) await old.unsubscribe().catch(() => {});        // the server key may have changed
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(st.public_key) });
+  await api(`/api/user/${S.userId}/push/subscribe`, "POST", { subscription: sub.toJSON() });
+  store.set("smartplate.push", String(S.userId));
+}
+async function syncPush() {                                 // re-register after a server reset
+  if (!hasPush() || pushState() !== "on") return;
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  const st = sub && await api(`/api/user/${S.userId}/push?endpoint=${encodeURIComponent(sub.endpoint)}`);
+  if (!st || !st.this_device) await subscribePush();
+}
+
+/* In-tab alerts: only while SmartPlate is open; used where Web Push isn't available. */
 const alertTimers = [];
 async function scheduleAlerts() {
   alertTimers.splice(0).forEach(clearTimeout);
-  if (typeof Notification === "undefined" || Notification.permission !== "granted" || store.get("smartplate.notify") !== "1" || !S.userId) return 0;
+  if (hasPush() || typeof Notification === "undefined" || Notification.permission !== "granted" || store.get("smartplate.notify") !== "1" || !S.userId) return 0;
   const due = await api(`/api/user/${S.userId}/reminders`);
   const now = Date.now();
   let n = 0;
@@ -373,6 +423,17 @@ async function scheduleAlerts() {
   return n;
 }
 async function toggleAlerts() {
+  if (hasPush()) {
+    if (pushState() === "on") {
+      const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+      if (sub) { await api(`/api/user/${S.userId}/push/unsubscribe`, "POST", { endpoint: sub.endpoint }); await sub.unsubscribe().catch(() => {}); }
+      store.del("smartplate.push"); toast("Reminders off for this device"); render(); return;
+    }
+    if (await Notification.requestPermission() !== "granted") { toast("Notifications are blocked for this site. Use the calendar instead."); return; }
+    await subscribePush();
+    await api(`/api/user/${S.userId}/push/test`, "POST", {}).catch(() => {});
+    toast("Reminders on. You'll get a nudge at each order-by time."); render(); return;
+  }
   if (store.get("smartplate.notify") === "1" && Notification.permission === "granted") {
     store.del("smartplate.notify"); alertTimers.splice(0).forEach(clearTimeout); toast("Browser alerts off"); render(); return;
   }
@@ -546,9 +607,55 @@ function profilesPanel() {
       <div class="row" style="align-items:center"><code class="rcode">${esc(`${S.userId}.${k}`)}</code><button class="small" data-act="copy-recovery">Copy</button></div></div>` : "";
   return `<h2 class="sec">Profiles</h2><div class="mlist">${opts}</div>
     <button class="primary" data-act="start-onboard">+ Set up a new profile</button>
+    ${accountCard()}
     ${recovery}
     <div class="card"><h3 class="k">Open a profile from another device</h3>
       <form id="recover" class="row" style="align-items:center"><input id="rcode" type="text" placeholder="Paste recovery code" style="flex:1;min-width:200px" autocomplete="off"><button type="submit">Open</button></form></div>`;
+}
+/* Sign in anywhere: an optional name + password for a private profile (accounts.py). */
+function accountCard() {
+  if (!keys.get(S.userId)) return `<div class="card"><h3 class="k">Sign in anywhere</h3>
+    <p class="sub">Sample profiles are shared by everyone, so they can't have a sign-in. Set up your own profile to add one.</p></div>`;
+  const a = S.account;
+  if (!a) return "";
+  const devs = a.devices.map(d => `<div class="devrow"><b>${esc(d.label)}${d.this_device ? " · this device" : ""}</b>
+    <span class="fine">Last used ${esc(fmtDate(d.last_seen.slice(0, 10)))}</span>
+    <button class="small ghost" data-rm-device="${d.id}">Sign out</button></div>`).join("");
+  return `<div class="card"><h3 class="k">Sign in anywhere</h3>
+    <p class="sub">${a.login ? `Sign in as <b>${esc(a.login)}</b> on any phone or computer to open this profile. There's no email: if you forget the password, open the profile here or with its recovery code and set a new one.`
+      : "Choose a name and password to open this profile on your other devices. No email needed."}</p>
+    <form id="account" class="settings-grid">
+      <label>Sign-in name<input id="acct-login" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" value="${esc(a.login || "")}" required minlength="3" maxlength="64"></label>
+      <label>${a.login ? "New password" : "Password"}<input id="acct-pw" type="password" autocomplete="new-password" required minlength="8" maxlength="200"></label>
+      <button type="submit">${a.login ? "Change password" : "Save sign-in"}</button></form>
+    ${devs ? `<h3 class="k">Signed-in devices</h3>${devs}` : ""}
+    ${a.devices.some(d => d.this_device) ? `<button class="ghost small" data-act="sign-out">Sign out of this device</button>` : ""}</div>`;
+}
+async function saveAccount() {
+  const login = document.getElementById("acct-login").value, password = document.getElementById("acct-pw").value;
+  const had = S.account?.login;
+  S.account = await api(`/api/user/${S.userId}/account`, "POST", { login, password });
+  toast(had ? "Password changed" : "Sign-in saved. Use it on your other devices."); render();
+}
+async function signIn(form) {
+  const login = form.querySelector("#si-login").value, password = form.querySelector("#si-pw").value;
+  const device = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent || "") ? "Phone" : "Computer";
+  const r = await api("/api/signin", "POST", { login, password, device });
+  keys.put(r.user_id, r.key, r.name);
+  S.users = mergeUsers(await api("/api/users")); S.signin = false;
+  await switchUser(r.user_id); toast(`Signed in. Hello, ${r.name.split(" ")[0]}.`);
+}
+async function signOut() {
+  await api(`/api/user/${S.userId}/signout`, "POST", {});
+  keys.drop(S.userId); store.del("smartplate.user");
+  S.userId = null; S.view = null; S.account = null; S.more = null; S.tab = "today";
+  S.users = mergeUsers(await api("/api/users")); S.welcome = true; render(); toast("Signed out of this device");
+}
+async function removeDevice(id) {
+  const mine = S.account?.devices.find(d => d.id === Number(id))?.this_device;
+  if (mine) return signOut();
+  S.account = await api(`/api/user/${S.userId}/devices/${id}/remove`, "POST", {});
+  toast("Signed out that device"); render();
 }
 async function useRecoveryCode(code) {
   const m = /^\s*(\d+)\.([A-Za-z0-9_-]{16,})\s*$/.exec(code || "");
@@ -936,11 +1043,19 @@ function wire() {
     "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); location.href = r.authorize_url; },
     "swiggy-discover": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/discover`, "POST", {}); toast("Tool list refreshed"); render(); },
     "swiggy-disconnect": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/disconnect`, "POST", {}); toast("Disconnected from Swiggy"); render(); },
+    "signin-open": async () => { S.signin = true; S.error = null; render(); document.getElementById("si-login")?.focus(); },
+    "signin-close": async () => { S.signin = false; S.error = null; render(); },
+    "sign-out": signOut,
     "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); }, "cancel-move": async () => { S.moving = null; render(); },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
   if (S.orderReview) document.querySelector(".checkout [autofocus]")?.focus();
   if (S.sheet?.data) document.querySelector(".sheet .close")?.focus();
+  on("[data-rm-device]", "click", (e) => guard(() => removeDevice(e.currentTarget.dataset.rmDevice)));
+  const signin = document.getElementById("signin");
+  if (signin) signin.onsubmit = (e) => { e.preventDefault(); guard(() => signIn(signin)); };
+  const account = document.getElementById("account");
+  if (account) account.onsubmit = (e) => { e.preventDefault(); guard(saveAccount); };
   const recover = document.getElementById("recover");
   if (recover) recover.onsubmit = (e) => { e.preventDefault(); guard(() => useRecoveryCode(document.getElementById("rcode").value)); };
   const preferences = document.getElementById('preferences');
@@ -977,6 +1092,7 @@ async function goTab(tab, sub = null) {
   if (S.more === "orders") S.exec = await api(`/api/plan/${S.planId}/orders`);
   if (S.more === "calendar") S.calendar = await api(`/api/user/${S.userId}/calendar`);
   if (S.more === "connection") S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
+  if (S.more === "profiles") S.account = keys.get(S.userId) ? await api(`/api/user/${S.userId}/account`) : null;
   render();
   if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);
 }

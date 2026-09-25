@@ -18,7 +18,8 @@ def _clear():
     tables = ["users", "households", "restaurants", "menu_items", "plans", "sessions",
               "decisions", "orders", "calendar_events", "leftovers", "weather",
               "surge_history", "festivals", "community_templates", "receipts", "grocery_baskets",
-              "intake_log", "favourites", "ratings", "weather_cache"]
+              "intake_log", "favourites", "ratings", "weather_cache", "logins", "devices",
+              "push_subscriptions", "push_sent"]
     with db.cursor() as cur:
         for t in tables:
             cur.execute(f"DELETE FROM {t}")
