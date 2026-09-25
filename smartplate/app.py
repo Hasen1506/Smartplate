@@ -83,6 +83,10 @@ def create_app() -> Flask:
     def index():
         return send_from_directory(STATIC_DIR, "index.html")
 
+    @app.get("/healthz")
+    def healthz():
+        return jsonify(ok=True)
+
     # Installable app: the manifest and the service worker are served from the root
     # so the worker's scope covers the whole app.
     @app.get("/manifest.webmanifest")

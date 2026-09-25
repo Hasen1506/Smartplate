@@ -31,7 +31,8 @@ WEATHER_TIMEOUT_S = float(os.environ.get("SMARTPLATE_WEATHER_TIMEOUT", "3"))
 SWIGGY_MCP_BASE = os.environ.get("SMARTPLATE_SWIGGY_MCP", "https://mcp.swiggy.com").rstrip("/")
 SWIGGY_TIMEOUT_S = float(os.environ.get("SMARTPLATE_SWIGGY_TIMEOUT", "10"))
 # Public base URL for the OAuth redirect when a proxy hides it (else derived per request).
-PUBLIC_URL = os.environ.get("SMARTPLATE_PUBLIC_URL", "").rstrip("/")
+# Render sets RENDER_EXTERNAL_URL for every web service, so hosted installs need no setup.
+PUBLIC_URL = (os.environ.get("SMARTPLATE_PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
 # Default order-execution policy. Swiggy's cautious posture (§7.1) means we
 # default to an editable window rather than silent auto-placement.

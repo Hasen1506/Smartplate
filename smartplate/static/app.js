@@ -87,7 +87,8 @@ async function boot() {
   if (!S.userId) { S.welcome = true; render(); return; }
   try { await loadOrCreatePlan(); }
   catch (e) {
-    if (!/private/i.test(e.message)) throw e;
+    // The key no longer opens this profile, or the server's data was reset (free hosting).
+    if (!/private|not found/i.test(e.message)) throw e;
     keys.drop(S.userId); store.del("smartplate.user"); S.userId = null; S.view = null;
     S.users = mergeUsers(await api("/api/users")); S.welcome = true; render(); return;
   }
@@ -115,7 +116,14 @@ async function switchUser(id) {
   S.userId = Number(id); S.exec = null; S.receipts = null; S.drawer = null; S.orderReview = null;
   S.sheet = null; S.moving = null; S.places = null; S.calendar = null; S.welcome = false; S.tab = "today"; S.more = null;
   store.set("smartplate.user", String(S.userId));
-  await loadOrCreatePlan(); render();
+  try { await loadOrCreatePlan(); }
+  catch (e) {
+    if (!/private|not found/i.test(e.message)) throw e;
+    keys.drop(S.userId); store.del("smartplate.user"); S.userId = null; S.view = null;
+    S.users = mergeUsers(await api("/api/users")); S.welcome = true;
+    toast("That profile isn't on this server any more");
+  }
+  render();
 }
 async function newWeek() {
   adoptView(await api("/api/plan", "POST", { user_id: S.userId }));
