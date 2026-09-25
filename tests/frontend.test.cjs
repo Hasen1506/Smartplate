@@ -151,3 +151,15 @@ test('onboarding walks five steps and validates before moving on', async () => {
   vm.runInContext("S.onboard.step = 3; S.onboard.suggest = { feasible: true, tight: 1500, suggested: 2000, roomy: 2500 }", context);
   assert.match(vm.runInContext('onboardingScreen()', context), /Usual · ₹2,000/);
 });
+
+test('private profile keys are sent as a header and merged into the profile list', async () => {
+  const { context, calls } = fixture(); await context.bootPromise;
+  vm.runInContext(`const bag = {}; localStorage.getItem = (k) => bag[k] ?? null; localStorage.setItem = (k, v) => { bag[k] = v; };
+    keys.put(2, 'secret-key-123456789', 'Meera')`, context);
+  await vm.runInContext("api('/api/user/2/plan')", context);
+  assert.equal(calls.at(-1).options.headers['X-SmartPlate-Key'], 'secret-key-123456789');
+  const users = JSON.parse(vm.runInContext("JSON.stringify(mergeUsers([{ id: 1, name: 'Sample' }, { id: 2, name: 'Meera' }]))", context));
+  assert.deepEqual(users.map(u => [u.id, !!u.private]), [[2, true], [1, false]]);
+  assert.match(vm.runInContext("withKey('/api/receipts/2/export.csv')", context), /\?key=secret-key-123456789$/);
+  await assert.rejects(vm.runInContext("useRecoveryCode('not a code')", context), /recovery code/);
+});

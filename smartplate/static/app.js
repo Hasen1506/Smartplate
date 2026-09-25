@@ -27,8 +27,23 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch (_) {} },
 };
 
+/* Private profiles: the key lives only in this browser ({id: {key, name}}). */
+const keys = {
+  all() { try { const v = JSON.parse(store.get("smartplate.keys") || "{}"); return v && typeof v === "object" && !Array.isArray(v) ? v : {}; } catch (_) { return {}; } },
+  get(id) { return this.all()[id]?.key || null; },
+  put(id, key, name) { const a = this.all(); a[id] = { key, name }; store.set("smartplate.keys", JSON.stringify(a)); },
+  drop(id) { const a = this.all(); delete a[id]; store.set("smartplate.keys", JSON.stringify(a)); },
+};
+const withKey = (url) => { const k = keys.get(S.userId); return k ? `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(k)}` : url; };
+function mergeUsers(open) {
+  const priv = Object.entries(keys.all()).map(([id, v]) => ({ id: Number(id), name: v.name || "My profile", city: "Chennai", setup_done: true, private: true }));
+  return [...priv, ...open.filter(u => !priv.some(p => p.id === u.id))];
+}
+
 async function api(path, method = "GET", body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
+  const k = S.userId ? keys.get(S.userId) : null;
+  if (k) opt.headers["X-SmartPlate-Key"] = k;
   if (body) opt.body = JSON.stringify(body);
   const r = await fetch(path, opt);
   if (!r.ok) { const data = await r.json().catch(() => ({})); throw new Error(data.message || data.error || r.statusText); }
@@ -66,19 +81,34 @@ async function reloadPlan() { S.view = await api(`/api/plan/${S.planId}`); rende
 async function boot() {
   ensureBusyBar();
   S.meta = await api("/api/meta");
-  S.users = await api("/api/users");
+  S.users = mergeUsers(await api("/api/users"));
   const saved = Number(store.get("smartplate.user"));
   S.userId = S.users.find(u => u.id === saved)?.id || null;
   if (!S.userId) { S.welcome = true; render(); return; }
-  await loadOrCreatePlan();
+  try { await loadOrCreatePlan(); }
+  catch (e) {
+    if (!/private/i.test(e.message)) throw e;
+    keys.drop(S.userId); store.del("smartplate.user"); S.userId = null; S.view = null;
+    S.users = mergeUsers(await api("/api/users")); S.welcome = true; render(); return;
+  }
+  const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new Map();
+  const wanted = params.get("tab");
+  if (["today", "week", "places", "more"].includes(wanted)) S.tab = wanted;
+  if (params.get("swiggy") || params.get("swiggy_error")) {             // back from Swiggy sign-in
+    S.tab = "more"; S.more = "connection"; S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
+    if (params.get("swiggy_error")) S.error = `Swiggy: ${params.get("swiggy_error")}`;
+    else toast("Connected to Swiggy");
+    if (typeof history !== "undefined") history.replaceState(null, "", "/");
+  }
   render();
+  scheduleAlerts().catch(() => {});
 }
 async function loadOrCreatePlan() {
   S.view = await api(`/api/user/${S.userId}/plan`);
   S.planId = S.view.plan.id;
   S.exec = await api(`/api/plan/${S.planId}/orders`);
 }
-function adoptView(view) { S.view = view; S.planId = view.plan.id; }
+function adoptView(view) { S.view = view; S.planId = view.plan.id; scheduleAlerts().catch(() => {}); }
 
 /* ---------------------------------------------------------------- actions */
 async function switchUser(id) {
@@ -257,6 +287,7 @@ function todayScreen() {
     ${budgetCard()}
     ${nu ? nextUpCard(nu) : `<div class="card empty">Nothing left to plan this week. <button data-act="newweek">Plan next week</button></div>`}
     ${todayRest(nu)}
+    ${reminderRow()}
     ${headsUp()}
     ${learningLine()}`;
 }
@@ -308,6 +339,43 @@ function todayRest(nu) {
   return `<section class="later"><h3 class="k">Later ${nu.when === "Today" ? "today" : esc(nu.when.toLowerCase())}</h3>
     ${rest.map(m => mealRow(day.meals[m], m, nu.day_index)).join("")}</section>`;
 }
+function reminderRow() {
+  const notifyOn = store.get("smartplate.notify") === "1" && typeof Notification !== "undefined" && Notification.permission === "granted";
+  return `<section class="remind" aria-label="Reminders"><span class="fine">Never miss an order-by time:</span>
+    <a class="btn ghost small" href="${esc(withKey(`/api/user/${S.userId}/reminders.ics`))}" download>📅 Add reminders to my calendar</a>
+    ${typeof Notification !== "undefined" ? `<button class="ghost small" data-act="notify">${notifyOn ? "🔔 Browser alerts on" : "🔔 Alert me in this browser"}</button>` : ""}</section>`;
+}
+/* Browser alerts only fire while SmartPlate is open in a tab; the calendar file works always. */
+const alertTimers = [];
+async function scheduleAlerts() {
+  alertTimers.splice(0).forEach(clearTimeout);
+  if (typeof Notification === "undefined" || Notification.permission !== "granted" || store.get("smartplate.notify") !== "1" || !S.userId) return 0;
+  const due = await api(`/api/user/${S.userId}/reminders`);
+  const now = Date.now();
+  let n = 0;
+  for (const r of due) {
+    const ms = new Date(r.at).getTime() - now;
+    if (ms <= 0 || ms > 24 * 3600 * 1000) continue;
+    n += 1;
+    alertTimers.push(setTimeout(() => {
+      const note = new Notification(r.title, { body: r.body, tag: `smartplate-${r.session_id}` });
+      if (r.link) note.onclick = () => window.open(r.link, "_blank", "noopener");
+    }, ms));
+  }
+  return n;
+}
+async function toggleAlerts() {
+  if (store.get("smartplate.notify") === "1" && Notification.permission === "granted") {
+    store.del("smartplate.notify"); alertTimers.splice(0).forEach(clearTimeout); toast("Browser alerts off"); render(); return;
+  }
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") { toast("Alerts are blocked in this browser. Use the calendar reminders instead."); return; }
+  store.set("smartplate.notify", "1");
+  const n = await scheduleAlerts();
+  toast(n ? `${n} alert${n === 1 ? "" : "s"} set for the next 24 hours (while this tab is open)` : "Alerts on. Nothing due in the next 24 hours.");
+  render();
+}
+
 function headsUp() {
   const hs = S.view.heads_up || [];
   if (!hs.length) return "";
@@ -463,9 +531,31 @@ function calendarPanel() {
 }
 
 function profilesPanel() {
-  const opts = S.users.map(u => `<button class="mitem ${u.id === S.userId ? "on" : ""}" data-user="${u.id}"><b>${esc(u.name)}</b><span>${esc(u.city)}${u.id === S.userId ? " · current" : ""}</span></button>`).join("");
+  const opts = S.users.map(u => `<button class="mitem ${u.id === S.userId ? "on" : ""}" data-user="${u.id}"><b>${esc(u.name)}${u.private ? " 🔒" : ""}</b><span>${u.private ? "Private to this browser" : "Sample · open to anyone"}${u.id === S.userId ? " · current" : ""}</span></button>`).join("");
+  const k = keys.get(S.userId);
+  const recovery = k ? `<div class="card"><h3 class="k">Recovery code</h3>
+      <p class="sub">This profile is private. Its key is stored only in this browser. To open it on another device, or after clearing your browser, you need this code. Keep it somewhere safe.</p>
+      <div class="row" style="align-items:center"><code class="rcode">${esc(`${S.userId}.${k}`)}</code><button class="small" data-act="copy-recovery">Copy</button></div></div>` : "";
   return `<h2 class="sec">Profiles</h2><div class="mlist">${opts}</div>
-    <button class="primary" data-act="start-onboard">+ Set up a new profile</button>`;
+    <button class="primary" data-act="start-onboard">+ Set up a new profile</button>
+    ${recovery}
+    <div class="card"><h3 class="k">Open a profile from another device</h3>
+      <form id="recover" class="row" style="align-items:center"><input id="rcode" type="text" placeholder="Paste recovery code" style="flex:1;min-width:200px" autocomplete="off"><button type="submit">Open</button></form></div>`;
+}
+async function useRecoveryCode(code) {
+  const m = /^\s*(\d+)\.([A-Za-z0-9_-]{16,})\s*$/.exec(code || "");
+  if (!m) throw new Error("That doesn't look like a recovery code (it looks like 12.AbC…)");
+  const id = Number(m[1]), key = m[2];
+  const prev = keys.all()[id];
+  keys.put(id, key, prev?.name);
+  try {
+    const r = await fetch(`/api/user/${id}/plan`, { headers: { "X-SmartPlate-Key": key } });
+    if (!r.ok) throw new Error(r.status === 401 ? "That code doesn't match a profile here" : "Profile not found");
+    const view = await r.json();
+    keys.put(id, key, view.user.name);
+  } catch (e) { if (prev) keys.put(id, prev.key, prev.name); else keys.drop(id); throw e; }
+  S.users = mergeUsers(await api("/api/users"));
+  await switchUser(id); toast("Profile opened on this device");
 }
 
 /* Explicit checkout hand-off: planning is reversible, ordering is not. */
@@ -590,7 +680,7 @@ function receiptsPanel() {
   return `<h2 class="sec">Expenses</h2>
     <div class="sub">Meals you confirmed and simulated orders. These are not tax invoices. Check the business/personal suggestions before you use them.</div>
     <div class="row" style="margin-bottom:12px"><button class="primary" data-act="genrcpt">Update from this week</button>
-      <a class="btn ghost" href="/api/receipts/${S.userId}/export.csv">Export CSV ↓</a></div>
+      <a class="btn ghost" href="${esc(withKey(`/api/receipts/${S.userId}/export.csv`))}">Export CSV ↓</a></div>
     ${r ? `<div class="stats"><div class="stat"><div class="label">Total</div><div class="val">${rupee(r.total)}</div></div>
       <div class="stat"><div class="label">Business</div><div class="val">${rupee(r.business_total)}</div></div></div>
       <div class="card scroll-x"><table><tr><th>date</th><th>item</th><th>category</th><th>amount</th></tr>${rows || `<tr><td class="empty" colspan="4">No expenses yet. Confirm a meal with “I had it”.</td></tr>`}</table></div>` : `<div class="card empty">Loading…</div>`}`;
@@ -644,7 +734,20 @@ function readSettings(form) {
 }
 
 function connectionPanel() {
-  return `<h2 class="sec">Swiggy connection</h2><div class="card"><span class="tag">Hand-off mode</span>
+  const sw = S.swiggy;
+  const live = !sw ? `<p class="fine">Checking Swiggy connection…</p>` : sw.connected ? `
+    <div class="card"><span class="tag good">Connected</span>
+      <h3>Signed in to Swiggy${sw.server?.name ? ` · ${esc(sw.server.name)}` : ""}</h3>
+      <p class="sub">Protocol ${esc(sw.protocol_version || "?")} · ${sw.tools.length} tools found (${sw.read_tools} read, ${sw.write_tools} write)${sw.expires ? ` · sign-in expires ${esc(sw.expires.slice(0, 16).replace("T", " "))}` : ""}.
+        SmartPlate has only <b>listed</b> these tools. It has not called any of them, and nothing is carted or ordered.</p>
+      <details><summary>What Swiggy offers this account</summary>${sw.tools.map(t => `<div class="calrow"><b>${esc(t.name)}</b><span class="tag ${t.kind === "write" ? "warn" : ""}">${t.kind}</span><span class="fine">${esc(t.description)}</span></div>`).join("")}</details>
+      <div class="row gap"><button data-act="swiggy-discover">Refresh tools</button><button class="ghost" data-act="swiggy-disconnect">Disconnect</button></div></div>`
+    : `<div class="card"><span class="tag">${sw.expired ? "Sign-in expired" : "Not connected"}</span>
+      <h3>Connect your Swiggy account</h3>
+      <p class="sub">You sign in on Swiggy's own page (phone + OTP). SmartPlate then only lists which tools your account offers. It doesn't read orders, build carts or pay. Swiggy sign-ins last about 5 days.</p>
+      <button class="primary" data-act="swiggy-connect">Connect Swiggy</button>
+      <p class="fine">First real test pending: this sign-in follows Swiggy's published docs but hasn't yet been run against the live service.</p></div>`;
+  return `<h2 class="sec">Swiggy connection</h2>${live}<div class="card"><span class="tag">Hand-off mode</span>
     <h3>Planning works now. You place each order on Swiggy yourself.</h3>
     <p><b>Today:</b> “Order on Swiggy” opens Swiggy's search for that restaurant and dish. You check the real price there and order. Then tap “I had it” so your budget and nutrition stay accurate.</p>
     <p><b>Next:</b> signing in to Swiggy would let SmartPlate build the cart for you (you still confirm and pay in Swiggy). Scheduled orders stay off until Swiggy's terms clearly allow them.</p>
@@ -752,7 +855,8 @@ async function onboardNav(dir) {
     if (!body.body) delete body.body;
     if (!body.daily_cap) delete body.daily_cap;
     const view = await api("/api/profiles", "POST", body);
-    S.users = await api("/api/users");
+    if (view.access_key) keys.put(view.user.id, view.access_key, view.user.name);
+    S.users = mergeUsers(await api("/api/users"));
     S.onboard = null; S.userId = view.user.id; store.set("smartplate.user", String(S.userId));
     adoptView(view); S.exec = await api(`/api/plan/${S.planId}/orders`);
     S.tab = "today"; S.more = null; toast("Your week is planned. Here's what's next."); render(); return;
@@ -820,18 +924,25 @@ function wire() {
   const acts = {
     cmd: runCommand, reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute, savetpl: saveTemplate,
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
-    "start-onboard": async () => startOnboard(), "cancel-move": async () => { S.moving = null; render(); },
+    "start-onboard": async () => startOnboard(), notify: toggleAlerts,
+    "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); location.href = r.authorize_url; },
+    "swiggy-discover": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/discover`, "POST", {}); toast("Tool list refreshed"); render(); },
+    "swiggy-disconnect": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/disconnect`, "POST", {}); toast("Disconnected from Swiggy"); render(); },
+    "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); }, "cancel-move": async () => { S.moving = null; render(); },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
   if (S.orderReview) document.querySelector(".checkout [autofocus]")?.focus();
   if (S.sheet?.data) document.querySelector(".sheet .close")?.focus();
+  const recover = document.getElementById("recover");
+  if (recover) recover.onsubmit = (e) => { e.preventDefault(); guard(() => useRecoveryCode(document.getElementById("rcode").value)); };
   const preferences = document.getElementById('preferences');
   if (preferences) preferences.onsubmit = e => {
     e.preventDefault();
     const body = readSettings(preferences);
     guard(async () => {
       adoptView(await api(`/api/user/${S.userId}/setup`, 'PATCH', body));
-      S.users = await api('/api/users'); S.orderReview = null;
+      if (keys.get(S.userId)) keys.put(S.userId, keys.get(S.userId), S.view.user.name);
+      S.users = mergeUsers(await api('/api/users')); S.orderReview = null;
       S.tab = 'today'; S.more = null; toast('Saved. Upcoming meals re-planned.'); render();
     });
   };
@@ -857,6 +968,7 @@ async function goTab(tab, sub = null) {
   if (S.more === "receipts") S.receipts = await api(`/api/receipts/${S.userId}`);
   if (S.more === "orders") S.exec = await api(`/api/plan/${S.planId}/orders`);
   if (S.more === "calendar") S.calendar = await api(`/api/user/${S.userId}/calendar`);
+  if (S.more === "connection") S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
   render();
   if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);
 }
@@ -878,4 +990,13 @@ async function idempotencyDemo() {
   toast(d.same_order_id && d.second_was_deduped ? "Safe: the repeat returned the same order, no duplicate charge" : "Duplicate detected: check order history");
 }
 
-boot().catch(e => { document.getElementById("app").innerHTML = `<div class="boot">Failed to start: ${esc(e.message)}</div>`; });
+function bootFailed(e) {
+  const offline = (typeof navigator !== "undefined" && navigator.onLine === false) || /fetch|network/i.test(e?.message || "");
+  document.getElementById("app").innerHTML = offline
+    ? `<main class="welcome"><div class="brand big">Smart<em>Plate</em></div><h1 class="hero">You're offline.</h1>
+       <p class="lede">Plans and budgets are always live, so SmartPlate needs a connection. It will reload by itself when you're back online.</p>
+       <button class="primary big" onclick="location.reload()">Try again</button></main>`
+    : `<div class="boot">Failed to start: ${esc(e.message)}</div>`;
+  if (offline && typeof window !== "undefined") window.addEventListener("online", () => location.reload(), { once: true });
+}
+boot().catch(bootFailed);

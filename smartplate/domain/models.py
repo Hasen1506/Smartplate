@@ -33,7 +33,9 @@ def get_user(user_id: int) -> dict | None:
 
 def list_users() -> list[dict]:
     with db.cursor() as cur:
-        rows = cur.execute("SELECT id, name, city, mode, prefs FROM users ORDER BY id").fetchall()
+        # private profiles are never listed; their owners' browsers remember them
+        rows = cur.execute("SELECT id, name, city, mode, prefs FROM users WHERE access_hash IS NULL "
+                           "ORDER BY id").fetchall()
     out = []
     for r in rows:
         u = db.row_to_dict(r)

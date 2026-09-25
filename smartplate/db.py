@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS users (
     carbon_pref REAL NOT NULL DEFAULT 0.0,         -- 0..1 weight (§5.3.16)
     household_id INTEGER,                           -- group mode (§5.2.7)
     observances TEXT NOT NULL DEFAULT '[]',        -- fasts the user keeps (opt-in, never assumed)
-    prefs TEXT NOT NULL DEFAULT '{}'               -- meals planned, daily cap, goal, body, area
+    prefs TEXT NOT NULL DEFAULT '{}',              -- meals planned, daily cap, goal, body, area
+    access_hash TEXT                               -- sha256 of the profile key; NULL = open profile
 );
 
 CREATE TABLE IF NOT EXISTS households (
@@ -244,6 +245,7 @@ CREATE TABLE IF NOT EXISTS weather_cache (       -- live forecast, cached per ci
 MIGRATIONS = [
     ("users", "observances", "TEXT NOT NULL DEFAULT '[]'"),
     ("users", "prefs", "TEXT NOT NULL DEFAULT '{}'"),
+    ("users", "access_hash", "TEXT"),
     ("sessions", "pinned", "TEXT"),
     ("festivals", "observance", "TEXT NOT NULL DEFAULT ''"),
     ("festivals", "approx", "INTEGER NOT NULL DEFAULT 0"),

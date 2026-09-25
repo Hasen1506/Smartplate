@@ -33,6 +33,10 @@ worth building, connector or app, who pays, and how do we keep it simple?", see
    nutrition re-balance, and nothing else in the week gets shuffled.
 5. **Heads-up**: rain, heat, holidays, the fasts you keep, meals that didn't fit
    the budget, and past meals to confirm.
+6. **Reminders**: one tap adds every order-by time to your phone calendar, with
+   alarms. Browser alerts also work while the app is open.
+7. **Installable and private**: add it to your home screen. A profile you create
+   is private to your browser; its recovery code opens it on another device.
 
 ## Try it in your browser
 
@@ -107,6 +111,8 @@ instead of silently ordered.
 | `SMARTPLATE_WEATHER` | `live` | `live` = Open-Meteo forecast (cached, falls back to the sample feed offline); `simulated` = sample feed only |
 | `SMARTPLATE_SOLVER_GAP` | `0.001` | Relative optimality gap for the weekly MILP |
 | `SMARTPLATE_SOLVER_TIME_LIMIT` | `10` | Seconds per solve before returning the best plan found |
+| `SMARTPLATE_SWIGGY_MCP` | `https://mcp.swiggy.com` | Swiggy MCP base for sign-in + read-only tool discovery |
+| `SMARTPLATE_PUBLIC_URL` | derived | Public base URL for the Swiggy OAuth redirect when a proxy hides it |
 | `SMARTPLATE_TZ` | `Asia/Kolkata` | Timezone for meal times, "today" and past meals (servers often run in UTC) |
 | `SMARTPLATE_STABILITY` | `0.3` | Bonus for keeping a meal's current pick on re-plans (0 disables) |
 

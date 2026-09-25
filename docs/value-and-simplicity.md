@@ -100,17 +100,34 @@ and verified savings exist.
 
 ## 5. What is *not* done, and the order to do it
 
-1. **Real menus and prices.** Swiggy OAuth → `get_addresses`,
+**Done since this memo was first written (follow-up PR):**
+- **Reminders**: order-by times (and "start cooking" 45 minutes before cook meals)
+  as a calendar file with alarms, plus opt-in browser alerts while the app is open.
+- **Installable**: web manifest, icons and a service worker. It adds to the home
+  screen, opens offline with a friendly screen, and never caches plans or budgets.
+- **Profile privacy**: onboarding profiles get a secret key (hash stored); every
+  endpoint for that profile needs it; a recovery code opens it on another device.
+  This is not full accounts: there's no password reset and no sync.
+- **Swiggy gate 1, sign-in + read-only discovery**: OAuth 2.1 + PKCE + dynamic
+  registration, MCP `initialize` + `tools/list` (JSON or SSE, session id,
+  pagination), tools classified read/write. Nothing is called beyond listing.
+  Tested against a strict fake server. **Not yet run against the real
+  mcp.swiggy.com**, which was unreachable from the build environment. The first
+  real sign-in is the verification step.
+
+**Still to do, in order:**
+
+1. **Real menus and prices.** Using the discovered schemas: `get_addresses`,
    `search_restaurants`, `get_restaurant_menu` (150-item limit) for the user's
    address. This replaces the sample catalogue and makes "usual places" real.
 2. **Cart hand-off.** `update_food_cart` + `get_food_cart` so *Order on Swiggy*
    opens a filled cart. The person still confirms and pays in Swiggy.
    Placement is not idempotent: check `get_food_orders` before any retry.
-3. **Reminders.** A push/WhatsApp nudge at the order-by time. This needs a
-   background worker and notification consent. The order-by time is already
-   computed.
-4. **Accounts.** Sign-in and per-user data ownership before anyone outside a
-   private trial uses it.
+3. **Push reminders.** Calendar alarms and in-tab alerts exist. True push (or
+   WhatsApp) at the order-by time still needs a background worker, Web Push keys
+   and consent.
+4. **Accounts.** Profile keys protect a shared trial. A public launch needs real
+   sign-in, recovery, and encryption of stored Swiggy tokens.
 5. **Unattended ordering.** Only if Swiggy's terms explicitly allow it. The
    spend-limited, fingerprinted consent flow is already built for that day.
 

@@ -399,3 +399,6 @@ details summary{cursor:pointer;font-weight:600;font-size:14px;padding:8px 0}
   .calrow{grid-template-columns:1fr}
   .calrow .fine{grid-column:1}
 }
+
+.remind{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 14px}
+.rcode{flex:1;min-width:200px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;background:var(--paper-2);border-radius:8px;padding:8px 10px;word-break:break-all}

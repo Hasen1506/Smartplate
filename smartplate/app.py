@@ -1,14 +1,16 @@
 """Flask JSON API and vanilla JavaScript UI; no frontend build step."""
 import os
 
-from flask import Flask, Response, g, jsonify, request, send_from_directory
+from urllib.parse import quote
+
+from flask import Flask, Response, g, jsonify, redirect, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
-from . import config, everyday, service
+from . import access, config, everyday, service
 from .domain import models, sentiment
 from .domain.checkout import CheckoutConflict
 from .kernel import agent_brain
-from .integrations import calendar_sync, swiggy_mcp
+from .integrations import calendar_sync, swiggy_connect, swiggy_mcp
 from .runtime import initialize, state_lock
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -39,6 +41,15 @@ def create_app() -> Flask:
                     found = cur.execute(f'SELECT id FROM {table} WHERE id=?', (args[key],)).fetchone()
                 if not found:
                     return jsonify(error='not found'), 404
+        if request.path.startswith('/api/'):
+            presented = request.headers.get(access.HEADER) or (
+                request.args.get('key') if request.method == 'GET' else None)
+            body = request.get_json(silent=True) if request.method == 'POST' else None
+            owners = access.owners_of(args, body if isinstance(body, dict) else None,
+                                      request.args.get('user_id', type=int))
+            if not all(access.allowed(uid, presented) for uid in owners):
+                return jsonify(error='This profile is private. Open it on the device that created it, '
+                                     'or add it with its recovery code.'), 401
 
     @app.teardown_request
     def release_state_lock(error):
@@ -50,6 +61,10 @@ def create_app() -> Flask:
     @app.errorhandler(TypeError)
     def invalid_input(error):
         return jsonify(error=str(error)), 400
+
+    @app.errorhandler(swiggy_connect.SwiggyError)
+    def swiggy_error(error):
+        return jsonify(error=str(error)), 502
 
     @app.errorhandler(HTTPException)
     def http_error(error):
@@ -67,6 +82,18 @@ def create_app() -> Flask:
     @app.get("/")
     def index():
         return send_from_directory(STATIC_DIR, "index.html")
+
+    # Installable app: the manifest and the service worker are served from the root
+    # so the worker's scope covers the whole app.
+    @app.get("/manifest.webmanifest")
+    def manifest():
+        return send_from_directory(STATIC_DIR, "manifest.webmanifest", mimetype="application/manifest+json")
+
+    @app.get("/sw.js")
+    def service_worker():
+        response = send_from_directory(STATIC_DIR, "sw.js", mimetype="text/javascript")
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
     # ---- meta / cost transparency ---- #
     @app.get("/api/meta")
@@ -261,6 +288,57 @@ def create_app() -> Flask:
     @app.post("/api/user/<int:user_id>/favourites/<int:restaurant_id>")
     def toggle_favourite(user_id, restaurant_id):
         return jsonify(everyday.toggle_favourite(user_id, restaurant_id))
+
+    @app.get("/api/user/<int:user_id>/reminders")
+    def reminders_list(user_id):
+        from .domain import reminders
+        return jsonify(reminders.upcoming(service.current_plan(user_id)))
+
+    @app.get("/api/user/<int:user_id>/reminders.ics")
+    def reminders_ics(user_id):
+        from .domain import reminders
+        view = service.current_plan(user_id)
+        body = reminders.to_ics(reminders.upcoming(view), plan_id=view["plan"]["id"], name=view["user"]["name"])
+        return Response(body, mimetype="text/calendar", headers={
+            "Content-Disposition": "attachment; filename=smartplate-reminders.ics"})
+
+    # ---- Swiggy sign-in + read-only discovery (no ordering) ---- #
+    def _public_base():
+        if config.PUBLIC_URL:
+            return config.PUBLIC_URL
+        proto = request.headers.get("X-Forwarded-Proto", request.scheme).split(",")[0].strip()
+        host = request.headers.get("X-Forwarded-Host", request.host).split(",")[0].strip()
+        return f"{proto}://{host}"
+
+    @app.get("/api/user/<int:user_id>/swiggy")
+    def swiggy_status(user_id):
+        return jsonify(swiggy_connect.status(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/connect")
+    def swiggy_start(user_id):
+        return jsonify(authorize_url=swiggy_connect.start(user_id, f"{_public_base()}/swiggy/callback"))
+
+    @app.post("/api/user/<int:user_id>/swiggy/discover")
+    def swiggy_discover(user_id):
+        return jsonify(swiggy_connect.discover(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/disconnect")
+    def swiggy_disconnect(user_id):
+        return jsonify(swiggy_connect.disconnect(user_id))
+
+    @app.get("/swiggy/callback")
+    def swiggy_callback():
+        # Swiggy redirects the browser here; the single-use `state` ties it to the
+        # profile that started sign-in, so no profile key is needed on this hop.
+        if request.args.get("error"):
+            return redirect("/?tab=more&swiggy_error=" + quote(request.args.get("error_description")
+                                                               or request.args["error"])[:300])
+        try:
+            with state_lock:
+                swiggy_connect.finish(request.args.get("state", ""), request.args.get("code", ""))
+        except swiggy_connect.SwiggyError as exc:
+            return redirect("/?tab=more&swiggy_error=" + quote(str(exc))[:300])
+        return redirect("/?tab=more&swiggy=connected")
 
     @app.get("/api/user/<int:user_id>/calendar")
     def upcoming_calendar(user_id):
