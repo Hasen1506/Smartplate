@@ -12,6 +12,7 @@ const S = {
   tab: "today", more: null, exec: null, community: [], receipts: null, drawer: null,
   busy: false, error: null, hideCold: false, orderReview: null, cartReview: null,
   liveResults: null, liveFavourites: null, liveBrowseMenu: null, liveOrderReview: null, liveCart: null,
+  checkoutReview: null, placedOrder: null, liveOrderStatus: null,
   sheet: null, moving: null, onboard: null, places: null, calendar: null, welcome: false, signin: false, account: null,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
@@ -121,6 +122,7 @@ async function switchUser(id) {
   S.sheet = null; S.moving = null; S.places = null; S.calendar = null; S.welcome = false; S.tab = "today"; S.more = null; S.account = null; S.cartReview = null;
   S.swiggy = null; S.swAddrs = null; S.liveMenu = null; S.carts = null; S.acctDraft = null;
   S.liveResults = null; S.liveFavourites = null; S.liveBrowseMenu = null; S.liveOrderReview = null; S.liveCart = null;
+  S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null;
   store.set("smartplate.user", String(S.userId));
   try { await loadOrCreatePlan(); }
   catch (e) {
@@ -241,7 +243,8 @@ function render() {
   app.innerHTML = topbar() + `<main class="wrap ${S.tab === "more" ? "wide" : ""}" id="main">${errbar() + tabBody()}</main>`
     + navBar() + (S.sheet ? sheetDialog() : "") + (S.drawer ? drawer() : "")
     + (S.orderReview ? orderReviewDialog() : "") + (S.cartReview ? cartReviewDialog() : "")
-    + (S.liveOrderReview ? liveOrderReviewDialog() : "");
+    + (S.liveOrderReview ? liveOrderReviewDialog() : "")
+    + (S.checkoutReview ? checkoutReviewDialog() : "");
   wire();
 }
 
@@ -608,9 +611,12 @@ function livePlacesScreen() {
       data-live-item-name="${esc(i.name)}" ${i.in_stock === false || i.in_stock === 0 ? "disabled" : ""}>Review</button></span></div>`).join("") : "";
   return `<h1 class="greet">Order from your area</h1><p class="sub">Live Swiggy restaurants and menus for ${esc(S.swiggy.address.label)}. Choose a real item and review the cart before checkout.</p>
     <form id="live-search" class="row" style="gap:8px;margin:14px 0"><input id="live-query" aria-label="Restaurant or cuisine" placeholder="Restaurant or cuisine" maxlength="80" required style="flex:1;min-width:150px"><button class="primary">Search Swiggy</button></form>
-    ${S.liveCart ? `<div class="consent cartnote"><b>In your Swiggy cart:</b> ${esc(S.liveCart.item)} · ${esc(S.liveCart.restaurant)}.
+    ${S.placedOrder ? `<div class="consent cartnote"><b>Swiggy order confirmed:</b> ${esc(S.placedOrder.order_id)} · ${esc(S.placedOrder.item)} · ${rupee(S.placedOrder.to_pay)}.
+      <button class="small" data-act="track-live-order">Check delivery status</button>${S.liveOrderStatus ? `<p class="fine">${esc(JSON.stringify(S.liveOrderStatus.provider))}</p>` : ""}</div>` : ""}
+    ${S.liveCart && !S.placedOrder ? `<div class="consent cartnote"><b>In your Swiggy cart:</b> ${esc(S.liveCart.item)} · ${esc(S.liveCart.restaurant)}.
       ${S.liveCart.to_pay == null ? "Check the final total in Swiggy." : `Current total ${rupee(S.liveCart.to_pay)}.`}
-      <a class="btn small primary" href="${esc(S.liveCart.checkout_url)}" target="_blank" rel="noopener">Open Swiggy checkout ↗</a></div>` : ""}
+      ${S.swiggy.order_enabled ? `<button class="small primary" data-act="review-live-checkout">Review and place order</button>` : ""}
+      <a class="btn small" href="${esc(S.liveCart.checkout_url)}" target="_blank" rel="noopener">Open Swiggy checkout ↗</a></div>` : ""}
     <h3 class="k">Your live favourites</h3><div class="plist">${fav.length ? fav.map(place).join("") : `<p class="fine">Search and star real restaurants for this address.</p>`}</div>
     ${S.liveResults ? `<h3 class="k">Swiggy results for ${esc(S.liveResults.query)}</h3><div class="plist">${results.length ? results.map(place).join("") : `<p class="fine">No live restaurants returned for this address and search.</p>`}</div>` : ""}
     ${menu ? `<section class="card livemenu"><button class="close ghost" data-act="close-live-browse" aria-label="Close menu">✕</button>
@@ -647,6 +653,32 @@ async function addLiveItemToCart() {
       item_name: r.item, expected_fingerprint: r.fingerprint });
   } finally { S.liveOrderReview = null; }
   render();
+}
+async function reviewLiveCheckout() {
+  S.checkoutReview = await api(`/api/user/${S.userId}/swiggy/checkout/preview`);
+  render();
+}
+async function placeLiveOrder() {
+  const review = S.checkoutReview;
+  S.checkoutReview = null;
+  S.placedOrder = await api(`/api/user/${S.userId}/swiggy/checkout`, "POST",
+    { expected_fingerprint: review.fingerprint });
+  S.liveCart = null;
+  render();
+}
+async function trackLiveOrder() {
+  S.liveOrderStatus = await api(`/api/user/${S.userId}/swiggy/orders/${encodeURIComponent(S.placedOrder.order_id)}`);
+  render();
+}
+function checkoutReviewDialog() {
+  const r = S.checkoutReview;
+  return `<div class="modal-bg" data-close-checkout-review="1"><section class="checkout" role="dialog" aria-modal="true" aria-labelledby="checkout-review-title">
+    <button class="close ghost" data-close-checkout-review="1" aria-label="Close order review">✕</button>
+    <p class="eyebrow">Real Swiggy order</p><h2 class="sec" id="checkout-review-title">Place this order now?</h2>
+    <div class="checkout-list"><div class="checkout-row"><div><strong>${esc(r.item)}</strong><span>Quantity ${esc(r.quantity)} · ${esc(r.address)}</span></div><b>${rupee(r.to_pay)}</b></div></div>
+    <p class="fine">Payment: ${esc(r.payment_label)}. This places a real order to the address shown and you may owe the full amount. Check ingredients with the restaurant if needed. An uncertain result will not be retried automatically.</p>
+    <div class="checkout-actions"><button class="ghost" data-close-checkout-review="1">Cancel</button><button class="primary" data-act="place-live-order" autofocus>Confirm and place order · ${rupee(r.to_pay)}</button></div>
+  </section></div>`;
 }
 function liveOrderReviewDialog() {
   const r = S.liveOrderReview;
@@ -1001,18 +1033,18 @@ function connectionPanel() {
     <div class="card"><span class="tag good">Connected</span>
       <h3>Signed in to Swiggy${sw.server?.name ? ` · ${esc(sw.server.name)}` : ""}</h3>
       ${addr}
-      <p class="sub">With an address set, <b>Places</b> shows Swiggy menus for your usual places. On <b>Today</b>, you can review an exact live item before adding it to your cart when its stock and options are clear. You review ingredients and pay in Swiggy. SmartPlate never places or pays for an order.</p>
+      <p class="sub">With an address set, <b>Today</b> and <b>Places</b> search real Swiggy restaurants for that address. Star your favourites, choose an exact live item, and review the cart. ${sw.order_enabled ? "Where Swiggy offers Cash on Delivery, you can confirm and place a real order here, then track it." : "Real order placement here is awaiting Swiggy approval and durable storage; complete checkout in Swiggy for now."}</p>
       <p class="fine">Protocol ${esc(sw.protocol_version || "?")} · ${sw.tools.length} tools (${sw.read_tools} read, ${sw.write_tools} write)${sw.expires ? ` · sign-in expires ${esc(sw.expires.slice(0, 16).replace("T", " "))}` : ""}.</p>
       <details><summary>What Swiggy offers this account</summary>${sw.tools.map(t => `<div class="calrow"><b>${esc(t.name)}</b><span class="tag ${t.kind === "write" ? "warn" : ""}">${t.kind}</span><span class="fine">${esc(t.description)}</span></div>`).join("")}</details>
       <div class="row gap"><button data-act="swiggy-discover">Refresh tools</button><button class="ghost" data-act="swiggy-disconnect">Disconnect</button></div></div>`
     : `<div class="card"><span class="tag">${sw.needs_reconnect ? "Reconnect required" : sw.expired ? "Sign-in expired" : "Not connected"}</span>
       <h3>Connect your Swiggy account</h3>
       ${sw.needs_reconnect ? `<p class="sub">This server can no longer read the saved Swiggy sign-in. Connect again.</p>` : ""}
-      <p class="sub">You sign in on Swiggy's own page (phone + OTP). SmartPlate can then show menus from your usual places and, for eligible dishes, let you review a live item before adding it to your cart. It never places or pays for an order. Swiggy sign-ins last about 5 days.</p>
+      <p class="sub">You sign in on Swiggy's own page (phone + OTP). SmartPlate can then search real restaurants and menus for your saved address, remember favourites, and let you review a live item before adding it to your cart. Swiggy sign-ins last about 5 days.</p>
       <button class="primary" data-act="swiggy-connect">Connect Swiggy</button>
       <p class="fine">Swiggy requires production access and an exact-match allowlisted HTTPS redirect. ${sw.callback_url ? `For this deployment, request <code>${esc(sw.callback_url)}</code> from Swiggy Builders Club. ` : ""}A Render URL is an HTTPS redirect; it still needs Swiggy approval. This connection has only been tested against a fake server.</p></div>`;
   return `<h2 class="sec">Swiggy connection</h2>${live}<div class="card"><span class="tag">Hand-off mode</span>
-    <h3>Planning works now. You place each order on Swiggy yourself.</h3>
+    <h3>The public deployment uses Swiggy checkout until real placement is approved.</h3>
     <p><b>Today:</b> “Order on Swiggy” opens Swiggy's search for that restaurant and dish. You check the real price there and order. Then tap “I had it” so your budget and nutrition stay accurate.</p>
     <p><b>Signed in:</b> Review the exact live dish and confirm before SmartPlate adds it to your cart. For allergies, medical rules, vegan diets, uncertain stock, or dishes needing options, choose the dish directly in Swiggy. Check the final total and pay there. Scheduled orders stay off until Swiggy's terms clearly allow them.</p>
     <p class="sub">Swiggy's Food tools cover addresses, restaurant and menu search, cart, payment, orders and tracking. The available tools can change; inspect the discovered list after connecting. SmartPlate keeps its own record of your usual places.</p>
@@ -1179,6 +1211,7 @@ function wire() {
   on("[data-close-review]", "click", (e) => { if (e.target.dataset.closeReview) { S.orderReview = null; render(); } });
   on("[data-close-cart-review]", "click", (e) => { if (e.target.dataset.closeCartReview) { S.cartReview = null; render(); } });
   on("[data-close-live-review]", "click", (e) => { if (e.target.dataset.closeLiveReview) { S.liveOrderReview = null; render(); } });
+  on("[data-close-checkout-review]", "click", (e) => { if (e.target.dataset.closeCheckoutReview) { S.checkoutReview = null; render(); } });
   on("[data-cmd]", "click", (e) => guard(() => quickCmd(e.currentTarget.dataset.cmd)));
   on("[data-adopt]", "click", (e) => guard(() => adopt(e.currentTarget.dataset.adopt)));
   on("[data-sess]", "click", (e) => { e.stopPropagation(); const [id, st] = e.currentTarget.dataset.sess.split(":"); guard(() => setSession(id, st)); });
@@ -1189,7 +1222,9 @@ function wire() {
   const cmd = document.getElementById("cmd"); if (cmd) cmd.addEventListener("keydown", (e) => { if (e.key === "Enter") guard(runCommand); });
   const acts = {
     cmd: runCommand, reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute,
-    "confirm-cart": fillCart, "confirm-live-cart": addLiveItemToCart, savetpl: saveTemplate,
+    "confirm-cart": fillCart, "confirm-live-cart": addLiveItemToCart,
+    "review-live-checkout": reviewLiveCheckout, "place-live-order": placeLiveOrder,
+    "track-live-order": trackLiveOrder, savetpl: saveTemplate,
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
     "start-onboard": async () => startOnboard(), notify: toggleAlerts,
     "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); location.href = r.authorize_url; },
@@ -1204,7 +1239,7 @@ function wire() {
     "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); }, "cancel-move": async () => { S.moving = null; render(); },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
-  if (S.orderReview || S.cartReview || S.liveOrderReview) document.querySelector(".checkout [autofocus]")?.focus();
+  if (S.orderReview || S.cartReview || S.liveOrderReview || S.checkoutReview) document.querySelector(".checkout [autofocus]")?.focus();
   if (S.sheet?.data) document.querySelector(".sheet .close")?.focus();
   on("[data-swaddr]", "click", (e) => guard(async () => {
     S.swiggy = await api(`/api/user/${S.userId}/swiggy/address`, "POST", { address_id: e.currentTarget.dataset.swaddr });
@@ -1268,10 +1303,10 @@ async function goTab(tab, sub = null) {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && (S.drawer || S.orderReview || S.cartReview || S.liveOrderReview || S.sheet || S.moving)) {
-    S.drawer = null; S.orderReview = null; S.cartReview = null; S.liveOrderReview = null; S.sheet = null; S.moving = null; render();
+  if (e.key === 'Escape' && (S.drawer || S.orderReview || S.cartReview || S.liveOrderReview || S.checkoutReview || S.sheet || S.moving)) {
+    S.drawer = null; S.orderReview = null; S.cartReview = null; S.liveOrderReview = null; S.checkoutReview = null; S.sheet = null; S.moving = null; render();
   }
-  if (e.key === 'Tab' && (S.orderReview || S.cartReview || S.liveOrderReview || S.sheet)) {
+  if (e.key === 'Tab' && (S.orderReview || S.cartReview || S.liveOrderReview || S.checkoutReview || S.sheet)) {
     const items = [...document.querySelectorAll('[role=dialog] button:not([disabled]), [role=dialog] a[href]')];
     if (!items.length) return;
     const first = items[0], last = items.at(-1);
