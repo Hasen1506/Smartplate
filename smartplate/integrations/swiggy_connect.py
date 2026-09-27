@@ -305,7 +305,11 @@ def status(user_id: int) -> dict:
         return {"connected": False}
     expired = bool(conn["expires_ts"]) and dt.datetime.fromisoformat(conn["expires_ts"]) <= clock.now()
     tools = db.jl(conn["tools"])
-    return {"connected": not expired, "expired": expired, "expires": conn["expires_ts"],
+    # A changed/missing vault key makes a stored token unreadable even before its
+    # advertised expiry. Never present that state as an active connection.
+    token_unreadable = not bool(conn["access_token"])
+    return {"connected": not expired and not token_unreadable, "expired": expired,
+            "needs_reconnect": token_unreadable, "expires": conn["expires_ts"],
             "connected_at": conn["connected_ts"], "discovered_at": conn["discovered_ts"],
             "protocol_version": conn["protocol_version"], "server": db.jl(conn["server_info"], {}),
             "tools": [{k: t[k] for k in ("name", "description", "kind")} for t in tools],
