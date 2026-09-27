@@ -125,6 +125,15 @@ test('today shows the next meal with order-by time, hand-off and escaped names',
   assert.ok(!html.includes('<b>Meals</b>'));
 });
 
+test('sample banner describes demo data without inventing an allergy', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  richView(context);
+  vm.runInContext("S.view.user.prefs = { sample: true }; S.view.user.allergens = []", context);
+  const html = vm.runInContext('todayScreen()', context);
+  assert.match(html, /demonstration preferences and sample menu data/);
+  assert.ok(!html.includes('fictional allergies'));
+});
+
 test('connected profiles with ingredient rules keep the direct Swiggy hand-off', async () => {
   const { context } = fixture(); await context.bootPromise;
   richView(context);
