@@ -14,6 +14,9 @@ AGENT_BRAIN = os.environ.get("SMARTPLATE_BRAIN", "deterministic")
 
 # Swiggy MCP provider — "simulated" (default) or "live" (requires real access).
 SWIGGY_PROVIDER = os.environ.get("SMARTPLATE_SWIGGY", "simulated")
+# Real Food orders are non-idempotent. Enable only after provider approval,
+# staging validation and durable storage; the public Render Free demo stays off.
+LIVE_ORDERS = os.environ.get("SMARTPLATE_LIVE_ORDERS", "off") == "on"
 
 # Solver limits: relative optimality gap and a hard time cap per weekly solve.
 SOLVER_GAP = float(os.environ.get("SMARTPLATE_SOLVER_GAP", "0.001"))
