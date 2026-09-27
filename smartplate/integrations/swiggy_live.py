@@ -18,6 +18,7 @@ Tested against a fake server (tests/test_swiggy_live.py), not the live service.
 """
 import datetime as dt
 import difflib
+import hashlib
 import json
 import re
 
@@ -29,13 +30,13 @@ ALLOWED = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu
                      "get_food_cart", "update_food_cart", "flush_food_cart"})
 MENU_TTL = dt.timedelta(hours=6)
 MATCH_RESTAURANT = 0.6
-MATCH_ITEM = 0.55
-CHECKOUT_URL = "https://www.swiggy.com/checkout"
+CHECKOUT_URL = "https://www.swiggy.com/"
 
 ALIASES = {
     "query": ["query", "searchQuery", "search_query", "keyword", "q", "restaurantName", "restaurant_name"],
     "address": ["addressId", "address_id"],
     "restaurant": ["restaurantId", "restaurant_id", "restId", "rest_id"],
+    "restaurant_scope": ["restaurantIdOfAddedItem", "restaurant_id_of_added_item"],
     "restaurant_name": ["restaurantName", "restaurant_name"],
     "cart_items": ["cartItems", "cart_items", "items"],
     "item_id": ["menu_item_id", "menuItemId", "itemId", "item_id", "id"],
@@ -44,16 +45,25 @@ ALIASES = {
 FIELDS = {
     "id": ["id", "addressId", "address_id", "restaurantId", "restaurant_id", "restId", "itemId", "item_id",
            "menuItemId", "menu_item_id"],
+    "menu_item_id": ["menu_item_id", "menuItemId", "itemId", "item_id", "id"],
     "name": ["name", "restaurantName", "itemName", "title"],
     "label": ["annotation", "label", "tag", "addressType", "type"],
     "text": ["formattedAddress", "address", "addressLine", "addressLine1", "displayAddress", "area", "locality"],
-    "price": ["price", "finalPrice", "defaultPrice", "priceInPaise", "price_in_paise", "cost"],
+    "price": ["priceInPaise", "price_in_paise", "priceInRupees", "price_in_rupees", "price", "finalPrice", "defaultPrice", "cost"],
     "rating": ["avgRating", "rating", "avg_rating"],
     "eta": ["deliveryTime", "eta", "sla", "slaString", "delivery_time"],
     "area": ["areaName", "locality", "area", "cuisines"],
     "veg": ["isVeg", "veg", "is_veg"],
-    "to_pay": ["to_pay", "toPay", "totalPayable", "grandTotal", "billTotal", "total", "totalAmount"],
+    "to_pay": ["to_pay", "toPay", "totalPayable", "grandTotal", "billTotal"],
+    "stock": ["inStock", "in_stock"],
+    "variants": ["hasVariants", "has_variants"],
+    "addons": ["hasAddons", "has_addons"],
+    "restaurant_id": ["restaurant_id", "restaurantId"],
 }
+
+
+class CartChanged(SwiggyError):
+    """The live item no longer matches the user's reviewed cart preview."""
 
 
 # --------------------------------------------------------------------------- #
@@ -108,6 +118,10 @@ def call(user_id: int, name: str, arguments: dict) -> object:
     if result.get("isError"):
         text = data.get("text") if isinstance(data, dict) else None
         raise SwiggyError(f"Swiggy said: {(text or json.dumps(data))[:240]}")
+    if isinstance(data, dict) and data.get("success") is False:
+        error = data.get("error") or {}
+        message = error.get("message") if isinstance(error, dict) else str(error)
+        raise SwiggyError(f"Swiggy said: {(message or 'The request failed')[:240]}")
     return data
 
 
@@ -188,15 +202,17 @@ def records(data, *needs: str) -> list[dict]:
 
 
 def rupees(record: dict) -> float | None:
-    """Menu prices: rupees, or paise when the field says so or the number is that large
-    (Swiggy's web data uses paise). Unverified until a real reply is seen."""
+    """Only convert a price when the provider names its units."""
     lowered = {k.lower(): k for k in record}
     for alias in FIELDS["price"]:
         key = lowered.get(alias.lower())
-        if key is None or not isinstance(record[key], (int, float)):
+        if key is None or not isinstance(record[key], (int, float)) or isinstance(record[key], bool):
             continue
         value = float(record[key])
-        return round(value / 100, 2) if "paise" in key.lower() or value >= 1000 else value
+        if "paise" in key.lower():
+            return round(value / 100, 2)
+        if "rupee" in key.lower():
+            return value
     return None
 
 
@@ -313,28 +329,78 @@ def _planned(session_id: int) -> tuple[int, dict]:
     session = models.get_session(session_id)
     view = service.plan_view(session["plan_id"])
     cell = next((c for d in view["grid"] for c in d["meals"].values() if c.get("session_id") == session_id), None)
-    if not cell or cell.get("kind") != "delivery" or not cell.get("restaurant"):
-        raise ValueError("Only a planned delivery can go into a Swiggy cart")
+    if (not cell or cell.get("kind") != "delivery" or not cell.get("restaurant")
+            or cell.get("status") != "active" or cell.get("past")):
+        raise ValueError("Only an upcoming, active planned delivery can go into a Swiggy cart")
     return view["user"]["id"], cell
 
 
-def fill_cart(session_id: int) -> dict:
-    """Put the planned dish in the person's Swiggy cart and read back what they'd pay.
-    Nothing is ordered: they open Swiggy to review and pay."""
+def _name(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", (value or "").lower())).strip()
+
+
+def cart_preview(session_id: int) -> dict:
+    """Read a fresh, exact, simple live item before the user approves a cart change.
+
+    Provider menus do not establish allergen or medical safety, and a vegetarian
+    mark does not establish vegan ingredients. Those profiles use manual hand-off.
+    """
+    user_id, cell = _planned(session_id)
+    from ..domain import models
+    user = models.get_user(user_id)
+    if user["allergens"] or user["medical"] or user["diet"] == "vegan":
+        raise SwiggyError("SmartPlate cannot verify your ingredient or medical rules from Swiggy's menu. "
+                          "Open Swiggy and confirm the dish with the restaurant before ordering.")
+    conn = _conn(user_id)
+    address_id = _address(conn)
+    place = find_restaurant(user_id, cell["restaurant"])
+    tool = _tool(conn, "search_menu")
+    data = call(user_id, "search_menu", build_args(tool, {
+        "query": cell["item"], "address": address_id, "restaurant_scope": place["id"]}))
+    exact = [r for r in records(data, "menu_item_id", "name") if _name(str(_get(r, "name"))) == _name(cell["item"])
+             and (_get(r, "restaurant_id") is None or str(_get(r, "restaurant_id")) == str(place["id"]))]
+    if len(exact) != 1:
+        raise SwiggyError(f"Could not verify one exact live match for {cell['item']} at {place['name']}. "
+                          "Open Swiggy to choose the right dish.")
+    item = exact[0]
+    if _get(item, "stock") not in (True, 1):
+        raise SwiggyError("Swiggy did not confirm this dish is in stock. Check it in Swiggy before ordering.")
+    if (_get(item, "variants") not in (False, 0) or _get(item, "addons") not in (False, 0)
+            or item.get("variations") or item.get("variantsV2") or item.get("addons")):
+        raise SwiggyError("This dish needs options or add-ons SmartPlate cannot safely choose. "
+                          "Customize it in Swiggy instead.")
+    if user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
+        raise SwiggyError("Swiggy did not verify this dish as vegetarian. Check it in Swiggy before ordering.")
+    item_id = _get(item, "menu_item_id")
+    details = {"session_id": session_id, "planned": cell["item"], "planned_restaurant": cell["restaurant"],
+               "planned_cost": cell["cost"], "restaurant": place["name"], "restaurant_id": place["id"],
+               "item": str(_get(item, "name")), "item_id": item_id, "address_id": address_id}
+    fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price")},
+                                            sort_keys=True).encode()).hexdigest()
+    return {**details, "address": conn.get("address_label") or "Selected Swiggy address",
+            "menu_price": rupees(item), "fingerprint": fingerprint}
+
+
+def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
+    """Add exactly the item the user reviewed, then read the provider's current cart."""
+    if not expected_fingerprint:
+        raise CartChanged("Review the live Swiggy item before adding it to your cart.")
+    preview = cart_preview(session_id)  # fresh provider lookup: no six-hour browse cache
+    if preview["fingerprint"] != expected_fingerprint:
+        raise CartChanged("The live Swiggy item or your plan changed. Review it again before adding to cart.")
     user_id, cell = _planned(session_id)
     conn = _conn(user_id)
-    live = menu(user_id, cell["restaurant"])
-    best = max(live["items"], key=lambda i: _similar(cell["item"], i["name"]), default=None)
-    if not best or _similar(cell["item"], best["name"]) < MATCH_ITEM:
-        raise SwiggyError(f"{cell['item']} isn't on {live['swiggy']['name']}'s Swiggy menu right now. "
-                          "Tap Change to pick another dish.")
     tool = _tool(conn, "update_food_cart")
     call(user_id, "update_food_cart", build_args(tool, {
-        "cart_items": [_cart_item(tool, best["id"])], "restaurant": live["swiggy"]["id"],
-        "address": _address(conn), "restaurant_name": live["swiggy"]["name"]}))
+        "cart_items": [_cart_item(tool, preview["item_id"])], "restaurant": preview["restaurant_id"],
+        "address": preview["address_id"], "restaurant_name": preview["restaurant"]}))
     cart = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"), {"address": _address(conn)}))
+    if not any(str(_get(r, "menu_item_id")) == str(preview["item_id"])
+               for r in records(cart, "menu_item_id")):
+        raise SwiggyError("SmartPlate could not confirm the added item in Swiggy's cart. "
+                          "Check your Swiggy cart before trying again.")
     to_pay = _num(cart, "to_pay")
-    return {"session_id": session_id, "restaurant": live["swiggy"]["name"], "item": best["name"],
-            "planned": cell["item"], "planned_cost": cell["cost"], "menu_price": best["price"],
+    return {"session_id": session_id, "restaurant": preview["restaurant"], "item": preview["item"],
+            "planned": cell["item"], "planned_cost": cell["cost"], "menu_price": preview["menu_price"],
             "to_pay": to_pay, "over_plan": round(to_pay - cell["cost"], 2) if to_pay is not None else None,
             "checkout_url": CHECKOUT_URL}
