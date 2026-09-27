@@ -171,6 +171,20 @@ def test_shortlist_is_capped_and_favourites_first(client):
     assert o["hidden"]["not_safe"] >= 1
 
 
+def test_treats_cannot_replace_a_meal_in_plan_shortlist_or_manual_pick(client):
+    v = client.get("/api/user/3/plan").get_json()  # Arjun has no allergy excluding chikki
+    assert all(not c.get("item", "").endswith(" Sweet")
+               for _, _, c in _cells(v) if c["kind"] == "delivery")
+    sid = next(c["session_id"] for _, _, c in _cells(v) if c["status"] == "active" and not c.get("past"))
+    o = client.get(f"/api/session/{sid}/options").get_json()
+    names = [d["name"] for g in o["usual"] for d in g["dishes"]] + [d["name"] for d in o["new"]]
+    assert "Peanut Chikki Sweet" not in names and "Rava Kesari Sweet" not in names
+    with db.cursor() as cur:
+        item_id = cur.execute("SELECT id FROM menu_items WHERE name='Peanut Chikki Sweet'").fetchone()["id"]
+    r = client.post(f"/api/session/{sid}/choose", json={"item_id": item_id})
+    assert r.status_code == 400 and "treat" in r.get_json()["error"]
+
+
 def test_pick_is_kept_and_week_rebalances(client):
     v = client.get("/api/plan/1").get_json()
     sid = _session(v, 0, "dinner")
