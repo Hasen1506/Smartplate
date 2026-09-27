@@ -16,6 +16,9 @@ SCHEMAS = {
                            "properties": {"query": {"type": "string"}, "addressId": {"type": "string"}}},
     "get_restaurant_menu": {"type": "object", "required": ["restaurantId", "addressId"],
                             "properties": {"restaurantId": {"type": "string"}, "addressId": {"type": "string"}}},
+    "search_menu": {"type": "object", "required": ["query", "addressId"],
+                    "properties": {"query": {"type": "string"}, "addressId": {"type": "string"},
+                                   "restaurantIdOfAddedItem": {"type": "string"}}},
     "update_food_cart": {"type": "object", "required": ["cartItems", "restaurantId", "addressId"], "properties": {
         "cartItems": {"type": "array", "items": {"type": "object", "required": ["menu_item_id", "quantity"],
                                                  "properties": {"menu_item_id": {"type": "string"},
@@ -32,6 +35,8 @@ class FakeLive(FakeSwiggy):
     def __init__(self):
         super().__init__()
         self.cart, self.dishes = None, {}
+        self.stock, self.has_variants, self.has_addons, self.is_veg = True, False, False, True
+        self.search_error = None
 
     def __call__(self, method, url, headers, body):
         if url.endswith("/food") and headers.get("Authorization") == f"Bearer {self.token}":
@@ -63,8 +68,17 @@ class FakeLive(FakeSwiggy):
                 {"restaurantId": "r-2", "name": "Completely Different Kitchen", "avgRating": 4.0}]}}
         if name == "get_restaurant_menu":
             assert args["restaurantId"] == "r-1" and args["addressId"] == "addr-home"
-            items = [{"itemId": f"m{i}", "name": n, "price": p, "isVeg": 1} for i, (n, p) in enumerate(self.dishes.items())]
+            items = [{"itemId": f"m{i}", "name": n, "priceInPaise": p, "isVeg": 1} for i, (n, p) in enumerate(self.dishes.items())]
             return {"structuredContent": {"menu": {"categories": [{"title": "Mains", "items": items}]}}}
+        if name == "search_menu":
+            assert args["addressId"] == "addr-home" and args["restaurantIdOfAddedItem"] == "r-1"
+            if self.search_error:
+                return {"structuredContent": {"success": False, "error": {"message": self.search_error}}}
+            items = [{"menu_item_id": f"m{i}", "name": n, "priceInPaise": p,
+                      "restaurant_id": "r-1", "inStock": self.stock,
+                      "hasVariants": self.has_variants, "hasAddons": self.has_addons,
+                      "isVeg": self.is_veg} for i, (n, p) in enumerate(self.dishes.items())]
+            return {"structuredContent": {"success": True, "data": {"items": items}}}
         if name == "update_food_cart":
             item = args["cartItems"][0]
             assert item["quantity"] == 1 and args["restaurantId"] == "r-1"
@@ -95,8 +109,8 @@ def swiggy(monkeypatch):
     return fake
 
 
-def _next_delivery(client):
-    v = client.get("/api/plan/1").get_json()
+def _next_delivery(client, plan_id=1):
+    v = client.get(f"/api/plan/{plan_id}").get_json()
     return next(c for d in v["grid"] for c in d["meals"].values()
                 if c["kind"] == "delivery" and c["status"] == "active" and not c.get("past"))
 
@@ -118,11 +132,14 @@ def test_choose_address_then_live_menu_in_rupees(client, swiggy):
 
 
 def test_fill_cart_puts_the_planned_dish_in_and_reads_to_pay(client, swiggy):
-    _connect(client, swiggy)
-    client.post("/api/user/1/swiggy/address", json={"address_id": "addr-home"})
-    cell = _next_delivery(client)
+    _connect(client, swiggy, uid=3)  # profile 1 has hard allergy/medical exclusions
+    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
+    cell = _next_delivery(client, plan_id=3)
     swiggy.dishes = {"Something Else": 9900, cell["item"]: 21000}
-    r = client.post(f"/api/session/{cell['session_id']}/swiggy-cart", json={})
+    preview = client.get(f"/api/session/{cell['session_id']}/swiggy-cart/preview").get_json()
+    assert preview["item"] == cell["item"] and preview["restaurant_id"] == "r-1"
+    r = client.post(f"/api/session/{cell['session_id']}/swiggy-cart",
+                    json={"expected_fingerprint": preview["fingerprint"]})
     assert r.status_code == 200, r.get_json()
     cart = r.get_json()
     assert cart["item"] == cell["item"] and cart["to_pay"] == 245.0 and cart["menu_price"] == 210.0
@@ -132,14 +149,53 @@ def test_fill_cart_puts_the_planned_dish_in_and_reads_to_pay(client, swiggy):
 
 
 def test_missing_dish_and_missing_address_are_explained(client, swiggy):
-    _connect(client, swiggy)
-    cell = _next_delivery(client)
-    r = client.post(f"/api/session/{cell['session_id']}/swiggy-cart", json={})
+    _connect(client, swiggy, uid=3)
+    cell = _next_delivery(client, plan_id=3)
+    r = client.get(f"/api/session/{cell['session_id']}/swiggy-cart/preview")
     assert r.status_code == 502 and "delivery address" in r.get_json()["error"]
-    client.post("/api/user/1/swiggy/address", json={"address_id": "addr-home"})
+    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
     swiggy.dishes = {"Nothing Like It": 10000}
-    r = client.post(f"/api/session/{cell['session_id']}/swiggy-cart", json={})
-    assert r.status_code == 502 and "isn't on" in r.get_json()["error"]
+    r = client.get(f"/api/session/{cell['session_id']}/swiggy-cart/preview")
+    assert r.status_code == 502 and "exact live match" in r.get_json()["error"]
+
+
+def test_cart_requires_review_and_rejects_changed_item(client, swiggy):
+    _connect(client, swiggy, uid=3)
+    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
+    cell = _next_delivery(client, plan_id=3)
+    sid = cell["session_id"]
+    swiggy.dishes = {cell["item"]: 21000}
+    assert client.post(f"/api/session/{sid}/swiggy-cart", json={}).status_code == 409
+    preview = client.get(f"/api/session/{sid}/swiggy-cart/preview").get_json()
+    assert "update_food_cart" not in swiggy.tool_calls()
+    swiggy.dishes = {"Another dish": 12000, cell["item"]: 21000}  # provider item ID changed
+    changed = client.post(f"/api/session/{sid}/swiggy-cart",
+                          json={"expected_fingerprint": preview["fingerprint"]})
+    assert changed.status_code == 409 and "changed" in changed.get_json()["message"]
+    assert "update_food_cart" not in swiggy.tool_calls()
+
+
+def test_cart_fails_closed_for_hard_rules_and_unverified_item(client, swiggy):
+    _connect(client, swiggy, uid=1)
+    sid = _next_delivery(client)["session_id"]
+    blocked = client.get(f"/api/session/{sid}/swiggy-cart/preview")
+    assert blocked.status_code == 502 and "cannot verify" in blocked.get_json()["error"]
+    assert "search_menu" not in swiggy.tool_calls()
+
+    _connect(client, swiggy, uid=3)
+    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
+    cell = _next_delivery(client, plan_id=3)
+    sid = cell["session_id"]
+    swiggy.dishes = {cell["item"]: 21000}
+    for field in ("stock", "has_variants", "has_addons"):
+        setattr(swiggy, field, False if field == "stock" else True)
+        response = client.get(f"/api/session/{sid}/swiggy-cart/preview")
+        assert response.status_code == 502
+        assert "update_food_cart" not in swiggy.tool_calls()
+        setattr(swiggy, field, True if field == "stock" else False)
+    swiggy.search_error = "Item unavailable"
+    response = client.get(f"/api/session/{sid}/swiggy-cart/preview")
+    assert response.status_code == 502 and "Item unavailable" in response.get_json()["error"]
 
 
 def test_ordering_and_payment_tools_are_refused(client, swiggy):
@@ -182,8 +238,12 @@ def test_vegetarians_do_not_see_non_veg_dishes(client, swiggy, monkeypatch):
 
 
 def test_reading_helpers():
-    assert swiggy_live.rupees({"price": 180}) == 180 and swiggy_live.rupees({"priceInPaise": 950}) == 9.5
-    assert swiggy_live.rupees({"price": 25000}) == 250.0 and swiggy_live.rupees({"name": "x"}) is None
+    assert swiggy_live.rupees({"priceInRupees": 180}) == 180
+    assert swiggy_live.rupees({"priceInPaise": 950}) == 9.5
+    assert swiggy_live.rupees({"price": 180}) is None
+    assert swiggy_live.rupees({"price": 25000, "priceInPaise": 25000}) == 250.0
+    assert swiggy_live.rupees({"name": "x"}) is None
     assert swiggy_live._num({"a": {"b": [{"toPay": "₹ 212"}]}}, "to_pay") == 212.0
+    assert swiggy_live._num({"cart": {"items": [{"total": 180}], "bill": {"to_pay": 225}}}, "to_pay") == 225
     nested = {"data": {"list": [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], "meta": [{"id": 9}]}}
     assert [r["name"] for r in swiggy_live.records(nested, "id", "name")] == ["A", "B"]
