@@ -303,7 +303,7 @@ function tabBody() {
 function todayScreen() {
   const v = S.view, nu = v.next_up;
   const hello = greeting();
-  const sample = v.user?.prefs?.sample ? `<div class="coldstart"><span class="i">Sample</span><span>This is a sample profile with fictional allergies. <a href="#" data-act="start-onboard">Set up your own</a>.</span></div>` : "";
+  const sample = v.user?.prefs?.sample ? `<div class="coldstart"><span class="i">Sample</span><span>This profile uses demonstration preferences and sample menu data. <a href="#" data-act="start-onboard">Set up your own</a>.</span></div>` : "";
   return `${sample}<h1 class="greet">${hello}${v.user?.name && v.user.name !== "Me" && !v.user?.prefs?.sample ? ", " + esc(v.user.name.split(" ")[0]) : ""}</h1>
     ${budgetCard()}
     ${nu ? nextUpCard(nu) : `<div class="card empty">Nothing left to plan this week. <button data-act="newweek">Plan next week</button></div>`}
@@ -545,6 +545,7 @@ function sheetDialog() {
   const usual = d.usual.map(g => `<div class="place"><div class="ph"><b>${esc(g.restaurant)}</b><span>${Number(g.rating).toFixed(1)}★ · ~${g.eta_min} min${g.favourite ? "" : ""}</span></div>
       ${g.dishes.map(x => dishBtn(x)).join("")}${g.more ? `<p class="fine">+${g.more} more on their menu</p>` : ""}</div>`).join("");
   const hidden = [d.hidden.not_safe ? `${d.hidden.not_safe} not safe for your allergies or diet` : "",
+    d.hidden.not_a_meal ? `${d.hidden.not_a_meal} treats hidden as standalone meals` : "",
     d.hidden.below_rating ? `${d.hidden.below_rating} below your ${Number(S.view.user.rating_floor).toFixed(1)}★ minimum` : "",
     d.hidden.not_again ? `${d.hidden.not_again} you said “not again” to` : ""].filter(Boolean).join(" · ");
   return `<div class="modal-bg" data-close-sheet="1"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
