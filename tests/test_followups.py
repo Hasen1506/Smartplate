@@ -241,6 +241,20 @@ def test_swiggy_sign_in_and_discovery_end_to_end(client, swiggy):
     assert called == ["initialize", "notifications/initialized", "tools/list", "tools/list"]  # nothing else
 
 
+def test_swiggy_can_use_approved_auth_callback_path_on_app_origin(client, swiggy, monkeypatch):
+    from smartplate import config
+    monkeypatch.setattr(config, "SWIGGY_CALLBACK_PATH", "/auth/swiggy/callback")
+    headers = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example"}
+    status = client.get("/api/user/1/swiggy", headers=headers).get_json()
+    assert status["callback_url"] == "https://app.example/auth/swiggy/callback"
+    url = client.post("/api/user/1/swiggy/connect", json={}, headers=headers).get_json()["authorize_url"]
+    q = swiggy.approve(url)
+    assert q["redirect_uri"] == status["callback_url"]
+    result = client.get(f"/auth/swiggy/callback?state={q['state']}&code=code-1")
+    assert result.status_code == 302
+    assert result.headers["Location"].endswith("swiggy=connected")
+
+
 def test_swiggy_state_is_single_use_and_checked(client, swiggy):
     r, q = _connect(client, swiggy)
     replay = client.get(f"/swiggy/callback?state={q['state']}&code=code-1")
