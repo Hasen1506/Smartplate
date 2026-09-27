@@ -313,7 +313,8 @@ function todayScreen() {
   if (swiggyReady()) return `<p class="fine">Signed in to Swiggy · ${esc(S.swiggy.address.label)}</p>${livePlacesScreen()}
     <details><summary>Open the sample weekly planner</summary><p class="fine">This planner currently uses demonstration Chennai dishes and prices. It is separate from the live Swiggy ordering flow.</p>
       ${budgetCard()}${nu ? nextUpCard(nu) : ""}${todayRest(nu)}</details>`;
-  const sample = v.user?.prefs?.sample ? `<div class="coldstart"><span class="i">Sample</span><span>This profile uses demonstration preferences and sample menu data. <a href="#" data-act="start-onboard">Set up your own</a>.</span></div>` : "";
+  const sample = v.user?.prefs?.sample ? `<div class="coldstart"><span class="i">Sample</span><span>This profile uses demonstration preferences and sample menu data. <a href="#" data-act="start-onboard">Set up your own</a>.</span></div>`
+    : `<div class="coldstart"><span class="i">Demo plan</span><span>These weekly restaurant dishes and prices are sample data. <a href="#" data-go="more:connection">Connect Swiggy</a> to order from real restaurants near your saved address.</span></div>`;
   return `${sample}<h1 class="greet">${hello}${v.user?.name && v.user.name !== "Me" && !v.user?.prefs?.sample ? ", " + esc(v.user.name.split(" ")[0]) : ""}</h1>
     ${budgetCard()}
     ${nu ? nextUpCard(nu) : `<div class="card empty">Nothing left to plan this week. <button data-act="newweek">Plan next week</button></div>`}
@@ -1053,9 +1054,9 @@ function connectionPanel() {
 }
 
 /* ================================================================ ONBOARDING */
-const OB_STEPS = ["What you eat", "Your meals", "Usual places", "Budget", "Goal"];
+const OB_STEPS = ["What you eat", "Your meals", "Budget", "Goal"];
 function startOnboard() {
-  S.onboard = { step: 0, places: null, suggest: null,
+  S.onboard = { step: 0,
     d: { name: "", diet: "nonveg", allergens: [], medical: [], observances: [], meals: ["lunch", "dinner"], cook: "sometimes",
       favourites: [], weekly_budget: null, daily_cap: null, goal: "none", body: null } };
   S.welcome = false; S.sheet = null; render();
@@ -1070,7 +1071,7 @@ function onboardingScreen() {
   if (st === 0) {
     body = `<h1>What do you eat?</h1>
       <div class="chips">${[["veg", "Vegetarian"], ["nonveg", "Non-vegetarian"], ["vegan", "Vegan"]].map(([k, l]) => chip("diet", k, l, d.diet === k, false)).join("")}</div>
-      <h3 class="k">Anything you must avoid?</h3><p class="fine">These are hard limits: excluded dishes never appear, even when you change a meal.</p>
+      <h3 class="k">Anything you must avoid?</h3><p class="fine">These exclusions filter the sample planner. Swiggy menus cannot verify all ingredients or cross-contact; confirm with the restaurant before a real order.</p>
       <div class="chips">${["peanut", "dairy", "gluten", "egg", "soy", "shellfish", "fish", "sesame", "tree_nut"].map(a => chip("allergens", a, cap1(a.replace("_", " ")), d.allergens.includes(a))).join("")}</div>
       <details><summary>Medical needs or fasts (optional)</summary>
         <div class="chips">${[["diabetes", "Diabetes (low sugar)"], ["hypertension", "Blood pressure (less salt)"], ["celiac", "Celiac"]].map(([k, l]) => chip("medical", k, l, d.medical.includes(k))).join("")}</div>
@@ -1084,25 +1085,12 @@ function onboardingScreen() {
       <div class="chips">${[["never", "Never"], ["sometimes", "1–2× a week"], ["often", "3–5× a week"], ["most", "Most days"]].map(([k, l]) => chip("cook", k, l, d.cook === k, false)).join("")}</div>
       <p class="fine">Cook days are cheaper. We'll suggest simple recipes and one grocery list.</p>`;
   } else if (st === 2) {
-    const ps = o.places;
-    body = `<h1>Where do you usually order from?</h1><p class="fine">Tap your usual places. Plans come mostly from these, so you never scroll a full menu. You can change them any time.</p>
-      ${!ps ? `<p class="fine">Loading nearby places…</p>` : `<div class="plist">${ps.map(p => `<button type="button" class="pcard pick ${d.favourites.includes(p.id) ? "fav" : ""} ${p.dishes_fit ? "" : "none"}" data-ob="favourites" data-val="${p.id}" data-multi="1" aria-pressed="${d.favourites.includes(p.id)}" ${p.dishes_fit ? "" : "disabled"}>
-        <span class="star" aria-hidden="true">${d.favourites.includes(p.id) ? "★" : "☆"}</span>
-        <span><b>${esc(p.name)}</b><span class="fine">${Number(p.rating).toFixed(1)}★ · ${esc(p.cuisines.slice(0, 2).join(", "))} · ${p.dishes_fit ? `${p.dishes_fit} dish${p.dishes_fit === 1 ? "" : "es"} fit${p.dishes_fit === 1 ? "s" : ""} you` : "nothing fits your diet"}</span>
-        ${p.examples?.length ? `<span class="fine ex">${esc(p.examples.join(" · "))}</span>` : ""}</span></button>`).join("")}</div>`}
-      <p class="fine">${d.favourites.length ? `${d.favourites.length} selected.` : "Not sure yet? Skip this and we'll start with the best-rated places."} Sample Chennai list for the trial.</p>`;
-  } else if (st === 3) {
-    const sg = o.suggest;
-    const opts = sg?.feasible ? [["tight", "Tight", sg.tight], ["suggested", "Usual", sg.suggested], ["roomy", "Roomy", sg.roomy]] : [];
     body = `<h1>What's your weekly food budget?</h1>
-      ${!sg ? `<p class="fine">Working out what your usual places cost…</p>` : sg.feasible
-        ? `<p class="fine">For ${d.meals.length * 7} meals a week from your places, including delivery and typical surge:</p>
-           <div class="chips">${opts.map(([k, l, v]) => chip("budgetpick", v, `${l} · ${rupee0(v)}`, d.weekly_budget === v, false)).join("")}</div>`
-        : `<p class="fine">${esc((sg.assumptions || [])[0] || "We couldn't estimate this. Enter an amount.")}</p>`}
+      <p class="fine">Enter your own limit. After you connect Swiggy and choose a delivery address, check current menu prices and the final cart total. The sample planner cannot quote live Swiggy prices.</p>
       <label class="bigin">₹ per week<input id="ob-budget" type="number" inputmode="numeric" min="100" max="100000" value="${d.weekly_budget ?? ""}" placeholder="e.g. 2000"></label>
       <details ${d.daily_cap ? "open" : ""}><summary>Also cap a single day (optional)</summary>
         <label class="bigin">₹ per day<input id="ob-daily" type="number" inputmode="numeric" min="0" max="20000" value="${d.daily_cap ?? ""}" placeholder="no daily limit"></label>
-        <p class="fine">Useful when money is tight until payday. Every day stays under this.</p></details>`;
+        <p class="fine">Useful when money is tight until payday. Live Swiggy totals can differ from the sample plan.</p></details>`;
   } else {
     const b = d.body || {};
     body = `<h1>Any food goal?</h1><p class="fine">Optional. With no goal, we just keep meals balanced.</p>
@@ -1122,15 +1110,15 @@ function onboardingScreen() {
       <div class="dots" aria-label="Step ${st + 1} of ${OB_STEPS.length}">${dots}</div><span class="fine">${st + 1}/${OB_STEPS.length}</span></div>
     ${errbar()}<form class="obbody" id="obform" novalidate>${body}</form>
     <div class="obfoot"><button class="primary big" data-ob-nav="next">${last ? "Plan my week →" : "Continue"}</button>
-      ${st === 2 && !(S.onboard.d.favourites.length) ? `<button class="ghost" data-ob-nav="next">Skip for now</button>` : ""}</div></main>`;
+      </div></main>`;
 }
 function readOnboardInputs() {
   const o = S.onboard, d = o.d, val = (id) => document.getElementById(id)?.value;
-  if (o.step === 3) {
+  if (o.step === 2) {
     const b = Number(val("ob-budget")); d.weekly_budget = b > 0 ? b : null;
     const c = Number(val("ob-daily")); d.daily_cap = c > 0 ? c : null;
   }
-  if (o.step === 4) {
+  if (o.step === 3) {
     d.name = (val("ob-name") || "").trim();
     const w = val("ob-w"), h = val("ob-h"), a = val("ob-a");
     d.body = w && h && a ? { weight_kg: Number(w), height_cm: Number(h), age: Number(a), sex: val("ob-s"), activity: val("ob-act") } : null;
@@ -1145,7 +1133,7 @@ async function onboardNav(dir) {
   }
   const d = o.d;
   if (o.step === 1 && !d.meals.length) throw new Error("Pick at least one meal to plan");
-  if (o.step === 3 && !d.weekly_budget) throw new Error("Enter a weekly budget, or tap one of the suggestions");
+  if (o.step === 2 && !d.weekly_budget) throw new Error("Enter a weekly budget");
   if (o.step === OB_STEPS.length - 1) {
     const body = { ...d, name: d.name || "Me" };
     if (!body.body) delete body.body;
@@ -1155,18 +1143,11 @@ async function onboardNav(dir) {
     S.users = mergeUsers(await api("/api/users"));
     S.onboard = null; S.userId = view.user.id; store.set("smartplate.user", String(S.userId));
     adoptView(view); S.exec = await api(`/api/plan/${S.planId}/orders`);
-    S.tab = "today"; S.more = null; toast("Your week is planned. Here's what's next."); render(); return;
+    S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
+    S.tab = "more"; S.more = "connection"; toast("Profile saved. Connect Swiggy to use real restaurants."); render(); return;
   }
   o.step += 1; S.error = null; render();
-  const q = `diet=${encodeURIComponent(d.diet)}&allergens=${encodeURIComponent(d.allergens.join(","))}&medical=${encodeURIComponent(d.medical.join(","))}`;
-  if (o.step === 2) { o.places = await api(`/api/restaurants?${q}`); render(); }
-  if (o.step === 3) {
-    o.suggest = null; render();
-    o.suggest = await api("/api/suggest-budget", "POST", { diet: d.diet, allergens: d.allergens, medical: d.medical,
-      meals: d.meals, favourites: d.favourites });
-    if (!d.weekly_budget && o.suggest.feasible) d.weekly_budget = o.suggest.suggested;
-    render();
-  }
+  render();
 }
 function onboardChip(group, value, multi) {
   const d = S.onboard.d;
