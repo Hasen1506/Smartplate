@@ -395,9 +395,16 @@ def create_app() -> Flask:
             raise ValueError("Say which restaurant")
         return jsonify(swiggy_live.menu_for(user_id, name, fresh=request.args.get("fresh") == "1"))
 
+    @app.get("/api/session/<int:session_id>/swiggy-cart/preview")
+    def swiggy_cart_preview(session_id):
+        return jsonify(swiggy_live.cart_preview(session_id))
+
     @app.post("/api/session/<int:session_id>/swiggy-cart")
     def swiggy_fill_cart(session_id):
-        return jsonify(swiggy_live.fill_cart(session_id))
+        try:
+            return jsonify(swiggy_live.fill_cart(session_id, request.get_json().get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
 
     @app.post("/api/user/<int:user_id>/swiggy/disconnect")
     def swiggy_disconnect(user_id):
