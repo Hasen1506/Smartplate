@@ -328,32 +328,33 @@ def toggle_live_favourite(user_id: int, restaurant_id: str, restaurant_name: str
             cur.execute("DELETE FROM swiggy_favourites WHERE user_id=? AND address_id=? AND restaurant_id=?",
                         (user_id, address_id, restaurant_id))
         return {"favourite": False, "restaurants": live_favourites(user_id)}
-    matches = search_live_restaurants(user_id, restaurant_name)["restaurants"]
-    match = next((r for r in matches if r["id"] == restaurant_id), None)
-    if not match:
-        raise SwiggyError("This restaurant is no longer available for your address. Search again.")
+    place = live_menu(user_id, restaurant_id, restaurant_name)["restaurant"]
     with db.cursor() as cur:
         cur.execute("INSERT INTO swiggy_favourites(user_id, address_id, restaurant_id, restaurant_name) "
-                    "VALUES (?,?,?,?)", (user_id, address_id, restaurant_id, match["name"]))
+                    "VALUES (?,?,?,?)", (user_id, address_id, restaurant_id, place["name"]))
     return {"favourite": True, "restaurants": live_favourites(user_id)}
 
 
 def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
     """Browse the exact provider restaurant ID, with a fresh menu for this address."""
-    matches = search_live_restaurants(user_id, restaurant_name)["restaurants"]
-    place = next((r for r in matches if r["id"] == restaurant_id), None)
-    if not place:
-        raise SwiggyError("This restaurant is no longer available for your address. Search again.")
-    if str(place["availability"] or "").upper() != "OPEN":
-        raise SwiggyError("This restaurant is closed right now. Search again later.")
+    if not restaurant_id or not restaurant_name:
+        raise ValueError("Choose a restaurant from live Swiggy search")
     conn = _conn(user_id)
     data = call(user_id, "get_restaurant_menu", build_args(_tool(conn, "get_restaurant_menu"),
                     {"restaurant": restaurant_id, "address": _address(conn)}))
     from ..domain import models
     user = models.get_user(user_id)
+    body = data.get("data", data) if isinstance(data, dict) else {}
+    provider_restaurant = body.get("restaurant") if isinstance(body, dict) else None
+    if (not isinstance(provider_restaurant, dict) or str(_get(provider_restaurant, "id")) != restaurant_id
+            or not _get(provider_restaurant, "name")):
+        raise SwiggyError("Swiggy did not verify this exact restaurant for your address. Search again.")
+    if provider_restaurant.get("isOpen") is False:
+        raise SwiggyError("This restaurant is closed right now. Search again later.")
+    place = {"id": restaurant_id, "name": str(_get(provider_restaurant, "name")),
+             "area": _get(provider_restaurant, "area"), "rating": _get(provider_restaurant, "rating")}
     items = []
     hidden = 0
-    body = data.get("data", data) if isinstance(data, dict) else {}
     browse = body.get("items") if isinstance(body, dict) else None
     for row in browse if isinstance(browse, list) else records(data, "id", "name"):
         if not isinstance(row, dict) or _get(row, "id") is None or _get(row, "name") is None:
@@ -513,10 +514,7 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
     if user["allergens"] or user["medical"] or user["diet"] == "vegan":
         raise SwiggyError("SmartPlate cannot verify your ingredient or medical rules from Swiggy's menu. "
                           "Choose and check the dish directly in Swiggy before ordering.")
-    matches = search_live_restaurants(user_id, restaurant_name)["restaurants"]
-    place = next((r for r in matches if r["id"] == restaurant_id), None)
-    if not place or str(place["availability"] or "").upper() != "OPEN":
-        raise SwiggyError("This restaurant is no longer open for your address. Search again.")
+    place = live_menu(user_id, restaurant_id, restaurant_name)["restaurant"]
     conn = _conn(user_id)
     address_id = _address(conn)
     data = call(user_id, "search_menu", build_args(_tool(conn, "search_menu"),
