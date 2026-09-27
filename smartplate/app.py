@@ -369,7 +369,8 @@ def create_app() -> Flask:
     @app.get("/api/user/<int:user_id>/swiggy")
     def swiggy_status(user_id):
         return jsonify({**swiggy_connect.status(user_id),
-                        "callback_url": f"{_public_base()}/swiggy/callback"})
+                        "callback_url": f"{_public_base()}/swiggy/callback",
+                        "order_enabled": config.LIVE_ORDERS})
 
     @app.post("/api/user/<int:user_id>/swiggy/connect")
     def swiggy_start(user_id):
@@ -377,7 +378,7 @@ def create_app() -> Flask:
 
     @app.post("/api/user/<int:user_id>/swiggy/discover")
     def swiggy_discover(user_id):
-        return jsonify(swiggy_connect.discover(user_id))
+        return jsonify({**swiggy_connect.discover(user_id), "order_enabled": config.LIVE_ORDERS})
 
     # gates 2–3 (swiggy_live.py): addresses, live menus, fill the cart. Never order or pay.
     @app.get("/api/user/<int:user_id>/swiggy/addresses")
@@ -386,7 +387,8 @@ def create_app() -> Flask:
 
     @app.post("/api/user/<int:user_id>/swiggy/address")
     def swiggy_choose_address(user_id):
-        return jsonify(swiggy_live.choose_address(user_id, request.get_json().get("address_id")))
+        return jsonify({**swiggy_live.choose_address(user_id, request.get_json().get("address_id")),
+                        "order_enabled": config.LIVE_ORDERS})
 
     @app.get("/api/user/<int:user_id>/swiggy/menu")
     def swiggy_menu(user_id):
@@ -430,6 +432,21 @@ def create_app() -> Flask:
                           str(body.get("item_name") or ""), body.get("expected_fingerprint")))
         except swiggy_live.CartChanged as exc:
             return jsonify(error="cart_changed", message=str(exc)), 409
+
+    @app.get("/api/user/<int:user_id>/swiggy/checkout/preview")
+    def swiggy_checkout_preview(user_id):
+        return jsonify(swiggy_live.live_checkout_preview(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/checkout")
+    def swiggy_checkout(user_id):
+        try:
+            return jsonify(swiggy_live.place_live_order(user_id, request.get_json().get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
+
+    @app.get("/api/user/<int:user_id>/swiggy/orders/<order_id>")
+    def swiggy_order_status(user_id, order_id):
+        return jsonify(swiggy_live.live_order_status(user_id, order_id))
 
     @app.get("/api/session/<int:session_id>/swiggy-cart/preview")
     def swiggy_cart_preview(session_id):
