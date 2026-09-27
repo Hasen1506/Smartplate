@@ -76,7 +76,9 @@ class FakeLive(FakeSwiggy):
         if name == "get_restaurant_menu":
             assert args["restaurantId"] == "r-1" and args["addressId"] == "addr-home"
             items = [{"itemId": f"m{i}", "name": n, "priceInPaise": p, "isVeg": 1} for i, (n, p) in enumerate(self.dishes.items())]
-            return {"structuredContent": {"menu": {"categories": [{"title": "Mains", "items": items}]}}}
+            return {"structuredContent": {"restaurant": {"id": "r-1", "name": "Hotel Saravana Bhavan (Adyar)",
+                                                        "isOpen": True},
+                                          "menu": {"categories": [{"title": "Mains", "items": items}]}}}
         if name == "search_menu":
             assert args["addressId"] == "addr-home" and args["restaurantIdOfAddedItem"] == "r-1"
             if self.search_error:
