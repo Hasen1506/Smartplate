@@ -109,8 +109,8 @@ def swiggy(monkeypatch):
     return fake
 
 
-def _next_delivery(client, plan_id=1):
-    v = client.get(f"/api/plan/{plan_id}").get_json()
+def _next_delivery(client, uid=1):
+    v = client.get(f"/api/user/{uid}/plan").get_json()
     return next(c for d in v["grid"] for c in d["meals"].values()
                 if c["kind"] == "delivery" and c["status"] == "active" and not c.get("past"))
 
@@ -134,7 +134,7 @@ def test_choose_address_then_live_menu_in_rupees(client, swiggy):
 def test_fill_cart_puts_the_planned_dish_in_and_reads_to_pay(client, swiggy):
     _connect(client, swiggy, uid=3)  # profile 1 has hard allergy/medical exclusions
     client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
-    cell = _next_delivery(client, plan_id=3)
+    cell = _next_delivery(client, uid=3)
     swiggy.dishes = {"Something Else": 9900, cell["item"]: 21000}
     preview = client.get(f"/api/session/{cell['session_id']}/swiggy-cart/preview").get_json()
     assert preview["item"] == cell["item"] and preview["restaurant_id"] == "r-1"
@@ -150,7 +150,7 @@ def test_fill_cart_puts_the_planned_dish_in_and_reads_to_pay(client, swiggy):
 
 def test_missing_dish_and_missing_address_are_explained(client, swiggy):
     _connect(client, swiggy, uid=3)
-    cell = _next_delivery(client, plan_id=3)
+    cell = _next_delivery(client, uid=3)
     r = client.get(f"/api/session/{cell['session_id']}/swiggy-cart/preview")
     assert r.status_code == 502 and "delivery address" in r.get_json()["error"]
     client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
@@ -162,7 +162,7 @@ def test_missing_dish_and_missing_address_are_explained(client, swiggy):
 def test_cart_requires_review_and_rejects_changed_item(client, swiggy):
     _connect(client, swiggy, uid=3)
     client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
-    cell = _next_delivery(client, plan_id=3)
+    cell = _next_delivery(client, uid=3)
     sid = cell["session_id"]
     swiggy.dishes = {cell["item"]: 21000}
     assert client.post(f"/api/session/{sid}/swiggy-cart", json={}).status_code == 409
@@ -184,7 +184,7 @@ def test_cart_fails_closed_for_hard_rules_and_unverified_item(client, swiggy):
 
     _connect(client, swiggy, uid=3)
     client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
-    cell = _next_delivery(client, plan_id=3)
+    cell = _next_delivery(client, uid=3)
     sid = cell["session_id"]
     swiggy.dishes = {cell["item"]: 21000}
     for field in ("stock", "has_variants", "has_addons"):
