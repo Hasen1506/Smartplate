@@ -218,6 +218,12 @@ def _cook_candidate(user, session, ctx, recipe=None):
     }
 
 
+def meal_suitable(item: dict, meal: str) -> bool:
+    """Keep treats visible in the catalogue without planning them as whole meals."""
+    return ("dessert" not in item.get("tags", []) and item.get("cuisine") != "dessert"
+            and not item.get("name", "").lower().endswith(" sweet"))
+
+
 def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[dict]:
     """All options for one session, hard constraints already applied. Always
     returns at least a 'skip' so the MILP stays feasible."""
@@ -250,6 +256,7 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     cands = []
     if not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
+        safe = [it for it in safe if meal_suitable(it, meal)]
         safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
         safe = [it for it in safe if it["id"] not in ctx["taste"]["disliked"]]   # "not again" is a lock
         # keep the most promising few (cheap-but-decent) to bound the MILP
@@ -327,7 +334,7 @@ def pinned_candidate(user, plan, session, ctx) -> dict | None:
         return None
     if pin.get("kind") == "delivery":
         item = next((it for it in ctx["menu"] if it["id"] == pin.get("item_id")), None)
-        if not item or allergens.violates(user, item):
+        if not item or allergens.violates(user, item) or not meal_suitable(item, session["meal"]):
             return None
         cand = _delivery_candidate(user, plan, session, item, ctx)
     elif pin.get("kind") == "cook":
