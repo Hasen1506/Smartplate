@@ -51,7 +51,7 @@ FIELDS = {
     "text": ["formattedAddress", "address", "addressLine", "addressLine1", "displayAddress", "area", "locality"],
     "price": ["priceInPaise", "price_in_paise", "priceInRupees", "price_in_rupees", "price", "finalPrice", "defaultPrice", "cost"],
     "rating": ["avgRating", "rating", "avg_rating"],
-    "eta": ["deliveryTime", "eta", "sla", "slaString", "delivery_time"],
+    "eta": ["deliveryTimeMinutes", "deliveryTimeRange", "deliveryTime", "eta", "sla", "slaString", "delivery_time"],
     "area": ["areaName", "locality", "area", "cuisines"],
     "veg": ["isVeg", "veg", "is_veg"],
     "to_pay": ["to_pay", "toPay", "totalPayable", "grandTotal", "billTotal"],
@@ -59,6 +59,8 @@ FIELDS = {
     "variants": ["hasVariants", "has_variants"],
     "addons": ["hasAddons", "has_addons"],
     "restaurant_id": ["restaurant_id", "restaurantId"],
+    "availability": ["availabilityStatus", "availability_status"],
+    "distance": ["distance", "distanceKm", "distance_km"],
 }
 
 
@@ -272,6 +274,98 @@ def _address(conn: dict) -> str:
     return conn["address_id"]
 
 
+def search_live_restaurants(user_id: int, query: str) -> dict:
+    """Only provider results for the selected delivery address; never seed rows."""
+    query = (query or "").strip()
+    if len(query) < 2 or len(query) > 80:
+        raise ValueError("Search for a restaurant or cuisine using 2–80 characters")
+    conn = _conn(user_id)
+    address_id = _address(conn)
+    data = call(user_id, "search_restaurants", build_args(_tool(conn, "search_restaurants"),
+                                                         {"query": query, "address": address_id}))
+    body = data.get("data", data) if isinstance(data, dict) else {}
+    rows = body.get("restaurants") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        raise SwiggyError("Swiggy did not return a restaurant list. Refresh tools and try again.")
+    found = []
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict) or _get(row, "id") is None or _get(row, "name") is None:
+            continue
+        rid = str(_get(row, "id"))
+        if rid in seen:
+            continue
+        seen.add(rid)
+        found.append({"id": rid, "name": str(_get(row, "name")), "rating": _get(row, "rating"),
+                      "eta": _get(row, "eta"), "area": _get(row, "area"),
+                      "availability": _get(row, "availability"), "distance": _get(row, "distance")})
+    return {"address": conn.get("address_label") or address_id, "address_id": address_id,
+            "query": query, "restaurants": found}
+
+
+def live_favourites(user_id: int) -> list[dict]:
+    address_id = _address(_conn(user_id))
+    with db.cursor() as cur:
+        rows = cur.execute("SELECT restaurant_id, restaurant_name FROM swiggy_favourites "
+                           "WHERE user_id=? AND address_id=? ORDER BY restaurant_name", (user_id, address_id)).fetchall()
+    return [{"id": r["restaurant_id"], "name": r["restaurant_name"]} for r in rows]
+
+
+def toggle_live_favourite(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
+    if not restaurant_id or not restaurant_name:
+        raise ValueError("Choose a restaurant from live Swiggy search")
+    address_id = _address(_conn(user_id))
+    with db.cursor() as cur:
+        exists = cur.execute("SELECT 1 FROM swiggy_favourites WHERE user_id=? AND address_id=? AND restaurant_id=?",
+                             (user_id, address_id, restaurant_id)).fetchone()
+    if exists:
+        with db.cursor() as cur:
+            cur.execute("DELETE FROM swiggy_favourites WHERE user_id=? AND address_id=? AND restaurant_id=?",
+                        (user_id, address_id, restaurant_id))
+        return {"favourite": False, "restaurants": live_favourites(user_id)}
+    matches = search_live_restaurants(user_id, restaurant_name)["restaurants"]
+    match = next((r for r in matches if r["id"] == restaurant_id), None)
+    if not match:
+        raise SwiggyError("This restaurant is no longer available for your address. Search again.")
+    with db.cursor() as cur:
+        cur.execute("INSERT INTO swiggy_favourites(user_id, address_id, restaurant_id, restaurant_name) "
+                    "VALUES (?,?,?,?)", (user_id, address_id, restaurant_id, match["name"]))
+    return {"favourite": True, "restaurants": live_favourites(user_id)}
+
+
+def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
+    """Browse the exact provider restaurant ID, with a fresh menu for this address."""
+    matches = search_live_restaurants(user_id, restaurant_name)["restaurants"]
+    place = next((r for r in matches if r["id"] == restaurant_id), None)
+    if not place:
+        raise SwiggyError("This restaurant is no longer available for your address. Search again.")
+    if str(place["availability"] or "").upper() != "OPEN":
+        raise SwiggyError("This restaurant is closed right now. Search again later.")
+    conn = _conn(user_id)
+    data = call(user_id, "get_restaurant_menu", build_args(_tool(conn, "get_restaurant_menu"),
+                    {"restaurant": restaurant_id, "address": _address(conn)}))
+    from ..domain import models
+    user = models.get_user(user_id)
+    items = []
+    hidden = 0
+    body = data.get("data", data) if isinstance(data, dict) else {}
+    browse = body.get("items") if isinstance(body, dict) else None
+    for row in browse if isinstance(browse, list) else records(data, "id", "name"):
+        if not isinstance(row, dict) or _get(row, "id") is None or _get(row, "name") is None:
+            continue
+        veg = _get(row, "veg")
+        if user["diet"] in ("veg", "vegan") and veg in (False, 0):
+            hidden += 1
+            continue
+        items.append({"id": str(_get(row, "id")), "name": str(_get(row, "name")),
+                      "price": rupees(row), "veg": bool(veg) if veg is not None else None,
+                      "in_stock": _get(row, "stock"),
+                      "has_options": bool(_get(row, "variants") or _get(row, "addons"))})
+    return {"restaurant": place, "address": conn.get("address_label") or _address(conn),
+            "items": items, "hidden_nonveg": hidden, "truncated": bool(body.get("truncated")) if isinstance(body, dict) else False,
+            "fetched": clock.now().isoformat(timespec="minutes")}
+
+
 def find_restaurant(user_id: int, name: str) -> dict:
     conn = _conn(user_id)
     tool = _tool(conn, "search_restaurants")
@@ -404,3 +498,64 @@ def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
             "planned": cell["item"], "planned_cost": cell["cost"], "menu_price": preview["menu_price"],
             "to_pay": to_pay, "over_plan": round(to_pay - cell["cost"], 2) if to_pay is not None else None,
             "checkout_url": CHECKOUT_URL}
+
+
+def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
+                      item_id: str, item_name: str) -> dict:
+    """Review an item chosen from a real menu, without a seeded plan or fuzzy match."""
+    from ..domain import models
+    user = models.get_user(user_id)
+    if user["allergens"] or user["medical"] or user["diet"] == "vegan":
+        raise SwiggyError("SmartPlate cannot verify your ingredient or medical rules from Swiggy's menu. "
+                          "Choose and check the dish directly in Swiggy before ordering.")
+    matches = search_live_restaurants(user_id, restaurant_name)["restaurants"]
+    place = next((r for r in matches if r["id"] == restaurant_id), None)
+    if not place or str(place["availability"] or "").upper() != "OPEN":
+        raise SwiggyError("This restaurant is no longer open for your address. Search again.")
+    conn = _conn(user_id)
+    address_id = _address(conn)
+    data = call(user_id, "search_menu", build_args(_tool(conn, "search_menu"),
+                {"query": item_name, "address": address_id, "restaurant_scope": restaurant_id}))
+    exact = [r for r in records(data, "menu_item_id", "name")
+             if str(_get(r, "menu_item_id")) == str(item_id)
+             and _name(str(_get(r, "name"))) == _name(item_name)
+             and (_get(r, "restaurant_id") is None or str(_get(r, "restaurant_id")) == restaurant_id)]
+    if len(exact) != 1:
+        raise SwiggyError("The selected dish is no longer an exact live menu match. Refresh the menu.")
+    item = exact[0]
+    if _get(item, "stock") not in (True, 1):
+        raise SwiggyError("Swiggy did not confirm this dish is in stock. Refresh the menu.")
+    if (_get(item, "variants") not in (False, 0) or _get(item, "addons") not in (False, 0)
+            or item.get("variations") or item.get("variantsV2") or item.get("addons")):
+        raise SwiggyError("This dish needs options that SmartPlate cannot choose yet. Customize it in Swiggy.")
+    if user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
+        raise SwiggyError("Swiggy did not verify this dish as vegetarian. Check it in Swiggy.")
+    details = {"user_id": user_id, "address_id": address_id, "restaurant_id": restaurant_id,
+               "restaurant": place["name"], "item_id": str(item_id), "item": str(_get(item, "name"))}
+    fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price")},
+                                            sort_keys=True).encode()).hexdigest()
+    return {**details, "address": conn.get("address_label") or address_id,
+            "menu_price": rupees(item), "fingerprint": fingerprint}
+
+
+def fill_live_cart(user_id: int, restaurant_id: str, restaurant_name: str,
+                   item_id: str, item_name: str, expected_fingerprint: str | None) -> dict:
+    if not expected_fingerprint:
+        raise CartChanged("Review the exact live Swiggy item before adding it to your cart.")
+    preview = live_cart_preview(user_id, restaurant_id, restaurant_name, item_id, item_name)
+    if preview["fingerprint"] != expected_fingerprint:
+        raise CartChanged("The live item, restaurant or address changed. Review it again.")
+    conn = _conn(user_id)
+    current = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
+                                                       {"address": preview["address_id"]}))
+    if records(current, "menu_item_id"):
+        raise SwiggyError("Your Swiggy cart already has items. Review or clear it in Swiggy before starting a new order.")
+    tool = _tool(conn, "update_food_cart")
+    call(user_id, "update_food_cart", build_args(tool, {
+        "cart_items": [_cart_item(tool, preview["item_id"])], "restaurant": restaurant_id,
+        "address": preview["address_id"], "restaurant_name": preview["restaurant"]}))
+    cart = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
+                                                    {"address": preview["address_id"]}))
+    if not any(str(_get(r, "menu_item_id")) == preview["item_id"] for r in records(cart, "menu_item_id")):
+        raise SwiggyError("SmartPlate could not confirm the item in Swiggy's cart. Check your cart before trying again.")
+    return {**preview, "to_pay": _num(cart, "to_pay"), "checkout_url": CHECKOUT_URL}
