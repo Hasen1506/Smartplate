@@ -45,7 +45,7 @@ ALIASES = {
 FIELDS = {
     "id": ["id", "addressId", "address_id", "restaurantId", "restaurant_id", "restId", "itemId", "item_id",
            "menuItemId", "menu_item_id"],
-    "menu_item_id": ["menu_item_id", "menuItemId", "itemId", "item_id", "id"],
+    "menu_item_id": ["menu_item_id", "menuItemId"],
     "name": ["name", "restaurantName", "itemName", "title"],
     "label": ["annotation", "label", "tag", "addressType", "type"],
     "text": ["formattedAddress", "address", "addressLine", "addressLine1", "displayAddress", "area", "locality"],
