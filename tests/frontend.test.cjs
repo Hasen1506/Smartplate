@@ -125,6 +125,30 @@ test('today shows the next meal with order-by time, hand-off and escaped names',
   assert.ok(!html.includes('<b>Meals</b>'));
 });
 
+test('connected profiles with ingredient rules keep the direct Swiggy hand-off', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  richView(context);
+  vm.runInContext("S.swiggy = { connected: true, address: { id: 'home' } }", context);
+  const html = vm.runInContext('todayScreen()', context);
+  assert.match(html, /Order on Swiggy/);
+  assert.match(html, /cannot verify your ingredient or medical rules/);
+  assert.ok(!html.includes('data-cart="9"'));
+});
+
+test('eligible profiles review and escape the exact live item before a cart update', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  richView(context);
+  vm.runInContext(`S.view.user.diet = 'nonveg'; S.view.user.allergens = [];
+    S.swiggy = { connected: true, address: { id: 'home' } };
+    S.cartReview = { session_id: 9, item: '<img src=x>', restaurant: '<b>Kitchen</b>',
+      address: 'Home', planned_cost: 150, menu_price: null, fingerprint: 'fingerprint' };`, context);
+  assert.match(vm.runInContext('todayScreen()', context), /data-cart="9"/);
+  const dialog = vm.runInContext('cartReviewDialog()', context);
+  assert.match(dialog, /Price to verify/);
+  assert.match(dialog, /Add to Swiggy cart/);
+  assert.ok(!dialog.includes('<img src=x>') && !dialog.includes('<b>Kitchen</b>'));
+});
+
 test('week rows are draggable and carry weather and holidays', async () => {
   const { context } = fixture(); await context.bootPromise;
   richView(context);
