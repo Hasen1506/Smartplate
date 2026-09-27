@@ -86,7 +86,7 @@ class FakeLive(FakeSwiggy):
             return {"content": [{"type": "text", "text": "Cart updated"}]}
         if name == "get_food_cart":
             price = next(p for i, (n, p) in enumerate(self.dishes.items()) if f"m{i}" == self.cart) / 100
-            return {"structuredContent": {"cart": {"items": [{"id": self.cart, "total": price}],
+            return {"structuredContent": {"cart": {"items": [{"menu_item_id": self.cart, "total": price}],
                                                    "bill": {"item_total": price, "delivery_fee": 35, "to_pay": price + 35}}}}
         raise AssertionError(f"unexpected tool {name}")
 
