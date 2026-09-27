@@ -64,7 +64,8 @@ class FakeLive(FakeSwiggy):
         if name == "search_restaurants":
             q = args["query"]
             return {"structuredContent": {"restaurants": [
-                {"restaurantId": "r-1", "name": f"{q} (Adyar)", "avgRating": 4.3, "sla": "30 mins"},
+                {"restaurantId": "r-1", "name": q if q.endswith(" (Adyar)") else f"{q} (Adyar)", "avgRating": 4.3,
+                 "sla": "30 mins", "availabilityStatus": "OPEN"},
                 {"restaurantId": "r-2", "name": "Completely Different Kitchen", "avgRating": 4.0}]}}
         if name == "get_restaurant_menu":
             assert args["restaurantId"] == "r-1" and args["addressId"] == "addr-home"
@@ -85,6 +86,8 @@ class FakeLive(FakeSwiggy):
             self.cart = item["menu_item_id"]
             return {"content": [{"type": "text", "text": "Cart updated"}]}
         if name == "get_food_cart":
+            if self.cart is None:
+                return {"structuredContent": {"cart": {"items": []}}}
             price = next(p for i, (n, p) in enumerate(self.dishes.items()) if f"m{i}" == self.cart) / 100
             return {"structuredContent": {"cart": {"items": [{"menu_item_id": self.cart, "total": price}],
                                                    "bill": {"item_total": price, "delivery_fee": 35, "to_pay": price + 35}}}}
@@ -129,6 +132,31 @@ def test_choose_address_then_live_menu_in_rupees(client, swiggy):
     assert again["cached"] and swiggy.tool_calls().count("get_restaurant_menu") == 1
     samples = db.jl(swiggy_connect._connection(1)["samples"], {})
     assert "12 Lake View" not in json.dumps(samples) and samples["get_addresses"]["reply"]   # shapes, not values
+
+
+def test_real_address_search_favourites_menu_and_exact_item_cart(client, swiggy):
+    _connect(client, swiggy, uid=3)
+    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
+    found = client.get("/api/user/3/swiggy/restaurants?query=Hotel%20Saravana%20Bhavan").get_json()
+    assert found["address_id"] == "addr-home" and found["restaurants"][0]["id"] == "r-1"
+    assert found["restaurants"][0]["availability"] == "OPEN"
+    fav = client.post("/api/user/3/swiggy/favourites", json={
+        "restaurant_id": "r-1", "restaurant_name": found["restaurants"][0]["name"]}).get_json()
+    assert fav["favourite"] and fav["restaurants"][0]["id"] == "r-1"
+    swiggy.dishes = {"Veg Meals": 18000, "Mini Tiffin": 12500}
+    params = "restaurant_id=r-1&restaurant_name=Hotel%20Saravana%20Bhavan%20%28Adyar%29"
+    menu = client.get(f"/api/user/3/swiggy/live-menu?{params}").get_json()
+    assert [x["id"] for x in menu["items"]] == ["m0", "m1"]
+    body = {"restaurant_id": "r-1", "restaurant_name": menu["restaurant"]["name"],
+            "item_id": "m1", "item_name": "Mini Tiffin"}
+    preview = client.post("/api/user/3/swiggy/live-cart/preview", json=body).get_json()
+    assert preview["item_id"] == "m1" and preview["menu_price"] == 125.0
+    assert swiggy.cart is None
+    assert client.post("/api/user/3/swiggy/live-cart", json=body).status_code == 409
+    added = client.post("/api/user/3/swiggy/live-cart", json={
+        **body, "expected_fingerprint": preview["fingerprint"]}).get_json()
+    assert added["item"] == "Mini Tiffin" and added["to_pay"] == 160.0
+    assert swiggy.cart == "m1" and "place_food_order" not in swiggy.tool_calls()
 
 
 def test_fill_cart_puts_the_planned_dish_in_and_reads_to_pay(client, swiggy):
