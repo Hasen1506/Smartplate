@@ -64,6 +64,13 @@ CREATE TABLE IF NOT EXISTS swiggy_menus (        -- live menus, cached briefly (
     fetched_ts TEXT NOT NULL,
     PRIMARY KEY (user_id, restaurant)
 );
+CREATE TABLE IF NOT EXISTS swiggy_favourites (
+    user_id INTEGER NOT NULL,
+    address_id TEXT NOT NULL,
+    restaurant_id TEXT NOT NULL,
+    restaurant_name TEXT NOT NULL,
+    PRIMARY KEY (user_id, address_id, restaurant_id)
+);
 """
 COLUMNS = [                                      # added after gate 1 shipped
     ("swiggy_connections", "address_id", "TEXT"),
