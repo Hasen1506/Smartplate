@@ -368,7 +368,8 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy")
     def swiggy_status(user_id):
-        return jsonify(swiggy_connect.status(user_id))
+        return jsonify({**swiggy_connect.status(user_id),
+                        "callback_url": f"{_public_base()}/swiggy/callback"})
 
     @app.post("/api/user/<int:user_id>/swiggy/connect")
     def swiggy_start(user_id):
