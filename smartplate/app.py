@@ -366,15 +366,18 @@ def create_app() -> Flask:
         host = request.headers.get("X-Forwarded-Host", request.host).split(",")[0].strip()
         return f"{proto}://{host}"
 
+    def _swiggy_callback_url():
+        return f"{_public_base()}{config.SWIGGY_CALLBACK_PATH}"
+
     @app.get("/api/user/<int:user_id>/swiggy")
     def swiggy_status(user_id):
         return jsonify({**swiggy_connect.status(user_id),
-                        "callback_url": f"{_public_base()}/swiggy/callback",
+                        "callback_url": _swiggy_callback_url(),
                         "order_enabled": config.LIVE_ORDERS})
 
     @app.post("/api/user/<int:user_id>/swiggy/connect")
     def swiggy_start(user_id):
-        return jsonify(authorize_url=swiggy_connect.start(user_id, f"{_public_base()}/swiggy/callback"))
+        return jsonify(authorize_url=swiggy_connect.start(user_id, _swiggy_callback_url()))
 
     @app.post("/api/user/<int:user_id>/swiggy/discover")
     def swiggy_discover(user_id):
@@ -464,6 +467,7 @@ def create_app() -> Flask:
         return jsonify(swiggy_connect.disconnect(user_id))
 
     @app.get("/swiggy/callback")
+    @app.get("/auth/swiggy/callback")
     def swiggy_callback():
         # Swiggy redirects the browser here; the single-use `state` ties it to the
         # profile that started sign-in, so no profile key is needed on this hop.
