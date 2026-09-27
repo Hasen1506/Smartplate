@@ -58,13 +58,18 @@ treat profiles there as a demo. For data that lasts, use a paid instance with a 
 and set `SMARTPLATE_DB` to a path on it. Any host that runs a `Procfile` (Railway,
 Koyeb, Heroku) works the same way; run **one** worker process.
 
-**Swiggy sign-in on a hosted URL requires provider approval.** Swiggy currently
-requires production access and an exact-match allowlisted HTTPS redirect URI. In
+**Swiggy sign-in on a hosted URL requires an exact approved redirect URI.** In
 More → Swiggy connection, copy the callback URL shown for this deployment (for
-example, `https://your-service.onrender.com/swiggy/callback`) and request access
-through [Swiggy Builders Club](https://mcp.swiggy.com/builders/docs/operate/access/).
-Dynamic client registration alone does not grant a new Render URL access. Until
-Swiggy approves it and the live contract is tested, use the manual Swiggy hand-off.
+example, `https://your-service.onrender.com/swiggy/callback`) and give that exact
+URI to [Swiggy Builders Club](https://mcp.swiggy.com/builders/docs/operate/access/).
+An approval for another hostname or path does not cover this URL. Swiggy creates
+the OAuth client ID through dynamic client registration, so there is no separate
+client ID to apply for; provider onboarding and redirect approval still apply.
+The optional `SMARTPLATE_SWIGGY_CALLBACK_PATH=/auth/swiggy/callback` supports that
+path if Swiggy has approved the resulting URL on a host you control. Set
+`SMARTPLATE_PUBLIC_URL` to that host's public HTTPS origin only when it actually
+routes to this app. Never point OAuth at a proposed or third-party domain. Until
+the approved URI and live contract are verified, use the manual Swiggy hand-off.
 
 **Or use GitHub Codespaces (private to you):**
 [Open SmartPlate in GitHub Codespaces](https://codespaces.new/Hasen1506/Smartplate?quickstart=1).
