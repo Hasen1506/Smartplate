@@ -395,6 +395,42 @@ def create_app() -> Flask:
             raise ValueError("Say which restaurant")
         return jsonify(swiggy_live.menu_for(user_id, name, fresh=request.args.get("fresh") == "1"))
 
+    @app.get("/api/user/<int:user_id>/swiggy/restaurants")
+    def swiggy_live_restaurants(user_id):
+        return jsonify(swiggy_live.search_live_restaurants(user_id, request.args.get("query", "")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/favourites")
+    def swiggy_live_favourites(user_id):
+        return jsonify(swiggy_live.live_favourites(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/favourites")
+    def swiggy_toggle_live_favourite(user_id):
+        body = request.get_json()
+        return jsonify(swiggy_live.toggle_live_favourite(user_id, str(body.get("restaurant_id") or ""),
+                                                        str(body.get("restaurant_name") or "")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/live-menu")
+    def swiggy_live_menu(user_id):
+        return jsonify(swiggy_live.live_menu(user_id, request.args.get("restaurant_id", ""),
+                                           request.args.get("restaurant_name", "")))
+
+    @app.post("/api/user/<int:user_id>/swiggy/live-cart/preview")
+    def swiggy_live_cart_preview(user_id):
+        body = request.get_json()
+        return jsonify(swiggy_live.live_cart_preview(user_id, str(body.get("restaurant_id") or ""),
+                          str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
+                          str(body.get("item_name") or "")))
+
+    @app.post("/api/user/<int:user_id>/swiggy/live-cart")
+    def swiggy_live_fill_cart(user_id):
+        body = request.get_json()
+        try:
+            return jsonify(swiggy_live.fill_live_cart(user_id, str(body.get("restaurant_id") or ""),
+                          str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
+                          str(body.get("item_name") or ""), body.get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
+
     @app.get("/api/session/<int:session_id>/swiggy-cart/preview")
     def swiggy_cart_preview(session_id):
         return jsonify(swiggy_live.cart_preview(session_id))
