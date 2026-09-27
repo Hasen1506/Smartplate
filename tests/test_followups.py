@@ -230,6 +230,7 @@ def test_swiggy_sign_in_and_discovery_end_to_end(client, swiggy):
     assert r.status_code == 302 and r.headers["Location"].endswith("swiggy=connected")
     s = client.get("/api/user/1/swiggy").get_json()
     assert s["connected"] and s["protocol_version"] == "2025-03-26" and s["server"]["name"] == "swiggy-food"
+    assert s["callback_url"] == "http://localhost/swiggy/callback"
     assert [t["name"] for t in s["tools"]] == TOOLS                                 # both pages
     kinds = {t["name"]: t["kind"] for t in s["tools"]}
     assert kinds["get_addresses"] == "read" and kinds["search_restaurants"] == "read"
@@ -273,11 +274,18 @@ def test_swiggy_requires_https_and_handles_expiry_and_disconnect(client, swiggy,
     monkeypatch.setattr(clock, "now", lambda: later)
     assert client.get("/api/user/1/swiggy").get_json()["expired"] is True
     assert client.post("/api/user/1/swiggy/disconnect", json={}).get_json() == {"connected": False}
-    assert client.get("/api/user/1/swiggy").get_json() == {"connected": False}
+    assert client.get("/api/user/1/swiggy").get_json()["connected"] is False
 
 
 def test_swiggy_connection_is_private_to_the_profile(client, swiggy):
     uid, key, _ = _private(client)
     assert client.get(f"/api/user/{uid}/swiggy").status_code == 401
     assert client.post(f"/api/user/{uid}/swiggy/connect", json={}).status_code == 401
-    assert client.get(f"/api/user/{uid}/swiggy", headers={"X-SmartPlate-Key": key}).get_json() == {"connected": False}
+    assert client.get(f"/api/user/{uid}/swiggy", headers={"X-SmartPlate-Key": key}).get_json()["connected"] is False
+
+
+def test_unreadable_swiggy_token_requires_reconnect(client, swiggy, monkeypatch):
+    _connect(client, swiggy)
+    monkeypatch.setattr(swiggy_connect.vault, "unseal", lambda _: None)
+    s = client.get("/api/user/1/swiggy").get_json()
+    assert s["connected"] is False and s["needs_reconnect"] is True
