@@ -5,6 +5,7 @@ import json
 import pytest
 
 from smartplate import db
+from smartplate import config
 from smartplate.app import create_app
 from smartplate.integrations import swiggy_connect, swiggy_live
 from smartplate.integrations.swiggy_connect import SwiggyError
@@ -25,6 +26,11 @@ SCHEMAS = {
                                                                 "quantity": {"type": "integer"}}}},
         "restaurantId": {"type": "string"}, "addressId": {"type": "string"}, "restaurantName": {"type": "string"}}},
     "get_food_cart": {"type": "object", "properties": {"addressId": {"type": "string"}}},
+    "get_payment_options": {"type": "object", "properties": {"addressId": {"type": "string"}}},
+    "place_food_order": {"type": "object", "required": ["addressId", "paymentMethod"],
+                         "properties": {"addressId": {"type": "string"}, "paymentMethod": {"type": "string"}}},
+    "track_food_order": {"type": "object", "required": ["orderId"],
+                         "properties": {"orderId": {"type": "string"}}},
 }
 
 
@@ -89,8 +95,20 @@ class FakeLive(FakeSwiggy):
             if self.cart is None:
                 return {"structuredContent": {"cart": {"items": []}}}
             price = next(p for i, (n, p) in enumerate(self.dishes.items()) if f"m{i}" == self.cart) / 100
-            return {"structuredContent": {"cart": {"items": [{"menu_item_id": self.cart, "total": price}],
+            name = next(n for i, (n, p) in enumerate(self.dishes.items()) if f"m{i}" == self.cart)
+            return {"structuredContent": {"cart": {"items": [{"menu_item_id": self.cart, "name": name,
+                                                                  "quantity": 1, "total": price}],
                                                    "bill": {"item_total": price, "delivery_fee": 35, "to_pay": price + 35}}}}
+        if name == "get_payment_options":
+            return {"structuredContent": {"success": True, "data": {"cod": {
+                "available": True, "id": "Cash", "displayName": "Cash on Delivery"}}}}
+        if name == "place_food_order":
+            assert args == {"addressId": "addr-home", "paymentMethod": "Cash"}
+            return {"structuredContent": {"success": True, "data": {
+                "orderId": "real-order-17", "normalizedStatus": "success", "status": "CONFIRMED"}}}
+        if name == "track_food_order":
+            assert args["orderId"] == "real-order-17"
+            return {"structuredContent": {"success": True, "data": {"status": "PREPARING"}}}
         raise AssertionError(f"unexpected tool {name}")
 
     def tool_calls(self):
@@ -226,12 +244,36 @@ def test_cart_fails_closed_for_hard_rules_and_unverified_item(client, swiggy):
     assert response.status_code == 502 and "Item unavailable" in response.get_json()["error"]
 
 
-def test_ordering_and_payment_tools_are_refused(client, swiggy):
+def test_ordering_gate_and_unsupported_tools_are_refused(client, swiggy):
     _connect(client, swiggy)
-    for name in ["place_food_order", "get_payment_options", "apply_food_coupon", "confirm_order"]:
-        with pytest.raises(SwiggyError, match="never calls"):
+    with pytest.raises(SwiggyError, match="disabled"):
+        swiggy_live.call(1, "place_food_order", {})
+    for name in ["apply_food_coupon", "confirm_order"]:
+        with pytest.raises(SwiggyError, match="does not support"):
             swiggy_live.call(1, name, {})
     assert swiggy.tool_calls() == []
+
+
+def test_cod_checkout_requires_fresh_review_and_places_only_once(client, swiggy, monkeypatch):
+    monkeypatch.setattr(config, "LIVE_ORDERS", True)
+    _connect(client, swiggy, uid=3)
+    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
+    swiggy.dishes = {"Mini Tiffin": 12500}
+    body = {"restaurant_id": "r-1", "restaurant_name": "Hotel Saravana Bhavan (Adyar)",
+            "item_id": "m0", "item_name": "Mini Tiffin"}
+    p = client.post("/api/user/3/swiggy/live-cart/preview", json=body).get_json()
+    assert client.post("/api/user/3/swiggy/live-cart", json={**body,
+        "expected_fingerprint": p["fingerprint"]}).status_code == 200
+    review = client.get("/api/user/3/swiggy/checkout/preview").get_json()
+    assert review["to_pay"] == 160 and review["payment_method"] == "Cash"
+    assert client.post("/api/user/3/swiggy/checkout", json={}).status_code == 409
+    placed = client.post("/api/user/3/swiggy/checkout", json={
+        "expected_fingerprint": review["fingerprint"]})
+    assert placed.status_code == 200 and placed.get_json()["order_id"] == "real-order-17"
+    assert client.post("/api/user/3/swiggy/checkout", json={
+        "expected_fingerprint": review["fingerprint"]}).status_code == 409
+    assert swiggy.tool_calls().count("place_food_order") == 1
+    assert client.get("/api/user/3/swiggy/orders/real-order-17").get_json()["provider"]["status"] == "PREPARING"
 
 
 def test_required_fields_we_cannot_fill_are_named():
