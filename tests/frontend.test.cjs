@@ -173,6 +173,19 @@ test('connected Places uses real Swiggy IDs and no sample restaurant cards', asy
   assert.ok(!html.includes('Sample Diner') && !html.includes('<Real Place>') && !html.includes('<Dish>'));
 });
 
+test('real order confirmation shows live total, address and payment before placement', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'home', label: 'Home' }, order_enabled: true };
+    S.liveCart = { item: 'Tiffin', restaurant: 'Real Place', to_pay: 160, checkout_url: 'https://www.swiggy.com/' };
+    S.checkoutReview = { item: '<Tiffin>', quantity: 1, address: '<Home>', to_pay: 160,
+      payment_label: 'Cash on Delivery', fingerprint: 'reviewed' };`, context);
+  assert.match(vm.runInContext('livePlacesScreen()', context), /Review and place order/);
+  const dialog = vm.runInContext('checkoutReviewDialog()', context);
+  assert.match(dialog, /Cash on Delivery/);
+  assert.match(dialog, /Confirm and place order · ₹160/);
+  assert.ok(!dialog.includes('<Tiffin>') && !dialog.includes('<Home>'));
+});
+
 test('week rows are draggable and carry weather and holidays', async () => {
   const { context } = fixture(); await context.bootPromise;
   richView(context);
