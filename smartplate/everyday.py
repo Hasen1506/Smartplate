@@ -220,7 +220,8 @@ def options(session_id: int) -> dict:
     current = next((d for d in models.decisions_for_plan(plan["id"]) if d["session_id"] == session_id), None)
 
     menu = ctx["menu"]
-    safe = allergens.safe_items(user, menu)
+    safe_all = allergens.safe_items(user, menu)
+    safe = [it for it in safe_all if optimizer.meal_suitable(it, session["meal"])]
     floor = float(user["rating_floor"])
     rated_ok = [it for it in safe if it["restaurant_rating"] >= floor]
     disliked = ctx["taste"]["disliked"]
@@ -278,7 +279,8 @@ def options(session_id: int) -> dict:
         "new": new, "has_favourites": bool(favs),
         "cook": [{"recipe_key": r["key"], "name": r["name"], "price": r["cost"], "kcal": r["kcal"],
                   "protein_g": r["protein_g"]} for r in cooks],
-        "hidden": {"not_safe": len(menu) - len(safe), "below_rating": len(safe) - len(rated_ok),
+        "hidden": {"not_safe": len(menu) - len(safe_all), "not_a_meal": len(safe_all) - len(safe),
+                   "below_rating": len(safe) - len(rated_ok),
                    "not_again": len(rated_ok) - len(pool)},
         "current": {"item": current["item_name"], "kind": current["chosen_kind"], "cost": current["cost"]} if current else None,
         # one timing tip for the whole sheet instead of repeating it on every dish
@@ -304,6 +306,8 @@ def choose(session_id: int, body: dict) -> dict:
         item = next((it for it in models.menu_for_city(user["city"]) if it["id"] == body["item_id"]), None)
         if not item:
             raise ValueError("That dish isn't available right now")
+        if not optimizer.meal_suitable(item, session["meal"]):
+            raise ValueError("That item is a treat, not a complete meal. Choose a meal instead.")
         reason = allergens.violates(user, item)
         if reason:
             raise ValueError(f"Not safe for you: {reason}. Your hard rules can't be overridden by a pick.")
