@@ -53,10 +53,18 @@ When the build finishes, open the `https://smartplate-….onrender.com` link on 
 phone and use **Add to Home Screen**. The blueprint is [render.yaml](render.yaml).
 
 On Render's free plan the app sleeps after about 15 minutes idle, so the first visit
-afterwards takes about a minute. Its disk is also wiped on every restart or redeploy:
+afterwards takes about a minute. Its disk is also wiped on spin-down, restart or redeploy:
 treat profiles there as a demo. For data that lasts, use a paid instance with a disk
 and set `SMARTPLATE_DB` to a path on it. Any host that runs a `Procfile` (Railway,
 Koyeb, Heroku) works the same way; run **one** worker process.
+
+**Swiggy sign-in on a hosted URL requires provider approval.** Swiggy currently
+requires production access and an exact-match allowlisted HTTPS redirect URI. In
+More → Swiggy connection, copy the callback URL shown for this deployment (for
+example, `https://your-service.onrender.com/swiggy/callback`) and request access
+through [Swiggy Builders Club](https://mcp.swiggy.com/builders/docs/operate/access/).
+Dynamic client registration alone does not grant a new Render URL access. Until
+Swiggy approves it and the live contract is tested, use the manual Swiggy hand-off.
 
 **Or use GitHub Codespaces (private to you):**
 [Open SmartPlate in GitHub Codespaces](https://codespaces.new/Hasen1506/Smartplate?quickstart=1).
