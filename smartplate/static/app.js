@@ -249,7 +249,7 @@ function welcomeScreen() {
     <ul class="promise">
       <li><b>No endless scrolling.</b> Your usual places, three dishes each, with prices that include delivery.</li>
       <li><b>Knows when to order.</b> Order-by times that avoid the rush and allow for rain and holidays.</li>
-      <li><b>Never breaks your rules.</b> Allergies and budget are hard limits, even when you change a meal.</li>
+      <li><b>Plans around your rules.</b> The sample planner filters declared allergies and caps estimated spend. Check ingredients and the final price in Swiggy before ordering.</li>
     </ul>
     ${S.signin ? "" : errbar(false)}
     <button class="primary big" data-act="start-onboard">Set up my week · 2 minutes</button>
@@ -899,16 +899,17 @@ function connectionPanel() {
       <p class="fine">Protocol ${esc(sw.protocol_version || "?")} · ${sw.tools.length} tools (${sw.read_tools} read, ${sw.write_tools} write)${sw.expires ? ` · sign-in expires ${esc(sw.expires.slice(0, 16).replace("T", " "))}` : ""}.</p>
       <details><summary>What Swiggy offers this account</summary>${sw.tools.map(t => `<div class="calrow"><b>${esc(t.name)}</b><span class="tag ${t.kind === "write" ? "warn" : ""}">${t.kind}</span><span class="fine">${esc(t.description)}</span></div>`).join("")}</details>
       <div class="row gap"><button data-act="swiggy-discover">Refresh tools</button><button class="ghost" data-act="swiggy-disconnect">Disconnect</button></div></div>`
-    : `<div class="card"><span class="tag">${sw.expired ? "Sign-in expired" : "Not connected"}</span>
+    : `<div class="card"><span class="tag">${sw.needs_reconnect ? "Reconnect required" : sw.expired ? "Sign-in expired" : "Not connected"}</span>
       <h3>Connect your Swiggy account</h3>
+      ${sw.needs_reconnect ? `<p class="sub">This server can no longer read the saved Swiggy sign-in. Connect again.</p>` : ""}
       <p class="sub">You sign in on Swiggy's own page (phone + OTP). SmartPlate can then show live menus from your usual places and put a planned dish in your Swiggy cart. It never places or pays for an order. Swiggy sign-ins last about 5 days.</p>
       <button class="primary" data-act="swiggy-connect">Connect Swiggy</button>
-      <p class="fine">First real test pending: this sign-in follows Swiggy's published docs but hasn't yet been run against the live service.</p></div>`;
+      <p class="fine">Swiggy requires production access and an exact-match allowlisted HTTPS redirect. ${sw.callback_url ? `For this deployment, request <code>${esc(sw.callback_url)}</code> from Swiggy Builders Club. ` : ""}A Render URL is an HTTPS redirect; it still needs Swiggy approval. This connection has only been tested against a fake server.</p></div>`;
   return `<h2 class="sec">Swiggy connection</h2>${live}<div class="card"><span class="tag">Hand-off mode</span>
     <h3>Planning works now. You place each order on Swiggy yourself.</h3>
     <p><b>Today:</b> “Order on Swiggy” opens Swiggy's search for that restaurant and dish. You check the real price there and order. Then tap “I had it” so your budget and nutrition stay accurate.</p>
     <p><b>Signed in:</b> SmartPlate fills your Swiggy cart with the planned dish and shows what you'd pay; you confirm and pay in Swiggy. Scheduled orders stay off until Swiggy's terms clearly allow them.</p>
-    <p class="sub">Swiggy's Food connector has 14 tools: addresses, restaurant and menu search, cart, coupons, payment options, place, track and order history. Its order history returns only about 5 recent orders as text, so SmartPlate keeps its own record of your usual places.</p>
+    <p class="sub">Swiggy's Food tools cover addresses, restaurant and menu search, cart, payment, orders and tracking. The available tools can change; inspect the discovered list after connecting. SmartPlate keeps its own record of your usual places.</p>
     <a href="https://mcp.swiggy.com/builders/docs/start/authenticate/" target="_blank" rel="noopener">Swiggy sign-in documentation ↗</a>
     </div>`;
 }
