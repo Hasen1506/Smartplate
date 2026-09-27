@@ -71,6 +71,15 @@ CREATE TABLE IF NOT EXISTS swiggy_favourites (
     restaurant_name TEXT NOT NULL,
     PRIMARY KEY (user_id, address_id, restaurant_id)
 );
+CREATE TABLE IF NOT EXISTS swiggy_order_attempts (
+    user_id INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    address_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    order_id TEXT,
+    created_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, fingerprint)
+);
 """
 COLUMNS = [                                      # added after gate 1 shipped
     ("swiggy_connections", "address_id", "TEXT"),
