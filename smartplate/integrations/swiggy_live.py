@@ -22,12 +22,13 @@ import hashlib
 import json
 import re
 
-from .. import clock, db
+from .. import clock, config, db
 from . import swiggy_connect as sc
 from .swiggy_connect import SwiggyError
 
 ALLOWED = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu",
-                     "get_food_cart", "update_food_cart", "flush_food_cart"})
+                     "get_food_cart", "update_food_cart", "flush_food_cart", "get_payment_options",
+                     "place_food_order", "get_food_orders", "track_food_order"})
 MENU_TTL = dt.timedelta(hours=6)
 MATCH_RESTAURANT = 0.6
 CHECKOUT_URL = "https://www.swiggy.com/"
@@ -41,6 +42,8 @@ ALIASES = {
     "cart_items": ["cartItems", "cart_items", "items"],
     "item_id": ["menu_item_id", "menuItemId", "itemId", "item_id", "id"],
     "quantity": ["quantity", "qty", "count"],
+    "payment_method": ["paymentMethod", "payment_method"],
+    "order_id": ["orderId", "order_id"],
 }
 FIELDS = {
     "id": ["id", "addressId", "address_id", "restaurantId", "restaurant_id", "restId", "itemId", "item_id",
@@ -101,9 +104,11 @@ def _shape(value, depth=0):
 
 
 def call(user_id: int, name: str, arguments: dict) -> object:
-    """One tools/call. Anything outside ALLOWED (placing orders, payment) is refused here."""
+    """One tools/call. Order placement also requires the explicit deployment gate."""
     if name not in ALLOWED:
-        raise SwiggyError(f"SmartPlate never calls {name}. You place and pay for orders in Swiggy.")
+        raise SwiggyError(f"SmartPlate does not support {name}.")
+    if name == "place_food_order" and not config.LIVE_ORDERS:
+        raise SwiggyError("Real order placement is disabled until Swiggy access and durable storage are approved.")
     conn = _conn(user_id)
     _tool(conn, name)
     token = conn["access_token"]
@@ -559,3 +564,91 @@ def fill_live_cart(user_id: int, restaurant_id: str, restaurant_name: str,
     if not any(str(_get(r, "menu_item_id")) == preview["item_id"] for r in records(cart, "menu_item_id")):
         raise SwiggyError("SmartPlate could not confirm the item in Swiggy's cart. Check your cart before trying again.")
     return {**preview, "to_pay": _num(cart, "to_pay"), "checkout_url": CHECKOUT_URL}
+
+
+def live_checkout_preview(user_id: int) -> dict:
+    """Fresh cart, exact payable total and provider-offered COD before placement."""
+    if not config.LIVE_ORDERS:
+        raise SwiggyError("Real order placement is disabled until Swiggy access and durable storage are approved.")
+    from ..domain import models
+    user = models.get_user(user_id)
+    if user["allergens"] or user["medical"] or user["diet"] == "vegan":
+        raise SwiggyError("SmartPlate cannot verify your ingredient or medical rules for a real order. "
+                          "Review and place it in Swiggy instead.")
+    conn = _conn(user_id)
+    address_id = _address(conn)
+    cart = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"), {"address": address_id}))
+    items = records(cart, "menu_item_id")
+    if len(items) != 1:
+        raise SwiggyError("Review one exact dish in the Swiggy cart before placing an order.")
+    item = items[0]
+    if item.get("quantity") != 1 or not _get(item, "name"):
+        raise SwiggyError("SmartPlate could not verify one dish and quantity in the live cart.")
+    if item.get("in_stock") is False or item.get("inStock") is False:
+        raise SwiggyError("The dish is no longer in stock. Refresh your cart.")
+    total = _num(cart, "to_pay")
+    if total is None or total <= 0 or total > 1000:
+        raise SwiggyError("Swiggy did not return a valid payable total within its ₹1,000 Builders Club limit.")
+    options = call(user_id, "get_payment_options", build_args(_tool(conn, "get_payment_options"),
+                                                        {"address": address_id}))
+    body = options.get("data", options) if isinstance(options, dict) else {}
+    cod = body.get("cod") if isinstance(body, dict) else None
+    if not isinstance(cod, dict) or cod.get("available") is not True or not cod.get("id"):
+        raise SwiggyError("Cash on Delivery is not offered for this cart. Use Swiggy checkout for another payment method.")
+    address = next((a for a in addresses(user_id) if a["id"] == address_id), None)
+    if not address or not address["text"]:
+        raise SwiggyError("Swiggy did not confirm your delivery address. Choose it again.")
+    details = {"address_id": address_id, "address": address["text"],
+               "item_id": str(_get(item, "menu_item_id")), "item": str(_get(item, "name") or "Selected dish"),
+               "quantity": item.get("quantity"), "to_pay": total, "payment_method": str(cod["id"])}
+    fingerprint = hashlib.sha256(json.dumps(details, sort_keys=True).encode()).hexdigest()
+    return {**details, "payment_label": str(cod.get("displayName") or "Cash on Delivery"),
+            "fingerprint": fingerprint}
+
+
+def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
+    if not expected_fingerprint:
+        raise CartChanged("Review the current Swiggy cart, address, total and payment method first.")
+    preview = live_checkout_preview(user_id)
+    if preview["fingerprint"] != expected_fingerprint:
+        raise CartChanged("The Swiggy cart, address, total or payment method changed. Review it again.")
+    with db.cursor() as cur:
+        existing = cur.execute("SELECT state, order_id FROM swiggy_order_attempts WHERE user_id=? AND fingerprint=?",
+                               (user_id, expected_fingerprint)).fetchone()
+        if existing:
+            raise CartChanged("This order was already attempted. Check your Swiggy orders before trying again.")
+        cur.execute("INSERT INTO swiggy_order_attempts(user_id, fingerprint, address_id, state, created_ts) "
+                    "VALUES (?,?,?,?,?)", (user_id, expected_fingerprint, preview["address_id"],
+                                           "started", clock.now().isoformat()))
+    conn = _conn(user_id)
+    try:
+        result = call(user_id, "place_food_order", build_args(_tool(conn, "place_food_order"),
+                {"address": preview["address_id"], "payment_method": preview["payment_method"]}))
+        body = result.get("data", result) if isinstance(result, dict) else {}
+        order_id = body.get("orderId") if isinstance(body, dict) else None
+        confirmed = isinstance(body, dict) and body.get("normalizedStatus") == "success" and order_id
+        with db.cursor() as cur:
+            cur.execute("UPDATE swiggy_order_attempts SET state=?, order_id=? WHERE user_id=? AND fingerprint=?",
+                        ("confirmed" if confirmed else "unknown", str(order_id) if order_id else None,
+                         user_id, expected_fingerprint))
+        if not confirmed:
+            raise SwiggyError("Swiggy did not confirm a completed order. Check Swiggy orders; do not retry this cart.")
+        return {"order_id": str(order_id), "status": "confirmed", "item": preview["item"],
+                "to_pay": preview["to_pay"], "address": preview["address"]}
+    except Exception:
+        with db.cursor() as cur:
+            cur.execute("UPDATE swiggy_order_attempts SET state='unknown' "
+                        "WHERE user_id=? AND fingerprint=? AND state='started'", (user_id, expected_fingerprint))
+        raise
+
+
+def live_order_status(user_id: int, order_id: str) -> dict:
+    with db.cursor() as cur:
+        known = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? AND order_id=? AND state='confirmed'",
+                            (user_id, order_id)).fetchone()
+    if not known:
+        raise ValueError("This order is not recorded for this profile")
+    conn = _conn(user_id)
+    data = call(user_id, "track_food_order", build_args(_tool(conn, "track_food_order"),
+                                                       {"order_id": order_id, "address": _address(conn)}))
+    return {"order_id": order_id, "provider": data.get("data", data) if isinstance(data, dict) else data}
