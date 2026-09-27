@@ -68,6 +68,19 @@ test('settings render persisted inputs and escape profile names', async () => {
   assert.match(html, /value="vegan" selected/);
 });
 
+test('Swiggy setup shows the exact callback and reconnect state safely', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = {
+    connected: false, needs_reconnect: true,
+    callback_url: 'https://smartplate.onrender.com/swiggy/callback?x=<unsafe>'
+  };`, context);
+  const html = vm.runInContext('connectionPanel()', context);
+  assert.match(html, /Reconnect required/);
+  assert.match(html, /exact-match allowlisted HTTPS redirect/);
+  assert.match(html, /smartplate\.onrender\.com\/swiggy\/callback/);
+  assert.ok(!html.includes('<unsafe>'));
+});
+
 test('busy action guard ignores a second click during the same action', async () => {
   const { context } = fixture(); await context.bootPromise;
   await vm.runInContext(`(async () => {
