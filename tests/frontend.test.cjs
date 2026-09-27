@@ -213,8 +213,8 @@ test('shortlist sheet lists usual places, new picks and hidden counts', async ()
   assert.match(html, /data-cook="dal_rice"/);
 });
 
-test('onboarding walks five steps and validates before moving on', async () => {
-  const { context } = fixture(); await context.bootPromise;
+test('onboarding uses four steps without sample restaurant choices or sample budget quotes', async () => {
+  const { context, calls } = fixture(); await context.bootPromise;
   vm.runInContext('startOnboard()', context);
   assert.match(vm.runInContext('onboardingScreen()', context), /What do you eat/);
   vm.runInContext("onboardChip('allergens', 'peanut', true); onboardChip('diet', 'veg', false)", context);
@@ -222,8 +222,12 @@ test('onboarding walks five steps and validates before moving on', async () => {
   assert.equal(vm.runInContext('S.onboard.d.diet', context), 'veg');
   vm.runInContext("S.onboard.step = 1; onboardChip('meals', 'lunch', true); onboardChip('meals', 'dinner', true)", context);
   await assert.rejects(vm.runInContext("onboardNav('next')", context), /at least one meal/);
-  vm.runInContext("S.onboard.step = 3; S.onboard.suggest = { feasible: true, tight: 1500, suggested: 2000, roomy: 2500 }", context);
-  assert.match(vm.runInContext('onboardingScreen()', context), /Usual · ₹2,000/);
+  vm.runInContext('S.onboard.step = 2', context);
+  const budget = vm.runInContext('onboardingScreen()', context);
+  assert.match(budget, /Enter your own limit/);
+  assert.ok(!budget.includes('Usual · ₹2,000'));
+  assert.equal(vm.runInContext('OB_STEPS.length', context), 4);
+  assert.ok(!calls.some(c => c.url.includes('/api/suggest-budget')));
 });
 
 test('private profile keys are sent as a header and merged into the profile list', async () => {
