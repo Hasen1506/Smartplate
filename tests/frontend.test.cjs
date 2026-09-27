@@ -137,10 +137,10 @@ test('sample banner describes demo data without inventing an allergy', async () 
 test('connected profiles with ingredient rules keep the direct Swiggy hand-off', async () => {
   const { context } = fixture(); await context.bootPromise;
   richView(context);
-  vm.runInContext("S.swiggy = { connected: true, address: { id: 'home' } }", context);
+  vm.runInContext("S.swiggy = { connected: true, address: { id: 'home', label: 'Home' } }", context);
   const html = vm.runInContext('todayScreen()', context);
-  assert.match(html, /Order on Swiggy/);
-  assert.match(html, /cannot verify your ingredient or medical rules/);
+  assert.match(html, /Order from your area/);
+  assert.match(html, /sample weekly planner/);
   assert.ok(!html.includes('data-cart="9"'));
 });
 
@@ -151,11 +151,26 @@ test('eligible profiles review and escape the exact live item before a cart upda
     S.swiggy = { connected: true, address: { id: 'home' } };
     S.cartReview = { session_id: 9, item: '<img src=x>', restaurant: '<b>Kitchen</b>',
       address: 'Home', planned_cost: 150, menu_price: null, fingerprint: 'fingerprint' };`, context);
-  assert.match(vm.runInContext('todayScreen()', context), /data-cart="9"/);
+  assert.match(vm.runInContext('nextUpCard(S.view.next_up)', context), /data-cart="9"/);
   const dialog = vm.runInContext('cartReviewDialog()', context);
   assert.match(dialog, /Price to verify/);
   assert.match(dialog, /Add to Swiggy cart/);
   assert.ok(!dialog.includes('<img src=x>') && !dialog.includes('<b>Kitchen</b>'));
+});
+
+test('connected Places uses real Swiggy IDs and no sample restaurant cards', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'addr-home', label: 'Home' } };
+    S.places = [{ id: 1, name: 'Sample Diner', favourite: true }];
+    S.liveFavourites = [{ id: 'rest-42', name: '<Real Place>' }];
+    S.liveBrowseMenu = { restaurant: { id: 'rest-42', name: '<Real Place>' }, address: 'Home', fetched: 'today',
+      items: [{ id: 'item-7', name: '<Dish>', price: null, veg: true, in_stock: true, has_options: false }] };`, context);
+  const html = vm.runInContext('placesScreen()', context);
+  assert.match(html, /Order from your area/);
+  assert.match(html, /rest-42/);
+  assert.match(html, /item-7/);
+  assert.match(html, /Price in cart/);
+  assert.ok(!html.includes('Sample Diner') && !html.includes('<Real Place>') && !html.includes('<Dish>'));
 });
 
 test('week rows are draggable and carry weather and holidays', async () => {
