@@ -22,25 +22,25 @@ worth building, connector or app, who pays, and how do we keep it simple?", see
 
 ## What using it feels like
 
-1. **Set up in five answers**: diet and allergies, which meals, your usual places,
-   a weekly budget (suggested from those places), an optional goal.
+1. **Set up your profile**: diet and exclusions, meals, budget and optional goal.
 2. **Today** shows the next meal, what it costs including delivery, and **when to
    order it** (ahead of the rush, with extra time on rainy days). Tap *Order on
    Swiggy*, *Change* or *I had it*.
-3. **Change** opens a short list: your usual places, three dishes each, plus three
-   new picks, all already filtered for your allergies and budget. No endless menu.
+3. **Change** opens a short list from the sample Chennai planner. The sample list
+   is separate from the connected Swiggy restaurant and menu flow.
 4. **Week**: drag a meal onto another day (or tap *Move*) to swap. The budget and
    nutrition re-balance, and nothing else in the week gets shuffled.
 5. **Heads-up**: rain, heat, holidays, the fasts you keep, meals that didn't fit
    the budget, and past meals to confirm.
-6. **Reminders**: *Remind me at order time* sends a push notification at each
-   order-by time, even with the app closed (on iPhone, add it to the Home Screen
-   first). One tap also adds every order-by time to your phone calendar.
+6. **Reminders**: *Remind me at order time* attempts a push notification while
+   the web process is awake. Free Render sleeps; notifications are best effort.
+   You can also export order-by times to your phone calendar.
 7. **Installable and private**: add it to your home screen. A profile you create
    is private; add a sign-in name and password to open it on your other devices.
-8. **Swiggy, when you sign in**: pick your delivery address, see today's Swiggy menu
-   for your usual places, and put the planned dish in your Swiggy cart with the real
-   amount to pay. You review and pay in Swiggy; SmartPlate never orders or pays.
+8. **Swiggy, once the exact redirect is approved**: choose your saved address,
+   search real nearby restaurants, star favourites, inspect current menus and put
+   one exact item in the cart. Review and pay in Swiggy. An optional Cash on
+   Delivery order path requires a separate server flag and explicit approval.
 
 ## Try it in your browser
 
@@ -58,6 +58,9 @@ treat profiles there as a demo. For data that lasts, use a paid instance with a 
 and set `SMARTPLATE_DB` to a path on it. Any host that runs a `Procfile` (Railway,
 Koyeb, Heroku) works the same way; run **one** worker process.
 
+For a private persistent pilot, review the separate [production Blueprint](render.production.yaml)
+and [deployment runbook](docs/production-deployment.md) before applying it.
+
 **Swiggy sign-in on a hosted URL requires an exact approved redirect URI.** In
 More → Swiggy connection, copy the callback URL shown for this deployment (for
 example, `https://your-service.onrender.com/swiggy/callback`) and give that exact
@@ -65,7 +68,9 @@ URI to [Swiggy Builders Club](https://mcp.swiggy.com/builders/docs/operate/acces
 An approval for another hostname or path does not cover this URL. Swiggy creates
 the OAuth client ID through dynamic client registration, so there is no separate
 client ID to apply for; provider onboarding and redirect approval still apply.
-The optional `SMARTPLATE_SWIGGY_CALLBACK_PATH=/auth/swiggy/callback` supports that
+As of 30 September 2026, Swiggy's sign-in page rejects the current Render callback
+with “Onrender isn't whitelisted yet”; the earlier approval email did not identify
+the URI. The optional `SMARTPLATE_SWIGGY_CALLBACK_PATH=/auth/swiggy/callback` supports that
 path if Swiggy has approved the resulting URL on a host you control. Set
 `SMARTPLATE_PUBLIC_URL` to that host's public HTTPS origin only when it actually
 routes to this app. Never point OAuth at a proposed or third-party domain. Until
@@ -143,7 +148,8 @@ instead of silently ordered.
 |---|---|---|
 | `PORT` | `5057` | HTTP port |
 | `SMARTPLATE_BRAIN` | `deterministic` | `llm` opts into the paid narrator (off the critical path) |
-| `SMARTPLATE_SWIGGY` | `simulated` | `live` is unsupported and checkout returns a clear error |
+| `SMARTPLATE_SWIGGY` | `simulated` | `live` enables MCP sign-in after provider approval; current Render origin is rejected by Swiggy |
+| `SMARTPLATE_LIVE_ORDERS` | `off` | `on` permits explicitly approved Cash on Delivery placement after durable storage and provider validation |
 | `SMARTPLATE_DB` | `smartplate.db` | SQLite path |
 | `SMARTPLATE_WEATHER` | `live` | `live` = Open-Meteo forecast (cached, falls back to the sample feed offline); `simulated` = sample feed only |
 | `SMARTPLATE_SOLVER_GAP` | `0.001` | Relative optimality gap for the weekly MILP |
@@ -164,11 +170,12 @@ Without a Swiggy sign-in, ordering is a **hand-off**: *Order on Swiggy* opens Sw
 public search for that restaurant and dish, the person orders there, then taps *I had
 it* so the budget and nutrition stay accurate.
 
-With a sign-in (More → Swiggy connection), SmartPlate reads the person's saved
-addresses, searches their usual places, shows the live menu, and fills the Swiggy cart
-with the planned dish, then reads back the amount to pay. It refuses every tool that
-orders or pays (`place_food_order`, payment options, coupons). The person reviews and
-pays in Swiggy. This follows Swiggy's public docs and is tested against a fake server;
-**it has not yet run against mcp.swiggy.com**, so the first real sign-in is the test.
+With a sign-in (More → Swiggy connection), SmartPlate reads saved addresses,
+searches real restaurants, shows menus, maintains favourites and puts an exact
+reviewed dish in the cart. It can place a user-confirmed Cash on Delivery order
+only when `SMARTPLATE_LIVE_ORDERS=on`; otherwise checkout remains in Swiggy.
+These flows are tested against a fake server. The real sign-in currently fails
+at Swiggy's allowlist page, so the first authenticated menu and cart calls remain
+to be tested after provider approval.
 The simulated auto-ordering path (idempotent, spend-limited) remains under More. No
 background worker places orders. See [the integration notes](docs/vendor/swiggy/README.md).
