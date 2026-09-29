@@ -18,6 +18,11 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
 def create_app() -> Flask:
+    if config.LIVE_ORDERS and os.environ.get("RENDER"):
+        if (config.SWIGGY_PROVIDER != "live" or not config.DB_PATH.startswith("/var/data/")
+                or not config.SECRET or not config.PUBLIC_URL.startswith("https://")):
+            raise RuntimeError("Live orders on Render require the live provider, persistent /var/data database, "
+                               "stable SMARTPLATE_SECRET and HTTPS SMARTPLATE_PUBLIC_URL")
     initialize()
     app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
     app.config['MAX_CONTENT_LENGTH'] = 256 * 1024
@@ -94,6 +99,19 @@ def create_app() -> Flask:
 
     @app.get("/healthz")
     def healthz():
+        return jsonify(ok=True)
+
+    @app.get("/readyz")
+    def readyz():
+        # Render should send traffic only while the configured data store is usable.
+        from . import db
+        try:
+            with db.cursor() as cur:
+                cur.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+            if not os.access(os.path.dirname(os.path.abspath(config.DB_PATH)), os.W_OK):
+                raise OSError("database directory is read-only")
+        except Exception:
+            return jsonify(ok=False), 503
         return jsonify(ok=True)
 
     # Installable app: the manifest and the service worker are served from the root
@@ -450,6 +468,10 @@ def create_app() -> Flask:
     @app.get("/api/user/<int:user_id>/swiggy/orders/<order_id>")
     def swiggy_order_status(user_id, order_id):
         return jsonify(swiggy_live.live_order_status(user_id, order_id))
+
+    @app.get("/api/user/<int:user_id>/swiggy/order-history")
+    def swiggy_order_history(user_id):
+        return jsonify(swiggy_live.live_order_history(user_id))
 
     @app.get("/api/session/<int:session_id>/swiggy-cart/preview")
     def swiggy_cart_preview(session_id):
