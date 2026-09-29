@@ -28,8 +28,9 @@ worth building, connector or app, who pays, and how do we keep it simple?", see
    Swiggy*, *Change* or *I had it*.
 3. **Change** opens a short list from the sample Chennai planner. The sample list
    is separate from the connected Swiggy restaurant and menu flow.
-4. **Week**: drag a meal onto another day (or tap *Move*) to swap. The budget and
-   nutrition re-balance, and nothing else in the week gets shuffled.
+4. **Week**: drag a meal onto another day (or tap *Move*) to swap. The selected
+   picks trade places; the solver may adjust other unpinned meals to keep the
+   budget and nutrition constraints.
 5. **Heads-up**: rain, heat, holidays, the fasts you keep, meals that didn't fit
    the budget, and past meals to confirm.
 6. **Reminders**: *Remind me at order time* attempts a push notification while
