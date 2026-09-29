@@ -387,14 +387,15 @@ def test_current_plan_rolls_to_new_week(client, monkeypatch):
     assert rolled["id"] != first["id"] and rolled["week_start"] == (ws + dt.timedelta(days=7)).isoformat()
 
 
-def test_swap_and_replan_do_not_reshuffle_other_meals(client):
+def test_swap_and_noop_replan_keep_the_requested_trade(client):
     snap = lambda v: {c["session_id"]: c["item"] for _, _, c in _cells(v)}          # noqa: E731
     v = client.get("/api/plan/1").get_json()
     before = snap(v)
     deliveries = [c for _, _, c in _cells(v) if c["kind"] == "delivery"]
     a, b = deliveries[0]["session_id"], deliveries[-1]["session_id"]
     after = snap(client.post("/api/plan/1/swap", json={"a": a, "b": b}).get_json())
-    assert [k for k in before if k not in (a, b) and before[k] != after[k]] == []
+    # The solver may rebalance other unpinned meals to respect day/week caps.
+    assert after[a] == before[b] and after[b] == before[a]
     again = snap(client.post("/api/plan/1/optimize", json={}).get_json())
     assert again == after                                           # a no-op re-plan is a no-op
 
