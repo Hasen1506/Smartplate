@@ -80,11 +80,18 @@ CREATE TABLE IF NOT EXISTS swiggy_order_attempts (
     created_ts TEXT NOT NULL,
     PRIMARY KEY (user_id, fingerprint)
 );
+CREATE TABLE IF NOT EXISTS swiggy_checkout_quotes (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    cart_fingerprint TEXT NOT NULL,
+    created_ts TEXT NOT NULL
+);
 """
 COLUMNS = [                                      # added after gate 1 shipped
     ("swiggy_connections", "address_id", "TEXT"),
     ("swiggy_connections", "address_label", "TEXT"),
     ("swiggy_connections", "samples", "TEXT NOT NULL DEFAULT '{}'"),
+    ("swiggy_order_attempts", "cart_fingerprint", "TEXT"),
 ]
 CLIENT_VERSION = "2025-06-18"          # protocol we offer; the server's reply is what we record
 PENDING_TTL = dt.timedelta(minutes=15)
