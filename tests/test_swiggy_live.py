@@ -31,6 +31,8 @@ SCHEMAS = {
                          "properties": {"addressId": {"type": "string"}, "paymentMethod": {"type": "string"}}},
     "track_food_order": {"type": "object", "required": ["orderId"],
                          "properties": {"orderId": {"type": "string"}}},
+    "get_food_orders": {"type": "object", "required": ["addressId"],
+                        "properties": {"addressId": {"type": "string"}}},
 }
 
 
@@ -43,6 +45,7 @@ class FakeLive(FakeSwiggy):
         self.cart, self.dishes = None, {}
         self.stock, self.has_variants, self.has_addons, self.is_veg = True, False, False, True
         self.search_error = None
+        self.order_uncertain = False
 
     def __call__(self, method, url, headers, body):
         if url.endswith("/food") and headers.get("Authorization") == f"Bearer {self.token}":
@@ -106,8 +109,16 @@ class FakeLive(FakeSwiggy):
                 "available": True, "id": "Cash", "displayName": "Cash on Delivery"}}}}
         if name == "place_food_order":
             assert args == {"addressId": "addr-home", "paymentMethod": "Cash"}
+            if self.order_uncertain:
+                return {"structuredContent": {"success": True, "data": {"status": "UNKNOWN"}}}
             return {"structuredContent": {"success": True, "data": {
                 "orderId": "real-order-17", "normalizedStatus": "success", "status": "CONFIRMED"}}}
+        if name == "get_food_orders":
+            assert args["addressId"] == "addr-home"
+            return {"structuredContent": {"success": True, "data": {"orders": [{
+                "orderId": "real-order-17", "restaurantName": "Hotel Saravana Bhavan",
+                "orderedItems": [{"name": "Mini Tiffin", "quantity": 1}], "orderTotal": "160",
+                "orderStatus": "PREPARING", "orderedTime": "2026-09-30T12:00:00Z"}]}}}
         if name == "track_food_order":
             assert args["orderId"] == "real-order-17"
             return {"structuredContent": {"success": True, "data": {"status": "PREPARING"}}}
@@ -276,6 +287,34 @@ def test_cod_checkout_requires_fresh_review_and_places_only_once(client, swiggy,
         "expected_fingerprint": review["fingerprint"]}).status_code == 409
     assert swiggy.tool_calls().count("place_food_order") == 1
     assert client.get("/api/user/3/swiggy/orders/real-order-17").get_json()["provider"]["status"] == "PREPARING"
+    history = client.get("/api/user/3/swiggy/order-history").get_json()
+    assert history["provider_orders"][0]["order_id"] == "real-order-17"
+    assert history["attempts"][0]["state"] == "confirmed"
+    # A completed order does not permanently prohibit ordering the same favourite.
+    again = client.get("/api/user/3/swiggy/checkout/preview").get_json()
+    assert again["fingerprint"] != review["fingerprint"]
+    assert client.post("/api/user/3/swiggy/checkout", json={
+        "expected_fingerprint": again["fingerprint"]}).status_code == 200
+    assert swiggy.tool_calls().count("place_food_order") == 2
+
+
+def test_uncertain_order_blocks_repeat_and_recovers_with_provider_history(client, swiggy, monkeypatch):
+    monkeypatch.setattr(config, "LIVE_ORDERS", True)
+    _connect(client, swiggy, uid=3)
+    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
+    swiggy.dishes = {"Mini Tiffin": 12500}
+    body = {"restaurant_id": "r-1", "restaurant_name": "Hotel Saravana Bhavan (Adyar)",
+            "item_id": "m0", "item_name": "Mini Tiffin"}
+    p = client.post("/api/user/3/swiggy/live-cart/preview", json=body).get_json()
+    client.post("/api/user/3/swiggy/live-cart", json={**body, "expected_fingerprint": p["fingerprint"]})
+    review = client.get("/api/user/3/swiggy/checkout/preview").get_json()
+    swiggy.order_uncertain = True
+    assert client.post("/api/user/3/swiggy/checkout", json={
+        "expected_fingerprint": review["fingerprint"]}).status_code == 502
+    assert client.get("/api/user/3/swiggy/checkout/preview").status_code == 502
+    assert swiggy.tool_calls().count("place_food_order") == 1
+    history = client.get("/api/user/3/swiggy/order-history").get_json()
+    assert history["attempts"][0]["state"] == "unknown"
 
 
 def test_required_fields_we_cannot_fill_are_named():
