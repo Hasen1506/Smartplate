@@ -1,9 +1,9 @@
 """Swiggy gates 2 and 3: real addresses, restaurants and menus, and filling the cart.
 
 Builds on swiggy_connect (sign-in + discovery). Every call goes through `call()`,
-which refuses any tool not on ALLOWED. SmartPlate can read, and it can put the
-planned dish in the person's Swiggy cart. It never places an order, picks a payment
-method or pays. The person opens Swiggy, checks the cart and pays there.
+which refuses any tool not on ALLOWED. SmartPlate can read live menus, prepare
+an exact item in the cart, and place an explicitly approved Cash on Delivery
+order only when LIVE_ORDERS is enabled. Other payments stay in Swiggy.
 
 Written from Swiggy's public docs (docs/vendor/swiggy/README.md). The exact argument
 and reply shapes are only known after a real sign-in, so this module:
@@ -21,6 +21,7 @@ import difflib
 import hashlib
 import json
 import re
+import secrets
 
 from .. import clock, config, db
 from . import swiggy_connect as sc
@@ -30,6 +31,7 @@ ALLOWED = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu
                      "get_food_cart", "update_food_cart", "flush_food_cart", "get_payment_options",
                      "place_food_order", "get_food_orders", "track_food_order"})
 MENU_TTL = dt.timedelta(hours=6)
+CHECKOUT_QUOTE_TTL = dt.timedelta(minutes=5)
 MATCH_RESTAURANT = 0.6
 CHECKOUT_URL = "https://www.swiggy.com/"
 
@@ -564,7 +566,7 @@ def fill_live_cart(user_id: int, restaurant_id: str, restaurant_name: str,
     return {**preview, "to_pay": _num(cart, "to_pay"), "checkout_url": CHECKOUT_URL}
 
 
-def live_checkout_preview(user_id: int) -> dict:
+def _checkout_state(user_id: int) -> dict:
     """Fresh cart, exact payable total and provider-offered COD before placement."""
     if not config.LIVE_ORDERS:
         raise SwiggyError("Real order placement is disabled until Swiggy access and durable storage are approved.")
@@ -604,20 +606,55 @@ def live_checkout_preview(user_id: int) -> dict:
             "fingerprint": fingerprint}
 
 
+def live_checkout_preview(user_id: int) -> dict:
+    """Issue a short-lived approval for this exact live cart.
+
+    The cart hash is stable so an uncertain placement can block a duplicate. The
+    approval token is new each time, allowing a confirmed favourite to be ordered
+    again later without reusing the previous nonrepeatable attempt.
+    """
+    preview = _checkout_state(user_id)
+    with db.cursor() as cur:
+        unresolved = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? "
+                                 "AND cart_fingerprint=? AND state IN ('started','unknown') LIMIT 1",
+                                 (user_id, preview["fingerprint"])).fetchone()
+        if unresolved:
+            raise SwiggyError("An earlier placement of this cart is unresolved. Check your Swiggy orders "
+                              "before placing it again.")
+        cur.execute("DELETE FROM swiggy_checkout_quotes WHERE created_ts < ?",
+                    ((clock.now() - CHECKOUT_QUOTE_TTL).isoformat(),))
+        approval = secrets.token_urlsafe(32)
+        cur.execute("INSERT INTO swiggy_checkout_quotes(token, user_id, cart_fingerprint, created_ts) "
+                    "VALUES (?,?,?,?)", (approval, user_id, preview["fingerprint"], clock.now().isoformat()))
+    return {**preview, "fingerprint": approval}
+
+
 def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
     if not expected_fingerprint:
         raise CartChanged("Review the current Swiggy cart, address, total and payment method first.")
-    preview = live_checkout_preview(user_id)
-    if preview["fingerprint"] != expected_fingerprint:
+    preview = _checkout_state(user_id)
+    with db.cursor() as cur:
+        quote = cur.execute("SELECT cart_fingerprint, created_ts FROM swiggy_checkout_quotes "
+                            "WHERE user_id=? AND token=?", (user_id, expected_fingerprint)).fetchone()
+    if (not quote or quote["cart_fingerprint"] != preview["fingerprint"]
+            or dt.datetime.fromisoformat(quote["created_ts"]) < clock.now() - CHECKOUT_QUOTE_TTL):
         raise CartChanged("The Swiggy cart, address, total or payment method changed. Review it again.")
     with db.cursor() as cur:
         existing = cur.execute("SELECT state, order_id FROM swiggy_order_attempts WHERE user_id=? AND fingerprint=?",
                                (user_id, expected_fingerprint)).fetchone()
         if existing:
             raise CartChanged("This order was already attempted. Check your Swiggy orders before trying again.")
-        cur.execute("INSERT INTO swiggy_order_attempts(user_id, fingerprint, address_id, state, created_ts) "
-                    "VALUES (?,?,?,?,?)", (user_id, expected_fingerprint, preview["address_id"],
-                                           "started", clock.now().isoformat()))
+        unresolved = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? "
+                                 "AND cart_fingerprint=? AND state IN ('started','unknown') LIMIT 1",
+                                 (user_id, preview["fingerprint"])).fetchone()
+        if unresolved:
+            raise CartChanged("An earlier placement of this cart is unresolved. Check Swiggy orders first.")
+        cur.execute("INSERT INTO swiggy_order_attempts(user_id, fingerprint, cart_fingerprint, "
+                    "address_id, state, created_ts) VALUES (?,?,?,?,?,?)",
+                    (user_id, expected_fingerprint, preview["fingerprint"], preview["address_id"],
+                     "started", clock.now().isoformat()))
+        cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=? AND token=?",
+                    (user_id, expected_fingerprint))
     conn = _conn(user_id)
     try:
         result = call(user_id, "place_food_order", build_args(_tool(conn, "place_food_order"),
@@ -642,7 +679,7 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
 
 def live_order_status(user_id: int, order_id: str) -> dict:
     with db.cursor() as cur:
-        known = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? AND order_id=? AND state='confirmed'",
+        known = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? AND order_id=?",
                             (user_id, order_id)).fetchone()
     if not known:
         raise ValueError("This order is not recorded for this profile")
@@ -650,3 +687,32 @@ def live_order_status(user_id: int, order_id: str) -> dict:
     data = call(user_id, "track_food_order", build_args(_tool(conn, "track_food_order"),
                                                        {"order_id": order_id, "address": _address(conn)}))
     return {"order_id": order_id, "provider": data.get("data", data) if isinstance(data, dict) else data}
+
+
+def live_order_history(user_id: int) -> dict:
+    """Show local attempts beside Swiggy's recent orders to recover uncertainty."""
+    conn = _conn(user_id)
+    address_id = _address(conn)
+    data = call(user_id, "get_food_orders", build_args(_tool(conn, "get_food_orders"),
+                                                        {"address": address_id}))
+    body = data.get("data", data) if isinstance(data, dict) else {}
+    rows = body.get("orders") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        raise SwiggyError("Swiggy did not return an order list. Check the Swiggy app before retrying an order.")
+    def item_names(row):
+        items = row.get("orderedItems")
+        if isinstance(items, list):
+            return ", ".join(str(item.get("name") or item.get("itemName") or "Item")
+                             for item in items if isinstance(item, dict))
+        return str(items or "") if isinstance(items, str) else ""
+
+    recent = [{"order_id": str(r.get("orderId")), "restaurant": str(r.get("restaurantName") or ""),
+               "item": item_names(r), "total": str(r.get("orderTotal") or ""),
+               "status": str(r.get("orderStatus") or ""), "ordered_time": str(r.get("orderedTime") or "")}
+              for r in rows if isinstance(r, dict) and r.get("orderId")]
+    with db.cursor() as cur:
+        attempts = cur.execute("SELECT state, order_id, created_ts FROM swiggy_order_attempts "
+                               "WHERE user_id=? AND address_id=? ORDER BY created_ts DESC LIMIT 20",
+                               (user_id, address_id)).fetchall()
+    return {"provider_orders": recent, "attempts": [dict(r) for r in attempts],
+            "address": conn.get("address_label") or address_id}
