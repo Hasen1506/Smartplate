@@ -186,6 +186,19 @@ test('real order confirmation shows live total, address and payment before place
   assert.ok(!dialog.includes('<Tiffin>') && !dialog.includes('<Home>'));
 });
 
+test('recent provider orders and uncertain attempts are visible without raw markup', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'home', label: 'Home' }, order_enabled: true };
+    S.liveOrderHistory = { address: '<Home>', attempts: [{ state: 'unknown' }],
+      provider_orders: [{ order_id: 'o-1', restaurant: '<Restaurant>', item: 'Tiffin',
+        status: 'PREPARING', total: '160', ordered_time: 'now' }] };`, context);
+  const html = vm.runInContext('livePlacesScreen()', context);
+  assert.match(html, /Check recent Swiggy orders/);
+  assert.match(html, /uncertain result/);
+  assert.match(html, /o-1/);
+  assert.ok(!html.includes('<Home>') && !html.includes('<Restaurant>'));
+});
+
 test('week rows are draggable and carry weather and holidays', async () => {
   const { context } = fixture(); await context.bootPromise;
   richView(context);
