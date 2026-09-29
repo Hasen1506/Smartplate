@@ -4,7 +4,7 @@ Pins the corrected model: protein is DAILY (no carry), calories carry WEEKLY (wi
 explicit credit), micros run on a ~30-DAY clock, medical caps are daily-hard."""
 import datetime as dt
 
-from smartplate import service
+from smartplate import clock, service
 from smartplate.domain import intake, ledger
 from smartplate.kernel import budget
 
@@ -75,8 +75,8 @@ def test_micros_run_monthly_and_medical_caps_daily():
 # Persistence — intake accumulates across days and feeds the rolling ledger
 # --------------------------------------------------------------------------- #
 def test_intake_persists_and_ledger_accumulates(seeded):
-    y = (dt.date.today() - dt.timedelta(days=1)).isoformat()
-    t = dt.date.today().isoformat()
+    y = (clock.today() - dt.timedelta(days=1)).isoformat()
+    t = clock.today().isoformat()
     service.log_intake(1, "dal + 2 rotis", iso_date=y, meal="lunch")   # a light prior day
     service.log_intake(1, "oats", iso_date=t, meal="breakfast")
     assert len(intake.recent(1, 7)) == 2
