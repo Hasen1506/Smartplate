@@ -12,7 +12,7 @@ const S = {
   tab: "today", more: null, exec: null, community: [], receipts: null, drawer: null,
   busy: false, error: null, hideCold: false, orderReview: null, cartReview: null,
   liveResults: null, liveFavourites: null, liveBrowseMenu: null, liveOrderReview: null, liveCart: null,
-  checkoutReview: null, placedOrder: null, liveOrderStatus: null,
+  checkoutReview: null, placedOrder: null, liveOrderStatus: null, liveOrderHistory: null,
   sheet: null, moving: null, onboard: null, places: null, calendar: null, welcome: false, signin: false, account: null,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
@@ -122,7 +122,7 @@ async function switchUser(id) {
   S.sheet = null; S.moving = null; S.places = null; S.calendar = null; S.welcome = false; S.tab = "today"; S.more = null; S.account = null; S.cartReview = null;
   S.swiggy = null; S.swAddrs = null; S.liveMenu = null; S.carts = null; S.acctDraft = null;
   S.liveResults = null; S.liveFavourites = null; S.liveBrowseMenu = null; S.liveOrderReview = null; S.liveCart = null;
-  S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null;
+  S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null;
   store.set("smartplate.user", String(S.userId));
   try { await loadOrCreatePlan(); }
   catch (e) {
@@ -612,9 +612,13 @@ function livePlacesScreen() {
       data-live-item-name="${esc(i.name)}" ${i.in_stock === false || i.in_stock === 0 ? "disabled" : ""}>Review</button></span></div>`).join("") : "";
   return `<h1 class="greet">Order from your area</h1><p class="sub">Live Swiggy restaurants and menus for ${esc(S.swiggy.address.label)}. Choose a real item and review the cart before checkout.</p>
     <form id="live-search" class="row" style="gap:8px;margin:14px 0"><input id="live-query" aria-label="Restaurant or cuisine" placeholder="Restaurant or cuisine" maxlength="80" required style="flex:1;min-width:150px"><button class="primary">Search Swiggy</button></form>
+    <div class="row"><button class="ghost small" data-act="live-order-history">Check recent Swiggy orders</button></div>
+    ${S.liveOrderHistory ? `<section class="card"><h3>Recent Swiggy orders</h3><p class="fine">Orders at ${esc(S.liveOrderHistory.address)}. If a placement failed or timed out, check here and in Swiggy before trying again.</p>
+      ${S.liveOrderHistory.attempts.some(a => a.state === "unknown" || a.state === "started") ? `<p class="fine">A SmartPlate order attempt has an uncertain result. Check Swiggy or contact support before ordering the same cart again.</p>` : ""}
+      ${S.liveOrderHistory.provider_orders.length ? S.liveOrderHistory.provider_orders.map(o => `<p><b>${esc(o.restaurant)}</b> · ${esc(o.item)} · ${esc(o.status)} · ${esc(o.total)} · ${esc(o.ordered_time)}<br><span class="fine">Order ${esc(o.order_id)}</span></p>`).join("") : `<p class="fine">Swiggy returned no recent orders for this address.</p>`}</section>` : ""}
     ${S.placedOrder ? `<div class="consent cartnote"><b>Swiggy order confirmed:</b> ${esc(S.placedOrder.order_id)} · ${esc(S.placedOrder.item)} · ${rupee(S.placedOrder.to_pay)}.
       <button class="small" data-act="track-live-order">Check delivery status</button>${S.liveOrderStatus ? `<p class="fine">${esc(JSON.stringify(S.liveOrderStatus.provider))}</p>` : ""}</div>` : ""}
-    ${S.liveCart && !S.placedOrder ? `<div class="consent cartnote"><b>In your Swiggy cart:</b> ${esc(S.liveCart.item)} · ${esc(S.liveCart.restaurant)}.
+    ${S.liveCart ? `<div class="consent cartnote"><b>In your Swiggy cart:</b> ${esc(S.liveCart.item)} · ${esc(S.liveCart.restaurant)}.
       ${S.liveCart.to_pay == null ? "Check the final total in Swiggy." : `Current total ${rupee(S.liveCart.to_pay)}.`}
       ${S.swiggy.order_enabled ? `<button class="small primary" data-act="review-live-checkout">Review and place order</button>` : ""}
       <a class="btn small" href="${esc(S.liveCart.checkout_url)}" target="_blank" rel="noopener">Open Swiggy checkout ↗</a></div>` : ""}
@@ -652,6 +656,8 @@ async function addLiveItemToCart() {
     S.liveCart = await api(`/api/user/${S.userId}/swiggy/live-cart`, "POST", {
       restaurant_id: r.restaurant_id, restaurant_name: r.restaurant, item_id: r.item_id,
       item_name: r.item, expected_fingerprint: r.fingerprint });
+    S.placedOrder = null;
+    S.liveOrderStatus = null;
   } finally { S.liveOrderReview = null; }
   render();
 }
@@ -662,9 +668,20 @@ async function reviewLiveCheckout() {
 async function placeLiveOrder() {
   const review = S.checkoutReview;
   S.checkoutReview = null;
-  S.placedOrder = await api(`/api/user/${S.userId}/swiggy/checkout`, "POST",
-    { expected_fingerprint: review.fingerprint });
-  S.liveCart = null;
+  try {
+    S.placedOrder = await api(`/api/user/${S.userId}/swiggy/checkout`, "POST",
+      { expected_fingerprint: review.fingerprint });
+    S.liveCart = null;
+    S.liveOrderHistory = null;
+    render();
+  } catch (error) {
+    S.liveOrderHistory = null;
+    render();
+    throw error;
+  }
+}
+async function loadLiveOrderHistory() {
+  S.liveOrderHistory = await api(`/api/user/${S.userId}/swiggy/order-history`);
   render();
 }
 async function trackLiveOrder() {
@@ -1205,7 +1222,7 @@ function wire() {
     cmd: runCommand, reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute,
     "confirm-cart": fillCart, "confirm-live-cart": addLiveItemToCart,
     "review-live-checkout": reviewLiveCheckout, "place-live-order": placeLiveOrder,
-    "track-live-order": trackLiveOrder, savetpl: saveTemplate,
+    "track-live-order": trackLiveOrder, "live-order-history": loadLiveOrderHistory, savetpl: saveTemplate,
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
     "start-onboard": async () => startOnboard(), notify: toggleAlerts,
     "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); location.href = r.authorize_url; },
@@ -1213,7 +1230,7 @@ function wire() {
     "swiggy-addresses": async () => { S.swAddrs = await api(`/api/user/${S.userId}/swiggy/addresses`); render(); },
     "close-live-menu": async () => { S.liveMenu = null; render(); },
     "close-live-browse": async () => { S.liveBrowseMenu = null; render(); },
-    "swiggy-disconnect": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/disconnect`, "POST", {}); S.liveMenu = null; S.carts = null; S.swAddrs = null; S.liveResults = null; S.liveFavourites = null; S.liveBrowseMenu = null; S.liveCart = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; toast("Disconnected from Swiggy"); render(); },
+    "swiggy-disconnect": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/disconnect`, "POST", {}); S.liveMenu = null; S.carts = null; S.swAddrs = null; S.liveResults = null; S.liveFavourites = null; S.liveBrowseMenu = null; S.liveCart = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null; toast("Disconnected from Swiggy"); render(); },
     "signin-open": async () => { S.signin = true; S.error = null; render(); document.getElementById("si-login")?.focus(); },
     "signin-close": async () => { S.signin = false; S.error = null; render(); },
     "sign-out": signOut,
@@ -1224,7 +1241,7 @@ function wire() {
   if (S.sheet?.data) document.querySelector(".sheet .close")?.focus();
   on("[data-swaddr]", "click", (e) => guard(async () => {
     S.swiggy = await api(`/api/user/${S.userId}/swiggy/address`, "POST", { address_id: e.currentTarget.dataset.swaddr });
-    S.swAddrs = null; S.liveMenu = null; S.liveResults = null; S.liveBrowseMenu = null; S.liveCart = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null;
+    S.swAddrs = null; S.liveMenu = null; S.liveResults = null; S.liveBrowseMenu = null; S.liveCart = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null;
     S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
     toast("Delivery address saved"); render(); }));
   on("[data-live-menu]", "click", (e) => guard(() => openLiveMenu(e.currentTarget.dataset.liveMenu)));
