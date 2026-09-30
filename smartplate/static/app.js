@@ -856,7 +856,8 @@ function profilesPanel() {
   const k = keys.get(S.userId);
   const recovery = k ? `<div class="card"><h3 class="k">Recovery code</h3>
       <p class="sub">This profile is private. Its key is stored only in this browser. To open it on another device, or after clearing your browser, you need this code. Keep it somewhere safe.</p>
-      <div class="row" style="align-items:center"><code class="rcode">${esc(`${S.userId}.${k}`)}</code><button class="small" data-act="copy-recovery">Copy</button></div></div>` : "";
+      <div class="row" style="align-items:center"><code class="rcode">${esc(`${S.userId}.${k}`)}</code><button class="small" data-act="copy-recovery">Copy</button></div>
+      <details><summary>Replace a shared or lost code</summary><p>A new code invalidates all earlier recovery codes and signs out every other device. Save the new code after replacing it. Change your password too if someone else knows it.</p><button data-act="rotate-recovery">Generate a new recovery code</button></details></div>` : "";
   return `<h2 class="sec">Profiles</h2><div class="mlist">${opts}</div>
     <button class="primary" data-act="start-onboard">+ Set up a new profile</button>
     ${accountCard()}
@@ -886,7 +887,7 @@ function accountCard() {
       <label>${a.login ? "New password" : "Password"}<input id="acct-pw" type="password" autocomplete="new-password" required minlength="8" maxlength="200"></label>
       <button type="submit">${a.login ? "Change password" : "Save sign-in"}</button></form>
     ${devs ? `<h3 class="k">Signed-in devices</h3>${devs}` : ""}
-    ${a.devices.some(d => d.this_device) ? `<button class="ghost small" data-act="sign-out">Sign out of this device</button>` : ""}</div>`;
+    <button class="ghost small" data-act="sign-out">${a.devices.some(d => d.this_device) ? "Sign out of this device" : "Forget this profile on this browser"}</button></div>`;
 }
 async function saveAccount() {
   const login = document.getElementById("acct-login").value, password = document.getElementById("acct-pw").value;
@@ -926,6 +927,18 @@ async function deleteProfile(form) {
   clearCurrentProfile();
   S.users = mergeUsers(await api("/api/users"));
   render(); toast("Your SmartPlate profile was deleted.");
+}
+async function rotateRecoveryCode() {
+  const probe = "smartplate.storage-check";
+  const marker = `${Date.now()}-${Math.random()}`;
+  store.set(probe, marker);
+  if (store.get(probe) !== marker) throw new Error("Enable browser storage before replacing your recovery code.");
+  store.del(probe);
+  const result = await api(`/api/user/${S.userId}/account/rotate-key`, "POST", { confirmation: "ROTATE" });
+  keys.put(result.user_id, result.key, result.name);
+  S.checkoutReview = null;
+  S.account = await api(`/api/user/${S.userId}/account`);
+  render(); toast("New recovery code saved here. Copy it somewhere safe.");
 }
 async function removeDevice(id) {
   const mine = S.account?.devices.find(d => d.id === Number(id))?.this_device;
@@ -1326,6 +1339,7 @@ function wire() {
     "signin-open": async () => { S.signin = true; S.error = null; render(); document.getElementById("si-login")?.focus(); },
     "signin-close": async () => { S.signin = false; S.error = null; render(); },
     "sign-out": signOut,
+    "rotate-recovery": rotateRecoveryCode,
     "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); }, "cancel-move": async () => { S.moving = null; render(); },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });

@@ -338,6 +338,10 @@ def create_app() -> Flask:
     def set_account(user_id):
         return jsonify(accounts.set_login(user_id, request.get_json(), _presented()))
 
+    @app.post("/api/user/<int:user_id>/account/rotate-key")
+    def rotate_profile_key(user_id):
+        return jsonify(accounts.rotate_key(user_id, request.get_json().get("confirmation")))
+
     @app.post("/api/user/<int:user_id>/devices/<int:device_id>/remove")
     def remove_device(user_id, device_id):
         return jsonify(accounts.remove_device(user_id, device_id))

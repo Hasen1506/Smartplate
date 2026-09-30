@@ -101,8 +101,24 @@ def remove_device(user_id: int, device_id: int) -> dict:
 
 
 def sign_out(user_id: int, presented: str | None) -> dict:
-    """Forget this browser's device token (the profile key itself can't be revoked)."""
+    """Forget this browser's device token; root codes rotate through rotate_key."""
     if presented:
         with db.cursor() as cur:
             cur.execute("DELETE FROM devices WHERE user_id=? AND token_hash=?", (user_id, access.digest(presented)))
     return {"ok": True}
+
+
+def rotate_key(user_id: int, confirmation):
+    if confirmation != "ROTATE":
+        raise ValueError("Confirm recovery code rotation")
+    key, hashed = access.new_key()
+    with db.cursor() as cur:
+        cur.execute("BEGIN IMMEDIATE")
+        user = cur.execute("SELECT name, access_hash FROM users WHERE id=?", (user_id,)).fetchone()
+        if not user or not user["access_hash"]:
+            raise ValueError("Recovery codes are only available for private profiles")
+        cur.execute("UPDATE users SET access_hash=? WHERE id=?", (hashed, user_id))
+        cur.execute("DELETE FROM devices WHERE user_id=?", (user_id,))
+        cur.execute("DELETE FROM swiggy_pending WHERE user_id=?", (user_id,))
+        cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
+    return {"user_id": user_id, "key": key, "name": user["name"]}

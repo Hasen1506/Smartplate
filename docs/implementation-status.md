@@ -9,8 +9,11 @@ It is not a claim that every expansion has been built.
 | Capability | Implementation | Verification |
 |---|---|---|
 | Personal connection | Private profile required; OAuth dynamic registration, PKCE, single-use state, server-side encrypted token; sample connections cannot expose addresses or order history | `tests/test_followups.py`, `tests/test_accounts.py` |
+| Private data controls | Header-authenticated export excludes credentials and other users; explicit deletion removes local dependent records atomically; new published templates track ownership privately | `tests/test_profile_data.py` |
+| Recovery and browser protections | Recovery-code rotation revokes old codes/device access and pending checkout/OAuth approvals; local script CSP blocks inline scripts and embedding; sign-out clears private UI state | `tests/test_accounts.py`, `tests/test_api.py`, `tests/frontend.test.cjs` |
 | Real local restaurants | Search receives a saved Swiggy address ID; address pagination and address-specific favourites; fresh menu uses exact provider restaurant ID | `tests/test_swiggy_live.py` |
 | Actual menu selection | Browse provider items, then fresh scoped `search_menu` checks exact item ID/name, restaurant, stock and options; bounded pagination finds later-page items | `tests/test_swiggy_live.py` |
+| Dish search beyond browse limits | User searches within a verified provider restaurant and loads subsequent provider offsets; preserves real item IDs and excludes another restaurant's results | `tests/test_swiggy_live.py`, `tests/frontend.test.cjs` |
 | Safe cart preparation | Explicit item review; refuses existing/malformed carts; confirms restaurant/item/quantity/address after mutation; persistent intent restores prepared carts after reload | `tests/test_swiggy_live.py`, `tests/frontend.test.cjs` |
 | User-approved COD purchase | Live placement deployment switch defaults off; current cart, offered payment, full address, restaurant, quantity and payable total are reviewed; latest five-minute approval is consumed atomically | `tests/test_swiggy_live.py`, `tests/frontend.test.cjs` |
 | Duplicate/uncertain submission protection | One attempt per approval; all unresolved attempts block the profile even after a changed price/address; timeout or pending payment cannot report a confirmed purchase; no automatic placement retries | `tests/test_swiggy_live.py` |
@@ -58,12 +61,18 @@ fully autonomous meal agent.
 
 These audit suggestions are not implemented capabilities: Postgres/migrations
 for multiple instances; durable reminder jobs; stronger session identity and
-account recovery/deletion/full export; monitoring and support automation; verified
+email-based account recovery; monitoring and support automation; verified
 charge/refund accounting; multi-item/options/UPI ordering; live weekly optimization;
 households; Instamart pantry shopping; Dineout bookings; workplace allowances;
 travel/events; and clinical nutrition. They need additional data contracts,
 business rules or provider permissions. Presenting empty UI or simulated outcomes
 for them would not satisfy a real ordering product.
+
+Profile deletion applies to the active local database and new community posts
+linked to their author profile. Legacy public templates without an author ID
+cannot be reliably assigned from a name and need operator review. Off-host
+backups require a deletion/retention policy so restoring old data does not undo
+an account deletion. Swiggy's independent account/orders are managed in Swiggy.
 
 ## Remaining live tests
 

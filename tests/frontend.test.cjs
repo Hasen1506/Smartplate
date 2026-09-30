@@ -374,3 +374,28 @@ test('restaurant dish search loads actual pages without replacing earlier result
   assert.match(html, /real-item-1/); assert.match(html, /real-item-2/);
   assert.ok(!html.includes('<First dish>'));
 });
+
+test('recovery rotation saves the new key and replaces the checkout approval', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`const rotateBag = {}; localStorage.getItem = k => rotateBag[k] ?? null;
+    localStorage.setItem = (k,v) => rotateBag[k] = v; localStorage.removeItem = k => delete rotateBag[k];
+    keys.put(2, 'old-key', 'Meera'); S.checkoutReview = { fingerprint: 'old-approval' };`, context);
+  const requests = [];
+  context.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return { ok: true, json: async () => url.endsWith('rotate-key') ?
+      { user_id: 2, key: 'fresh-private-key', name: 'Meera' } : { devices: [], private: true } };
+  };
+  await vm.runInContext('rotateRecoveryCode()', context);
+  assert.equal(requests[0].options.headers['X-SmartPlate-Key'], 'old-key');
+  assert.equal(requests[1].options.headers['X-SmartPlate-Key'], 'fresh-private-key');
+  assert.equal(vm.runInContext('keys.get(2)', context), 'fresh-private-key');
+  assert.equal(vm.runInContext('S.checkoutReview', context), null);
+});
+
+test('blocked storage cannot silently discard access during recovery rotation', async () => {
+  const { context, calls } = fixture(); await context.bootPromise;
+  const before = calls.length;
+  await assert.rejects(vm.runInContext('rotateRecoveryCode()', context), /Enable browser storage/);
+  assert.equal(calls.length, before);
+});

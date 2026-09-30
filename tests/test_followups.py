@@ -73,7 +73,8 @@ def test_manifest_and_service_worker_are_served_for_install(client):
     assert sw.status_code == 200 and "javascript" in sw.mimetype and sw.headers["Cache-Control"] == "no-cache"
     assert b'startsWith("/api/")' in sw.data                           # plans/budgets are never cached
     page = client.get("/").data
-    assert b'rel="manifest"' in page and b"serviceWorker" in page
+    assert b'rel="manifest"' in page and b'<script src="/static/app.js">' in page
+    assert b'serviceWorker.register("/sw.js")' in client.get("/static/app.js").data
 
 
 # --------------------------------------------------------------------------- #
