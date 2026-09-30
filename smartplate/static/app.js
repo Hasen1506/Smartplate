@@ -498,7 +498,7 @@ function weekScreen() {
     ${gone.length ? `<p class="fine gone">${esc(gone.map(x => x.d.day).join(", "))}: before this plan started.</p>` : ""}
     <div class="days">${shown.map(({ d, i, ctx }) => dayRow(d, i, ctx)).join("")}</div>
     <div class="row gap"><button data-act="newweek">Plan next week</button>
-      <button class="ghost" data-act="exec" title="Try SmartPlate placing every delivery for you (simulation)">Simulate auto-ordering…</button></div>`;
+      ${S.meta.swiggy_provider === "simulated" ? `<button class="ghost" data-act="exec" title="Try SmartPlate placing every delivery for you (simulation)">Simulate auto-ordering…</button>` : ""}</div>`;
 }
 function fmtDate(iso) {
   if (!iso) return "";
@@ -934,6 +934,9 @@ function insights() {
 
 /* ---- orders / substitution / idempotency ---- */
 function ordersPanel() {
+  if (S.meta.swiggy_provider !== "simulated") return `<h2 class="sec">Real Swiggy orders</h2>
+    <p class="sub">The sample weekly planner cannot schedule or place real orders. Choose a restaurant and exact item for your saved address in Places, then review its live cart.</p>
+    <button class="primary" data-go="places">Open live Places</button>`;
   const head = `<h2 class="sec">Auto-ordering (simulation)</h2>
     <div class="sub">This shows the future "SmartPlate orders for me" mode. You approve a maximum total. If a dish is unavailable, it is replaced only with one that passes your filters and costs no more. No restaurant receives these orders.</div>
     <div class="row" style="margin:12px 0"><button class="primary" data-act="exec">Review simulated orders</button>
