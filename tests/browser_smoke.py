@@ -211,3 +211,57 @@ def test_browser_private_export_rotation_and_deletion(pilot, viewport, tmp_path)
             raise
         finally:
             browser.close()
+
+
+@pytest.mark.parametrize('viewport', [{'width':1280,'height':900},{'width':390,'height':844}],ids=['desktop','phone'])
+def test_browser_agent_connection_memory_and_human_approval(pilot,viewport):
+    from urllib.parse import urlsplit
+    client=pilot['client']; uid=pilot['uid']; root=f'/api/user/{uid}/swiggy'
+    assert client.post(root+'/favourites',json={'restaurant_id':'r-1','restaurant_name':'Hotel Saravana Bhavan'}).status_code==200
+    with pw.sync_playwright() as playwright:
+        browser=playwright.chromium.launch()
+        page,errors=open_profile(browser,pilot,viewport)
+        try:
+            page.locator('[data-tab="more"]').click()
+            page.locator('[data-go="more:agents"]').click()
+            page.get_by_label('Connection name',exact=True).fill('My personal agent')
+            page.get_by_label('Plan',exact=True).check()
+            page.get_by_label('Memory',exact=True).check()
+            page.get_by_label('Prepare cart and request human checkout review',exact=True).check()
+            page.get_by_role('button',name='Create scoped connection',exact=True).click()
+            token=page.get_by_label('Agent access token',exact=True).input_value()
+            assert token and token not in page.url
+            headers={'Authorization':'Bearer '+token,'Accept':'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'}
+            def call(name,args=None):
+                response=client.post('/mcp',json={'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':args or {}}},headers=headers)
+                body=response.get_json()['result'];assert not body.get('isError'),body
+                return json.loads(body['content'][0]['text'])
+            call('plan_meals',{'budget':1500,'meals':['dinner'],'start_date':__import__('smartplate.clock',fromlist=['now']).now().date().isoformat()})
+            page.locator('[data-tab="week"]').click()
+            page.locator('[data-memory-slot]').first.click()
+            page.get_by_label('Preference',exact=True).select_option('like')
+            page.get_by_label('Dinner',exact=True).check()
+            page.get_by_label('Note',exact=True).fill('My reliable dinner')
+            page.get_by_role('button',name='Save preference',exact=True).click()
+            pw.expect(page.get_by_text('My reliable dinner',exact=False)).to_be_visible()
+            call('revise_plan',{'expected_version':call('get_week_status')['plan']['version']})
+            basket={'restaurant_id':'r-1','restaurant_name':'Hotel Saravana Bhavan','items':[{'item_id':'m0','item_name':'Mini Tiffin','quantity':1,'variants':{}}]}
+            quote=call('review_basket',basket)
+            call('prepare_order',{**basket,'expected_fingerprint':quote['fingerprint']})
+            review=call('request_order_review')
+            assert 'place_food_order' not in pilot['fake'].tool_calls()
+            path=urlsplit(review['approval_url']);page.goto(pilot['url']+path.path+'?'+path.query)
+            pw.expect(page.get_by_role('heading',name='Review your agent’s order',exact=True)).to_be_visible()
+            pw.expect(page.get_by_text('Pay ₹160',exact=False)).to_be_visible()
+            no_overflow(page)
+            page.get_by_role('button',name='Confirm and place this order',exact=True).click()
+            pw.expect(page.get_by_text('Swiggy order confirmed:',exact=True)).to_be_visible()
+            assert call('confirm_order',{'review_id':review['review_id']})['status']=='confirmed'
+            assert pilot['fake'].tool_calls().count('place_food_order')==1
+            assert not errors and page.evaluate('policyViolations')==[]
+        except Exception:
+            Path('test-artifacts').mkdir(exist_ok=True)
+            page.screenshot(path=f'test-artifacts/agent-{viewport["width"]}.png',full_page=True)
+            raise
+        finally:
+            browser.close()

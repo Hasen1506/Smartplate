@@ -4,9 +4,9 @@ from . import clock, db
 USER_TABLES = ("calendar_events", "leftovers", "receipts", "intake_log", "favourites", "ratings",
                "logins", "devices", "push_subscriptions", "swiggy_connections", "swiggy_pending",
                "swiggy_menus", "swiggy_favourites", "swiggy_order_attempts", "swiggy_checkout_quotes",
-               "swiggy_cart_intents", "swiggy_cart_lines", "live_weeks", "reminder_jobs")
+               "swiggy_cart_intents", "swiggy_cart_lines", "live_weeks", "reminder_jobs", "food_memory", "food_events", "agent_handoffs", "agent_grants")
 PRIVATE_COLUMNS = frozenset({"access_hash", "pw_hash", "token_hash", "access_token", "verifier",
-                             "token", "fingerprint", "p256dh", "auth", "idempotency_key"})
+                             "token", "fingerprint", "quote_token", "p256dh", "auth", "idempotency_key"})
 
 
 def _private(cur, user_id):
@@ -27,7 +27,7 @@ def export(user_id):
         user = _private(cur, user_id)
         data = {"profile": _clean([user])[0]}
         for table in USER_TABLES:
-            if table in ("swiggy_pending", "swiggy_checkout_quotes"):
+            if table in ("swiggy_pending", "swiggy_checkout_quotes", "agent_handoffs"):
                 continue  # ephemeral authorization material, never exported
             data[table] = _clean(cur.execute(f"SELECT * FROM {table} WHERE user_id=?", (user_id,)).fetchall())
         plan_scope = "SELECT id FROM plans WHERE user_id=?"

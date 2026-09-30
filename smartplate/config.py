@@ -42,6 +42,12 @@ SWIGGY_CALLBACK_PATH = os.environ.get("SMARTPLATE_SWIGGY_CALLBACK_PATH", "/swigg
 if SWIGGY_CALLBACK_PATH not in ("/swiggy/callback", "/auth/swiggy/callback"):
     raise ValueError("SMARTPLATE_SWIGGY_CALLBACK_PATH must be a supported callback route")
 
+# Generic menu "price" has no documented unit. Set only after provider confirmation
+# or comparing a real account menu with its authoritative cart payable total.
+SWIGGY_MENU_PRICE_UNIT = os.environ.get("SMARTPLATE_SWIGGY_MENU_PRICE_UNIT", "unknown")
+if SWIGGY_MENU_PRICE_UNIT not in ("unknown", "paise", "rupees"):
+    raise ValueError("SMARTPLATE_SWIGGY_MENU_PRICE_UNIT must be unknown, paise or rupees")
+
 # Server secret for encrypting stored tokens. render.yaml generates one; without it a
 # random key is created once and kept in the database (fine for a trial, not for
 # production, where the key must live outside the data it protects).

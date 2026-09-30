@@ -107,3 +107,14 @@ address and final amount. Contracts and stub tests cannot certify a real purchas
 
 Instamart, Dineout, UPI, automatic scheduled purchases and verified nutrition remain
 future work requiring their own provider contracts and operational validation.
+
+
+## Agent-first upgrade
+
+See [agent architecture](agent-architecture.md). The live picker is now a
+coverage-first bounded MILP, with explicit shortfalls and verified incumbents.
+The Week page supports food preferences and actual meal recording, then revises
+future choices. More → Personal agent issues scoped, expiring tokens. Agent checkout
+hands off to an authenticated owner browser. Confirmed provider totals are recorded
+once as committed spending and can be allocated to a meal. Other creative verticals
+are documented as future ideas rather than shipped functions.

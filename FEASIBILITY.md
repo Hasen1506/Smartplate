@@ -1,10 +1,26 @@
+# Current architecture qualification (2026-09-30)
+
+The original feasibility report below describes the sample-data prototype. Its latency,
+cost and feature-completeness claims are not production measurements. Live planning now
+uses fresh Swiggy favourite menus and a bounded coverage-first MILP. A user's personal
+agent handles conversation and may render its own dashboard; SmartPlate exposes scoped
+MCP planning, memory and cart tools, with owner-only browser purchase approval.
+
+See [agent architecture](docs/agent-architecture.md) for implemented scope, compatibility,
+bounded solver fallback, deployment limits and release gates. Swiggy access, real account
+payloads, price units, durable hosting and a supervised purchase still require validation.
+CPU and provider calls have hosting/latency costs; there is no evidence for universally
+millisecond or free execution. The new live planner has no per-request LLM API call.
+
+---
+
 # SmartPlate v1.1 — Feasibility Report
 
 **Question asked:** Build a fully working v1.1 app with **every** gap idea from §5.1, §5.2 and §5.3
 of the brainstorm integrated (Debt/EMI integration explicitly out of scope). *Is it even possible?
 Agentic execution costs a lot — do we hold on?*
 
-**Verdict: Yes, it is possible — and no, you do not need to hold on.** This document explains why,
+**Historical prototype verdict (not a production readiness claim).** This document explains why,
 where the one real caveat is (live Swiggy order placement), and how the cost concern is engineered away.
 The working app that implements this report ships in the same commit.
 
@@ -13,8 +29,7 @@ The working app that implements this report ships in the same commit.
 ## 1. The one-paragraph answer
 
 The v1.1 "agent" is a **constraint solver, not a language model**. Planning a week of meals is a
-mixed-integer optimisation problem (MILP) solved by CBC in **single-digit milliseconds on a CPU you
-already pay for** — effectively free. Sentiment runs on a **local lexicon** (no API), the taste model
+mixed-integer optimisation problem (MILP) solved by CBC in **a deployment-dependent CPU runtime** — effectively free. Sentiment runs on a **local lexicon** (no API), the taste model
 is **statistical** (per-user ratings/variance), and every explanation is **templated from solver
 output**. LLM calls are *optional polish* (conversational plan editing), gated behind an interface and
 **off by default**. So the expensive, recurring "agentic execution" cost the question worries about is
@@ -28,7 +43,7 @@ There are two very different things people call "the agent":
 
 | | What it is | Cost model | Used in v1.1? |
 |---|---|---|---|
-| **The planner** | MILP/LP solver (CBC via PuLP) that chooses items, restaurants, cook-vs-order, and time-shifts under hard + soft constraints | CPU-bound, ~1–10 ms per weekly re-plan. Marginal cost ≈ **₹0** | **Yes — this is the product** |
+| **The planner** | MILP/LP solver (CBC via PuLP) that chooses items, restaurants, cook-vs-order, and time-shifts under hard + soft constraints | CPU-bound; latency and cost require deployment measurement | **Yes — this is the product** |
 | **The narrator** | An LLM that turns a request into a plan edit, or writes prose explanations | Per-token API cost; recurring; scales with users | **No — optional, off by default** |
 
 The brainstorm itself already points the right way (§6): *"Google NLP API is ~100× more expensive than a
@@ -167,3 +182,4 @@ MILP optimiser, substitution + rating floor + sentiment, and **all 17 gap featur
 optimiser and exposed in the UI and API — running against a simulated Swiggy MCP with idempotent,
 saga-based order placement. See `README.md` to run it and `tests/` for the proofs (allergen safety,
 idempotency, Survival Mode, feature integration).
+

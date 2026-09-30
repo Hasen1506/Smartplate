@@ -230,7 +230,7 @@ def records(data, *needs: str) -> list[dict]:
 
 
 def rupees(record: dict) -> float | None:
-    """Only convert a price when the provider names its units."""
+    """Convert explicit units, or a deployment-verified generic price contract."""
     lowered = {k.lower(): k for k in record}
     for alias in FIELDS["price"]:
         key = lowered.get(alias.lower())
@@ -242,6 +242,10 @@ def rupees(record: dict) -> float | None:
         if "paise" in key.lower():
             return round(value / 100, 2)
         if "rupee" in key.lower():
+            return value
+        if config.SWIGGY_MENU_PRICE_UNIT == "paise":
+            return round(value / 100, 2)
+        if config.SWIGGY_MENU_PRICE_UNIT == "rupees":
             return value
     return None
 
@@ -409,6 +413,7 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
             continue
         items.append({"id": str(_get(row, "id")), "name": str(_get(row, "name")),
                       "price": rupees(row), "veg": veg,
+                      "categories": [v for v in row.get("categories", []) if isinstance(v, str)] if isinstance(row.get("categories"), list) else [],
                       "in_stock": _flag(_get(row, "stock")),
                       "has_options": _flag(_get(row, "variants")) is True or _flag(_get(row, "addons")) is True})
     return {"restaurant": place, "address": conn.get("address_label") or _address(conn),
@@ -452,6 +457,7 @@ def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, q
             continue
         seen.add(item_id)
         items.append({"id": item_id, "name": str(_get(row, "name")), "price": rupees(row), "veg": veg,
+                      "categories": [v for v in row.get("categories", []) if isinstance(v, str)] if isinstance(row.get("categories"), list) else [],
                       "in_stock": _flag(_get(row, "stock")), "has_options": bool(row.get("variations") or
                       row.get("variantsV2") or row.get("addons") or _flag(_get(row, "variants")) is True or
                       _flag(_get(row, "addons")) is True)})
@@ -880,6 +886,13 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
                         ("confirmed" if confirmed else "unknown", str(order_id) if order_id else None,
                          user_id, expected_fingerprint))
             if confirmed:
+                from ..live_planner import paise
+                # Provider confirmation is a committed payable amount, not proof
+                # of delivery or consumption. Allocate the meal explicitly later.
+                cur.execute("INSERT OR IGNORE INTO food_events(user_id,event_key,meal_date,meal,amount_paise,source,payload,created_ts) VALUES (?,?,?,?,?,?,?,?)",
+                    (user_id, 'swiggy:' + str(order_id), clock.now().date().isoformat(), 'unassigned',
+                     paise(preview['to_pay']), 'swiggy_confirmed_order',
+                     db.jd({'order_id': str(order_id), 'items': preview['items'], 'payment': preview['payment_label']}), clock.now().isoformat()))
                 cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
                 cur.execute('DELETE FROM swiggy_cart_lines WHERE user_id=?', (user_id,))
         if not confirmed:

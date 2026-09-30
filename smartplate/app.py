@@ -103,9 +103,12 @@ def create_app() -> Flask:
             "frame-ancestors 'none'; form-action 'self'; connect-src 'self'; worker-src 'self'; "
             "img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com")
-        if request.path.startswith('/api/'):
+        if request.path.startswith('/api/') or request.path == '/mcp':
             response.headers['Cache-Control'] = 'no-store'
         return response
+
+    from . import agent_api
+    agent_api.register(app)
 
     # ---- UI ---- #
     @app.get("/")
@@ -151,7 +154,7 @@ def create_app() -> Flask:
     def meta():
         brain = agent_brain.get_brain()
         return jsonify({
-            "version": "1.1.0",
+            "version": "1.2.0",
             "brain": brain.name,
             "brain_cost_per_decision": brain.cost_per_decision,
             "swiggy_provider": config.SWIGGY_PROVIDER,
@@ -159,7 +162,7 @@ def create_app() -> Flask:
             "order_edit_window_min": config.ORDER_EDIT_WINDOW_MIN,
             "modes": config.MODE_LABELS,
             "mode_outcomes": {k: v["outcome"] for k, v in config.MODE_META.items()},
-            "note": "v1.1 plans with a MILP solver — no per-decision LLM cost (see FEASIBILITY.md).",
+            "note": "Live planning uses a bounded coverage-first MILP. Menu and fee estimates require fresh checkout; no nutrition or portion guarantee.",
             "weather_provider": config.WEATHER_PROVIDER,
             "catalog_city": everyday.CITY,
             "features": _FEATURE_MAP,
@@ -506,6 +509,44 @@ def create_app() -> Flask:
     @app.post('/api/user/<int:user_id>/swiggy/week')
     def generate_live_week(user_id):
         return jsonify(plan=live_core.build_week(user_id, request.get_json()))
+
+    @app.post('/api/user/<int:user_id>/swiggy/week/revise')
+    def revise_live_week(user_id):
+        return jsonify(plan=live_core.revise_week(user_id, request.get_json()))
+
+    @app.get('/api/user/<int:user_id>/swiggy/week/status')
+    def live_week_status(user_id):
+        return jsonify(live_core.week_status(user_id))
+
+    @app.get('/api/user/<int:user_id>/food-memory')
+    def read_food_memory(user_id):
+        from . import food_memory
+        return jsonify(items=food_memory.memory(user_id))
+
+    @app.post('/api/user/<int:user_id>/food-memory')
+    def save_food_memory(user_id):
+        return jsonify(agent_api.remember_food(user_id, request.get_json()))
+
+    @app.post('/api/user/<int:user_id>/food-memory/forget')
+    def forget_food_memory(user_id):
+        from . import food_memory
+        body = request.get_json()
+        return jsonify(food_memory.forget(user_id, body.get('restaurant_id', ''), body.get('item_id', '')))
+
+    @app.post('/api/user/<int:user_id>/food-events')
+    def record_food_event(user_id):
+        from . import food_memory
+        return jsonify(food_memory.record(user_id, request.get_json()))
+
+    @app.post('/api/user/<int:user_id>/food-events/assign-order')
+    def assign_order_meal(user_id):
+        from . import food_memory
+        return jsonify(food_memory.assign_order(user_id, request.get_json()))
+
+    @app.post('/api/user/<int:user_id>/food-events/<int:event_id>/remove')
+    def remove_food_event(user_id, event_id):
+        from . import food_memory
+        return jsonify(food_memory.remove_event(user_id, event_id))
 
     @app.post('/api/user/<int:user_id>/swiggy/item-options')
     def item_options(user_id):

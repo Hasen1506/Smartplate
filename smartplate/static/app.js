@@ -132,6 +132,7 @@ async function boot() {
   const wanted = params.get("tab");
   if (["today", "week", "places", "more"].includes(wanted)) S.tab = wanted;
   if (S.tab === "week" && swiggyReady()) await loadLiveWeek();
+  if (params.get("agent_review")) { S.agentReview = await api(`/api/user/${S.userId}/agent-review/${encodeURIComponent(params.get("agent_review"))}`); if (typeof history !== "undefined") history.replaceState(null, "", "/?tab=places"); }
   if (params.get("swiggy") || params.get("swiggy_error")) {             // back from Swiggy sign-in
     S.tab = "more"; S.more = "connection"; S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
     if (params.get("swiggy_error")) S.error = `Swiggy: ${params.get("swiggy_error")}`;
@@ -282,7 +283,7 @@ function render() {
     + navBar() + (S.sheet ? sheetDialog() : "") + (S.drawer ? drawer() : "")
     + (S.orderReview ? orderReviewDialog() : "") + (S.cartReview ? cartReviewDialog() : "")
     + (S.liveOrderReview ? liveOrderReviewDialog() : "")
-    + (S.checkoutReview ? checkoutReviewDialog() : "") + liveCoreDialogs();
+    + (S.checkoutReview ? checkoutReviewDialog() : "") + liveCoreDialogs() + agentReviewDialog() + foodMemoryDialog();
   wire();
 }
 
@@ -849,14 +850,14 @@ function moreScreen() {
     ["insights", "Nutrition & insights", "Daily averages vs targets, weather"], ["orders", "Auto-ordering (simulation)", "Try SmartPlate placing orders with a spend limit"],
     ["cooking", "Cooking & groceries", "Recipes and one grocery list for cook days"], ["receipts", "Expenses", "What you spent; CSV export"],
     ["community", "Community weeks", "Plans others shared"], ["connection", "Swiggy connection", "What's live and what's not"],
-    ["profiles", "Profiles", "Switch or add a profile"]];
+    ["agents", "Personal agent", "Scoped food tools for your agent"], ["profiles", "Profiles", "Switch or add a profile"]];
   if (!S.more) {
     return `<h1 class="greet">More</h1><div class="mlist">${items.map(([k, t, d]) =>
       `<button class="mitem" data-go="more:${k}"><b>${t}</b><span>${d}</span></button>`).join("")}</div>`;
   }
   const back = `<button class="ghost small back" data-go="more:">← More</button>`;
   const body = { settings: settingsPanel, calendar: calendarPanel, insights, orders: ordersPanel, cooking: cookingPanel,
-    receipts: receiptsPanel, community: communityPanel, connection: connectionPanel, profiles: profilesPanel }[S.more];
+    receipts: receiptsPanel, community: communityPanel, connection: connectionPanel, profiles: profilesPanel, agents: personalAgentPanel }[S.more];
   return back + (body ? body() : "");
 }
 
@@ -1419,8 +1420,9 @@ function onMealTap(sid) {
   guard(() => openSheet(sid));
 }
 async function goTab(tab, sub = null) {
+  if (tab !== "more" || sub !== "agents") S.agentToken = null;
   S.tab = tab; S.sheet = null;
-  if (tab === "more") S.more = sub;
+  S.more = tab === "more" ? sub : null;
   if (tab === 'week' && swiggyReady()) await loadLiveWeek();
   if (tab === "places" && swiggyReady() && !S.liveFavourites)
     S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
@@ -1432,6 +1434,7 @@ async function goTab(tab, sub = null) {
   if (S.more === "orders") S.exec = await api(`/api/plan/${S.planId}/orders`);
   if (S.more === "calendar") S.calendar = await api(`/api/user/${S.userId}/calendar`);
   if (S.more === "connection") S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
+  if (S.more === "agents") S.agentConnections = await api(`/api/user/${S.userId}/agents`);
   if (S.more === "profiles") S.account = keys.get(S.userId) ? await api(`/api/user/${S.userId}/account`) : null;
   render();
   if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);

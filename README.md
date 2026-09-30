@@ -196,3 +196,14 @@ durable reminder jobs, operations status and localhost launcher. The owner suppl
 Swiggy approval for the exact Render callback on 30 September 2026, but a fresh
 sign-in still displayed the gateway whitelist error. Actual-account validation is
 still required; stub tests never place real purchases.
+
+
+## Personal-agent planning and food memory
+
+The draft live-core upgrade now exposes `/mcp` for scoped personal-agent connections
+(**More → Personal agent**), a stdio bridge, a coverage-first live MILP, versioned
+remaining-week revisions and persistent food preferences/spending. Purchases require
+owner browser approval of an exact fresh quote. See
+[agent architecture and client setup](docs/agent-architecture.md) for supported
+protocol versions, client authentication compatibility, tools and release gates.
+This code is distinct from evidence of successful live Swiggy login or checkout.

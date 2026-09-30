@@ -438,3 +438,16 @@ test('profile clearing removes real-menu snapshots and all staged basket dialogs
   vm.runInContext(`for(const k of ['liveWeek','basketDraft','itemOptions','basketReview','addonReview']) S[k]={private:'previous user'}; clearCurrentProfile();`,context);
   assert.equal(vm.runInContext("['liveWeek','basketDraft','itemOptions','basketReview','addonReview'].every(k=>S[k]===null)",context),true);
 });
+
+
+test('agent approval escapes the exact quote and never renders an expired purchase button',async()=>{
+  const {context}=fixture();await context.bootPromise;
+  vm.runInContext(`S.agentReview={review_id:'id',state:'expired',expires_ts:'soon',quote:{restaurant:'<Kitchen>',address:'<Address>',to_pay:160,payment_label:'Cash',items:[{quantity:1,name:'<Meal>',variants:[],addons:[]}]}}`,context);
+  const html=vm.runInContext('agentReviewDialog()',context);
+  assert.match(html,/&lt;Kitchen&gt;/);assert.match(html,/&lt;Address&gt;/);assert.ok(!html.includes('data-core-act="approve-agent-order"'));
+});
+test('profile clearing removes delegated tokens, food memory and approval state',async()=>{
+  const {context}=fixture();await context.bootPromise;
+  vm.runInContext(`for(const k of ['agentToken','agentReview','agentConnections','foodMemory','weekStatus'])S[k]={private:true};clearCurrentProfile()`,context);
+  assert.equal(vm.runInContext("['agentToken','agentReview','agentConnections','foodMemory','weekStatus'].every(k=>S[k]===null)",context),true);
+});
