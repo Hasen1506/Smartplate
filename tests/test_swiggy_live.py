@@ -564,3 +564,46 @@ def test_shared_legacy_connection_is_never_exposed(client, swiggy):
     assert "tools" not in state and "address" not in state
     assert client.get("/api/user/1/swiggy/addresses").status_code == 502
     assert len(swiggy.calls) == before
+
+
+def test_scoped_dish_search_paginates_and_preserves_real_identity(client, swiggy, monkeypatch):
+    monkeypatch.setitem(SCHEMAS["search_menu"]["properties"], "offset", {"type": "number"})
+    _connect(client, swiggy, uid=3)
+    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
+    swiggy.dishes = {"Mini Tiffin": 12500}
+    original = swiggy.tool
+    def pages(name, args):
+        if name != "search_menu": return original(name, args)
+        assert args["restaurantIdOfAddedItem"] == "r-1" and args["addressId"] == "addr-home"
+        offset = args.get("offset", 0)
+        rows = [{"menu_item_id": "m0" if not offset else "m1", "name": "Mini Tiffin" if not offset else "Deluxe Tiffin",
+                 "restaurant_id": "r-1", "isVeg": True, "priceInRupees": 125, "inStock": 1,
+                 "hasVariants": False, "hasAddons": False},
+                {"menu_item_id": "other", "name": "Different place's meal", "restaurant_id": "r-other"}]
+        return {"structuredContent": {"success": True, "data": {"items": rows, "hasMore": offset == 0,
+                                                                "nextOffset": 20 if not offset else None}}}
+    monkeypatch.setattr(swiggy, "tool", pages)
+    route = "/api/user/3/swiggy/dishes?restaurant_id=r-1&restaurant_name=Hotel&query=tiffin"
+    first = client.get(route).get_json()
+    assert [r["id"] for r in first["items"]] == ["m0"]
+    assert first["items"][0]["price"] == 125 and first["next_offset"] == 20
+    second = client.get(route + "&offset=20").get_json()
+    assert [r["id"] for r in second["items"]] == ["m1"] and not second["has_more"]
+    assert "update_food_cart" not in swiggy.tool_calls()
+    assert client.get(route + "&offset=-1").status_code == 400
+
+
+def test_dish_search_never_invents_pages_or_ignores_diet(client, swiggy, monkeypatch):
+    _connect(client, swiggy, uid=2)
+    client.post("/api/user/2/swiggy/address", json={"address_id": "addr-home"})
+    original = swiggy.tool
+    monkeypatch.setattr(swiggy, "tool", lambda name, args: {"structuredContent": {"success": True, "data": {
+        "items": [{"menu_item_id": "chicken", "name": "Chicken", "isVeg": False},
+                  {"menu_item_id": "veg", "name": "Plain rice", "isVeg": True}], "hasMore": False}}}
+        if name == "search_menu" else original(name, args))
+    route = "/api/user/2/swiggy/dishes?restaurant_id=r-1&restaurant_name=Hotel&query=rice"
+    result = client.get(route).get_json()
+    assert [r["id"] for r in result["items"]] == ["veg"] and result["hidden_nonveg"] == 1
+    monkeypatch.setattr(swiggy, "tool", lambda name, args: {"structuredContent": {"success": True, "data": {
+        "items": [], "hasMore": True, "nextOffset": 0}}} if name == "search_menu" else original(name, args))
+    assert client.get(route).status_code == 502

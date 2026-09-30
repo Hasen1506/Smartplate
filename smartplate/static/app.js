@@ -655,9 +655,10 @@ function livePlacesScreen() {
     ${S.liveResults ? `<h3 class="k">Swiggy results for ${esc(S.liveResults.query)}</h3><div class="plist">${results.length ? results.map(place).join("") : `<p class="fine">No live restaurants returned for this address and search.</p>`}</div>` : ""}
     ${menu ? `<section class="card livemenu"><button class="close ghost" data-act="close-live-browse" aria-label="Close menu">✕</button>
       <p class="eyebrow">Swiggy menu · ${esc(menu.restaurant.name)} · ${esc(menu.address)}</p><h3>${menu.items.length} current dishes</h3>
+      <form id="dish-search" class="row"><label>Search this restaurant<input id="dish-query" value="${esc(menu.search?.query || "")}" placeholder="Dish name" required minlength="2" maxlength="80"></label><button type="submit">Find dishes</button>${menu.search ? `<button type="button" class="ghost" data-act="restore-live-menu">Browse menu</button>` : ""}</form>
       <p class="fine">Checked ${esc(menu.fetched)}. ${menu.truncated ? "Swiggy shortened this browse list; search in Swiggy for more dishes. " : ""}
       ${menu.hidden_nonveg ? `${menu.hidden_nonveg} marked non-veg dishes hidden. ` : ""}Ingredient and allergy safety cannot be established from this menu. Final price, fees, options and availability may change.</p>
-      <div class="lmlist">${rows || `<p class="fine">No dishes returned for this restaurant.</p>`}</div></section>` : ""}
+      <div class="lmlist">${rows || `<p class="fine">No dishes returned for this restaurant and search.</p>`}</div>${menu.search?.has_more ? `<button data-act="more-live-dishes">Load more matching dishes</button>` : ""}</section>` : ""}
     <details><summary>Sample planner (demo data)</summary><p class="fine">The weekly plan and sample Chennai list currently use seeded data. They do not determine which live Swiggy items are orderable.</p></details>`;
 }
 
@@ -671,6 +672,21 @@ async function refreshLiveCart(show = true) {
     S.liveCartError = null;
   } catch (error) { S.liveCart = null; S.liveCartError = error.message; }
   if (show) render();
+}
+async function searchLiveDishes(query, more = false) {
+  const menu = S.liveBrowseMenu;
+  if (!menu) throw new Error("Choose a live restaurant first.");
+  const offset = more ? menu.search?.next_offset : 0;
+  if (offset == null) throw new Error("There is no next dish page.");
+  const result = await api(`/api/user/${S.userId}/swiggy/dishes?restaurant_id=${encodeURIComponent(menu.restaurant.id)}&restaurant_name=${encodeURIComponent(menu.restaurant.name)}&query=${encodeURIComponent(query)}&offset=${offset}`);
+  const previous = more ? menu.items : [];
+  const seen = new Set(previous.map(item => item.id));
+  menu.items = [...previous, ...result.items.filter(item => !seen.has(item.id))];
+  menu.search = { query: result.query, has_more: result.has_more, next_offset: result.next_offset };
+  menu.hidden_nonveg = (more ? menu.hidden_nonveg : 0) + result.hidden_nonveg;
+  menu.fetched = result.fetched; menu.truncated = result.has_more;
+  S.liveOrderReview = null;
+  render();
 }
 async function toggleLiveFavourite(id, name) {
   const r = await api(`/api/user/${S.userId}/swiggy/favourites`, "POST", { restaurant_id: id, restaurant_name: name });
@@ -845,6 +861,11 @@ function profilesPanel() {
     <button class="primary" data-act="start-onboard">+ Set up a new profile</button>
     ${accountCard()}
     ${recovery}
+    ${k ? `<section class="card"><h3 class="k">Your data</h3>
+      <p>Download your saved SmartPlate profile, plans, favourites and order records. Authentication secrets are excluded.</p>
+      <button data-act="download-profile">Download my data</button>
+      <details><summary>Delete my SmartPlate profile</summary><p>This permanently removes your profile, sign-in, device access and saved records from this app. Your Swiggy account and existing orders remain active. Download your data first if you want a copy.</p>
+      <form id="delete-profile"><label>Type DELETE to confirm<input id="delete-confirmation" autocomplete="off" required pattern="DELETE"></label><button class="ghost" type="submit">Permanently delete this profile</button></form></details></section>` : ""}
     <div class="card"><h3 class="k">Open a profile from another device</h3>
       <form id="recover" class="row" style="align-items:center"><input id="rcode" type="text" placeholder="Paste recovery code" style="flex:1;min-width:200px" autocomplete="off"><button type="submit">Open</button></form></div>`;
 }
@@ -885,10 +906,26 @@ async function signIn(form) {
   await switchUser(r.user_id); toast(`Signed in. Hello, ${r.name.split(" ")[0]}.`);
 }
 async function signOut() {
-  await api(`/api/user/${S.userId}/signout`, "POST", {});
-  keys.drop(S.userId); store.del("smartplate.user");
-  S.userId = null; S.view = null; S.account = null; S.more = null; S.tab = "today";
+    await api(`/api/user/${S.userId}/signout`, "POST", {});
+    keys.drop(S.userId); store.del("smartplate.user");
+  clearCurrentProfile();
   S.users = mergeUsers(await api("/api/users")); S.welcome = true; render(); toast("Signed out of this device");
+}
+function clearCurrentProfile() {
+  for (const key of ["userId", "planId", "view", "account", "more", "exec", "receipts", "drawer", "sheet",
+    "moving", "places", "calendar", "orderReview", "cartReview", "swiggy", "swAddrs", "liveMenu", "carts",
+    "liveResults", "liveFavourites", "liveBrowseMenu", "liveOrderReview", "liveCart", "liveCartError",
+    "checkoutReview", "placedOrder", "liveOrderStatus", "liveOrderHistory", "acctDraft", "onboard"])
+    S[key] = null;
+  S.tab = "today"; S.welcome = true;
+}
+async function deleteProfile(form) {
+  const confirmation = form.querySelector("#delete-confirmation").value;
+  await api(`/api/user/${S.userId}`, "DELETE", { confirmation });
+  keys.drop(S.userId); store.del("smartplate.user");
+  clearCurrentProfile();
+  S.users = mergeUsers(await api("/api/users"));
+  render(); toast("Your SmartPlate profile was deleted.");
 }
 async function removeDevice(id) {
   const mine = S.account?.devices.find(d => d.id === Number(id))?.this_device;
@@ -1268,11 +1305,14 @@ function wire() {
   if (obform) obform.onsubmit = (e) => { e.preventDefault(); guard(() => onboardNav("next")); };
   const cmd = document.getElementById("cmd"); if (cmd) cmd.addEventListener("keydown", (e) => { if (e.key === "Enter") guard(runCommand); });
   const acts = {
+    "download-profile": () => downloadPrivate(`/api/user/${S.userId}/data.json`, "smartplate-profile.json", "application/json"),
     cmd: runCommand, reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute,
     "confirm-cart": fillCart, "confirm-live-cart": addLiveItemToCart,
     "review-live-checkout": reviewLiveCheckout, "place-live-order": placeLiveOrder,
     "track-live-order": trackLiveOrder, "live-order-history": loadLiveOrderHistory, savetpl: saveTemplate,
     "refresh-live-cart": refreshLiveCart,
+    "more-live-dishes": () => searchLiveDishes(S.liveBrowseMenu.search.query, true),
+    "restore-live-menu": () => openLivePlace(S.liveBrowseMenu.restaurant.id, S.liveBrowseMenu.restaurant.name),
     "download-ics": () => downloadPrivate(`/api/user/${S.userId}/reminders.ics`, "smartplate-reminders.ics", "text/calendar"),
     "download-csv": () => downloadPrivate(`/api/receipts/${S.userId}/export.csv`, "smartplate-expenses.csv", "text/csv"),
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
@@ -1289,6 +1329,8 @@ function wire() {
     "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); }, "cancel-move": async () => { S.moving = null; render(); },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
+  const deleteForm = document.getElementById("delete-profile");
+  if (deleteForm) deleteForm.onsubmit = (e) => { e.preventDefault(); guard(() => deleteProfile(deleteForm)); };
   if (S.orderReview || S.cartReview || S.liveOrderReview || S.checkoutReview) document.querySelector(".checkout [autofocus]")?.focus();
   if (S.sheet?.data) document.querySelector(".sheet .close")?.focus();
   on("[data-swaddr]", "click", (e) => guard(async () => {
@@ -1304,6 +1346,8 @@ function wire() {
   on("[data-live-track]", "click", (e) => guard(() => trackLiveOrder(e.currentTarget.dataset.liveTrack)));
   const liveSearch = document.getElementById("live-search");
   if (liveSearch) liveSearch.onsubmit = (e) => { e.preventDefault(); guard(() => searchLivePlaces(document.getElementById("live-query").value)); };
+  const dishSearch = document.getElementById("dish-search");
+  if (dishSearch) dishSearch.onsubmit = (e) => { e.preventDefault(); guard(() => searchLiveDishes(document.getElementById("dish-query").value)); };
   on("[data-cart]", "click", (e) => guard(() => reviewCart(Number(e.currentTarget.dataset.cart))));
   on("[data-rm-device]", "click", (e) => guard(() => removeDevice(e.currentTarget.dataset.rmDevice)));
   const signin = document.getElementById("signin");
@@ -1377,8 +1421,11 @@ function bootFailed(e) {
   document.getElementById("app").innerHTML = offline
     ? `<main class="welcome"><div class="brand big">Smart<em>Plate</em></div><h1 class="hero">You're offline.</h1>
        <p class="lede">Plans and budgets are always live, so SmartPlate needs a connection. It will reload by itself when you're back online.</p>
-       <button class="primary big" onclick="location.reload()">Try again</button></main>`
+       <button class="primary big" id="retry-boot">Try again</button></main>`
     : `<div class="boot">Failed to start: ${esc(e.message)}</div>`;
   if (offline && typeof window !== "undefined") window.addEventListener("online", () => location.reload(), { once: true });
+  document.getElementById("retry-boot")?.addEventListener("click", () => location.reload());
 }
+if (typeof navigator !== "undefined" && "serviceWorker" in navigator)
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
 boot().catch(bootFailed);

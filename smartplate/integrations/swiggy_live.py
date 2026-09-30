@@ -51,6 +51,7 @@ ALIASES = {
     "page": ["page"],
     "page_size": ["pageSize"],
     "offset": ["offset"],
+    "veg_filter": ["vegFilter"],
 }
 FIELDS = {
     "id": ["id", "addressId", "address_id", "restaurantId", "restaurant_id", "restId", "itemId", "item_id",
@@ -411,6 +412,53 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
     return {"restaurant": place, "address": conn.get("address_label") or _address(conn),
             "items": items, "hidden_nonveg": hidden, "truncated": bool(body.get("truncated")) if isinstance(body, dict) else False,
             "fetched": clock.now().isoformat(timespec="minutes")}
+
+
+def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, query: str, offset=0) -> dict:
+    """Search beyond the compact browse menu using real scoped provider results."""
+    query = (query or "").strip()
+    if not 2 <= len(query) <= 80:
+        raise ValueError("Search for a dish using 2–80 characters")
+    if not isinstance(offset, int) or isinstance(offset, bool) or not 0 <= offset <= 10000:
+        raise ValueError("Invalid menu page")
+    menu = live_menu(user_id, restaurant_id, restaurant_name)
+    conn = _conn(user_id)
+    tool = _tool(conn, "search_menu")
+    props = (tool.get("input_schema") or {}).get("properties") or {}
+    if not _find(props, "restaurant_scope") or (offset and not _find(props, "offset")):
+        raise SwiggyError("Swiggy did not offer scoped menu pagination. Refresh tools or search in Swiggy.")
+    from ..domain import models
+    vegetarian = models.get_user(user_id)["diet"] in ("veg", "vegan")
+    result = call(user_id, "search_menu", build_args(tool, {"query": query, "address": _address(conn),
+                    "restaurant_scope": restaurant_id, "offset": offset, "veg_filter": 1 if vegetarian else 0}))
+    body = result.get("data", result) if isinstance(result, dict) else {}
+    rows = body.get("items") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        raise SwiggyError("Swiggy did not return a dish list. Try again later.")
+    items, seen, hidden = [], set(), 0
+    for row in rows:
+        if not isinstance(row, dict) or not _get(row, "menu_item_id") or not _get(row, "name"):
+            continue
+        if _get(row, "restaurant_id") is not None and str(_get(row, "restaurant_id")) != restaurant_id:
+            continue
+        veg = _flag(_get(row, "veg"))
+        if vegetarian and veg is False:
+            hidden += 1
+            continue
+        item_id = str(_get(row, "menu_item_id"))
+        if item_id in seen:
+            continue
+        seen.add(item_id)
+        items.append({"id": item_id, "name": str(_get(row, "name")), "price": rupees(row), "veg": veg,
+                      "in_stock": _flag(_get(row, "stock")), "has_options": bool(row.get("variations") or
+                      row.get("variantsV2") or row.get("addons") or _flag(_get(row, "variants")) is True or
+                      _flag(_get(row, "addons")) is True)})
+    more = body.get("hasMore") is True
+    next_offset = body.get("nextOffset") if more else None
+    if more and (not isinstance(next_offset, int) or isinstance(next_offset, bool) or not offset < next_offset <= 10000):
+        raise SwiggyError("Swiggy returned unusable menu pagination. Search again later.")
+    return {"restaurant": menu["restaurant"], "items": items, "query": query, "has_more": more,
+            "next_offset": next_offset, "hidden_nonveg": hidden, "fetched": clock.now().isoformat(timespec="minutes")}
 
 
 def find_restaurant(user_id: int, name: str) -> dict:

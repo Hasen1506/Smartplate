@@ -7,7 +7,7 @@ from flask import Flask, Response, g, jsonify, redirect, request, send_from_dire
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, accounts, config, everyday, push, ratelimit, service
+from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
 from .domain import models, sentiment
 from .domain.checkout import CheckoutConflict
 from .kernel import agent_brain
@@ -90,6 +90,12 @@ def create_app() -> Flask:
     def response_headers(response):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; "
+            "frame-ancestors 'none'; form-action 'self'; connect-src 'self'; worker-src 'self'; "
+            "img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com")
         if request.path.startswith('/api/'):
             response.headers['Cache-Control'] = 'no-store'
         return response
@@ -340,6 +346,16 @@ def create_app() -> Flask:
     def sign_out(user_id):
         return jsonify(accounts.sign_out(user_id, _presented()))
 
+    @app.get("/api/user/<int:user_id>/data.json")
+    def export_profile(user_id):
+        response = jsonify(profile_data.export(user_id))
+        response.headers['Content-Disposition'] = f'attachment; filename=smartplate-profile-{user_id}.json'
+        return response
+
+    @app.delete("/api/user/<int:user_id>")
+    def delete_profile(user_id):
+        return jsonify(profile_data.delete(user_id, request.get_json().get("confirmation")))
+
     @app.patch("/api/user/<int:user_id>/setup")
     def update_setup(user_id):
         return jsonify(everyday.update_setup(user_id, request.get_json()))
@@ -438,7 +454,15 @@ def create_app() -> Flask:
     @app.get("/api/user/<int:user_id>/swiggy/live-menu")
     def swiggy_live_menu(user_id):
         return jsonify(swiggy_live.live_menu(user_id, request.args.get("restaurant_id", ""),
-                                           request.args.get("restaurant_name", "")))
+                                            request.args.get("restaurant_name", "")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/dishes")
+    def swiggy_dishes(user_id):
+        offset = request.args.get("offset", "0")
+        if not offset.isdigit():
+            raise ValueError("Invalid menu page")
+        return jsonify(swiggy_live.search_live_dishes(user_id, request.args.get("restaurant_id", ""),
+            request.args.get("restaurant_name", ""), request.args.get("query", ""), int(offset)))
 
     @app.post("/api/user/<int:user_id>/swiggy/live-cart/preview")
     def swiggy_live_cart_preview(user_id):

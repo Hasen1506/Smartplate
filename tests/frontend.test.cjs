@@ -337,3 +337,40 @@ test('saved orders remain trackable after reload with readable provider progress
   assert.match(html, /25 minutes/);
   assert.ok(!html.includes('<Preparing>') && !html.includes('"tracking":'));
 });
+
+test('Profiles exposes authenticated export and an explicit deletion form', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`const savedKeys = {}; localStorage.getItem = k => savedKeys[k] || null;
+    localStorage.setItem = (k,v) => savedKeys[k] = v; keys.put(2, 'my-private-key', 'Meera');`, context);
+  const html = vm.runInContext('profilesPanel()', context);
+  assert.match(html, /data-act="download-profile"/);
+  assert.match(html, /id="delete-profile"/);
+  assert.match(html, /Type DELETE/);
+  assert.match(html, /existing orders remain active/);
+  vm.runInContext(`S.liveCart = { item: 'Private dish' }; S.liveOrderHistory = { private: true }; clearCurrentProfile()`, context);
+  assert.equal(vm.runInContext('S.liveCart', context), null);
+  assert.equal(vm.runInContext('S.liveOrderHistory', context), null);
+  assert.equal(vm.runInContext('S.userId', context), null);
+});
+
+test('restaurant dish search loads actual pages without replacing earlier results', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'home' } };
+    S.liveBrowseMenu = { restaurant: { id: 'real-r', name: 'Real Kitchen' }, items: [], address: 'Home' };`, context);
+  const requests = [];
+  context.fetch = async (url) => {
+    requests.push(url);
+    const more = url.endsWith('offset=20');
+    return { ok: true, json: async () => ({ items: more ? [{ id: 'real-item-2', name: 'Second dish' }] :
+      [{ id: 'real-item-1', name: '<First dish>' }], query: 'tiffin', has_more: !more, next_offset: more ? null : 20,
+      hidden_nonveg: 0, fetched: 'now' }) };
+  };
+  await vm.runInContext("searchLiveDishes('tiffin')", context);
+  assert.match(vm.runInContext('livePlacesScreen()', context), /Load more matching dishes/);
+  await vm.runInContext("searchLiveDishes('tiffin', true)", context);
+  assert.equal(vm.runInContext('S.liveBrowseMenu.items.length', context), 2);
+  assert.ok(requests[0].includes('restaurant_id=real-r') && requests[1].endsWith('offset=20'));
+  const html = vm.runInContext('livePlacesScreen()', context);
+  assert.match(html, /real-item-1/); assert.match(html, /real-item-2/);
+  assert.ok(!html.includes('<First dish>'));
+});

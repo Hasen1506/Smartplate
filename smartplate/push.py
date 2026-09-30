@@ -109,6 +109,11 @@ def send_due(at: dt.datetime | None = None, sender=None, pairs=None) -> int:
     at = at or clock.now()
     count = 0
     for sub, r in (due(at) if pairs is None else pairs):
+        with db.cursor() as cur:
+            active = cur.execute("SELECT 1 FROM push_subscriptions WHERE id=? AND user_id=? AND endpoint=?",
+                                 (sub["id"], sub["user_id"], sub["endpoint"])).fetchone()
+        if not active:  # profile deleted or alerts disabled after the due snapshot
+            continue
         payload = {"title": r["title"], "body": r["body"], "url": r["link"] or "/?tab=today",
                    "tag": f"smartplate-{r['session_id']}"}
         try:
