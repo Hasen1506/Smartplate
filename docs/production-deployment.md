@@ -2,13 +2,19 @@
 
 ## Current gate
 
-On 30 September 2026, a real browser sign-in from `https://smartplate-xgxd.onrender.com/` reached Swiggy with `redirect_uri=https://smartplate-xgxd.onrender.com/swiggy/callback`. Swiggy displayed **“Oops, Onrender isn't whitelisted yet”** and **“This client isn't supported for Swiggy MCP sign-in yet.”** This is direct evidence that this deployed origin cannot sign in now. The earlier approval email did not state the approved URI. `smartplate.app` in the submission document was a proposed domain that the SmartPlate owner does not control. Do not put it into OAuth configuration.
+On 30 September 2026, Swiggy MCP Support explicitly confirmed that
+`https://smartplate-xgxd.onrender.com/swiggy/callback` is whitelisted and the old
+proposed `smartplate.app` URI was removed. The owner then tried the deployed app
+again and still received “Onrender isn't whitelisted.” Approval is confirmed by
+the supplied support message; successful gateway authentication remains unverified.
+Keep the approved callback. Ask support to investigate the mismatch using a fresh
+attempt time and the exact callback, without sending tokens or full OAuth URLs.
+The app reuses dynamic clients by their exact redirect URI; the proposed domain's
+registration cannot be reused for this Render URI. Do not buy or configure the
+proposed domain to work around this mismatch.
 
-Reply to `builders@swiggy.in` in the existing approval thread with:
-
-> Thank you for whitelisting Smart Plate. Our actual deployed HTTPS callback is `https://smartplate-xgxd.onrender.com/swiggy/callback`. A sign-in attempt on 30 September 2026 returned “Onrender isn't whitelisted yet / This client isn't supported for Swiggy MCP sign-in yet.” Please confirm the **exact** URI and client/origin you approved, and allow this Render callback for Smart Plate's Food MCP integration. If onrender.com is ineligible, please tell us the domain requirements so we can register a domain we own. Please also confirm which Food tools and staging/production order permissions are enabled. We can provide an approximate UTC attempt time and request ID if your engineers need it.
-
-No Swiggy account, OAuth code, cart, payment, or real order was used in the observed failure. Send this request only from the account that received approval; never share tokens or a full authorization URL with its PKCE state.
+See [live-core-walkthrough.md](live-core-walkthrough.md) for the implemented
+real-menu week, multi-item variants/add-ons, durable reminders and local stub.
 
 ## Deployment steps
 
@@ -45,4 +51,10 @@ record and backup before correcting financial attempt state.
 
 ## Release boundary
 
-The PR prepares the app for a **small supervised pilot**, not an unqualified public commerce launch. The live provider contract remains untested until Swiggy accepts this origin. A single SQLite web process, browser-held recovery keys, best-effort in-process reminders, and a demo meal planner remain limits for wider scale. If the provider rejects `onrender.com` as a domain class, register a domain you control, point it to this service, request that **exact** new callback, and update `SMARTPLATE_PUBLIC_URL` only after approval. `smartplate.app` cannot be used without acquiring control of it.
+This release prepares a small supervised pilot. Real-account payloads and an
+actual supervised purchase remain unverified. The connected planner uses provider
+menus; the older sample planner remains an explicitly labelled optional demo.
+Persistent reminder jobs improve restart behaviour but still need an awake host.
+Single-process SQLite, browser-held profile codes, hosted backup restoration and
+support for uncertain purchases remain constraints on a wider public launch.
+Do not enable live placement solely because the callback is approved.

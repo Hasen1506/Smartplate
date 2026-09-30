@@ -4,7 +4,7 @@ from . import clock, db
 USER_TABLES = ("calendar_events", "leftovers", "receipts", "intake_log", "favourites", "ratings",
                "logins", "devices", "push_subscriptions", "swiggy_connections", "swiggy_pending",
                "swiggy_menus", "swiggy_favourites", "swiggy_order_attempts", "swiggy_checkout_quotes",
-               "swiggy_cart_intents")
+               "swiggy_cart_intents", "swiggy_cart_lines", "live_weeks", "reminder_jobs")
 PRIVATE_COLUMNS = frozenset({"access_hash", "pw_hash", "token_hash", "access_token", "verifier",
                              "token", "fingerprint", "p256dh", "auth", "idempotency_key"})
 

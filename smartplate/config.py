@@ -53,6 +53,7 @@ BEHIND_PROXY = os.environ.get("SMARTPLATE_BEHIND_PROXY", "1" if os.environ.get("
 PUSH_CONTACT = os.environ.get("SMARTPLATE_PUSH_CONTACT", "mailto:smartplate@example.invalid")
 PUSH_TICK_S = float(os.environ.get("SMARTPLATE_PUSH_TICK", "60"))
 PUSH_ENABLED = os.environ.get("SMARTPLATE_PUSH", "on") == "on"
+PUSH_WORKER = os.environ.get('SMARTPLATE_PUSH_WORKER', 'on') == 'on'
 VAPID_PRIVATE = os.environ.get("SMARTPLATE_VAPID_PRIVATE", "")   # base64url P-256 key; generated if unset
 
 # Default order-execution policy. Swiggy's cautious posture (§7.1) means we

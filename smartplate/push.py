@@ -3,7 +3,7 @@
 A browser that opts in gives us a Web Push subscription (endpoint + keys). A single
 background thread wakes every minute, works out each subscriber's reminders from their
 current plan (the same list as the calendar file, domain/reminders.py), and sends the
-ones that are now due. Each reminder is sent at most once per subscription; if the
+ones that are now due. Reminder jobs persist across restarts with bounded retries and delivery leases; if the
 server was asleep, one that is up to 20 minutes late is still sent, older ones are
 dropped (an "order now" nudge an hour late is noise).
 
@@ -93,7 +93,7 @@ def due(at: dt.datetime | None = None) -> list[tuple[dict, dict]]:
         uid = sub["user_id"]
         if uid not in views:
             try:
-                views[uid] = reminders.upcoming(service.current_plan(uid), at - LATE_OK)
+                views[uid] = _reminders(uid, at - LATE_OK)
             except Exception:                         # a deleted profile, a plan that can't solve
                 log.exception("push: reminders for user %s failed", uid)
                 views[uid] = []
@@ -103,35 +103,45 @@ def due(at: dt.datetime | None = None) -> list[tuple[dict, dict]]:
     return out
 
 
+def _reminders(user_id, since):
+    from . import live_core, service
+    from .domain import reminders
+    from .integrations import swiggy_connect
+    if swiggy_connect.private_owner(user_id):
+        if not swiggy_connect.status(user_id).get('connected'):
+            return []
+        return live_core.reminders(user_id, since)
+    return reminders.upcoming(service.current_plan(user_id), since)
+
+
 def send_due(at: dt.datetime | None = None, sender=None, pairs=None) -> int:
-    """Send every due reminder once. `sender` is the delivery seam for tests."""
-    sender = sender or webpush.send
+    from . import reminder_queue
     at = at or clock.now()
-    count = 0
-    for sub, r in (due(at) if pairs is None else pairs):
-        with db.cursor() as cur:
-            active = cur.execute("SELECT 1 FROM push_subscriptions WHERE id=? AND user_id=? AND endpoint=?",
-                                 (sub["id"], sub["user_id"], sub["endpoint"])).fetchone()
-        if not active:  # profile deleted or alerts disabled after the due snapshot
-            continue
-        payload = {"title": r["title"], "body": r["body"], "url": r["link"] or "/?tab=today",
-                   "tag": f"smartplate-{r['session_id']}"}
+    reconcile = pairs is None
+    if pairs is None:
+        from .runtime import state_lock
+        with state_lock:
+            pairs, reconcile = _scheduled_pairs(at)
+            reminder_queue.enqueue(pairs, at, reconcile=reconcile)
+    else:
+        reminder_queue.enqueue(pairs, at, reconcile=False)
+    return reminder_queue.drain(at, sender)
+
+
+def _scheduled_pairs(at):
+    reconcile = True
+    with db.cursor() as cur:
+        subs = [dict(r) for r in cur.execute('SELECT * FROM push_subscriptions')]
+    pairs, views = [], {}
+    for sub in subs:
         try:
-            code = sender(sub["endpoint"], sub["p256dh"], sub["auth"], payload,
-                          private_b64u=vapid_private(), contact=config.PUSH_CONTACT)
-        except Exception:                             # network trouble: try again next tick
-            log.warning("push: delivery to %s failed", sub["endpoint"][:40], exc_info=True)
-            continue
-        with db.cursor() as cur:
-            if code in (404, 410):                    # the browser unsubscribed; forget it
-                cur.execute("DELETE FROM push_subscriptions WHERE id=?", (sub["id"],))
-                cur.execute("DELETE FROM push_sent WHERE subscription_id=?", (sub["id"],))
-                continue
-            if 200 <= code < 300:
-                cur.execute("INSERT OR IGNORE INTO push_sent(subscription_id, session_id, at, sent_ts) VALUES (?,?,?,?)",
-                            (sub["id"], r["session_id"], r["at"], at.isoformat(timespec="seconds")))
-                count += 1
-    return count
+            if sub['user_id'] not in views:
+                views[sub['user_id']] = _reminders(sub['user_id'], at - LATE_OK)
+            pairs.extend((sub, r) for r in views[sub['user_id']])
+        except Exception:
+            log.warning('Reminder schedule unavailable; user_id=%s', sub['user_id'])
+            reconcile = False  # a transient read error must not cancel persisted jobs
+    return pairs, reconcile
 
 
 def test_message(user_id: int, sender=None) -> dict:
@@ -150,13 +160,9 @@ def test_message(user_id: int, sender=None) -> dict:
 
 
 def _loop():
-    from .runtime import state_lock
     while not _stop.wait(config.PUSH_TICK_S):
         try:
-            with state_lock:                          # plans may roll forward while we read them
-                pairs = due()
-            if pairs:                                 # network calls happen outside the lock
-                send_due(pairs=pairs)
+            send_due()
         except Exception:
             log.exception("push: tick failed")
 
@@ -164,7 +170,7 @@ def _loop():
 def start_worker() -> bool:
     """Start the background sender once per process (wsgi.py and run.py call this)."""
     global _worker
-    if not config.PUSH_ENABLED or (_worker and _worker.is_alive()):
+    if not config.PUSH_ENABLED or not config.PUSH_WORKER or (_worker and _worker.is_alive()):
         return False
     _stop.clear()
     _worker = threading.Thread(target=_loop, name="smartplate-push", daemon=True)

@@ -11,6 +11,7 @@ const S = {
   meta: null, users: [], userId: null, planId: null, view: null,
   tab: "today", more: null, exec: null, community: [], receipts: null, drawer: null,
   busy: false, error: null, hideCold: false, orderReview: null, cartReview: null,
+  liveWeek: null, liveWeekError: null, basketDraft: null, itemOptions: null, basketReview: null, addonReview: null,
   liveResults: null, liveFavourites: null, liveBrowseMenu: null, liveOrderReview: null, liveCart: null,
   checkoutReview: null, placedOrder: null, liveOrderStatus: null, liveOrderHistory: null, liveCartError: null,
   sheet: null, moving: null, onboard: null, places: null, calendar: null, welcome: false, signin: false, account: null,
@@ -67,7 +68,7 @@ async function api(path, method = "GET", body) {
   if (!r.ok) {
     const data = await r.json().catch(() => ({}));
     if (data.code === "swiggy_auth_expired" && S.swiggy) {
-      S.swiggy.connected = false; S.swiggy.expired = true;
+      S.swiggy.connected = false; S.swiggy.expired = true; clearLiveCoreState();
       S.liveCart = null; S.checkoutReview = null;
     }
     throw new Error(data.message || data.error || r.statusText);
@@ -130,6 +131,7 @@ async function boot() {
   const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new Map();
   const wanted = params.get("tab");
   if (["today", "week", "places", "more"].includes(wanted)) S.tab = wanted;
+  if (S.tab === "week" && swiggyReady()) await loadLiveWeek();
   if (params.get("swiggy") || params.get("swiggy_error")) {             // back from Swiggy sign-in
     S.tab = "more"; S.more = "connection"; S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
     if (params.get("swiggy_error")) S.error = `Swiggy: ${params.get("swiggy_error")}`;
@@ -152,6 +154,7 @@ function adoptView(view) { S.view = view; S.planId = view.plan.id; scheduleAlert
 
 /* ---------------------------------------------------------------- actions */
 async function switchUser(id) {
+  clearLiveCoreState();
   S.userId = Number(id); S.exec = null; S.receipts = null; S.drawer = null; S.orderReview = null;
   S.sheet = null; S.moving = null; S.places = null; S.calendar = null; S.welcome = false; S.tab = "today"; S.more = null; S.account = null; S.cartReview = null;
   S.swiggy = null; S.swAddrs = null; S.liveMenu = null; S.carts = null; S.acctDraft = null;
@@ -275,11 +278,11 @@ function render() {
   const app = document.getElementById("app");
   if (S.onboard) { app.innerHTML = onboardingScreen(); wire(); return; }
   if (S.welcome || !S.view) { app.innerHTML = welcomeScreen(); wire(); return; }
-  app.innerHTML = topbar() + `<main class="wrap ${S.tab === "more" ? "wide" : ""}" id="main">${errbar() + tabBody()}</main>`
+  app.innerHTML = topbar() + `<main class="wrap ${S.tab === "more" ? "wide" : ""}" id="main">${S.meta.local_stub ? '<p role="status" class="consent">Local Swiggy stub · Example provider data. No real purchases.</p>' : ""}${errbar() + tabBody()}</main>`
     + navBar() + (S.sheet ? sheetDialog() : "") + (S.drawer ? drawer() : "")
     + (S.orderReview ? orderReviewDialog() : "") + (S.cartReview ? cartReviewDialog() : "")
     + (S.liveOrderReview ? liveOrderReviewDialog() : "")
-    + (S.checkoutReview ? checkoutReviewDialog() : "");
+    + (S.checkoutReview ? checkoutReviewDialog() : "") + liveCoreDialogs();
   wire();
 }
 
@@ -323,7 +326,7 @@ function topbar() {
   return `<header class="topbar"><div class="inner">
     <div class="brand">Smart<em>Plate</em></div>
     <span class="spacer"></span>
-    ${swiggyReady() && ["today", "places"].includes(S.tab) ? `<span class="pill accent">Live Swiggy menu</span>` : `<span class="pill ${left < 0 ? "bad" : "ok"}" title="Sample weekly plan estimate">Plan estimate · ${rupee0(Math.abs(left))} ${left < 0 ? "over" : "left"}</span>`}
+    ${swiggyReady() && ["today", "week", "places"].includes(S.tab) ? `<span class="pill accent">Live Swiggy menu</span>` : `<span class="pill ${left < 0 ? "bad" : "ok"}" title="Sample weekly plan estimate">Plan estimate · ${rupee0(Math.abs(left))} ${left < 0 ? "over" : "left"}</span>`}
     <button class="avatar" data-go="more:profiles" title="Profile: ${esc(S.view.user?.name)}" aria-label="Profile and settings">${esc((S.view.user?.name || "?").slice(0, 1))}</button>
   </div></header>`;
 }
@@ -336,7 +339,7 @@ function navBar() {
 
 function tabBody() {
   if (S.tab === "today") return todayScreen();
-  if (S.tab === "week") return weekScreen();
+  if (S.tab === "week") return swiggyReady() ? liveWeekScreen() : weekScreen();
   if (S.tab === "places") return placesScreen();
   return moreScreen();
 }
@@ -645,11 +648,13 @@ function livePlacesScreen() {
   const rows = menu ? menu.items.map(i => `<div class="lmrow"><span>${i.veg === true ? "🟢 " : i.veg === false ? "🔴 " : ""}${esc(i.name)}
     ${i.in_stock === false || i.in_stock === 0 ? " · unavailable" : ""}${i.has_options ? " · options in Swiggy" : ""}</span>
     <span><b>${i.price == null ? "Price in cart" : rupee(i.price)}</b> <button class="small" data-live-item="${esc(i.id)}"
-      data-live-item-name="${esc(i.name)}" ${i.in_stock === false || i.in_stock === 0 ? "disabled" : ""}>Review</button></span></div>`).join("") : "";
+      data-live-item-name="${esc(i.name)}" ${i.in_stock === false || i.in_stock === 0 ? "disabled" : ""}>Review</button>
+      <button class="small" data-item-options="${esc(i.id)}" data-item-name="${esc(i.name)}" ${i.in_stock === false || !cartEligible() ? 'disabled' : ''}>Quantity/options</button></span></div>`).join("") : "";
   return `<h1 class="greet">Order from your area</h1><p class="sub">Live Swiggy restaurants and menus for ${esc(S.swiggy.address.label)}. Choose a real item and review the cart before checkout.</p>
     <form id="live-search" class="row" style="gap:8px;margin:14px 0"><input id="live-query" aria-label="Restaurant or cuisine" placeholder="Restaurant or cuisine" maxlength="80" required style="flex:1;min-width:150px"><button class="primary">Search Swiggy</button></form>
     <div class="row"><button class="ghost small" data-act="live-order-history">Check recent Swiggy orders</button><button class="ghost small" data-act="refresh-live-cart">Refresh Swiggy cart</button></div>
     ${S.liveCartError ? `<p class="fine" role="alert">${esc(S.liveCartError)}</p>` : ""}
+    ${basketPanel()}
     ${S.liveOrderHistory ? `<section class="card"><h3>Recent Swiggy orders</h3><p class="fine">Orders at ${esc(S.liveOrderHistory.address)}. If a placement failed or timed out, check here and in Swiggy before trying again.</p>
       ${S.liveOrderHistory.attempts.some(a => a.state === "unknown" || a.state === "started") ? `<p class="fine">A SmartPlate order attempt has an uncertain result. Check Swiggy or contact support before ordering the same cart again.</p>` : ""}
       ${S.liveOrderHistory.provider_orders.length ? S.liveOrderHistory.provider_orders.map(o => `<p><b>${esc(o.restaurant)}</b> · ${esc(o.item)} · ${esc(o.status)} · ${esc(o.total)} · ${esc(o.ordered_time)}<br><span class="fine">Order ${esc(o.order_id)}</span>${S.liveOrderHistory.attempts.some(a => a.order_id === o.order_id) ? ` <button class="small" data-live-track="${esc(o.order_id)}">Check delivery status</button>` : ""}</p>`).join("") : `<p class="fine">Swiggy returned no recent orders for this address.</p>`}</section>` : ""}
@@ -766,6 +771,7 @@ function checkoutReviewDialog() {
     <button class="close ghost" data-close-checkout-review="1" aria-label="Close order review">✕</button>
     <p class="eyebrow">Real Swiggy order</p><h2 class="sec" id="checkout-review-title">Place this order now?</h2>
     <div class="checkout-list"><div class="checkout-row"><div><strong>${esc(r.item)}</strong><span>${esc(r.restaurant)} · Quantity ${esc(r.quantity)} · ${esc(r.address)}</span></div><b>${rupee(r.to_pay)}</b></div></div>
+    ${checkoutOptionsSummary(r)}
     <p class="fine">Payment: ${esc(r.payment_label)}. This places a real order to the address shown and you may owe the full amount. Check ingredients with the restaurant if needed. An uncertain result will not be retried automatically.</p>
     <div class="checkout-actions"><button class="ghost" data-close-checkout-review="1">Cancel</button><button class="primary" data-act="place-live-order" autofocus>Confirm and place order · ${rupee(r.to_pay)}</button></div>
   </section></div>`;
@@ -924,6 +930,7 @@ async function signOut() {
   S.users = mergeUsers(await api("/api/users")); S.welcome = true; render(); toast("Signed out of this device");
 }
 function clearCurrentProfile() {
+  clearLiveCoreState();
   for (const key of ["userId", "planId", "view", "account", "more", "exec", "receipts", "drawer", "sheet",
     "moving", "places", "calendar", "orderReview", "cartReview", "swiggy", "swAddrs", "liveMenu", "carts",
     "liveResults", "liveFavourites", "liveBrowseMenu", "liveOrderReview", "liveCart", "liveCartError",
@@ -1294,6 +1301,7 @@ function wire() {
   // Actions may render new controls before their request finishes. Keep those
   // controls disabled too, while preserving stock/rule-based disabled states.
   setBusy(S.busy);
+  wireLiveCore();
   const on = (sel, ev, fn) => document.querySelectorAll(sel).forEach(el => el.addEventListener(ev, fn));
   on("[data-tab]", "click", (e) => { e.preventDefault(); guard(() => goTab(e.currentTarget.dataset.tab)); });
   on("[data-go]", "click", (e) => { const [t, sub] = e.currentTarget.dataset.go.split(":"); guard(() => goTab(t, sub || null)); });
@@ -1349,7 +1357,7 @@ function wire() {
     "swiggy-addresses": async () => { S.swAddrs = await api(`/api/user/${S.userId}/swiggy/addresses`); render(); },
     "close-live-menu": async () => { S.liveMenu = null; render(); },
     "close-live-browse": async () => { S.liveBrowseMenu = null; render(); },
-    "swiggy-disconnect": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/disconnect`, "POST", {}); S.liveMenu = null; S.carts = null; S.swAddrs = null; S.liveResults = null; S.liveFavourites = null; S.liveBrowseMenu = null; S.liveCart = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null; S.liveCartError = null; toast("Disconnected from Swiggy"); render(); },
+    "swiggy-disconnect": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/disconnect`, "POST", {}); clearLiveCoreState(); S.liveMenu = null; S.carts = null; S.swAddrs = null; S.liveResults = null; S.liveFavourites = null; S.liveBrowseMenu = null; S.liveCart = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null; S.liveCartError = null; toast("Disconnected from Swiggy"); render(); },
     "signin-open": async () => { S.signin = true; S.error = null; render(); document.getElementById("si-login")?.focus(); },
     "signin-close": async () => { S.signin = false; S.error = null; render(); },
     "sign-out": signOut,
@@ -1363,6 +1371,7 @@ function wire() {
   if (S.sheet?.data) document.querySelector(".sheet .close")?.focus();
   on("[data-swaddr]", "click", (e) => guard(async () => {
     S.swiggy = await api(`/api/user/${S.userId}/swiggy/address`, "POST", { address_id: e.currentTarget.dataset.swaddr });
+    clearLiveCoreState();
     S.swAddrs = null; S.liveMenu = null; S.liveResults = null; S.liveBrowseMenu = null; S.liveCart = null; S.liveCartError = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null;
     S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
     await refreshLiveCart(false);
@@ -1412,6 +1421,7 @@ function onMealTap(sid) {
 async function goTab(tab, sub = null) {
   S.tab = tab; S.sheet = null;
   if (tab === "more") S.more = sub;
+  if (tab === 'week' && swiggyReady()) await loadLiveWeek();
   if (tab === "places" && swiggyReady() && !S.liveFavourites)
     S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
   if (tab === "places" && swiggyReady()) await refreshLiveCart(false);

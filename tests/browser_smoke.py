@@ -13,16 +13,17 @@ from smartplate import config
 from smartplate.app import create_app
 from smartplate.integrations import swiggy_connect
 from test_followups import _connect
-from test_swiggy_live import FakeLive
+from live_stub import FakeBasket
 
 pw = pytest.importorskip("playwright.sync_api")
+pw.expect.set_options(timeout=15000)
 
 
 @pytest.fixture
 def pilot(seeded, monkeypatch):
     monkeypatch.setattr(config, "LIVE_ORDERS", True)
     monkeypatch.setattr(config, "SWIGGY_PROVIDER", "live")
-    fake = FakeLive()
+    fake = FakeBasket()
     fake.dishes = {"Mini Tiffin": 12500}
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     app = create_app()
@@ -57,12 +58,70 @@ def open_profile(browser, pilot, viewport):
         document.addEventListener('securitypolicyviolation', e => policyViolations.push(e.violatedDirective));
     """)
     page.goto(pilot["url"])
-    pw.expect(page.get_by_role("heading", name="Order from your area")).to_be_visible()
+    try:
+        pw.expect(page.get_by_role("heading", name="Order from your area")).to_be_visible(timeout=15000)
+    except AssertionError:
+        print('Browser script errors:', errors)
+        raise
     return page, errors
 
 
 def no_overflow(page):
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Page overflows the viewport"
+
+
+@pytest.mark.parametrize('viewport', [{'width': 1280, 'height': 900}, {'width': 390, 'height': 844}], ids=['desktop', 'phone'])
+def test_browser_real_week_and_customized_basket(pilot, viewport):
+    pilot['fake'].dishes = {'Mini Tiffin': 12500, 'Veg Meals': 18000}
+    with pw.sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page, errors = open_profile(browser, pilot, viewport)
+        try:
+            page.get_by_role('textbox', name='Restaurant or cuisine').fill('Hotel Saravana Bhavan')
+            page.get_by_role('button', name='Search Swiggy', exact=True).click()
+            page.locator('[data-live-fav="r-1"]').click()
+            page.locator('[data-tab="week"]').click()
+            page.get_by_role('button', name='Plan from live favourites', exact=True).click()
+            pw.expect(page.locator('[data-live-week-slot]')).to_have_count(7)
+            no_overflow(page)
+            page.reload()
+            page.locator('[data-tab="week"]').click()
+            pw.expect(page.locator('[data-live-week-slot]')).to_have_count(7)
+            page.locator('[data-live-week-slot="0"]').click()
+            dialog = page.get_by_role('dialog')
+            dialog.get_by_role('button', name='Save to basket draft', exact=True).click()
+            page.locator('[data-item-options="m1"]').click()
+            dialog = page.get_by_role('dialog')
+            dialog.get_by_label('Quantity', exact=True).fill('2')
+            dialog.locator('select').select_option('large')
+            dialog.get_by_role('checkbox').check()
+            dialog.get_by_role('button', name='Save to basket draft', exact=True).click()
+            page.get_by_role('button', name='Review whole basket', exact=True).click()
+            dialog = page.get_by_role('dialog')
+            pw.expect(dialog).to_contain_text('Large')
+            dialog.get_by_role('button', name='Confirm and prepare basket', exact=True).click()
+            page.get_by_role('button', name='Review available add-ons', exact=True).click()
+            dialog = page.get_by_role('dialog')
+            dialog.get_by_label('Curd', exact=True).check()
+            dialog.get_by_label('Apply these same add-ons to all portions of each dish.', exact=True).check()
+            dialog.get_by_role('button', name='Confirm selected add-ons', exact=True).click()
+            page.reload()
+            page.get_by_role('button', name='Review and place order', exact=True).click()
+            dialog = page.get_by_role('dialog')
+            pw.expect(dialog).to_contain_text('Quantity 3')
+            pw.expect(dialog).to_contain_text('Curd')
+            pw.expect(dialog).to_contain_text('Large')
+            no_overflow(page)
+            dialog.get_by_role('button', name='Confirm and place order · ₹580', exact=True).click()
+            pw.expect(page.get_by_text('Swiggy order confirmed:', exact=True)).to_be_visible()
+            assert pilot['fake'].tool_calls().count('place_food_order') == 1
+            assert not errors and page.evaluate('policyViolations') == []
+        except Exception:
+            Path('test-artifacts').mkdir(exist_ok=True)
+            page.screenshot(path=f"test-artifacts/basket-{viewport['width']}.png", full_page=True)
+            raise
+        finally:
+            browser.close()
 
 
 @pytest.mark.parametrize("viewport", [{"width": 1280, "height": 900}, {"width": 390, "height": 844}], ids=["desktop", "phone"])

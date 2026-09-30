@@ -312,6 +312,8 @@ def choose_address(user_id: int, address_id: str) -> dict:
         cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (user_id,))     # menus depend on the address
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
+        cur.execute('DELETE FROM swiggy_cart_lines WHERE user_id=?', (user_id,))
+        cur.execute("DELETE FROM reminder_jobs WHERE user_id=? AND event_key LIKE 'live:%' AND state!='sent'", (user_id,))
     return sc.status(user_id)
 
 
@@ -586,7 +588,7 @@ def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
             "checkout_url": CHECKOUT_URL}
 
 
-def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
+def live_item_details(user_id: int, restaurant_id: str, restaurant_name: str,
                       item_id: str, item_name: str) -> dict:
     """Review an item chosen from a real menu, without a seeded plan or fuzzy match."""
     from ..domain import models
@@ -621,9 +623,6 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
     item = exact[0]
     if _get(item, "stock") not in (True, 1):
         raise SwiggyError("Swiggy did not confirm this dish is in stock. Refresh the menu.")
-    if (_get(item, "variants") not in (False, 0) or _get(item, "addons") not in (False, 0)
-            or item.get("variations") or item.get("variantsV2") or item.get("addons")):
-        raise SwiggyError("This dish needs options that SmartPlate cannot choose yet. Customize it in Swiggy.")
     if user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
         raise SwiggyError("Swiggy did not verify this dish as vegetarian. Check it in Swiggy.")
     details = {"user_id": user_id, "address_id": address_id, "restaurant_id": restaurant_id,
@@ -631,7 +630,18 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
     fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price")},
                                             sort_keys=True).encode()).hexdigest()
     return {**details, "address": conn.get("address_label") or address_id,
-            "menu_price": rupees(item), "fingerprint": fingerprint}
+            "menu_price": rupees(item), "fingerprint": fingerprint,
+            "customizations": {k: item.get(k) for k in ('variations', 'variantsV2', 'addons', 'hasVariants', 'hasAddons')}}
+
+
+def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
+                      item_id: str, item_name: str) -> dict:
+    preview = live_item_details(user_id, restaurant_id, restaurant_name, item_id, item_name)
+    options = preview.pop('customizations')
+    if (options['hasVariants'] not in (False, 0) or options['hasAddons'] not in (False, 0)
+            or options['variations'] or options['variantsV2'] or options['addons']):
+        raise SwiggyError('This dish needs options. Use the quantity/options review to choose them.')
+    return preview
 
 
 def _cart_view(data: object, address_id: str) -> dict:
@@ -654,6 +664,7 @@ def _intent(user_id: int) -> dict | None:
 
 
 def _prepared_cart(user_id: int) -> tuple[dict, dict, dict]:
+    from .. import live_basket
     conn = _conn(user_id)
     address_id = _address(conn)
     intent = _intent(user_id)
@@ -662,6 +673,10 @@ def _prepared_cart(user_id: int) -> tuple[dict, dict, dict]:
     cart = _cart_view(data, address_id)
     restaurant = cart.get("restaurant") or {}
     items = cart["items"]
+    if live_basket.saved(user_id):
+        if not intent or not live_basket.matches(user_id, cart, address_id):
+            raise SwiggyError('The cart differs from your reviewed basket. Check it in Swiggy.')
+        return conn, intent, cart
     if (not intent or intent["address_id"] != address_id or len(items) != 1
             or not isinstance(restaurant, dict) or str(restaurant.get("id")) != intent["restaurant_id"]
             or str(_get(items[0], "menu_item_id")) != intent["item_id"]
@@ -672,6 +687,7 @@ def _prepared_cart(user_id: int) -> tuple[dict, dict, dict]:
 
 
 def current_live_cart(user_id: int) -> dict:
+    from .. import live_basket
     conn = _conn(user_id)
     address_id = _address(conn)
     intent = _intent(user_id)
@@ -685,10 +701,13 @@ def current_live_cart(user_id: int) -> dict:
     prepared = bool(intent and intent["address_id"] == address_id and rid == intent["restaurant_id"]
                     and len(cart["items"]) == 1 and cart["items"][0].get("quantity") == 1
                     and str(_get(cart["items"][0], "menu_item_id")) == intent["item_id"])
+    if live_basket.saved(user_id):
+        prepared = live_basket.matches(user_id, cart, address_id)
     name = restaurant.get("name") if isinstance(restaurant, dict) else None
     return {"cart": {"item": ", ".join(str(_get(i, "name") or "Unnamed item") for i in cart["items"]),
                      "restaurant": name or (intent["restaurant_name"] if prepared else "Check restaurant in Swiggy"),
                      "to_pay": _num(cart, "to_pay"), "orderable": prepared,
+                     "items": cart['items'], "basket": bool(live_basket.saved(user_id)),
                      "checkout_url": CHECKOUT_URL}}
 
 
@@ -725,6 +744,7 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     with db.cursor() as cur:
         cur.execute("INSERT OR REPLACE INTO swiggy_cart_intents VALUES (?,?,?,?,?)",
                     (user_id, preview["address_id"], restaurant_id, preview["restaurant"], preview["item_id"]))
+        cur.execute('DELETE FROM swiggy_cart_lines WHERE user_id=?', (user_id,))
     return {**preview, "to_pay": _num(view, "to_pay"), "checkout_url": CHECKOUT_URL, "orderable": True}
 
 
@@ -740,17 +760,32 @@ def _checkout_state(user_id: int) -> dict:
     conn, intent, cart = _prepared_cart(user_id)
     address_id = _address(conn)
     items = cart["items"]
-    if len(items) != 1:
-        raise SwiggyError("Review one exact dish in the Swiggy cart before placing an order.")
-    item = items[0]
-    if item.get("quantity") != 1 or not _get(item, "name"):
-        raise SwiggyError("SmartPlate could not verify one dish and quantity in the live cart.")
-    if _flag(_get(item, "stock")) is False:
-        raise SwiggyError("The dish is no longer in stock. Refresh your cart.")
-    if user["diet"] == "veg" and _flag(_get(item, "veg")) is not True:
-        raise SwiggyError("Swiggy did not verify the cart dish as vegetarian. Check it in Swiggy.")
-    if item.get("variants") or item.get("addons") or item.get("variations") or item.get("variantsV2"):
-        raise SwiggyError("The cart has customizations that SmartPlate did not review. Check it in Swiggy.")
+    from .. import live_basket
+    batch = live_basket.saved(user_id)
+    for item in items:
+        qty = item.get('quantity')
+        if isinstance(qty, bool) or not isinstance(qty, int) or not 1 <= qty <= 10 or not _get(item, 'name'):
+            raise SwiggyError('SmartPlate could not verify the cart items and quantities')
+        if _flag(_get(item, 'stock')) is False:
+            raise SwiggyError('A dish is no longer in stock. Refresh your cart.')
+        if user['diet'] == 'veg' and _flag(_get(item, 'veg')) is not True:
+            raise SwiggyError('Swiggy did not verify a cart dish as vegetarian. Check it in Swiggy.')
+        if not batch and (item.get('variants') or item.get('addons') or item.get('variations') or item.get('variantsV2')):
+            raise SwiggyError('The cart has customizations that SmartPlate did not review. Check it in Swiggy.')
+        current_addons = live_basket.valid_addon_groups(item)
+        allowed_groups = {str(g.get('group_id') or g.get('groupId')) for g in current_addons}
+        if any(str(a.get('group_id') or a.get('groupId')) not in allowed_groups for a in item.get('addons') or []):
+            raise SwiggyError('Swiggy did not confirm the selected add-ons are still valid')
+        for group in current_addons:
+            gid = str(group.get('group_id') or group.get('groupId') or '')
+            selected = [a for a in item.get('addons') or [] if str(a.get('group_id') or a.get('groupId')) == gid]
+            choices = group.get('choices') or group.get('addons') or []
+            if not group.get('minAddons', 0) <= len(selected) <= group.get('maxAddons', len(choices)):
+                raise SwiggyError('The current add-on limits changed. Review add-ons before checkout')
+            for addon in selected:
+                choice = next((c for c in choices if str(c['id']) == str(addon.get('id') or addon.get('choice_id'))), None)
+                if not choice or _flag(choice.get('inStock')) is False or (user['diet'] == 'veg' and _flag(choice.get('isVeg')) is False):
+                    raise SwiggyError('An add-on is no longer available for this cart. Review it again.')
     total = _num(cart.get("pricing") or {}, "to_pay")
     if total is None or total <= 0 or total > 1000:
         raise SwiggyError("Swiggy did not return a valid payable total within its ₹1,000 Builders Club limit.")
@@ -765,8 +800,13 @@ def _checkout_state(user_id: int) -> dict:
         raise SwiggyError("Swiggy did not confirm your delivery address. Choose it again.")
     details = {"address_id": address_id, "address": address["text"],
                "restaurant_id": intent["restaurant_id"], "restaurant": intent["restaurant_name"],
-               "item_id": str(_get(item, "menu_item_id")), "item": str(_get(item, "name") or "Selected dish"),
-               "quantity": item.get("quantity"), "to_pay": total, "payment_method": str(cod["id"])}
+               "item_id": str(_get(items[0], "menu_item_id")),
+               "item": ', '.join(f"{i['quantity']} × {_get(i, 'name')}" for i in items) if batch else _get(items[0], 'name'),
+               "items": [{"id": str(_get(i, 'menu_item_id')), "name": _get(i, 'name'),
+                          "quantity": i['quantity'],
+                          'variants': next(l['variants'] for l in batch['lines'] if l['id'] == str(_get(i, 'menu_item_id'))) if batch else i.get('variants') or i.get('variantsV2') or [],
+                          'addons': next(l['addons'] for l in batch['lines'] if l['id'] == str(_get(i, 'menu_item_id'))) if batch else i.get('addons') or []} for i in items],
+               "quantity": sum(i['quantity'] for i in items), "to_pay": total, "payment_method": str(cod["id"])}
     fingerprint = hashlib.sha256(json.dumps(details, sort_keys=True).encode()).hexdigest()
     return {**details, "payment_label": str(cod.get("displayName") or "Cash on Delivery"),
             "fingerprint": fingerprint}
@@ -841,6 +881,7 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
                          user_id, expected_fingerprint))
             if confirmed:
                 cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
+                cur.execute('DELETE FROM swiggy_cart_lines WHERE user_id=?', (user_id,))
         if not confirmed:
             raise SwiggyError("Swiggy did not confirm a completed order. Check Swiggy orders; do not retry this cart.")
         return {"order_id": str(order_id), "status": "confirmed", "item": preview["item"],

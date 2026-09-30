@@ -282,6 +282,9 @@ def finish(state: str, code: str) -> int:
         cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (row["user_id"],))
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (row["user_id"],))
         cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (row["user_id"],))
+        cur.execute('DELETE FROM swiggy_cart_lines WHERE user_id=?', (row['user_id'],))
+        cur.execute('DELETE FROM live_weeks WHERE user_id=?', (row['user_id'],))
+        cur.execute("DELETE FROM reminder_jobs WHERE user_id=? AND event_key LIKE 'live:%'", (row['user_id'],))
     discover(row["user_id"])
     return row["user_id"]
 
@@ -396,4 +399,7 @@ def disconnect(user_id: int) -> dict:
         cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
+        cur.execute('DELETE FROM swiggy_cart_lines WHERE user_id=?', (user_id,))
+        cur.execute('DELETE FROM live_weeks WHERE user_id=?', (user_id,))
+        cur.execute("DELETE FROM reminder_jobs WHERE user_id=? AND event_key LIKE 'live:%'", (user_id,))
     return {"connected": False}

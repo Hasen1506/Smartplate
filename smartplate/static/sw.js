@@ -3,8 +3,8 @@
    Network-first for the app shell (so a new release is picked up on the next open),
    falling back to the cached copy when offline. API responses are never cached:
    budgets and plans must always be live. */
-const CACHE = "smartplate-shell-v2";
-const SHELL = ["/", "/static/app.js", "/static/styles.css", "/manifest.webmanifest",
+const CACHE = "smartplate-shell-v3";
+const SHELL = ["/", "/static/live-core.js", "/static/app.js", "/static/styles.css", "/manifest.webmanifest",
   "/static/icons/icon-192.png", "/static/icons/icon-512.png", "/static/icons/icon.svg"];
 
 self.addEventListener("install", (e) => {
