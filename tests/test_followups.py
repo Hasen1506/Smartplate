@@ -115,9 +115,11 @@ def test_private_profile_endpoints_require_the_key(client):
         assert getattr(client, method)(url, **kw).status_code == 401, url
         assert getattr(client, method)(url, headers=bad, **kw).status_code == 401, url
         assert getattr(client, method)(url, headers=good, **kw).status_code in (200, 201), url
-    # plain download links carry the key as a query parameter (GET only)
-    assert client.get(f"/api/user/{uid}/reminders.ics?key={key}").status_code == 200
-    assert client.get(f"/api/receipts/{uid}/export.csv?key={key}").status_code == 200
+    # Export credentials stay in headers so browser history and access logs omit them.
+    assert client.get(f"/api/user/{uid}/reminders.ics", headers=good).status_code == 200
+    assert client.get(f"/api/receipts/{uid}/export.csv", headers=good).status_code == 200
+    assert client.get(f"/api/user/{uid}/reminders.ics?key={key}").status_code == 401
+    assert client.get(f"/api/receipts/{uid}/export.csv?key={key}").status_code == 401
 
 
 def test_open_profile_id_cannot_vouch_for_a_private_one(client):
