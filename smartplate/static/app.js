@@ -357,12 +357,12 @@ function budgetCard() {
   const left = cap - spend, pct = cap ? Math.min(100, (spend / cap) * 100) : 0;
   const modes = S.meta?.modes || {};
   return `<section class="budget card" aria-label="Budget">
-    <div class="brow"><div><div class="lbl">This week</div>
+    <div class="brow"><div><div class="lbl">Sample plan estimate</div>
       <div class="big ${left < 0 ? "neg" : ""}">${rupee0(Math.abs(left))} <small>${left < 0 ? "over budget" : "left of " + rupee0(cap)}</small></div></div>
       <div class="seg" role="group" aria-label="How tight is money this week?">${Object.entries(modes).map(([k, l]) =>
         `<button class="${S.view.plan.mode === k ? "on" : ""}" data-mode="${k}" title="${esc(S.meta.mode_outcomes?.[k] || "")}">${esc(l)}</button>`).join("")}</div></div>
     <div class="bar"><i style="width:${pct}%;background:${left < 0 ? "var(--red)" : "var(--accent)"}"></i></div>
-    <div class="fine">${b.prorated ? `Covers the rest of this week (${rupee0(cap)} of your ${rupee0(b.weekly_budget)} weekly budget). ` : ""}${b.daily_cap ? `Daily limit ${rupee0(b.daily_cap)}. ` : ""}Prices include delivery and expected surge.</div>
+    <div class="fine">${b.prorated ? `Covers the rest of this week (${rupee0(cap)} of your ${rupee0(b.weekly_budget)} weekly budget). ` : ""}${b.daily_cap ? `Daily planning limit ${rupee0(b.daily_cap)}. ` : ""}Sample prices include estimated fees. Live prices and actual purchases are reviewed separately.</div>
   </section>`;
 }
 function nextUpCard(nu) {
@@ -519,6 +519,7 @@ function weekScreen() {
   return `<div class="whead"><h1 class="greet">Week of ${esc(fmtDate(v.plan.week_start))}</h1>
       <button class="ghost small" data-act="reopt" title="Recompute with your current rules">↻ Re-plan</button></div>
     ${moving}
+    <p class="fine">Sample weekly planner: dishes, nutrition and prices come from the demo catalogue. Open Places for real restaurants and current Swiggy menus after connecting.</p>
     <p class="fine">Tap a meal to change it. Drag it onto another meal (or use <b>Move</b>) to swap them. The rest of the week re-balances each time.</p>
     ${gone.length ? `<p class="fine gone">${esc(gone.map(x => x.d.day).join(", "))}: before this plan started.</p>` : ""}
     <div class="days">${shown.map(({ d, i, ctx }) => dayRow(d, i, ctx)).join("")}</div>
@@ -1225,7 +1226,7 @@ function onboardingScreen() {
   return `<main class="onboard"><div class="obtop"><button class="ghost small" data-ob-nav="back">${st ? "← Back" : "Cancel"}</button>
       <div class="dots" aria-label="Step ${st + 1} of ${OB_STEPS.length}">${dots}</div><span class="fine">${st + 1}/${OB_STEPS.length}</span></div>
     ${errbar()}<form class="obbody" id="obform" novalidate>${body}</form>
-    <div class="obfoot"><button class="primary big" data-ob-nav="next">${last ? "Plan my week →" : "Continue"}</button>
+    <div class="obfoot"><button class="primary big" data-ob-nav="next">${last ? "Create profile →" : "Continue"}</button>
       </div></main>`;
 }
 function readOnboardInputs() {

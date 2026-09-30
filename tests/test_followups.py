@@ -136,6 +136,44 @@ def test_sample_profiles_stay_open(client):
     assert {1, 2, 3} <= {u["id"] for u in client.get("/api/users").get_json()}
 
 
+def test_calendar_import_rejects_foreign_or_invalid_plan_before_parsing(client, monkeypatch):
+    from smartplate.integrations import calendar_sync
+    uid, key, view = _private(client)
+    called = []
+    monkeypatch.setattr(calendar_sync, 'ingest_ics', lambda *args: called.append(args))
+    route = f'/api/user/{uid}/calendar/ics'
+    for plan_id in (1, 999999, True, None, '1', 1.5, -1):
+        response = client.post(route, json={'plan_id': plan_id, 'ics': 'BEGIN:VCALENDAR'},
+                               headers={'X-SmartPlate-Key': key})
+        assert response.status_code == 400
+    # An open sample user cannot borrow a private plan's dates either.
+    assert client.post('/api/user/1/calendar/ics', json={
+        'plan_id': view['plan']['id'], 'ics': 'BEGIN:VCALENDAR'}).status_code == 400
+    assert called == []
+
+
+def test_calendar_import_valid_profile_and_malformed_event_rollback(client):
+    from smartplate import db
+    uid, key, view = _private(client)
+    route = f'/api/user/{uid}/calendar/ics'
+    date = view['plan']['week_start'].replace('-', '')
+    good = ('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n'
+            f'DTSTART:{date}T120000\r\nDTEND:{date}T130000\r\n'
+            'SUMMARY:Lunch meeting\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n')
+    def upload(ics):
+        return client.post(route, json={'plan_id': view['plan']['id'], 'ics': ics},
+                           headers={'X-SmartPlate-Key': key})
+    response = upload(good)
+    assert response.status_code == 200 and response.get_json()['events_added'] == 1
+    # The first event is valid but the second lacks DTSTART. Neither is persisted.
+    malformed = good.replace('END:VCALENDAR',
+        'BEGIN:VEVENT\r\nSUMMARY:Missing start\r\nEND:VEVENT\r\nEND:VCALENDAR')
+    assert upload(malformed).status_code == 400
+    assert upload(None).status_code == 400
+    with db.cursor() as cur:
+        assert cur.execute('SELECT COUNT(*) FROM calendar_events WHERE user_id=?', (uid,)).fetchone()[0] == 1
+
+
 # --------------------------------------------------------------------------- #
 # Swiggy sign-in + read-only discovery, against a strict fake server
 # --------------------------------------------------------------------------- #

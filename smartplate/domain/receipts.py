@@ -46,13 +46,22 @@ def set_category(receipt_id: int, category: str) -> None:
         cur.execute("UPDATE receipts SET category=? WHERE id=?", (category, receipt_id))
 
 
+def _csv_text(value) -> str:
+    """Keep untrusted labels as text when opened by spreadsheet software."""
+    text = str(value or "")
+    if text.startswith(("\t", "\r", "\n")) or text.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + text
+    return text
+
+
 def export_csv(user_id: int) -> str:
     rows = list_for(user_id)
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["date", "category", "amount", "note"])
     for r in rows:
-        w.writerow([r["iso_date"], r["category"], f'{r["amount"]:.2f}', r["note"]])
+        w.writerow([_csv_text(r["iso_date"]), _csv_text(r["category"]),
+                    f'{r["amount"]:.2f}', _csv_text(r["note"])])
     w.writerow([])
     business = sum(r["amount"] for r in rows if r["category"] == "business")
     w.writerow(["", "business total", f"{business:.2f}", ""])

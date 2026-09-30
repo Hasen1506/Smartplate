@@ -281,8 +281,19 @@ def create_app() -> Flask:
     @app.post("/api/user/<int:user_id>/calendar/ics")
     def ingest_ics(user_id):
         body = request.get_json(force=True, silent=True) or {}
-        plan = models.get_plan(int(body["plan_id"]))
-        n = calendar_sync.ingest_ics(user_id, body.get("ics", ""), plan["week_start"])
+        plan_id = body.get("plan_id")
+        if isinstance(plan_id, bool) or not isinstance(plan_id, int) or plan_id <= 0:
+            raise ValueError("Choose a valid plan for this profile")
+        plan = models.get_plan(plan_id)
+        if not plan or plan["user_id"] != user_id:
+            raise ValueError("Choose a plan belonging to this profile")
+        ics = body.get("ics")
+        if not isinstance(ics, str) or not ics.strip():
+            raise ValueError("Provide a calendar export")
+        try:
+            n = calendar_sync.ingest_ics(user_id, ics, plan["week_start"])
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ValueError("Invalid calendar export") from error
         return jsonify({"events_added": n})
 
     # ---- sentiment demo (shows the free, local NLP) ---- #

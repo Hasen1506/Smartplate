@@ -206,6 +206,11 @@ test('live configuration routes orders to real Places instead of a dead simulato
   assert.match(vm.runInContext('ordersPanel()', context), /Open live Places/);
   assert.ok(!vm.runInContext('ordersPanel()', context).includes('data-act="exec"'));
   assert.ok(!vm.runInContext('weekScreen()', context).includes('data-act="exec"'));
+  assert.match(vm.runInContext('weekScreen()', context), /Sample weekly planner/);
+  const budget = vm.runInContext('budgetCard()', context);
+  assert.match(budget, /Sample plan estimate/);
+  assert.match(budget, /actual purchases are reviewed separately/);
+  assert.ok(!budget.includes('Prices include delivery and expected surge'));
 });
 
 test('week rows are draggable and carry weather and holidays', async () => {
