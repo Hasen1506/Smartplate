@@ -50,8 +50,7 @@ def create_app() -> Flask:
                 if not found:
                     return jsonify(error='not found'), 404
         if request.path.startswith('/api/'):
-            presented = request.headers.get(access.HEADER) or (
-                request.args.get('key') if request.method == 'GET' else None)
+            presented = request.headers.get(access.HEADER)
             body = request.get_json(silent=True) if request.method == 'POST' else None
             owners = access.owners_of(args, body if isinstance(body, dict) else None,
                                       request.args.get('user_id', type=int))
@@ -108,8 +107,9 @@ def create_app() -> Flask:
         try:
             with db.cursor() as cur:
                 cur.execute("SELECT 1 FROM users LIMIT 1").fetchone()
-            if not os.access(os.path.dirname(os.path.abspath(config.DB_PATH)), os.W_OK):
-                raise OSError("database directory is read-only")
+            if (not os.access(os.path.dirname(os.path.abspath(config.DB_PATH)), os.W_OK)
+                    or not os.access(config.DB_PATH, os.W_OK)):
+                raise OSError("database storage is read-only")
         except Exception:
             return jsonify(ok=False), 503
         return jsonify(ok=True)
