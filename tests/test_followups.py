@@ -73,7 +73,8 @@ def test_manifest_and_service_worker_are_served_for_install(client):
     assert sw.status_code == 200 and "javascript" in sw.mimetype and sw.headers["Cache-Control"] == "no-cache"
     assert b'startsWith("/api/")' in sw.data                           # plans/budgets are never cached
     page = client.get("/").data
-    assert b'rel="manifest"' in page and b"serviceWorker" in page
+    assert b'rel="manifest"' in page and b'<script src="/static/app.js">' in page
+    assert b'serviceWorker.register("/sw.js")' in client.get("/static/app.js").data
 
 
 # --------------------------------------------------------------------------- #
@@ -115,9 +116,11 @@ def test_private_profile_endpoints_require_the_key(client):
         assert getattr(client, method)(url, **kw).status_code == 401, url
         assert getattr(client, method)(url, headers=bad, **kw).status_code == 401, url
         assert getattr(client, method)(url, headers=good, **kw).status_code in (200, 201), url
-    # plain download links carry the key as a query parameter (GET only)
-    assert client.get(f"/api/user/{uid}/reminders.ics?key={key}").status_code == 200
-    assert client.get(f"/api/receipts/{uid}/export.csv?key={key}").status_code == 200
+    # Export credentials stay in headers so browser history and access logs omit them.
+    assert client.get(f"/api/user/{uid}/reminders.ics", headers=good).status_code == 200
+    assert client.get(f"/api/receipts/{uid}/export.csv", headers=good).status_code == 200
+    assert client.get(f"/api/user/{uid}/reminders.ics?key={key}").status_code == 401
+    assert client.get(f"/api/receipts/{uid}/export.csv?key={key}").status_code == 401
 
 
 def test_open_profile_id_cannot_vouch_for_a_private_one(client):
@@ -131,6 +134,44 @@ def test_sample_profiles_stay_open(client):
     assert client.get("/api/user/1/plan").status_code == 200
     assert client.post("/api/plan/1/optimize", json={}).status_code == 200
     assert {1, 2, 3} <= {u["id"] for u in client.get("/api/users").get_json()}
+
+
+def test_calendar_import_rejects_foreign_or_invalid_plan_before_parsing(client, monkeypatch):
+    from smartplate.integrations import calendar_sync
+    uid, key, view = _private(client)
+    called = []
+    monkeypatch.setattr(calendar_sync, 'ingest_ics', lambda *args: called.append(args))
+    route = f'/api/user/{uid}/calendar/ics'
+    for plan_id in (1, 999999, True, None, '1', 1.5, -1):
+        response = client.post(route, json={'plan_id': plan_id, 'ics': 'BEGIN:VCALENDAR'},
+                               headers={'X-SmartPlate-Key': key})
+        assert response.status_code == 400
+    # An open sample user cannot borrow a private plan's dates either.
+    assert client.post('/api/user/1/calendar/ics', json={
+        'plan_id': view['plan']['id'], 'ics': 'BEGIN:VCALENDAR'}).status_code == 400
+    assert called == []
+
+
+def test_calendar_import_valid_profile_and_malformed_event_rollback(client):
+    from smartplate import db
+    uid, key, view = _private(client)
+    route = f'/api/user/{uid}/calendar/ics'
+    date = view['plan']['week_start'].replace('-', '')
+    good = ('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n'
+            f'DTSTART:{date}T120000\r\nDTEND:{date}T130000\r\n'
+            'SUMMARY:Lunch meeting\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n')
+    def upload(ics):
+        return client.post(route, json={'plan_id': view['plan']['id'], 'ics': ics},
+                           headers={'X-SmartPlate-Key': key})
+    response = upload(good)
+    assert response.status_code == 200 and response.get_json()['events_added'] == 1
+    # The first event is valid but the second lacks DTSTART. Neither is persisted.
+    malformed = good.replace('END:VCALENDAR',
+        'BEGIN:VEVENT\r\nSUMMARY:Missing start\r\nEND:VEVENT\r\nEND:VCALENDAR')
+    assert upload(malformed).status_code == 400
+    assert upload(None).status_code == 400
+    with db.cursor() as cur:
+        assert cur.execute('SELECT COUNT(*) FROM calendar_events WHERE user_id=?', (uid,)).fetchone()[0] == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -217,7 +258,16 @@ def swiggy(monkeypatch):
     return fake
 
 
+def _secure_profile(client, uid=1):
+    from smartplate import access, db
+    key, hashed = access.new_key()
+    with db.cursor() as cur:
+        cur.execute("UPDATE users SET access_hash=? WHERE id=?", (hashed, uid))
+    client.environ_base["HTTP_X_SMARTPLATE_KEY"] = key
+
+
 def _connect(client, swiggy, uid=1):
+    _secure_profile(client, uid)
     url = client.post(f"/api/user/{uid}/swiggy/connect", json={},
                       headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example"}).get_json()["authorize_url"]
     q = swiggy.approve(url)
@@ -230,6 +280,7 @@ def test_swiggy_sign_in_and_discovery_end_to_end(client, swiggy):
     assert r.status_code == 302 and r.headers["Location"].endswith("swiggy=connected")
     s = client.get("/api/user/1/swiggy").get_json()
     assert s["connected"] and s["protocol_version"] == "2025-03-26" and s["server"]["name"] == "swiggy-food"
+    assert s["callback_url"] == "http://localhost/swiggy/callback"
     assert [t["name"] for t in s["tools"]] == TOOLS                                 # both pages
     kinds = {t["name"]: t["kind"] for t in s["tools"]}
     assert kinds["get_addresses"] == "read" and kinds["search_restaurants"] == "read"
@@ -238,6 +289,21 @@ def test_swiggy_sign_in_and_discovery_end_to_end(client, swiggy):
     assert swiggy.token not in json.dumps(s)                                        # token never exposed
     called = [json.loads(b)["method"] for m, u, h, b in swiggy.calls if u.endswith("/food")]
     assert called == ["initialize", "notifications/initialized", "tools/list", "tools/list"]  # nothing else
+
+
+def test_swiggy_can_use_approved_auth_callback_path_on_app_origin(client, swiggy, monkeypatch):
+    from smartplate import config
+    monkeypatch.setattr(config, "SWIGGY_CALLBACK_PATH", "/auth/swiggy/callback")
+    _secure_profile(client)
+    headers = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example"}
+    status = client.get("/api/user/1/swiggy", headers=headers).get_json()
+    assert status["callback_url"] == "https://app.example/auth/swiggy/callback"
+    url = client.post("/api/user/1/swiggy/connect", json={}, headers=headers).get_json()["authorize_url"]
+    q = swiggy.approve(url)
+    assert q["redirect_uri"] == status["callback_url"]
+    result = client.get(f"/auth/swiggy/callback?state={q['state']}&code=code-1")
+    assert result.status_code == 302
+    assert result.headers["Location"].endswith("swiggy=connected")
 
 
 def test_swiggy_state_is_single_use_and_checked(client, swiggy):
@@ -262,6 +328,7 @@ def test_swiggy_registration_reused_and_pkce_enforced(client, swiggy):
 
 
 def test_swiggy_requires_https_and_handles_expiry_and_disconnect(client, swiggy, monkeypatch):
+    _secure_profile(client)
     r = client.post("/api/user/1/swiggy/connect", json={}, headers={"X-Forwarded-Host": "evil.example"})
     assert r.status_code == 502 and "HTTPS" in r.get_json()["error"]
     _connect(client, swiggy)
@@ -273,11 +340,26 @@ def test_swiggy_requires_https_and_handles_expiry_and_disconnect(client, swiggy,
     monkeypatch.setattr(clock, "now", lambda: later)
     assert client.get("/api/user/1/swiggy").get_json()["expired"] is True
     assert client.post("/api/user/1/swiggy/disconnect", json={}).get_json() == {"connected": False}
-    assert client.get("/api/user/1/swiggy").get_json() == {"connected": False}
+    assert client.get("/api/user/1/swiggy").get_json()["connected"] is False
 
 
 def test_swiggy_connection_is_private_to_the_profile(client, swiggy):
     uid, key, _ = _private(client)
     assert client.get(f"/api/user/{uid}/swiggy").status_code == 401
     assert client.post(f"/api/user/{uid}/swiggy/connect", json={}).status_code == 401
-    assert client.get(f"/api/user/{uid}/swiggy", headers={"X-SmartPlate-Key": key}).get_json() == {"connected": False}
+    assert client.get(f"/api/user/{uid}/swiggy", headers={"X-SmartPlate-Key": key}).get_json()["connected"] is False
+
+
+def test_swiggy_cannot_connect_or_expose_a_shared_sample_profile(client, swiggy):
+    status = client.get("/api/user/1/swiggy").get_json()
+    assert status["requires_private_profile"] is True and status["connected"] is False
+    r = client.post("/api/user/1/swiggy/connect", json={})
+    assert r.status_code == 502 and "private" in r.get_json()["error"]
+    assert swiggy.calls == []
+
+
+def test_unreadable_swiggy_token_requires_reconnect(client, swiggy, monkeypatch):
+    _connect(client, swiggy)
+    monkeypatch.setattr(swiggy_connect.vault, "unseal", lambda _: None)
+    s = client.get("/api/user/1/swiggy").get_json()
+    assert s["connected"] is False and s["needs_reconnect"] is True

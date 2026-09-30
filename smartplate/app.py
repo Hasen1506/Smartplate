@@ -7,7 +7,7 @@ from flask import Flask, Response, g, jsonify, redirect, request, send_from_dire
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, accounts, config, everyday, push, ratelimit, service
+from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
 from .domain import models, sentiment
 from .domain.checkout import CheckoutConflict
 from .kernel import agent_brain
@@ -18,6 +18,11 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
 def create_app() -> Flask:
+    if config.LIVE_ORDERS and os.environ.get("RENDER"):
+        if (config.SWIGGY_PROVIDER != "live" or not config.DB_PATH.startswith("/var/data/")
+                or not config.SECRET or not config.PUBLIC_URL.startswith("https://")):
+            raise RuntimeError("Live orders on Render require the live provider, persistent /var/data database, "
+                               "stable SMARTPLATE_SECRET and HTTPS SMARTPLATE_PUBLIC_URL")
     initialize()
     app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
     app.config['MAX_CONTENT_LENGTH'] = 256 * 1024
@@ -45,8 +50,7 @@ def create_app() -> Flask:
                 if not found:
                     return jsonify(error='not found'), 404
         if request.path.startswith('/api/'):
-            presented = request.headers.get(access.HEADER) or (
-                request.args.get('key') if request.method == 'GET' else None)
+            presented = request.headers.get(access.HEADER)
             body = request.get_json(silent=True) if request.method == 'POST' else None
             owners = access.owners_of(args, body if isinstance(body, dict) else None,
                                       request.args.get('user_id', type=int))
@@ -73,7 +77,10 @@ def create_app() -> Flask:
 
     @app.errorhandler(swiggy_connect.SwiggyError)
     def swiggy_error(error):
-        return jsonify(error=str(error)), 502
+        response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after)
+        if error.retry_after is not None:
+            response.headers['Retry-After'] = str(error.retry_after)
+        return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
     @app.errorhandler(HTTPException)
     def http_error(error):
@@ -83,6 +90,12 @@ def create_app() -> Flask:
     def response_headers(response):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; "
+            "frame-ancestors 'none'; form-action 'self'; connect-src 'self'; worker-src 'self'; "
+            "img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com")
         if request.path.startswith('/api/'):
             response.headers['Cache-Control'] = 'no-store'
         return response
@@ -94,6 +107,20 @@ def create_app() -> Flask:
 
     @app.get("/healthz")
     def healthz():
+        return jsonify(ok=True)
+
+    @app.get("/readyz")
+    def readyz():
+        # Render should send traffic only while the configured data store is usable.
+        from . import db
+        try:
+            with db.cursor() as cur:
+                cur.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+            if (not os.access(os.path.dirname(os.path.abspath(config.DB_PATH)), os.W_OK)
+                    or not os.access(config.DB_PATH, os.W_OK)):
+                raise OSError("database storage is read-only")
+        except Exception:
+            return jsonify(ok=False), 503
         return jsonify(ok=True)
 
     # Installable app: the manifest and the service worker are served from the root
@@ -116,7 +143,7 @@ def create_app() -> Flask:
             "version": "1.1.0",
             "brain": brain.name,
             "brain_cost_per_decision": brain.cost_per_decision,
-            "swiggy_provider": 'simulated' if config.SWIGGY_PROVIDER == 'simulated' else 'unavailable',
+            "swiggy_provider": config.SWIGGY_PROVIDER,
             "order_edit_window_min": config.ORDER_EDIT_WINDOW_MIN,
             "modes": config.MODE_LABELS,
             "mode_outcomes": {k: v["outcome"] for k, v in config.MODE_META.items()},
@@ -254,8 +281,19 @@ def create_app() -> Flask:
     @app.post("/api/user/<int:user_id>/calendar/ics")
     def ingest_ics(user_id):
         body = request.get_json(force=True, silent=True) or {}
-        plan = models.get_plan(int(body["plan_id"]))
-        n = calendar_sync.ingest_ics(user_id, body.get("ics", ""), plan["week_start"])
+        plan_id = body.get("plan_id")
+        if isinstance(plan_id, bool) or not isinstance(plan_id, int) or plan_id <= 0:
+            raise ValueError("Choose a valid plan for this profile")
+        plan = models.get_plan(plan_id)
+        if not plan or plan["user_id"] != user_id:
+            raise ValueError("Choose a plan belonging to this profile")
+        ics = body.get("ics")
+        if not isinstance(ics, str) or not ics.strip():
+            raise ValueError("Provide a calendar export")
+        try:
+            n = calendar_sync.ingest_ics(user_id, ics, plan["week_start"])
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ValueError("Invalid calendar export") from error
         return jsonify({"events_added": n})
 
     # ---- sentiment demo (shows the free, local NLP) ---- #
@@ -311,6 +349,10 @@ def create_app() -> Flask:
     def set_account(user_id):
         return jsonify(accounts.set_login(user_id, request.get_json(), _presented()))
 
+    @app.post("/api/user/<int:user_id>/account/rotate-key")
+    def rotate_profile_key(user_id):
+        return jsonify(accounts.rotate_key(user_id, request.get_json().get("confirmation")))
+
     @app.post("/api/user/<int:user_id>/devices/<int:device_id>/remove")
     def remove_device(user_id, device_id):
         return jsonify(accounts.remove_device(user_id, device_id))
@@ -318,6 +360,16 @@ def create_app() -> Flask:
     @app.post("/api/user/<int:user_id>/signout")
     def sign_out(user_id):
         return jsonify(accounts.sign_out(user_id, _presented()))
+
+    @app.get("/api/user/<int:user_id>/data.json")
+    def export_profile(user_id):
+        response = jsonify(profile_data.export(user_id))
+        response.headers['Content-Disposition'] = f'attachment; filename=smartplate-profile-{user_id}.json'
+        return response
+
+    @app.delete("/api/user/<int:user_id>")
+    def delete_profile(user_id):
+        return jsonify(profile_data.delete(user_id, request.get_json().get("confirmation")))
 
     @app.patch("/api/user/<int:user_id>/setup")
     def update_setup(user_id):
@@ -358,7 +410,7 @@ def create_app() -> Flask:
         ratelimit.check(f"push-test:{user_id}", 5, 600)
         return jsonify(push.test_message(user_id))
 
-    # ---- Swiggy sign-in + read-only discovery (no ordering) ---- #
+    # ---- Swiggy sign-in, live browsing, cart and gated COD ordering ---- #
     def _public_base():
         if config.PUBLIC_URL:
             return config.PUBLIC_URL
@@ -366,26 +418,32 @@ def create_app() -> Flask:
         host = request.headers.get("X-Forwarded-Host", request.host).split(",")[0].strip()
         return f"{proto}://{host}"
 
+    def _swiggy_callback_url():
+        return f"{_public_base()}{config.SWIGGY_CALLBACK_PATH}"
+
     @app.get("/api/user/<int:user_id>/swiggy")
     def swiggy_status(user_id):
-        return jsonify(swiggy_connect.status(user_id))
+        return jsonify({**swiggy_connect.status(user_id),
+                        "callback_url": _swiggy_callback_url(),
+                        "order_enabled": config.LIVE_ORDERS})
 
     @app.post("/api/user/<int:user_id>/swiggy/connect")
     def swiggy_start(user_id):
-        return jsonify(authorize_url=swiggy_connect.start(user_id, f"{_public_base()}/swiggy/callback"))
+        return jsonify(authorize_url=swiggy_connect.start(user_id, _swiggy_callback_url()))
 
     @app.post("/api/user/<int:user_id>/swiggy/discover")
     def swiggy_discover(user_id):
-        return jsonify(swiggy_connect.discover(user_id))
+        return jsonify({**swiggy_connect.discover(user_id), "order_enabled": config.LIVE_ORDERS})
 
-    # gates 2–3 (swiggy_live.py): addresses, live menus, fill the cart. Never order or pay.
+    # swiggy_live.py: addresses, live menus, cart and explicitly approved COD.
     @app.get("/api/user/<int:user_id>/swiggy/addresses")
     def swiggy_addresses(user_id):
         return jsonify(swiggy_live.addresses(user_id))
 
     @app.post("/api/user/<int:user_id>/swiggy/address")
     def swiggy_choose_address(user_id):
-        return jsonify(swiggy_live.choose_address(user_id, request.get_json().get("address_id")))
+        return jsonify({**swiggy_live.choose_address(user_id, request.get_json().get("address_id")),
+                        "order_enabled": config.LIVE_ORDERS})
 
     @app.get("/api/user/<int:user_id>/swiggy/menu")
     def swiggy_menu(user_id):
@@ -394,15 +452,90 @@ def create_app() -> Flask:
             raise ValueError("Say which restaurant")
         return jsonify(swiggy_live.menu_for(user_id, name, fresh=request.args.get("fresh") == "1"))
 
+    @app.get("/api/user/<int:user_id>/swiggy/restaurants")
+    def swiggy_live_restaurants(user_id):
+        return jsonify(swiggy_live.search_live_restaurants(user_id, request.args.get("query", "")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/favourites")
+    def swiggy_live_favourites(user_id):
+        return jsonify(swiggy_live.live_favourites(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/favourites")
+    def swiggy_toggle_live_favourite(user_id):
+        body = request.get_json()
+        return jsonify(swiggy_live.toggle_live_favourite(user_id, str(body.get("restaurant_id") or ""),
+                                                        str(body.get("restaurant_name") or "")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/live-menu")
+    def swiggy_live_menu(user_id):
+        return jsonify(swiggy_live.live_menu(user_id, request.args.get("restaurant_id", ""),
+                                            request.args.get("restaurant_name", "")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/dishes")
+    def swiggy_dishes(user_id):
+        offset = request.args.get("offset", "0")
+        if not offset.isdigit():
+            raise ValueError("Invalid menu page")
+        return jsonify(swiggy_live.search_live_dishes(user_id, request.args.get("restaurant_id", ""),
+            request.args.get("restaurant_name", ""), request.args.get("query", ""), int(offset)))
+
+    @app.post("/api/user/<int:user_id>/swiggy/live-cart/preview")
+    def swiggy_live_cart_preview(user_id):
+        body = request.get_json()
+        return jsonify(swiggy_live.live_cart_preview(user_id, str(body.get("restaurant_id") or ""),
+                          str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
+                          str(body.get("item_name") or "")))
+
+    @app.post("/api/user/<int:user_id>/swiggy/live-cart")
+    def swiggy_live_fill_cart(user_id):
+        body = request.get_json()
+        try:
+            return jsonify(swiggy_live.fill_live_cart(user_id, str(body.get("restaurant_id") or ""),
+                          str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
+                          str(body.get("item_name") or ""), body.get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
+
+    @app.get("/api/user/<int:user_id>/swiggy/live-cart")
+    def swiggy_current_cart(user_id):
+        return jsonify(swiggy_live.current_live_cart(user_id))
+
+    @app.get("/api/user/<int:user_id>/swiggy/checkout/preview")
+    def swiggy_checkout_preview(user_id):
+        return jsonify(swiggy_live.live_checkout_preview(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/checkout")
+    def swiggy_checkout(user_id):
+        try:
+            return jsonify(swiggy_live.place_live_order(user_id, request.get_json().get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
+
+    @app.get("/api/user/<int:user_id>/swiggy/orders/<order_id>")
+    def swiggy_order_status(user_id, order_id):
+        return jsonify(swiggy_live.live_order_status(user_id, order_id))
+
+    @app.get("/api/user/<int:user_id>/swiggy/order-history")
+    def swiggy_order_history(user_id):
+        return jsonify(swiggy_live.live_order_history(user_id))
+
+    @app.get("/api/session/<int:session_id>/swiggy-cart/preview")
+    def swiggy_cart_preview(session_id):
+        return jsonify(swiggy_live.cart_preview(session_id))
+
     @app.post("/api/session/<int:session_id>/swiggy-cart")
     def swiggy_fill_cart(session_id):
-        return jsonify(swiggy_live.fill_cart(session_id))
+        try:
+            return jsonify(swiggy_live.fill_cart(session_id, request.get_json().get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
 
     @app.post("/api/user/<int:user_id>/swiggy/disconnect")
     def swiggy_disconnect(user_id):
         return jsonify(swiggy_connect.disconnect(user_id))
 
     @app.get("/swiggy/callback")
+    @app.get("/auth/swiggy/callback")
     def swiggy_callback():
         # Swiggy redirects the browser here; the single-use `state` ties it to the
         # profile that started sign-in, so no profile key is needed on this hop.

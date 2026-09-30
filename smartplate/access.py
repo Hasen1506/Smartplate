@@ -3,9 +3,9 @@
 A profile created through onboarding gets a random key. Only its SHA-256 is stored;
 the key itself is returned once and kept in the person's browser. Every endpoint that
 reads or changes that profile (its user, plans, sessions, expenses, reminders) must
-present it in the `X-SmartPlate-Key` header — or, for plain download links (CSV, .ics),
-as `?key=` on a GET. Sample profiles, and profiles made before keys existed, have no
-key and stay open.
+present it in the `X-SmartPlate-Key` header. CSV and calendar downloads use fetch
+with that header so keys are never embedded in URLs. Sample profiles, and profiles
+made before keys existed, have no key and stay open.
 
 A profile can also get a name + password (accounts.py). Each browser that signs in
 gets its own device token, which this check accepts alongside the profile key. Without

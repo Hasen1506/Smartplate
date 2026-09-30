@@ -282,6 +282,7 @@ CREATE TABLE IF NOT EXISTS app_secrets (         -- generated keys when no env s
 # Columns added after the first trial shipped. CREATE TABLE IF NOT EXISTS does not
 # alter an existing table, so a saved Codespace database is upgraded in place.
 MIGRATIONS = [
+    ("community_templates", "author_user_id", "INTEGER"),
     ("users", "observances", "TEXT NOT NULL DEFAULT '[]'"),
     ("users", "prefs", "TEXT NOT NULL DEFAULT '{}'"),
     ("users", "access_hash", "TEXT"),

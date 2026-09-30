@@ -64,11 +64,41 @@ CREATE TABLE IF NOT EXISTS swiggy_menus (        -- live menus, cached briefly (
     fetched_ts TEXT NOT NULL,
     PRIMARY KEY (user_id, restaurant)
 );
+CREATE TABLE IF NOT EXISTS swiggy_favourites (
+    user_id INTEGER NOT NULL,
+    address_id TEXT NOT NULL,
+    restaurant_id TEXT NOT NULL,
+    restaurant_name TEXT NOT NULL,
+    PRIMARY KEY (user_id, address_id, restaurant_id)
+);
+CREATE TABLE IF NOT EXISTS swiggy_order_attempts (
+    user_id INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    address_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    order_id TEXT,
+    created_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, fingerprint)
+);
+CREATE TABLE IF NOT EXISTS swiggy_checkout_quotes (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    cart_fingerprint TEXT NOT NULL,
+    created_ts TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS swiggy_cart_intents (
+    user_id INTEGER PRIMARY KEY,
+    address_id TEXT NOT NULL,
+    restaurant_id TEXT NOT NULL,
+    restaurant_name TEXT NOT NULL,
+    item_id TEXT NOT NULL
+);
 """
 COLUMNS = [                                      # added after gate 1 shipped
     ("swiggy_connections", "address_id", "TEXT"),
     ("swiggy_connections", "address_label", "TEXT"),
     ("swiggy_connections", "samples", "TEXT NOT NULL DEFAULT '{}'"),
+    ("swiggy_order_attempts", "cart_fingerprint", "TEXT"),
 ]
 CLIENT_VERSION = "2025-06-18"          # protocol we offer; the server's reply is what we record
 PENDING_TTL = dt.timedelta(minutes=15)
@@ -77,6 +107,10 @@ READ_PREFIXES = ("get_", "search_", "fetch_", "track_", "list_")
 
 class SwiggyError(RuntimeError):
     """A connection step failed; the message is safe to show the user."""
+
+    def __init__(self, message, *, code="swiggy_error", retry_after=None):
+        super().__init__(message)
+        self.code, self.retry_after = code, retry_after
 
 
 def init_schema() -> None:
@@ -184,8 +218,17 @@ def pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
+def private_owner(user_id: int) -> bool:
+    with db.cursor() as cur:
+        row = cur.execute("SELECT access_hash FROM users WHERE id=?", (user_id,)).fetchone()
+    return bool(row and row["access_hash"])
+
+
 def start(user_id: int, redirect_uri: str) -> str:
     """Begin sign-in; returns the Swiggy authorization URL to send the browser to."""
+    if not private_owner(user_id):
+        raise SwiggyError("Create or sign in to your own private SmartPlate profile before connecting Swiggy. "
+                          "Sample profiles are shared by every visitor.")
     if not redirect_uri.startswith("https://") and "://localhost" not in redirect_uri \
             and "://127.0.0.1" not in redirect_uri:
         raise SwiggyError("Swiggy sign-in needs HTTPS (or localhost for development)")
@@ -216,6 +259,8 @@ def finish(state: str, code: str) -> int:
         raise SwiggyError("This sign-in link expired or was already used. Start again from SmartPlate.")
     if not code:
         raise SwiggyError("Swiggy didn't return a sign-in code")
+    if not private_owner(row["user_id"]):
+        raise SwiggyError("This sign-in belongs to a shared profile. Start again from your own private profile.")
     meta = _metadata()
     status, _, raw = _json("POST", meta["token_endpoint"], {
         "grant_type": "authorization_code", "code": code, "redirect_uri": row["redirect_uri"],
@@ -229,8 +274,14 @@ def finish(state: str, code: str) -> int:
     expires = (clock.now() + dt.timedelta(seconds=int(tok["expires_in"]))).isoformat() if tok.get("expires_in") else None
     with db.cursor() as cur:
         cur.execute("INSERT INTO swiggy_connections(user_id, access_token, expires_ts, connected_ts) VALUES (?,?,?,?) "
-                    "ON CONFLICT(user_id) DO UPDATE SET access_token=excluded.access_token, "   # keeps the chosen address
-                    "expires_ts=excluded.expires_ts, connected_ts=excluded.connected_ts", (row["user_id"], vault.seal(tok["access_token"]), expires, clock.now().isoformat()))
+                    "ON CONFLICT(user_id) DO UPDATE SET access_token=excluded.access_token, "
+                    "expires_ts=excluded.expires_ts, connected_ts=excluded.connected_ts, "
+                    "address_id=NULL, address_label=NULL, samples='{}'", (row["user_id"], vault.seal(tok["access_token"]), expires, clock.now().isoformat()))
+        # Reconnection may sign into a different Swiggy account. Re-select an
+        # address and review a cart instead of carrying over old account state.
+        cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (row["user_id"],))
+        cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (row["user_id"],))
+        cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (row["user_id"],))
     discover(row["user_id"])
     return row["user_id"]
 
@@ -247,10 +298,27 @@ def _rpc(token, method, params, rid, session_id=None):
         payload["id"] = rid
     status, headers, raw = _json("POST", f"{config.SWIGGY_MCP_BASE}/food", payload, token=token, extra=extra)
     if status == 401:
-        raise SwiggyError("Your Swiggy sign-in has expired. Connect again.")
+        raise SwiggyError("Your Swiggy sign-in has expired. Connect again.", code="swiggy_auth_expired")
+    if status == 429:
+        wait = headers.get("retry-after", "")
+        wait = min(int(wait), 86400) if str(wait).isdigit() else None
+        raise SwiggyError("Swiggy is limiting requests. Wait before trying again; an order is never retried automatically.",
+                          code="swiggy_rate_limited", retry_after=wait)
     if status >= 400:
         raise SwiggyError(f"Swiggy's MCP server returned HTTP {status}")
     return headers, (_parse_rpc(headers, raw, rid) if rid is not None else None)
+
+
+def user_rpc(user_id, token, *args):
+    """Persist a provider-rejected sign-in without retrying a purchase."""
+    try:
+        return _rpc(token, *args)
+    except SwiggyError as error:
+        if error.code == "swiggy_auth_expired":
+            with db.cursor() as cur:
+                cur.execute("UPDATE swiggy_connections SET expires_ts=? WHERE user_id=?",
+                            (clock.now().isoformat(), user_id))
+        raise
 
 
 def classify(tool: dict) -> str:
@@ -266,14 +334,14 @@ def discover(user_id: int) -> dict:
         raise SwiggyError("Not connected to Swiggy")
     if not conn["access_token"]:
         raise SwiggyError("Your Swiggy sign-in can no longer be read on this server. Connect again.")
-    headers, init = _rpc(conn["access_token"], "initialize", {
+    headers, init = user_rpc(user_id, conn["access_token"], "initialize", {
         "protocolVersion": CLIENT_VERSION, "capabilities": {},
         "clientInfo": {"name": "SmartPlate", "version": "1.1.0"}}, 1)
     session_id = headers.get("mcp-session-id")
-    _rpc(conn["access_token"], "notifications/initialized", {}, None, session_id)
+    user_rpc(user_id, conn["access_token"], "notifications/initialized", {}, None, session_id)
     tools, cursor, rid = [], None, 2
     while True:
-        _, page = _rpc(conn["access_token"], "tools/list", {"cursor": cursor} if cursor else {}, rid, session_id)
+        _, page = user_rpc(user_id, conn["access_token"], "tools/list", {"cursor": cursor} if cursor else {}, rid, session_id)
         tools += page.get("tools", [])
         cursor, rid = page.get("nextCursor"), rid + 1
         if not cursor or rid > 20:
@@ -288,6 +356,8 @@ def discover(user_id: int) -> dict:
 
 
 def _connection(user_id: int) -> dict | None:
+    if not private_owner(user_id):
+        return None
     init_schema()
     with db.cursor() as cur:
         row = cur.execute("SELECT * FROM swiggy_connections WHERE user_id=?", (user_id,)).fetchone()
@@ -302,10 +372,14 @@ def status(user_id: int) -> dict:
     """What the UI may see — never the token."""
     conn = _connection(user_id)
     if not conn:
-        return {"connected": False}
+        return {"connected": False, "requires_private_profile": not private_owner(user_id)}
     expired = bool(conn["expires_ts"]) and dt.datetime.fromisoformat(conn["expires_ts"]) <= clock.now()
     tools = db.jl(conn["tools"])
-    return {"connected": not expired, "expired": expired, "expires": conn["expires_ts"],
+    # A changed/missing vault key makes a stored token unreadable even before its
+    # advertised expiry. Never present that state as an active connection.
+    token_unreadable = not bool(conn["access_token"])
+    return {"connected": not expired and not token_unreadable, "expired": expired,
+            "needs_reconnect": token_unreadable, "expires": conn["expires_ts"],
             "connected_at": conn["connected_ts"], "discovered_at": conn["discovered_ts"],
             "protocol_version": conn["protocol_version"], "server": db.jl(conn["server_info"], {}),
             "tools": [{k: t[k] for k in ("name", "description", "kind")} for t in tools],
@@ -320,4 +394,6 @@ def disconnect(user_id: int) -> dict:
         cur.execute("DELETE FROM swiggy_connections WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_pending WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (user_id,))
+        cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
+        cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
     return {"connected": False}

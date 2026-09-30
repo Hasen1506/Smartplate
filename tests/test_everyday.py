@@ -171,6 +171,20 @@ def test_shortlist_is_capped_and_favourites_first(client):
     assert o["hidden"]["not_safe"] >= 1
 
 
+def test_treats_cannot_replace_a_meal_in_plan_shortlist_or_manual_pick(client):
+    v = client.get("/api/user/3/plan").get_json()  # Arjun has no allergy excluding chikki
+    assert all(not c.get("item", "").endswith(" Sweet")
+               for _, _, c in _cells(v) if c["kind"] == "delivery")
+    sid = next(c["session_id"] for _, _, c in _cells(v) if c["status"] == "active" and not c.get("past"))
+    o = client.get(f"/api/session/{sid}/options").get_json()
+    names = [d["name"] for g in o["usual"] for d in g["dishes"]] + [d["name"] for d in o["new"]]
+    assert "Peanut Chikki Sweet" not in names and "Rava Kesari Sweet" not in names
+    with db.cursor() as cur:
+        item_id = cur.execute("SELECT id FROM menu_items WHERE name='Peanut Chikki Sweet'").fetchone()["id"]
+    r = client.post(f"/api/session/{sid}/choose", json={"item_id": item_id})
+    assert r.status_code == 400 and "treat" in r.get_json()["error"]
+
+
 def test_pick_is_kept_and_week_rebalances(client):
     v = client.get("/api/plan/1").get_json()
     sid = _session(v, 0, "dinner")
@@ -373,14 +387,15 @@ def test_current_plan_rolls_to_new_week(client, monkeypatch):
     assert rolled["id"] != first["id"] and rolled["week_start"] == (ws + dt.timedelta(days=7)).isoformat()
 
 
-def test_swap_and_replan_do_not_reshuffle_other_meals(client):
+def test_swap_and_noop_replan_keep_the_requested_trade(client):
     snap = lambda v: {c["session_id"]: c["item"] for _, _, c in _cells(v)}          # noqa: E731
     v = client.get("/api/plan/1").get_json()
     before = snap(v)
     deliveries = [c for _, _, c in _cells(v) if c["kind"] == "delivery"]
     a, b = deliveries[0]["session_id"], deliveries[-1]["session_id"]
     after = snap(client.post("/api/plan/1/swap", json={"a": a, "b": b}).get_json())
-    assert [k for k in before if k not in (a, b) and before[k] != after[k]] == []
+    # The solver may rebalance other unpinned meals to respect day/week caps.
+    assert after[a] == before[b] and after[b] == before[a]
     again = snap(client.post("/api/plan/1/optimize", json={}).get_json())
     assert again == after                                           # a no-op re-plan is a no-op
 

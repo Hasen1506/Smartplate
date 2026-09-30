@@ -14,6 +14,9 @@ AGENT_BRAIN = os.environ.get("SMARTPLATE_BRAIN", "deterministic")
 
 # Swiggy MCP provider — "simulated" (default) or "live" (requires real access).
 SWIGGY_PROVIDER = os.environ.get("SMARTPLATE_SWIGGY", "simulated")
+# Real Food orders are non-idempotent. Enable only after provider approval,
+# staging validation and durable storage; the public Render Free demo stays off.
+LIVE_ORDERS = os.environ.get("SMARTPLATE_LIVE_ORDERS", "off") == "on"
 
 # Solver limits: relative optimality gap and a hard time cap per weekly solve.
 SOLVER_GAP = float(os.environ.get("SMARTPLATE_SOLVER_GAP", "0.001"))
@@ -33,6 +36,11 @@ SWIGGY_TIMEOUT_S = float(os.environ.get("SMARTPLATE_SWIGGY_TIMEOUT", "10"))
 # Public base URL for the OAuth redirect when a proxy hides it (else derived per request).
 # Render sets RENDER_EXTERNAL_URL for every web service, so hosted installs need no setup.
 PUBLIC_URL = (os.environ.get("SMARTPLATE_PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+# The registered redirect path must exactly match Swiggy's approval. A proposed
+# URL in an application document is not proof that the host belongs to this app.
+SWIGGY_CALLBACK_PATH = os.environ.get("SMARTPLATE_SWIGGY_CALLBACK_PATH", "/swiggy/callback")
+if SWIGGY_CALLBACK_PATH not in ("/swiggy/callback", "/auth/swiggy/callback"):
+    raise ValueError("SMARTPLATE_SWIGGY_CALLBACK_PATH must be a supported callback route")
 
 # Server secret for encrypting stored tokens. render.yaml generates one; without it a
 # random key is created once and kept in the database (fine for a trial, not for

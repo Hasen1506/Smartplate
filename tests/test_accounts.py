@@ -124,3 +124,26 @@ def test_vault_seals_and_rejects_foreign_keys(seeded, monkeypatch):
     monkeypatch.setattr(config, "SECRET", "a different server secret")
     assert vault.unseal(sealed) is None
     assert vault.unseal(vault.seal("t2")) == "t2"
+
+
+
+def test_recovery_rotation_revokes_old_codes_devices_and_approvals(client):
+    uid, old = _with_login(client, login="rotate-me")
+    phone = client.post("/api/signin", json={"login": "rotate-me", "password": "correct horse", "device": "Phone"}).get_json()
+    with db.cursor() as cur:
+        cur.execute("INSERT INTO swiggy_pending VALUES (?,?,?,?,?)", ("old-state", uid, "verifier", "https://example.com/callback", "now"))
+        cur.execute("INSERT INTO swiggy_checkout_quotes VALUES (?,?,?,?)", ("old-quote", uid, "cart", "now"))
+    route = f"/api/user/{uid}/account/rotate-key"
+    assert client.post(route, json={"confirmation": "ROTATE"}).status_code == 401
+    assert client.post(route, json={}, headers=old).status_code == 400
+    response = client.post(route, json={"confirmation": "ROTATE"}, headers=old)
+    assert response.status_code == 200 and response.headers["Cache-Control"] == "no-store"
+    fresh = {"X-SmartPlate-Key": response.get_json()["key"]}
+    assert fresh != old
+    assert client.get(f"/api/user/{uid}/plan", headers=old).status_code == 401
+    assert client.get(f"/api/user/{uid}/plan", headers={"X-SmartPlate-Key": phone["key"]}).status_code == 401
+    assert client.get(f"/api/user/{uid}/plan", headers=fresh).status_code == 200
+    with db.cursor() as cur:
+        for table in ("devices", "swiggy_pending", "swiggy_checkout_quotes"):
+            assert not cur.execute(f"SELECT 1 FROM {table} WHERE user_id=?", (uid,)).fetchone()
+    assert client.post("/api/signin", json={"login": "rotate-me", "password": "correct horse"}).status_code == 200

@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const source = fs.readFileSync('smartplate/static/app.js', 'utf8').replace(
   'boot().catch', 'globalThis.bootPromise = boot().catch');
 
-function fixture() {
+function fixture(overrides = {}) {
   const calls = [];
   const element = { innerHTML: '', classList: { toggle() {} }, appendChild() {}, remove() {}, addEventListener() {}, setAttribute() {} };
   const view = {
@@ -24,6 +24,7 @@ function fixture() {
     '/api/plan/42/orders': { attempted: 1, placed: 1, substituted: 0, failed: 0,
       results: [{ day: 0, meal: 'lunch', item: 'Meal', state: 'placed', placed: true, substituted: true, substitution: null }] },
   };
+  Object.assign(replies, overrides);
   const context = vm.createContext({
     document: { getElementById: () => element, querySelectorAll: () => [], querySelector: () => null,
       createElement: () => element, addEventListener() {}, body: element },
@@ -68,6 +69,19 @@ test('settings render persisted inputs and escape profile names', async () => {
   assert.match(html, /value="vegan" selected/);
 });
 
+test('Swiggy setup shows the exact callback and reconnect state safely', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = {
+    connected: false, needs_reconnect: true,
+    callback_url: 'https://smartplate.onrender.com/swiggy/callback?x=<unsafe>'
+  };`, context);
+  const html = vm.runInContext('connectionPanel()', context);
+  assert.match(html, /Reconnect required/);
+  assert.match(html, /exact-match allowlisted HTTPS redirect/);
+  assert.match(html, /smartplate\.onrender\.com\/swiggy\/callback/);
+  assert.ok(!html.includes('<unsafe>'));
+});
+
 test('busy action guard ignores a second click during the same action', async () => {
   const { context } = fixture(); await context.bootPromise;
   await vm.runInContext(`(async () => {
@@ -97,7 +111,7 @@ test('no saved profile opens the welcome screen instead of a sample', async () =
   vm.runInContext("localStorage.getItem = () => null", context);
   await vm.runInContext('boot()', context);
   assert.equal(vm.runInContext('S.welcome', context), true);
-  assert.match(element.innerHTML, /Set up my week/);
+  assert.match(element.innerHTML, /Create my private profile/);
   assert.ok(!calls.some(c => c.url.includes('/plan')));
 });
 
@@ -110,6 +124,93 @@ test('today shows the next meal with order-by time, hand-off and escaped names',
   assert.match(html, /data-confirm="9"/);
   assert.match(html, /2 meals didn&#39;t fit/);
   assert.ok(!html.includes('<b>Meals</b>'));
+});
+
+test('sample banner describes demo data without inventing an allergy', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  richView(context);
+  vm.runInContext("S.view.user.prefs = { sample: true }; S.view.user.allergens = []", context);
+  const html = vm.runInContext('todayScreen()', context);
+  assert.match(html, /demonstration preferences and sample menu data/);
+  assert.ok(!html.includes('fictional allergies'));
+});
+
+test('connected profiles with ingredient rules keep the direct Swiggy hand-off', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  richView(context);
+  vm.runInContext("S.swiggy = { connected: true, address: { id: 'home', label: 'Home' } }", context);
+  const html = vm.runInContext('todayScreen()', context);
+  assert.match(html, /Order from your area/);
+  assert.match(html, /sample weekly planner/);
+  assert.ok(!html.includes('data-cart="9"'));
+});
+
+test('eligible profiles review and escape the exact live item before a cart update', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  richView(context);
+  vm.runInContext(`S.view.user.diet = 'nonveg'; S.view.user.allergens = [];
+    S.swiggy = { connected: true, address: { id: 'home' } };
+    S.cartReview = { session_id: 9, item: '<img src=x>', restaurant: '<b>Kitchen</b>',
+      address: 'Home', planned_cost: 150, menu_price: null, fingerprint: 'fingerprint' };`, context);
+  assert.match(vm.runInContext('nextUpCard(S.view.next_up)', context), /data-cart="9"/);
+  const dialog = vm.runInContext('cartReviewDialog()', context);
+  assert.match(dialog, /Price to verify/);
+  assert.match(dialog, /Add to Swiggy cart/);
+  assert.ok(!dialog.includes('<img src=x>') && !dialog.includes('<b>Kitchen</b>'));
+});
+
+test('connected Places uses real Swiggy IDs and no sample restaurant cards', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'addr-home', label: 'Home' } };
+    S.places = [{ id: 1, name: 'Sample Diner', favourite: true }];
+    S.liveFavourites = [{ id: 'rest-42', name: '<Real Place>' }];
+    S.liveBrowseMenu = { restaurant: { id: 'rest-42', name: '<Real Place>' }, address: 'Home', fetched: 'today',
+      items: [{ id: 'item-7', name: '<Dish>', price: null, veg: true, in_stock: true, has_options: false }] };`, context);
+  const html = vm.runInContext('placesScreen()', context);
+  assert.match(html, /Order from your area/);
+  assert.match(html, /rest-42/);
+  assert.match(html, /item-7/);
+  assert.match(html, /Price in cart/);
+  assert.ok(!html.includes('Sample Diner') && !html.includes('<Real Place>') && !html.includes('<Dish>'));
+});
+
+test('real order confirmation shows live total, address and payment before placement', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'home', label: 'Home' }, order_enabled: true };
+    S.liveCart = { item: 'Tiffin', restaurant: 'Real Place', to_pay: 160, checkout_url: 'https://www.swiggy.com/' };
+    S.checkoutReview = { item: '<Tiffin>', quantity: 1, address: '<Home>', to_pay: 160,
+      payment_label: 'Cash on Delivery', fingerprint: 'reviewed' };`, context);
+  assert.match(vm.runInContext('livePlacesScreen()', context), /Review and place order/);
+  const dialog = vm.runInContext('checkoutReviewDialog()', context);
+  assert.match(dialog, /Cash on Delivery/);
+  assert.match(dialog, /Confirm and place order · ₹160/);
+  assert.ok(!dialog.includes('<Tiffin>') && !dialog.includes('<Home>'));
+});
+
+test('recent provider orders and uncertain attempts are visible without raw markup', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'home', label: 'Home' }, order_enabled: true };
+    S.liveOrderHistory = { address: '<Home>', attempts: [{ state: 'unknown' }],
+      provider_orders: [{ order_id: 'o-1', restaurant: '<Restaurant>', item: 'Tiffin',
+        status: 'PREPARING', total: '160', ordered_time: 'now' }] };`, context);
+  const html = vm.runInContext('livePlacesScreen()', context);
+  assert.match(html, /Check recent Swiggy orders/);
+  assert.match(html, /uncertain result/);
+  assert.match(html, /o-1/);
+  assert.ok(!html.includes('<Home>') && !html.includes('<Restaurant>'));
+});
+
+test('live configuration routes orders to real Places instead of a dead simulator', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.meta.swiggy_provider = 'live';`, context);
+  assert.match(vm.runInContext('ordersPanel()', context), /Open live Places/);
+  assert.ok(!vm.runInContext('ordersPanel()', context).includes('data-act="exec"'));
+  assert.ok(!vm.runInContext('weekScreen()', context).includes('data-act="exec"'));
+  assert.match(vm.runInContext('weekScreen()', context), /Sample weekly planner/);
+  const budget = vm.runInContext('budgetCard()', context);
+  assert.match(budget, /Sample plan estimate/);
+  assert.match(budget, /actual purchases are reviewed separately/);
+  assert.ok(!budget.includes('Prices include delivery and expected surge'));
 });
 
 test('week rows are draggable and carry weather and holidays', async () => {
@@ -139,8 +240,8 @@ test('shortlist sheet lists usual places, new picks and hidden counts', async ()
   assert.match(html, /data-cook="dal_rice"/);
 });
 
-test('onboarding walks five steps and validates before moving on', async () => {
-  const { context } = fixture(); await context.bootPromise;
+test('onboarding uses four steps without sample restaurant choices or sample budget quotes', async () => {
+  const { context, calls } = fixture(); await context.bootPromise;
   vm.runInContext('startOnboard()', context);
   assert.match(vm.runInContext('onboardingScreen()', context), /What do you eat/);
   vm.runInContext("onboardChip('allergens', 'peanut', true); onboardChip('diet', 'veg', false)", context);
@@ -148,8 +249,12 @@ test('onboarding walks five steps and validates before moving on', async () => {
   assert.equal(vm.runInContext('S.onboard.d.diet', context), 'veg');
   vm.runInContext("S.onboard.step = 1; onboardChip('meals', 'lunch', true); onboardChip('meals', 'dinner', true)", context);
   await assert.rejects(vm.runInContext("onboardNav('next')", context), /at least one meal/);
-  vm.runInContext("S.onboard.step = 3; S.onboard.suggest = { feasible: true, tight: 1500, suggested: 2000, roomy: 2500 }", context);
-  assert.match(vm.runInContext('onboardingScreen()', context), /Usual · ₹2,000/);
+  vm.runInContext('S.onboard.step = 2', context);
+  const budget = vm.runInContext('onboardingScreen()', context);
+  assert.match(budget, /Enter your own limit/);
+  assert.ok(!budget.includes('Usual · ₹2,000'));
+  assert.equal(vm.runInContext('OB_STEPS.length', context), 4);
+  assert.ok(!calls.some(c => c.url.includes('/api/suggest-budget')));
 });
 
 test('private profile keys are sent as a header and merged into the profile list', async () => {
@@ -160,6 +265,142 @@ test('private profile keys are sent as a header and merged into the profile list
   assert.equal(calls.at(-1).options.headers['X-SmartPlate-Key'], 'secret-key-123456789');
   const users = JSON.parse(vm.runInContext("JSON.stringify(mergeUsers([{ id: 1, name: 'Sample' }, { id: 2, name: 'Meera' }]))", context));
   assert.deepEqual(users.map(u => [u.id, !!u.private]), [[2, true], [1, false]]);
-  assert.match(vm.runInContext("withKey('/api/receipts/2/export.csv')", context), /\?key=secret-key-123456789$/);
+  assert.match(vm.runInContext('receiptsPanel()', context), /data-act="download-csv"/);
+  assert.match(vm.runInContext('reminderRow()', context), /data-act="download-ics"/);
+  assert.ok(!source.includes('withKey('));
   await assert.rejects(vm.runInContext("useRecoveryCode('not a code')", context), /recovery code/);
+});
+
+test('private exports fetch with a header and never put recovery keys in URLs', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`const bag2 = {}; localStorage.getItem = (k) => bag2[k] ?? null;
+    localStorage.setItem = (k, v) => { bag2[k] = v; };
+    keys.put(2, 'export-secret', 'Meera');`, context);
+  let requested, downloaded;
+  context.Blob = Blob;
+  context.URL = { createObjectURL: () => 'blob:export', revokeObjectURL() {} };
+  context.fetch = async (url, options) => {
+    requested = { url, options };
+    return { ok: true, blob: async () => new Blob(['date,item\n'], { type: 'text/csv' }) };
+  };
+  context.document.createElement = () => ({ click() { downloaded = this.download; }, remove() {} });
+  await vm.runInContext("downloadPrivate('/api/receipts/2/export.csv', 'expenses.csv', 'text/csv')", context);
+  assert.equal(requested.url, '/api/receipts/2/export.csv');
+  assert.equal(requested.options.headers['X-SmartPlate-Key'], 'export-secret');
+  assert.equal(downloaded, 'expenses.csv');
+});
+
+test('shared profiles cannot start a personal Swiggy connection', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext('S.swiggy = { connected: false, requires_private_profile: true }', context);
+  const html = vm.runInContext('connectionPanel()', context);
+  assert.match(html, /Create my profile/);
+  assert.match(html, /data-act="signin-open"/);
+  assert.ok(!html.includes('data-act="swiggy-connect"'));
+});
+
+test('boot restores the actual provider cart after a page reload', async () => {
+  const { context, calls } = fixture({
+    '/api/user/2/swiggy': { connected: true, address: { id: 'home', label: 'Home' } },
+    '/api/user/2/swiggy/favourites': [],
+    '/api/user/2/swiggy/live-cart': { cart: { item: 'Real Dish', restaurant: 'Real Place', to_pay: 160, orderable: true } },
+  });
+  await context.bootPromise;
+  assert.equal(vm.runInContext('S.liveCart.item', context), 'Real Dish');
+  assert.equal(vm.runInContext('S.liveCart.to_pay', context), 160);
+  assert.ok(calls.some(c => c.url.endsWith('/swiggy/live-cart') && c.options.method === 'GET'));
+});
+
+test('an external cart is visible but cannot be placed without a new review', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'home' }, order_enabled: true };
+    S.liveCart = { item: '<External item>', restaurant: 'Real Place', to_pay: 160, orderable: false };`, context);
+  const html = vm.runInContext('livePlacesScreen()', context);
+  assert.ok(!html.includes('data-act="review-live-checkout"') && !html.includes('<External item>'));
+  assert.match(html, /clear/);
+});
+
+test('checkout names and escapes the reviewed restaurant', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.checkoutReview = { restaurant: '<Kitchen>', item: 'Dish', quantity: 1,
+    address: 'Full address', to_pay: 160, payment_label: 'Cash' };`, context);
+  const html = vm.runInContext('checkoutReviewDialog()', context);
+  assert.match(html, /&lt;Kitchen&gt;/);
+  assert.ok(!html.includes('<Kitchen>'));
+});
+
+test('saved orders remain trackable after reload with readable provider progress', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'home' } };
+    S.placedOrder = null;
+    S.liveOrderHistory = { attempts: [{ state: 'confirmed', order_id: 'o-1' }],
+      provider_orders: [{ order_id: 'o-1', restaurant: 'Kitchen', item: 'Dish', status: 'PREPARING' }] };
+    S.liveOrderStatus = { order_id: 'o-1', tracking: { title: '<Preparing>', subtitle: 'At the restaurant', eta: '25 minutes' } };`, context);
+  const html = vm.runInContext('livePlacesScreen()', context);
+  assert.match(html, /data-live-track="o-1"/);
+  assert.match(html, /&lt;Preparing&gt;/);
+  assert.match(html, /25 minutes/);
+  assert.ok(!html.includes('<Preparing>') && !html.includes('"tracking":'));
+});
+
+test('Profiles exposes authenticated export and an explicit deletion form', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`const savedKeys = {}; localStorage.getItem = k => savedKeys[k] || null;
+    localStorage.setItem = (k,v) => savedKeys[k] = v; keys.put(2, 'my-private-key', 'Meera');`, context);
+  const html = vm.runInContext('profilesPanel()', context);
+  assert.match(html, /data-act="download-profile"/);
+  assert.match(html, /id="delete-profile"/);
+  assert.match(html, /Type DELETE/);
+  assert.match(html, /existing orders remain active/);
+  vm.runInContext(`S.liveCart = { item: 'Private dish' }; S.liveOrderHistory = { private: true }; clearCurrentProfile()`, context);
+  assert.equal(vm.runInContext('S.liveCart', context), null);
+  assert.equal(vm.runInContext('S.liveOrderHistory', context), null);
+  assert.equal(vm.runInContext('S.userId', context), null);
+});
+
+test('restaurant dish search loads actual pages without replacing earlier results', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'home' } };
+    S.liveBrowseMenu = { restaurant: { id: 'real-r', name: 'Real Kitchen' }, items: [], address: 'Home' };`, context);
+  const requests = [];
+  context.fetch = async (url) => {
+    requests.push(url);
+    const more = url.endsWith('offset=20');
+    return { ok: true, json: async () => ({ items: more ? [{ id: 'real-item-2', name: 'Second dish' }] :
+      [{ id: 'real-item-1', name: '<First dish>' }], query: 'tiffin', has_more: !more, next_offset: more ? null : 20,
+      hidden_nonveg: 0, fetched: 'now' }) };
+  };
+  await vm.runInContext("searchLiveDishes('tiffin')", context);
+  assert.match(vm.runInContext('livePlacesScreen()', context), /Load more matching dishes/);
+  await vm.runInContext("searchLiveDishes('tiffin', true)", context);
+  assert.equal(vm.runInContext('S.liveBrowseMenu.items.length', context), 2);
+  assert.ok(requests[0].includes('restaurant_id=real-r') && requests[1].endsWith('offset=20'));
+  const html = vm.runInContext('livePlacesScreen()', context);
+  assert.match(html, /real-item-1/); assert.match(html, /real-item-2/);
+  assert.ok(!html.includes('<First dish>'));
+});
+
+test('recovery rotation saves the new key and replaces the checkout approval', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`const rotateBag = {}; localStorage.getItem = k => rotateBag[k] ?? null;
+    localStorage.setItem = (k,v) => rotateBag[k] = v; localStorage.removeItem = k => delete rotateBag[k];
+    keys.put(2, 'old-key', 'Meera'); S.checkoutReview = { fingerprint: 'old-approval' };`, context);
+  const requests = [];
+  context.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return { ok: true, json: async () => url.endsWith('rotate-key') ?
+      { user_id: 2, key: 'fresh-private-key', name: 'Meera' } : { devices: [], private: true } };
+  };
+  await vm.runInContext('rotateRecoveryCode()', context);
+  assert.equal(requests[0].options.headers['X-SmartPlate-Key'], 'old-key');
+  assert.equal(requests[1].options.headers['X-SmartPlate-Key'], 'fresh-private-key');
+  assert.equal(vm.runInContext('keys.get(2)', context), 'fresh-private-key');
+  assert.equal(vm.runInContext('S.checkoutReview', context), null);
+});
+
+test('blocked storage cannot silently discard access during recovery rotation', async () => {
+  const { context, calls } = fixture(); await context.bootPromise;
+  const before = calls.length;
+  await assert.rejects(vm.runInContext('rotateRecoveryCode()', context), /Enable browser storage/);
+  assert.equal(calls.length, before);
 });

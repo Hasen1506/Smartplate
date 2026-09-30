@@ -29,6 +29,11 @@ The recipe describes a ₹1,000 Builders Club cart cap, a single-restaurant cart
 
 ## Tool inventory and the history limit (update, 25 September 2026)
 
+**27 September update:** the current public [Food reference](https://mcp.swiggy.com/builders/docs/reference/food/)
+lists 20 tools, rather than the 14 below. The authenticated `tools/list` response
+remains the source of truth for an approved account. The app must not promise that
+the public inventory or response shapes are fixed.
+
 Public references list 14 Food tools: `get_addresses`, `search_restaurants`,
 `get_restaurant_menu` (150-item limit per call), `search_menu`, `update_food_cart`,
 `get_food_cart`, `flush_food_cart`, `fetch_food_coupons`, `apply_food_coupon`,

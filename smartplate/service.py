@@ -389,7 +389,7 @@ def save_template(plan_id: int, title: str):
     user = models.get_user(plan["user_id"])
     decisions = [d for d in models.decisions_for_plan(plan_id) if d["chosen_kind"] in ("delivery", "cook")]
     meta = {"city": user["city"], "budget": user["weekly_budget"], "mode": plan["mode"]}
-    return community.save_template(user["name"], title, meta, decisions)
+    return community.save_template(user["name"], title, meta, decisions, author_user_id=user["id"])
 
 
 def record_receipts(plan_id: int) -> dict:

@@ -16,6 +16,17 @@ def test_index_and_static(client):
     assert client.get("/static/app.js").status_code == 200
 
 
+def test_private_app_security_policy_works_with_external_bootstrap(client):
+    response = client.get("/")
+    policy = response.headers["Content-Security-Policy"]
+    assert "script-src 'self'" in policy and "frame-ancestors 'none'" in policy
+    assert response.headers["X-Frame-Options"] == "DENY"
+    html = response.data.decode()
+    assert '<script src="/static/app.js">' in html and '<script>' not in html
+    script = client.get("/static/app.js").data.decode()
+    assert 'onclick="' not in script and 'register("/sw.js")' in script
+
+
 def test_meta_reports_zero_cost_brain(client):
     m = client.get("/api/meta").get_json()
     assert m["brain"] == "deterministic"
