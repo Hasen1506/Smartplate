@@ -134,7 +134,7 @@ def create_app() -> Flask:
             "version": "1.1.0",
             "brain": brain.name,
             "brain_cost_per_decision": brain.cost_per_decision,
-            "swiggy_provider": 'simulated' if config.SWIGGY_PROVIDER == 'simulated' else 'unavailable',
+            "swiggy_provider": config.SWIGGY_PROVIDER,
             "order_edit_window_min": config.ORDER_EDIT_WINDOW_MIN,
             "modes": config.MODE_LABELS,
             "mode_outcomes": {k: v["outcome"] for k, v in config.MODE_META.items()},
@@ -376,7 +376,7 @@ def create_app() -> Flask:
         ratelimit.check(f"push-test:{user_id}", 5, 600)
         return jsonify(push.test_message(user_id))
 
-    # ---- Swiggy sign-in + read-only discovery (no ordering) ---- #
+    # ---- Swiggy sign-in, live browsing, cart and gated COD ordering ---- #
     def _public_base():
         if config.PUBLIC_URL:
             return config.PUBLIC_URL
@@ -401,7 +401,7 @@ def create_app() -> Flask:
     def swiggy_discover(user_id):
         return jsonify({**swiggy_connect.discover(user_id), "order_enabled": config.LIVE_ORDERS})
 
-    # gates 2–3 (swiggy_live.py): addresses, live menus, fill the cart. Never order or pay.
+    # swiggy_live.py: addresses, live menus, cart and explicitly approved COD.
     @app.get("/api/user/<int:user_id>/swiggy/addresses")
     def swiggy_addresses(user_id):
         return jsonify(swiggy_live.addresses(user_id))
