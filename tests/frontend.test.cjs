@@ -259,6 +259,27 @@ test('private profile keys are sent as a header and merged into the profile list
   assert.equal(calls.at(-1).options.headers['X-SmartPlate-Key'], 'secret-key-123456789');
   const users = JSON.parse(vm.runInContext("JSON.stringify(mergeUsers([{ id: 1, name: 'Sample' }, { id: 2, name: 'Meera' }]))", context));
   assert.deepEqual(users.map(u => [u.id, !!u.private]), [[2, true], [1, false]]);
-  assert.match(vm.runInContext("withKey('/api/receipts/2/export.csv')", context), /\?key=secret-key-123456789$/);
+  assert.match(vm.runInContext('receiptsPanel()', context), /data-act="download-csv"/);
+  assert.match(vm.runInContext('reminderRow()', context), /data-act="download-ics"/);
+  assert.ok(!source.includes('withKey('));
   await assert.rejects(vm.runInContext("useRecoveryCode('not a code')", context), /recovery code/);
+});
+
+test('private exports fetch with a header and never put recovery keys in URLs', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`const bag2 = {}; localStorage.getItem = (k) => bag2[k] ?? null;
+    localStorage.setItem = (k, v) => { bag2[k] = v; };
+    keys.put(2, 'export-secret', 'Meera');`, context);
+  let requested, downloaded;
+  context.Blob = Blob;
+  context.URL = { createObjectURL: () => 'blob:export', revokeObjectURL() {} };
+  context.fetch = async (url, options) => {
+    requested = { url, options };
+    return { ok: true, blob: async () => new Blob(['date,item\n'], { type: 'text/csv' }) };
+  };
+  context.document.createElement = () => ({ click() { downloaded = this.download; }, remove() {} });
+  await vm.runInContext("downloadPrivate('/api/receipts/2/export.csv', 'expenses.csv', 'text/csv')", context);
+  assert.equal(requested.url, '/api/receipts/2/export.csv');
+  assert.equal(requested.options.headers['X-SmartPlate-Key'], 'export-secret');
+  assert.equal(downloaded, 'expenses.csv');
 });
