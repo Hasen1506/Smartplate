@@ -220,3 +220,16 @@ def test_bad_provider_prices_cannot_enter_milp():
         {'id':'corrupt','restaurant_id':'real-r','price':1e100},
         {'id':'nan','restaurant_id':'real-r','price':float('nan')}],700,50)
     assert result['covered']==7 and all(i['id']=='cheap' for i in result['items'])
+
+
+def test_private_profile_creation_cannot_bypass_owner_check_with_string_id(core):
+    client,fake=core
+    stranger=create_app().test_client()
+    with db.cursor() as cur:
+        before=cur.execute('SELECT COUNT(*) FROM plans WHERE user_id=3').fetchone()[0]
+    for malformed in ('3', 3.0, True, None, [3], {'id':3}):
+        response=stranger.post('/api/plan',json={'user_id':malformed})
+        assert response.status_code==400
+    assert stranger.post('/api/plan',json={'user_id':3}).status_code==401
+    with db.cursor() as cur:
+        assert cur.execute('SELECT COUNT(*) FROM plans WHERE user_id=3').fetchone()[0]==before

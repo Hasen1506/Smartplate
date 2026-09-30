@@ -50,7 +50,11 @@ def owners_of(view_args: dict, body: dict | None, query_user: int | None = None)
                 owners.add(row["user_id"])
     if query_user is not None:
         owners.add(query_user)
-    if body and isinstance(body.get("user_id"), int) and not isinstance(body.get("user_id"), bool):
+    if body and "user_id" in body:
+        # Validate the same representation that the handler consumes. Otherwise
+        # int("3") in plan creation could bypass this ownership check entirely.
+        if isinstance(body["user_id"], bool) or not isinstance(body["user_id"], int) or body["user_id"] <= 0:
+            raise ValueError("user_id must be a positive integer")
         owners.add(body["user_id"])
     return owners
 
