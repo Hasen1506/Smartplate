@@ -309,6 +309,8 @@ def choose_address(user_id: int, address_id: str) -> dict:
         cur.execute("UPDATE swiggy_connections SET address_id=?, address_label=? WHERE user_id=?",
                     (match["id"], f"{match['label']} · {match['text']}"[:120], user_id))
         cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (user_id,))     # menus depend on the address
+        cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
+        cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
     return sc.status(user_id)
 
 
@@ -625,7 +627,8 @@ def current_live_cart(user_id: int) -> dict:
     conn = _conn(user_id)
     address_id = _address(conn)
     intent = _intent(user_id)
-    data = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"), {"address": address_id}))
+    data = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
+                {"address": address_id, "restaurant_name": intent["restaurant_name"] if intent else None}))
     cart = _cart_view(data, address_id)
     if not cart["items"]:
         return {"cart": None}
@@ -732,7 +735,7 @@ def live_checkout_preview(user_id: int) -> dict:
         unresolved = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? "
                                  "AND state IN ('started','unknown') LIMIT 1", (user_id,)).fetchone()
         if unresolved:
-            raise SwiggyError("An earlier placement of this cart is unresolved. Check your Swiggy orders "
+            raise SwiggyError("An earlier order attempt is unresolved. Check your Swiggy orders "
                               "before placing it again.")
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE created_ts < ?",
                     ((clock.now() - CHECKOUT_QUOTE_TTL).isoformat(),))
@@ -768,7 +771,7 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
         unresolved = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? "
                                  "AND state IN ('started','unknown') LIMIT 1", (user_id,)).fetchone()
         if unresolved:
-            raise CartChanged("An earlier placement of this cart is unresolved. Check Swiggy orders first.")
+            raise CartChanged("An earlier order attempt is unresolved. Check Swiggy orders first.")
         cur.execute("INSERT INTO swiggy_order_attempts(user_id, fingerprint, cart_fingerprint, "
                     "address_id, state, created_ts) VALUES (?,?,?,?,?,?)",
                     (user_id, expected_fingerprint, preview["fingerprint"], preview["address_id"],
@@ -780,8 +783,10 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
                 {"address": preview["address_id"], "payment_method": preview["payment_method"]}))
         body = result.get("data", result) if isinstance(result, dict) else {}
         order_id = body.get("orderId") if isinstance(body, dict) else None
-        confirmed = (isinstance(body, dict) and body.get("normalizedStatus") == "success" and order_id
-                     and str(body.get("status", "")).upper() != "PENDING_PAYMENT")
+        confirmed = (isinstance(body, dict) and body.get("normalizedStatus") == "success"
+                     and isinstance(order_id, str) and bool(order_id.strip())
+                     and str(body.get("status", "")).upper() not in
+                     ("PENDING_PAYMENT", "UNKNOWN", "FAILED", "FAILURE", "CANCELLED"))
         with db.cursor() as cur:
             cur.execute("UPDATE swiggy_order_attempts SET state=?, order_id=? WHERE user_id=? AND fingerprint=?",
                         ("confirmed" if confirmed else "unknown", str(order_id) if order_id else None,
@@ -791,7 +796,8 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
         if not confirmed:
             raise SwiggyError("Swiggy did not confirm a completed order. Check Swiggy orders; do not retry this cart.")
         return {"order_id": str(order_id), "status": "confirmed", "item": preview["item"],
-                "to_pay": preview["to_pay"], "address": preview["address"]}
+                "to_pay": preview["to_pay"], "address": preview["address"],
+                "message": str(result.get("message") or "")}
     except Exception:
         with db.cursor() as cur:
             cur.execute("UPDATE swiggy_order_attempts SET state='unknown' "
@@ -808,7 +814,17 @@ def live_order_status(user_id: int, order_id: str) -> dict:
     conn = _conn(user_id)
     data = call(user_id, "track_food_order", build_args(_tool(conn, "track_food_order"),
                                                        {"order_id": order_id, "address": _address(conn)}))
-    return {"order_id": order_id, "provider": data.get("data", data) if isinstance(data, dict) else data}
+    body = data.get("data", data) if isinstance(data, dict) else {}
+    rows = body.get("orders") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        raise SwiggyError("Swiggy did not return order tracking. Check delivery status in Swiggy.")
+    order = next((row for row in rows if isinstance(row, dict) and str(row.get("orderId")) == order_id), None)
+    return {"order_id": order_id, "tracking": {
+        "status": str(order.get("orderStatus") or "") if order else "",
+        "title": str(order.get("title") or "") if order else "",
+        "subtitle": str(order.get("subtitle") or "") if order else "",
+        "eta": str(order.get("etaText") or "") if order else "",
+        "message": str(body.get("statusMessage") or "")}}
 
 
 def live_order_history(user_id: int) -> dict:
@@ -833,8 +849,7 @@ def live_order_history(user_id: int) -> dict:
                "status": str(r.get("orderStatus") or ""), "ordered_time": str(r.get("orderedTime") or "")}
               for r in rows if isinstance(r, dict) and r.get("orderId")]
     with db.cursor() as cur:
-        attempts = cur.execute("SELECT state, order_id, created_ts FROM swiggy_order_attempts "
-                               "WHERE user_id=? AND address_id=? ORDER BY created_ts DESC LIMIT 20",
-                               (user_id, address_id)).fetchall()
+        attempts = cur.execute("SELECT state, order_id, address_id, created_ts FROM swiggy_order_attempts "
+                               "WHERE user_id=? ORDER BY created_ts DESC LIMIT 20", (user_id,)).fetchall()
     return {"provider_orders": recent, "attempts": [dict(r) for r in attempts],
             "address": conn.get("address_label") or address_id}

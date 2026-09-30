@@ -274,8 +274,14 @@ def finish(state: str, code: str) -> int:
     expires = (clock.now() + dt.timedelta(seconds=int(tok["expires_in"]))).isoformat() if tok.get("expires_in") else None
     with db.cursor() as cur:
         cur.execute("INSERT INTO swiggy_connections(user_id, access_token, expires_ts, connected_ts) VALUES (?,?,?,?) "
-                    "ON CONFLICT(user_id) DO UPDATE SET access_token=excluded.access_token, "   # keeps the chosen address
-                    "expires_ts=excluded.expires_ts, connected_ts=excluded.connected_ts", (row["user_id"], vault.seal(tok["access_token"]), expires, clock.now().isoformat()))
+                    "ON CONFLICT(user_id) DO UPDATE SET access_token=excluded.access_token, "
+                    "expires_ts=excluded.expires_ts, connected_ts=excluded.connected_ts, "
+                    "address_id=NULL, address_label=NULL, samples='{}'", (row["user_id"], vault.seal(tok["access_token"]), expires, clock.now().isoformat()))
+        # Reconnection may sign into a different Swiggy account. Re-select an
+        # address and review a cart instead of carrying over old account state.
+        cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (row["user_id"],))
+        cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (row["user_id"],))
+        cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (row["user_id"],))
     discover(row["user_id"])
     return row["user_id"]
 

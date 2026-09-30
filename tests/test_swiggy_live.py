@@ -121,11 +121,13 @@ class FakeLive(FakeSwiggy):
             assert args["addressId"] == "addr-home"
             return {"structuredContent": {"success": True, "data": {"orders": [{
                 "orderId": "real-order-17", "restaurantName": "Hotel Saravana Bhavan",
-                "orderedItems": [{"name": "Mini Tiffin", "quantity": 1}], "orderTotal": "160",
+                "orderedItems": "Mini Tiffin (1)", "orderTotal": "160",
                 "orderStatus": "PREPARING", "orderedTime": "2026-09-30T12:00:00Z"}]}}}
         if name == "track_food_order":
             assert args["orderId"] == "real-order-17"
-            return {"structuredContent": {"success": True, "data": {"status": "PREPARING"}}}
+            return {"structuredContent": {"success": True, "data": {"orders": [{
+                "orderId": "real-order-17", "orderStatus": "PREPARING", "title": "Food is being prepared",
+                "subtitle": "The restaurant is working on your order", "etaText": "Arrives in 25 minutes"}]}}}
         raise AssertionError(f"unexpected tool {name}")
 
     def tool_calls(self):
@@ -290,7 +292,8 @@ def test_cod_checkout_requires_fresh_review_and_places_only_once(client, swiggy,
     assert client.post("/api/user/3/swiggy/checkout", json={
         "expected_fingerprint": review["fingerprint"]}).status_code == 409
     assert swiggy.tool_calls().count("place_food_order") == 1
-    assert client.get("/api/user/3/swiggy/orders/real-order-17").get_json()["provider"]["status"] == "PREPARING"
+    tracking = client.get("/api/user/3/swiggy/orders/real-order-17").get_json()["tracking"]
+    assert tracking["status"] == "PREPARING" and tracking["eta"] == "Arrives in 25 minutes"
     history = client.get("/api/user/3/swiggy/order-history").get_json()
     assert history["provider_orders"][0]["order_id"] == "real-order-17"
     assert history["attempts"][0]["state"] == "confirmed"
@@ -538,3 +541,26 @@ def test_exact_item_on_later_search_page_is_reviewable(client, swiggy, monkeypat
         assert offsets == [0, 20] and "update_food_cart" not in swiggy.tool_calls()
     finally:
         SCHEMAS["search_menu"]["properties"].pop("offset", None)
+
+
+def test_reconnection_requires_a_new_address_and_cart_review(client, swiggy, monkeypatch):
+    review = _prepared_checkout(client, swiggy, monkeypatch)
+    _connect(client, swiggy, uid=3)
+    status = client.get("/api/user/3/swiggy").get_json()
+    assert status["connected"] and status["address"] is None
+    with db.cursor() as cur:
+        assert not cur.execute("SELECT 1 FROM swiggy_cart_intents WHERE user_id=3").fetchone()
+        assert not cur.execute("SELECT 1 FROM swiggy_checkout_quotes WHERE token=?", (review["fingerprint"],)).fetchone()
+    assert "place_food_order" not in swiggy.tool_calls()
+
+
+def test_shared_legacy_connection_is_never_exposed(client, swiggy):
+    _connect(client, swiggy)
+    with db.cursor() as cur:
+        cur.execute("UPDATE users SET access_hash=NULL WHERE id=1")
+    before = len(swiggy.calls)
+    state = client.get("/api/user/1/swiggy").get_json()
+    assert not state["connected"] and state["requires_private_profile"]
+    assert "tools" not in state and "address" not in state
+    assert client.get("/api/user/1/swiggy/addresses").status_code == 502
+    assert len(swiggy.calls) == before

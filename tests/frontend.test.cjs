@@ -323,3 +323,17 @@ test('checkout names and escapes the reviewed restaurant', async () => {
   assert.match(html, /&lt;Kitchen&gt;/);
   assert.ok(!html.includes('<Kitchen>'));
 });
+
+test('saved orders remain trackable after reload with readable provider progress', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'home' } };
+    S.placedOrder = null;
+    S.liveOrderHistory = { attempts: [{ state: 'confirmed', order_id: 'o-1' }],
+      provider_orders: [{ order_id: 'o-1', restaurant: 'Kitchen', item: 'Dish', status: 'PREPARING' }] };
+    S.liveOrderStatus = { order_id: 'o-1', tracking: { title: '<Preparing>', subtitle: 'At the restaurant', eta: '25 minutes' } };`, context);
+  const html = vm.runInContext('livePlacesScreen()', context);
+  assert.match(html, /data-live-track="o-1"/);
+  assert.match(html, /&lt;Preparing&gt;/);
+  assert.match(html, /25 minutes/);
+  assert.ok(!html.includes('<Preparing>') && !html.includes('"tracking":'));
+});

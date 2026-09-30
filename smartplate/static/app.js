@@ -641,9 +641,11 @@ function livePlacesScreen() {
     ${S.liveCartError ? `<p class="fine" role="alert">${esc(S.liveCartError)}</p>` : ""}
     ${S.liveOrderHistory ? `<section class="card"><h3>Recent Swiggy orders</h3><p class="fine">Orders at ${esc(S.liveOrderHistory.address)}. If a placement failed or timed out, check here and in Swiggy before trying again.</p>
       ${S.liveOrderHistory.attempts.some(a => a.state === "unknown" || a.state === "started") ? `<p class="fine">A SmartPlate order attempt has an uncertain result. Check Swiggy or contact support before ordering the same cart again.</p>` : ""}
-      ${S.liveOrderHistory.provider_orders.length ? S.liveOrderHistory.provider_orders.map(o => `<p><b>${esc(o.restaurant)}</b> · ${esc(o.item)} · ${esc(o.status)} · ${esc(o.total)} · ${esc(o.ordered_time)}<br><span class="fine">Order ${esc(o.order_id)}</span></p>`).join("") : `<p class="fine">Swiggy returned no recent orders for this address.</p>`}</section>` : ""}
+      ${S.liveOrderHistory.provider_orders.length ? S.liveOrderHistory.provider_orders.map(o => `<p><b>${esc(o.restaurant)}</b> · ${esc(o.item)} · ${esc(o.status)} · ${esc(o.total)} · ${esc(o.ordered_time)}<br><span class="fine">Order ${esc(o.order_id)}</span>${S.liveOrderHistory.attempts.some(a => a.order_id === o.order_id) ? ` <button class="small" data-live-track="${esc(o.order_id)}">Check delivery status</button>` : ""}</p>`).join("") : `<p class="fine">Swiggy returned no recent orders for this address.</p>`}</section>` : ""}
     ${S.placedOrder ? `<div class="consent cartnote"><b>Swiggy order confirmed:</b> ${esc(S.placedOrder.order_id)} · ${esc(S.placedOrder.item)} · ${rupee(S.placedOrder.to_pay)}.
-      <button class="small" data-act="track-live-order">Check delivery status</button>${S.liveOrderStatus ? `<p class="fine">${esc(JSON.stringify(S.liveOrderStatus.provider))}</p>` : ""}</div>` : ""}
+      ${S.placedOrder.message ? `<p class="fine">${esc(S.placedOrder.message)}</p>` : ""}
+      <button class="small" data-act="track-live-order">Check delivery status</button></div>` : ""}
+    ${S.liveOrderStatus ? liveTrackingCard() : ""}
     ${S.liveCart ? `<div class="consent cartnote"><b>In your Swiggy cart:</b> ${esc(S.liveCart.item)} · ${esc(S.liveCart.restaurant)}.
       ${S.liveCart.to_pay == null ? "Check the final total in Swiggy." : `Current total ${rupee(S.liveCart.to_pay)}.`}
       ${S.swiggy.order_enabled && S.liveCart.orderable !== false ? `<button class="small primary" data-act="review-live-checkout">Review and place order</button>` : ""}
@@ -719,8 +721,16 @@ async function loadLiveOrderHistory() {
   S.liveOrderHistory = await api(`/api/user/${S.userId}/swiggy/order-history`);
   render();
 }
-async function trackLiveOrder() {
-  S.liveOrderStatus = await api(`/api/user/${S.userId}/swiggy/orders/${encodeURIComponent(S.placedOrder.order_id)}`);
+function liveTrackingCard() {
+  const t = S.liveOrderStatus.tracking || {};
+  return `<section class="card"><p class="eyebrow">Order ${esc(S.liveOrderStatus.order_id)}</p>
+    <h3>${esc(t.title || t.status || "Check delivery in Swiggy")}</h3>
+    <p>${esc(t.subtitle || t.message || "Swiggy did not return a current delivery update.")}</p>
+    ${t.eta ? `<p>${esc(t.eta)}</p>` : ""}</section>`;
+}
+async function trackLiveOrder(orderId = S.placedOrder?.order_id) {
+  if (!orderId) throw new Error("Choose a recorded order to track.");
+  S.liveOrderStatus = await api(`/api/user/${S.userId}/swiggy/orders/${encodeURIComponent(orderId)}`);
   render();
 }
 function checkoutReviewDialog() {
@@ -1272,7 +1282,7 @@ function wire() {
     "swiggy-addresses": async () => { S.swAddrs = await api(`/api/user/${S.userId}/swiggy/addresses`); render(); },
     "close-live-menu": async () => { S.liveMenu = null; render(); },
     "close-live-browse": async () => { S.liveBrowseMenu = null; render(); },
-    "swiggy-disconnect": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/disconnect`, "POST", {}); S.liveMenu = null; S.carts = null; S.swAddrs = null; S.liveResults = null; S.liveFavourites = null; S.liveBrowseMenu = null; S.liveCart = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null; toast("Disconnected from Swiggy"); render(); },
+    "swiggy-disconnect": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/disconnect`, "POST", {}); S.liveMenu = null; S.carts = null; S.swAddrs = null; S.liveResults = null; S.liveFavourites = null; S.liveBrowseMenu = null; S.liveCart = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null; S.liveCartError = null; toast("Disconnected from Swiggy"); render(); },
     "signin-open": async () => { S.signin = true; S.error = null; render(); document.getElementById("si-login")?.focus(); },
     "signin-close": async () => { S.signin = false; S.error = null; render(); },
     "sign-out": signOut,
@@ -1291,6 +1301,7 @@ function wire() {
   on("[data-live-fav]", "click", (e) => guard(() => toggleLiveFavourite(e.currentTarget.dataset.liveFav, e.currentTarget.dataset.liveName)));
   on("[data-live-place]", "click", (e) => guard(() => openLivePlace(e.currentTarget.dataset.livePlace, e.currentTarget.dataset.liveName)));
   on("[data-live-item]", "click", (e) => guard(() => reviewLiveItem(e.currentTarget.dataset.liveItem, e.currentTarget.dataset.liveItemName)));
+  on("[data-live-track]", "click", (e) => guard(() => trackLiveOrder(e.currentTarget.dataset.liveTrack)));
   const liveSearch = document.getElementById("live-search");
   if (liveSearch) liveSearch.onsubmit = (e) => { e.preventDefault(); guard(() => searchLivePlaces(document.getElementById("live-query").value)); };
   on("[data-cart]", "click", (e) => guard(() => reviewCart(Number(e.currentTarget.dataset.cart))));

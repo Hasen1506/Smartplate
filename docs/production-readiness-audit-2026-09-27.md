@@ -1,5 +1,17 @@
 # SmartPlate production readiness audit
 
+## Implementation status
+
+For a clear split between working source, external release gates and recommendations,
+see [implementation-status.md](implementation-status.md). The findings below retain
+the original main-branch audit; they must not be read as a list of unfixed defects
+in the draft branch. The follow-up also fixes shared-profile Swiggy privacy, cart
+restoration after reload, final restaurant/item/quantity/address verification,
+latest-approval concurrency, profile-wide uncertain-order blocking, paginated
+addresses/item search, provider 401/429 handling, and readable tracking after reload.
+Reconnecting clears old account address/cart approvals. These are real code changes
+with regression tests; live Swiggy access and operator deployment are still required.
+
 ## 30 September 2026 follow-up: live rejection and pilot preparation
 
 I opened the deployed `https://smartplate-xgxd.onrender.com/` app, selected a sample profile, and clicked Connect Swiggy. The browser was sent to Swiggy with `redirect_uri=https://smartplate-xgxd.onrender.com/swiggy/callback`. Swiggy displayed **“Oops, Onrender isn't whitelisted yet”** and **“This client isn't supported for Swiggy MCP sign-in yet.”** Therefore the **Render callback is not accepted as of this check**. The approval email may concern a different URI; it contains no URI, and the document's `smartplate.app` domain was only proposed. The exact provider-side record cannot be inspected from this repository. The response to send and deployment runbook are in [production-deployment.md](production-deployment.md).
@@ -94,4 +106,4 @@ The [draft PR](https://github.com/Hasen1506/Smartplate/pull/17) addresses severa
 
 ## Verification and remaining unknowns
 
-The reviewed GitHub `main` CI run passed. Earlier draft PR commits passed the Python and frontend suites in GitHub CI. The 30 September local changes passed 18 frontend tests and Python compilation; the final CI run must be checked after upload. I inspected the deployed Render sign-in but have not invoked any authenticated Swiggy cart, order or payment tool.
+The reviewed GitHub `main` CI run passed. The [30 September follow-up CI](https://github.com/Hasen1506/Smartplate/actions/runs/36650717023) passed 215 Python and 24 frontend tests plus sourcing and syntax checks. Subsequent tracking/reconnection changes require a final run after upload. I inspected the deployed Render sign-in but have not invoked any authenticated Swiggy cart, order or payment tool.
