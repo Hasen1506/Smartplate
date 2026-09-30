@@ -219,7 +219,16 @@ def swiggy(monkeypatch):
     return fake
 
 
+def _secure_profile(client, uid=1):
+    from smartplate import access, db
+    key, hashed = access.new_key()
+    with db.cursor() as cur:
+        cur.execute("UPDATE users SET access_hash=? WHERE id=?", (hashed, uid))
+    client.environ_base["HTTP_X_SMARTPLATE_KEY"] = key
+
+
 def _connect(client, swiggy, uid=1):
+    _secure_profile(client, uid)
     url = client.post(f"/api/user/{uid}/swiggy/connect", json={},
                       headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example"}).get_json()["authorize_url"]
     q = swiggy.approve(url)
@@ -246,6 +255,7 @@ def test_swiggy_sign_in_and_discovery_end_to_end(client, swiggy):
 def test_swiggy_can_use_approved_auth_callback_path_on_app_origin(client, swiggy, monkeypatch):
     from smartplate import config
     monkeypatch.setattr(config, "SWIGGY_CALLBACK_PATH", "/auth/swiggy/callback")
+    _secure_profile(client)
     headers = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example"}
     status = client.get("/api/user/1/swiggy", headers=headers).get_json()
     assert status["callback_url"] == "https://app.example/auth/swiggy/callback"
@@ -279,6 +289,7 @@ def test_swiggy_registration_reused_and_pkce_enforced(client, swiggy):
 
 
 def test_swiggy_requires_https_and_handles_expiry_and_disconnect(client, swiggy, monkeypatch):
+    _secure_profile(client)
     r = client.post("/api/user/1/swiggy/connect", json={}, headers={"X-Forwarded-Host": "evil.example"})
     assert r.status_code == 502 and "HTTPS" in r.get_json()["error"]
     _connect(client, swiggy)
@@ -298,6 +309,14 @@ def test_swiggy_connection_is_private_to_the_profile(client, swiggy):
     assert client.get(f"/api/user/{uid}/swiggy").status_code == 401
     assert client.post(f"/api/user/{uid}/swiggy/connect", json={}).status_code == 401
     assert client.get(f"/api/user/{uid}/swiggy", headers={"X-SmartPlate-Key": key}).get_json()["connected"] is False
+
+
+def test_swiggy_cannot_connect_or_expose_a_shared_sample_profile(client, swiggy):
+    status = client.get("/api/user/1/swiggy").get_json()
+    assert status["requires_private_profile"] is True and status["connected"] is False
+    r = client.post("/api/user/1/swiggy/connect", json={})
+    assert r.status_code == 502 and "private" in r.get_json()["error"]
+    assert swiggy.calls == []
 
 
 def test_unreadable_swiggy_token_requires_reconnect(client, swiggy, monkeypatch):

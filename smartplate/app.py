@@ -77,7 +77,10 @@ def create_app() -> Flask:
 
     @app.errorhandler(swiggy_connect.SwiggyError)
     def swiggy_error(error):
-        return jsonify(error=str(error)), 502
+        response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after)
+        if error.retry_after is not None:
+            response.headers['Retry-After'] = str(error.retry_after)
+        return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
     @app.errorhandler(HTTPException)
     def http_error(error):
@@ -453,6 +456,10 @@ def create_app() -> Flask:
                           str(body.get("item_name") or ""), body.get("expected_fingerprint")))
         except swiggy_live.CartChanged as exc:
             return jsonify(error="cart_changed", message=str(exc)), 409
+
+    @app.get("/api/user/<int:user_id>/swiggy/live-cart")
+    def swiggy_current_cart(user_id):
+        return jsonify(swiggy_live.current_live_cart(user_id))
 
     @app.get("/api/user/<int:user_id>/swiggy/checkout/preview")
     def swiggy_checkout_preview(user_id):

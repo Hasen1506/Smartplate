@@ -1,5 +1,5 @@
-"""Swiggy gates 2–3 against a fake MCP server: addresses, live menus, filling the cart.
-The fake checks the documented argument names and that nothing is ever ordered."""
+"""Documented Food contracts and failure cases against a fake MCP server.
+No real account, cart or order is used by these tests."""
 import json
 
 import pytest
@@ -12,7 +12,7 @@ from smartplate.integrations.swiggy_connect import SwiggyError
 from test_followups import FakeSwiggy, _connect
 
 SCHEMAS = {
-    "get_addresses": {"type": "object", "properties": {}},
+    "get_addresses": {"type": "object", "properties": {"page": {"type": "number"}, "pageSize": {"type": "number"}}},
     "search_restaurants": {"type": "object", "required": ["query", "addressId"],
                            "properties": {"query": {"type": "string"}, "addressId": {"type": "string"}}},
     "get_restaurant_menu": {"type": "object", "required": ["restaurantId", "addressId"],
@@ -25,7 +25,8 @@ SCHEMAS = {
                                                  "properties": {"menu_item_id": {"type": "string"},
                                                                 "quantity": {"type": "integer"}}}},
         "restaurantId": {"type": "string"}, "addressId": {"type": "string"}, "restaurantName": {"type": "string"}}},
-    "get_food_cart": {"type": "object", "properties": {"addressId": {"type": "string"}}},
+    "get_food_cart": {"type": "object", "required": ["addressId"], "properties": {
+        "addressId": {"type": "string"}, "restaurantName": {"type": "string"}}},
     "get_payment_options": {"type": "object", "properties": {"addressId": {"type": "string"}}},
     "place_food_order": {"type": "object", "required": ["addressId", "paymentMethod"],
                          "properties": {"addressId": {"type": "string"}, "paymentMethod": {"type": "string"}}},
@@ -38,7 +39,7 @@ SCHEMAS = {
 
 class FakeLive(FakeSwiggy):
     """Adds tools/call. Addresses come back as JSON text, menus as structuredContent,
-    the cart nested under bill, like the documented `to_pay` field."""
+    the cart in the documented data.data envelope with pricing.to_pay."""
 
     def __init__(self):
         super().__init__()
@@ -98,12 +99,14 @@ class FakeLive(FakeSwiggy):
             return {"content": [{"type": "text", "text": "Cart updated"}]}
         if name == "get_food_cart":
             if self.cart is None:
-                return {"structuredContent": {"cart": {"items": []}}}
+                return {"structuredContent": {"success": True, "data": {"addressId": args["addressId"], "data": {"items": []}}}}
             price = next(p for i, (n, p) in enumerate(self.dishes.items()) if f"m{i}" == self.cart) / 100
             name = next(n for i, (n, p) in enumerate(self.dishes.items()) if f"m{i}" == self.cart)
-            return {"structuredContent": {"cart": {"items": [{"menu_item_id": self.cart, "name": name,
-                                                                  "quantity": 1, "total": price}],
-                                                   "bill": {"item_total": price, "delivery_fee": 35, "to_pay": price + 35}}}}
+            return {"structuredContent": {"success": True, "data": {"addressId": args["addressId"], "data": {
+                "restaurant": {"id": "r-1", "name": "Hotel Saravana Bhavan (Adyar)"},
+                "items": [{"menu_item_id": self.cart, "name": name, "quantity": 1, "total": price,
+                           "is_veg": self.is_veg, "in_stock": self.stock}],
+                "pricing": {"item_total": price, "delivery_charge": 35, "to_pay": price + 35}}}}}
         if name == "get_payment_options":
             return {"structuredContent": {"success": True, "data": {"cod": {
                 "available": True, "id": "Cash", "displayName": "Cash on Delivery"}}}}
@@ -111,6 +114,7 @@ class FakeLive(FakeSwiggy):
             assert args == {"addressId": "addr-home", "paymentMethod": "Cash"}
             if self.order_uncertain:
                 return {"structuredContent": {"success": True, "data": {"status": "UNKNOWN"}}}
+            self.cart = None
             return {"structuredContent": {"success": True, "data": {
                 "orderId": "real-order-17", "normalizedStatus": "success", "status": "CONFIRMED"}}}
         if name == "get_food_orders":
@@ -291,6 +295,9 @@ def test_cod_checkout_requires_fresh_review_and_places_only_once(client, swiggy,
     assert history["provider_orders"][0]["order_id"] == "real-order-17"
     assert history["attempts"][0]["state"] == "confirmed"
     # A completed order does not permanently prohibit ordering the same favourite.
+    p = client.post("/api/user/3/swiggy/live-cart/preview", json=body).get_json()
+    assert client.post("/api/user/3/swiggy/live-cart", json={**body,
+        "expected_fingerprint": p["fingerprint"]}).status_code == 200
     again = client.get("/api/user/3/swiggy/checkout/preview").get_json()
     assert again["fingerprint"] != review["fingerprint"]
     assert client.post("/api/user/3/swiggy/checkout", json={
@@ -358,3 +365,176 @@ def test_reading_helpers():
     assert swiggy_live._num({"cart": {"items": [{"total": 180}], "bill": {"to_pay": 225}}}, "to_pay") == 225
     nested = {"data": {"list": [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], "meta": [{"id": 9}]}}
     assert [r["name"] for r in swiggy_live.records(nested, "id", "name")] == ["A", "B"]
+    assert swiggy_live._num({"to_pay": float("nan")}, "to_pay") is None
+    assert swiggy_live.rupees({"priceInRupees": float("inf")}) is None
+
+
+def _prepared_checkout(client, swiggy, monkeypatch):
+    monkeypatch.setattr(config, "LIVE_ORDERS", True)
+    with db.cursor() as cur:
+        cur.execute("UPDATE users SET diet='veg' WHERE id=3")
+    _connect(client, swiggy, uid=3)
+    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
+    swiggy.dishes = {"Mini Tiffin": 12500}
+    body = {"restaurant_id": "r-1", "restaurant_name": "Hotel Saravana Bhavan (Adyar)",
+            "item_id": "m0", "item_name": "Mini Tiffin"}
+    p = client.post("/api/user/3/swiggy/live-cart/preview", json=body).get_json()
+    assert client.post("/api/user/3/swiggy/live-cart", json={**body,
+        "expected_fingerprint": p["fingerprint"]}).status_code == 200
+    review = client.get("/api/user/3/swiggy/checkout/preview")
+    assert review.status_code == 200, review.get_json()
+    return review.get_json()
+
+
+@pytest.mark.parametrize("change,expected", [
+    ("price", 409), ("item", 502), ("restaurant", 502), ("address", 502),
+    ("quantity", 502), ("nonveg", 502), ("variants", 502), ("addons", 502),
+    ("stock", 502), ("nan", 502), ("over_limit", 502), ("payment", 502),
+])
+def test_checkout_rechecks_external_cart_changes(client, swiggy, monkeypatch, change, expected):
+    review = _prepared_checkout(client, swiggy, monkeypatch)
+    original = swiggy.tool
+    def edited(name, args):
+        result = original(name, args)
+        if name == "get_food_cart":
+            envelope = result["structuredContent"]["data"]
+            cart, item = envelope["data"], envelope["data"]["items"][0]
+            if change == "price": cart["pricing"]["to_pay"] += 1
+            if change == "item": item["menu_item_id"] = "other-item"
+            if change == "restaurant": cart["restaurant"]["id"] = "other-restaurant"
+            if change == "address": envelope["addressId"] = "other-address"
+            if change == "quantity": item["quantity"] = 2
+            if change == "nonveg": item["is_veg"] = False
+            if change == "variants": item["variants"] = [{"id": "unreviewed"}]
+            if change == "addons": item["addons"] = [{"id": "unreviewed"}]
+            if change == "stock": item["in_stock"] = 0
+            if change == "nan": cart["pricing"]["to_pay"] = float("nan")
+            if change == "over_limit": cart["pricing"]["to_pay"] = 1001
+        if name == "get_payment_options" and change == "payment":
+            result["structuredContent"]["data"]["cod"]["available"] = False
+        return result
+    monkeypatch.setattr(swiggy, "tool", edited)
+    r = client.post("/api/user/3/swiggy/checkout", json={"expected_fingerprint": review["fingerprint"]})
+    assert r.status_code == expected, r.get_json()
+    assert "place_food_order" not in swiggy.tool_calls()
+
+
+def test_latest_quote_wins_and_expired_quotes_never_place(client, swiggy, monkeypatch):
+    from smartplate import clock
+    import datetime as dt
+    first = _prepared_checkout(client, swiggy, monkeypatch)
+    second = client.get("/api/user/3/swiggy/checkout/preview").get_json()
+    assert client.post("/api/user/3/swiggy/checkout", json={"expected_fingerprint": first["fingerprint"]}).status_code == 409
+    with db.cursor() as cur:
+        cur.execute("UPDATE swiggy_checkout_quotes SET created_ts=?", ((clock.now() - dt.timedelta(minutes=6)).isoformat(),))
+    assert client.post("/api/user/3/swiggy/checkout", json={"expected_fingerprint": second["fingerprint"]}).status_code == 409
+    assert "place_food_order" not in swiggy.tool_calls()
+
+
+def test_unknown_order_cannot_be_retried_at_a_new_price(client, swiggy, monkeypatch):
+    review = _prepared_checkout(client, swiggy, monkeypatch)
+    swiggy.order_uncertain = True
+    assert client.post("/api/user/3/swiggy/checkout", json={"expected_fingerprint": review["fingerprint"]}).status_code == 502
+    swiggy.dishes = {"Mini Tiffin": 13000}
+    assert client.get("/api/user/3/swiggy/checkout/preview").status_code == 502
+    assert swiggy.tool_calls().count("place_food_order") == 1
+
+
+def test_prepared_cart_can_be_restored_after_reload(client, swiggy, monkeypatch):
+    _prepared_checkout(client, swiggy, monkeypatch)
+    other_browser = create_app().test_client()
+    other_browser.environ_base["HTTP_X_SMARTPLATE_KEY"] = client.environ_base["HTTP_X_SMARTPLATE_KEY"]
+    cart = other_browser.get("/api/user/3/swiggy/live-cart").get_json()["cart"]
+    assert cart["item"] == "Mini Tiffin" and cart["to_pay"] == 160 and cart["orderable"] is True
+
+
+def test_malformed_cart_is_not_treated_as_empty(client, swiggy, monkeypatch):
+    _prepared_checkout(client, swiggy, monkeypatch)
+    swiggy.cart = None
+    before = swiggy.tool_calls().count("update_food_cart")
+    original = swiggy.tool
+    monkeypatch.setattr(swiggy, "tool", lambda name, args: {"structuredContent": {"success": True, "data": {}}}
+                        if name == "get_food_cart" else original(name, args))
+    body = {"restaurant_id": "r-1", "restaurant_name": "Hotel Saravana Bhavan (Adyar)",
+            "item_id": "m0", "item_name": "Mini Tiffin"}
+    p = client.post("/api/user/3/swiggy/live-cart/preview", json=body).get_json()
+    assert client.post("/api/user/3/swiggy/live-cart", json={**body, "expected_fingerprint": p["fingerprint"]}).status_code == 502
+    assert swiggy.tool_calls().count("update_food_cart") == before
+
+
+def test_all_address_pages_are_available_for_selection(client, swiggy, monkeypatch):
+    _connect(client, swiggy)
+    original = swiggy.tool
+    def paged(name, args):
+        if name != "get_addresses": return original(name, args)
+        page = args["page"]
+        return {"structuredContent": {"success": True, "data": {
+            "addresses": [{"id": "addr-home" if page == 2 else "addr-first", "addressTag": "Home",
+                           "addressLine": "A complete delivery address"}],
+            "pagination": {"page": page, "hasMore": page == 1}}}}
+    monkeypatch.setattr(swiggy, "tool", paged)
+    rows = client.get("/api/user/1/swiggy/addresses").get_json()
+    assert [r["id"] for r in rows] == ["addr-first", "addr-home"]
+    assert client.post("/api/user/1/swiggy/address", json={"address_id": "addr-home"}).status_code == 200
+
+@pytest.mark.parametrize("failure", ["timeout", "pending_payment"])
+def test_ambiguous_submission_never_confirms_or_retries(client, swiggy, monkeypatch, failure):
+    review = _prepared_checkout(client, swiggy, monkeypatch)
+    original = swiggy.tool
+    def failed(name, args):
+        if name != "place_food_order": return original(name, args)
+        if failure == "timeout":
+            raise SwiggyError("Request timed out")
+        return {"structuredContent": {"success": True, "data": {
+            "normalizedStatus": "success", "orderId": "real-order-17", "status": "PENDING_PAYMENT"}}}
+    monkeypatch.setattr(swiggy, "tool", failed)
+    r = client.post("/api/user/3/swiggy/checkout", json={"expected_fingerprint": review["fingerprint"]})
+    assert r.status_code == 502
+    assert client.get("/api/user/3/swiggy/checkout/preview").status_code == 502
+    assert swiggy.tool_calls().count("place_food_order") == 1
+    assert client.get("/api/user/3/swiggy/order-history").get_json()["attempts"][0]["state"] == "unknown"
+
+
+@pytest.mark.parametrize("status,code", [(401, "swiggy_auth_expired"), (429, "swiggy_rate_limited")])
+def test_provider_auth_and_rate_limits_are_actionable_and_never_retried(client, swiggy, monkeypatch, status, code):
+    _connect(client, swiggy)
+    original = swiggy_connect._http
+    failed_calls = []
+    def failed(method, url, headers, body):
+        if url.endswith("/food"):
+            failed_calls.append(1)
+            return status, {"retry-after": "45"}, b""
+        return original(method, url, headers, body)
+    monkeypatch.setattr(swiggy_connect, "_http", failed)
+    r = client.get("/api/user/1/swiggy/addresses")
+    assert r.get_json()["code"] == code and len(failed_calls) == 1
+    if status == 429:
+        assert r.status_code == 429 and r.headers["Retry-After"] == "45"
+    else:
+        state = client.get("/api/user/1/swiggy").get_json()
+        assert not state["connected"] and state["expired"]
+
+
+def test_exact_item_on_later_search_page_is_reviewable(client, swiggy, monkeypatch):
+    _connect(client, swiggy, uid=3)
+    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
+    swiggy.dishes = {"Mini Tiffin": 12500}
+    original = swiggy.tool
+    offsets = []
+    def paged(name, args):
+        if name != "search_menu": return original(name, args)
+        offsets.append(args.get("offset", 0))
+        if args.get("offset", 0) == 0:
+            return {"structuredContent": {"success": True, "data": {"items": [], "hasMore": True, "nextOffset": 20}}}
+        return original(name, args)
+    SCHEMAS["search_menu"]["properties"]["offset"] = {"type": "number"}
+    try:
+        client.post("/api/user/3/swiggy/discover", json={})
+        monkeypatch.setattr(swiggy, "tool", paged)
+        r = client.post("/api/user/3/swiggy/live-cart/preview", json={
+            "restaurant_id": "r-1", "restaurant_name": "Hotel Saravana Bhavan (Adyar)",
+            "item_id": "m0", "item_name": "Mini Tiffin"})
+        assert r.status_code == 200, r.get_json()
+        assert offsets == [0, 20] and "update_food_cart" not in swiggy.tool_calls()
+    finally:
+        SCHEMAS["search_menu"]["properties"].pop("offset", None)

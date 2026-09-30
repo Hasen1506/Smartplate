@@ -12,7 +12,7 @@ const S = {
   tab: "today", more: null, exec: null, community: [], receipts: null, drawer: null,
   busy: false, error: null, hideCold: false, orderReview: null, cartReview: null,
   liveResults: null, liveFavourites: null, liveBrowseMenu: null, liveOrderReview: null, liveCart: null,
-  checkoutReview: null, placedOrder: null, liveOrderStatus: null, liveOrderHistory: null,
+  checkoutReview: null, placedOrder: null, liveOrderStatus: null, liveOrderHistory: null, liveCartError: null,
   sheet: null, moving: null, onboard: null, places: null, calendar: null, welcome: false, signin: false, account: null,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
@@ -64,7 +64,14 @@ async function api(path, method = "GET", body) {
   if (k) opt.headers["X-SmartPlate-Key"] = k;
   if (body) opt.body = JSON.stringify(body);
   const r = await fetch(path, opt);
-  if (!r.ok) { const data = await r.json().catch(() => ({})); throw new Error(data.message || data.error || r.statusText); }
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    if (data.code === "swiggy_auth_expired" && S.swiggy) {
+      S.swiggy.connected = false; S.swiggy.expired = true;
+      S.liveCart = null; S.checkoutReview = null;
+    }
+    throw new Error(data.message || data.error || r.statusText);
+  }
   return r.json();
 }
 function toast(msg) {
@@ -129,6 +136,7 @@ async function loadOrCreatePlan() {
   S.exec = await api(`/api/plan/${S.planId}/orders`);
   S.swiggy = await api(`/api/user/${S.userId}/swiggy`).catch(() => null);
   S.liveFavourites = swiggyReady() ? await api(`/api/user/${S.userId}/swiggy/favourites`).catch(() => null) : null;
+  if (swiggyReady()) await refreshLiveCart(false);
 }
 function adoptView(view) { S.view = view; S.planId = view.plan.id; scheduleAlerts().catch(() => {}); }
 
@@ -139,6 +147,7 @@ async function switchUser(id) {
   S.swiggy = null; S.swAddrs = null; S.liveMenu = null; S.carts = null; S.acctDraft = null;
   S.liveResults = null; S.liveFavourites = null; S.liveBrowseMenu = null; S.liveOrderReview = null; S.liveCart = null;
   S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null;
+  S.liveCartError = null;
   store.set("smartplate.user", String(S.userId));
   try { await loadOrCreatePlan(); }
   catch (e) {
@@ -628,7 +637,8 @@ function livePlacesScreen() {
       data-live-item-name="${esc(i.name)}" ${i.in_stock === false || i.in_stock === 0 ? "disabled" : ""}>Review</button></span></div>`).join("") : "";
   return `<h1 class="greet">Order from your area</h1><p class="sub">Live Swiggy restaurants and menus for ${esc(S.swiggy.address.label)}. Choose a real item and review the cart before checkout.</p>
     <form id="live-search" class="row" style="gap:8px;margin:14px 0"><input id="live-query" aria-label="Restaurant or cuisine" placeholder="Restaurant or cuisine" maxlength="80" required style="flex:1;min-width:150px"><button class="primary">Search Swiggy</button></form>
-    <div class="row"><button class="ghost small" data-act="live-order-history">Check recent Swiggy orders</button></div>
+    <div class="row"><button class="ghost small" data-act="live-order-history">Check recent Swiggy orders</button><button class="ghost small" data-act="refresh-live-cart">Refresh Swiggy cart</button></div>
+    ${S.liveCartError ? `<p class="fine" role="alert">${esc(S.liveCartError)}</p>` : ""}
     ${S.liveOrderHistory ? `<section class="card"><h3>Recent Swiggy orders</h3><p class="fine">Orders at ${esc(S.liveOrderHistory.address)}. If a placement failed or timed out, check here and in Swiggy before trying again.</p>
       ${S.liveOrderHistory.attempts.some(a => a.state === "unknown" || a.state === "started") ? `<p class="fine">A SmartPlate order attempt has an uncertain result. Check Swiggy or contact support before ordering the same cart again.</p>` : ""}
       ${S.liveOrderHistory.provider_orders.length ? S.liveOrderHistory.provider_orders.map(o => `<p><b>${esc(o.restaurant)}</b> · ${esc(o.item)} · ${esc(o.status)} · ${esc(o.total)} · ${esc(o.ordered_time)}<br><span class="fine">Order ${esc(o.order_id)}</span></p>`).join("") : `<p class="fine">Swiggy returned no recent orders for this address.</p>`}</section>` : ""}
@@ -636,7 +646,8 @@ function livePlacesScreen() {
       <button class="small" data-act="track-live-order">Check delivery status</button>${S.liveOrderStatus ? `<p class="fine">${esc(JSON.stringify(S.liveOrderStatus.provider))}</p>` : ""}</div>` : ""}
     ${S.liveCart ? `<div class="consent cartnote"><b>In your Swiggy cart:</b> ${esc(S.liveCart.item)} · ${esc(S.liveCart.restaurant)}.
       ${S.liveCart.to_pay == null ? "Check the final total in Swiggy." : `Current total ${rupee(S.liveCart.to_pay)}.`}
-      ${S.swiggy.order_enabled ? `<button class="small primary" data-act="review-live-checkout">Review and place order</button>` : ""}
+      ${S.swiggy.order_enabled && S.liveCart.orderable !== false ? `<button class="small primary" data-act="review-live-checkout">Review and place order</button>` : ""}
+      ${S.liveCart.orderable === false ? `<p class="fine">This cart differs from the item reviewed here. Check or clear it in Swiggy before selecting another item.</p>` : ""}
       <a class="btn small" href="${esc(S.liveCart.checkout_url)}" target="_blank" rel="noopener">Open Swiggy checkout ↗</a></div>` : ""}
     <h3 class="k">Your live favourites</h3><div class="plist">${fav.length ? fav.map(place).join("") : `<p class="fine">Search and star real restaurants for this address.</p>`}</div>
     ${S.liveResults ? `<h3 class="k">Swiggy results for ${esc(S.liveResults.query)}</h3><div class="plist">${results.length ? results.map(place).join("") : `<p class="fine">No live restaurants returned for this address and search.</p>`}</div>` : ""}
@@ -651,6 +662,13 @@ function livePlacesScreen() {
 async function searchLivePlaces(query) {
   S.liveResults = await api(`/api/user/${S.userId}/swiggy/restaurants?query=${encodeURIComponent(query)}`);
   S.liveBrowseMenu = null; render();
+}
+async function refreshLiveCart(show = true) {
+  try {
+    S.liveCart = (await api(`/api/user/${S.userId}/swiggy/live-cart`)).cart;
+    S.liveCartError = null;
+  } catch (error) { S.liveCart = null; S.liveCartError = error.message; }
+  if (show) render();
 }
 async function toggleLiveFavourite(id, name) {
   const r = await api(`/api/user/${S.userId}/swiggy/favourites`, "POST", { restaurant_id: id, restaurant_name: name });
@@ -674,6 +692,7 @@ async function addLiveItemToCart() {
       item_name: r.item, expected_fingerprint: r.fingerprint });
     S.placedOrder = null;
     S.liveOrderStatus = null;
+    S.liveCartError = null;
   } finally { S.liveOrderReview = null; }
   render();
 }
@@ -709,7 +728,7 @@ function checkoutReviewDialog() {
   return `<div class="modal-bg" data-close-checkout-review="1"><section class="checkout" role="dialog" aria-modal="true" aria-labelledby="checkout-review-title">
     <button class="close ghost" data-close-checkout-review="1" aria-label="Close order review">✕</button>
     <p class="eyebrow">Real Swiggy order</p><h2 class="sec" id="checkout-review-title">Place this order now?</h2>
-    <div class="checkout-list"><div class="checkout-row"><div><strong>${esc(r.item)}</strong><span>Quantity ${esc(r.quantity)} · ${esc(r.address)}</span></div><b>${rupee(r.to_pay)}</b></div></div>
+    <div class="checkout-list"><div class="checkout-row"><div><strong>${esc(r.item)}</strong><span>${esc(r.restaurant)} · Quantity ${esc(r.quantity)} · ${esc(r.address)}</span></div><b>${rupee(r.to_pay)}</b></div></div>
     <p class="fine">Payment: ${esc(r.payment_label)}. This places a real order to the address shown and you may owe the full amount. Check ingredients with the restaurant if needed. An uncertain result will not be retried automatically.</p>
     <div class="checkout-actions"><button class="ghost" data-close-checkout-review="1">Cancel</button><button class="primary" data-act="place-live-order" autofocus>Confirm and place order · ${rupee(r.to_pay)}</button></div>
   </section></div>`;
@@ -1074,6 +1093,7 @@ function connectionPanel() {
       <p class="fine">Protocol ${esc(sw.protocol_version || "?")} · ${sw.tools.length} tools (${sw.read_tools} read, ${sw.write_tools} write)${sw.expires ? ` · sign-in expires ${esc(sw.expires.slice(0, 16).replace("T", " "))}` : ""}.</p>
       <details><summary>What Swiggy offers this account</summary>${sw.tools.map(t => `<div class="calrow"><b>${esc(t.name)}</b><span class="tag ${t.kind === "write" ? "warn" : ""}">${t.kind}</span><span class="fine">${esc(t.description)}</span></div>`).join("")}</details>
       <div class="row gap"><button data-act="swiggy-discover">Refresh tools</button><button class="ghost" data-act="swiggy-disconnect">Disconnect</button></div></div>`
+    : sw.requires_private_profile ? `<div class="card"><h3>Use your own private profile</h3><p>Sample profiles are shared by every visitor. Create or sign in to a private SmartPlate profile to keep your Swiggy account and delivery addresses private.</p><button class="primary" data-act="start-onboard">Create my profile</button><button class="ghost" data-act="signin-open">Sign in</button></div>`
     : `<div class="card"><span class="tag">${sw.needs_reconnect ? "Reconnect required" : sw.expired ? "Sign-in expired" : "Not connected"}</span>
       <h3>Connect your Swiggy account</h3>
       ${sw.needs_reconnect ? `<p class="sub">This server can no longer read the saved Swiggy sign-in. Connect again.</p>` : ""}
@@ -1242,6 +1262,7 @@ function wire() {
     "confirm-cart": fillCart, "confirm-live-cart": addLiveItemToCart,
     "review-live-checkout": reviewLiveCheckout, "place-live-order": placeLiveOrder,
     "track-live-order": trackLiveOrder, "live-order-history": loadLiveOrderHistory, savetpl: saveTemplate,
+    "refresh-live-cart": refreshLiveCart,
     "download-ics": () => downloadPrivate(`/api/user/${S.userId}/reminders.ics`, "smartplate-reminders.ics", "text/calendar"),
     "download-csv": () => downloadPrivate(`/api/receipts/${S.userId}/export.csv`, "smartplate-expenses.csv", "text/csv"),
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
@@ -1262,8 +1283,9 @@ function wire() {
   if (S.sheet?.data) document.querySelector(".sheet .close")?.focus();
   on("[data-swaddr]", "click", (e) => guard(async () => {
     S.swiggy = await api(`/api/user/${S.userId}/swiggy/address`, "POST", { address_id: e.currentTarget.dataset.swaddr });
-    S.swAddrs = null; S.liveMenu = null; S.liveResults = null; S.liveBrowseMenu = null; S.liveCart = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null;
+    S.swAddrs = null; S.liveMenu = null; S.liveResults = null; S.liveBrowseMenu = null; S.liveCart = null; S.liveCartError = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null;
     S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
+    await refreshLiveCart(false);
     toast("Delivery address saved"); render(); }));
   on("[data-live-menu]", "click", (e) => guard(() => openLiveMenu(e.currentTarget.dataset.liveMenu)));
   on("[data-live-fav]", "click", (e) => guard(() => toggleLiveFavourite(e.currentTarget.dataset.liveFav, e.currentTarget.dataset.liveName)));
@@ -1309,6 +1331,7 @@ async function goTab(tab, sub = null) {
   if (tab === "more") S.more = sub;
   if (tab === "places" && swiggyReady() && !S.liveFavourites)
     S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
+  if (tab === "places" && swiggyReady()) await refreshLiveCart(false);
   if (tab === "places" && !swiggyReady() && !S.places)
     S.places = await api(`/api/restaurants?user_id=${S.userId}`);
   if (S.more === "community") S.community = await api("/api/community");

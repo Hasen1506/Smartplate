@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const source = fs.readFileSync('smartplate/static/app.js', 'utf8').replace(
   'boot().catch', 'globalThis.bootPromise = boot().catch');
 
-function fixture() {
+function fixture(overrides = {}) {
   const calls = [];
   const element = { innerHTML: '', classList: { toggle() {} }, appendChild() {}, remove() {}, addEventListener() {}, setAttribute() {} };
   const view = {
@@ -24,6 +24,7 @@ function fixture() {
     '/api/plan/42/orders': { attempted: 1, placed: 1, substituted: 0, failed: 0,
       results: [{ day: 0, meal: 'lunch', item: 'Meal', state: 'placed', placed: true, substituted: true, substitution: null }] },
   };
+  Object.assign(replies, overrides);
   const context = vm.createContext({
     document: { getElementById: () => element, querySelectorAll: () => [], querySelector: () => null,
       createElement: () => element, addEventListener() {}, body: element },
@@ -282,4 +283,43 @@ test('private exports fetch with a header and never put recovery keys in URLs', 
   assert.equal(requested.url, '/api/receipts/2/export.csv');
   assert.equal(requested.options.headers['X-SmartPlate-Key'], 'export-secret');
   assert.equal(downloaded, 'expenses.csv');
+});
+
+test('shared profiles cannot start a personal Swiggy connection', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext('S.swiggy = { connected: false, requires_private_profile: true }', context);
+  const html = vm.runInContext('connectionPanel()', context);
+  assert.match(html, /Create my profile/);
+  assert.match(html, /data-act="signin-open"/);
+  assert.ok(!html.includes('data-act="swiggy-connect"'));
+});
+
+test('boot restores the actual provider cart after a page reload', async () => {
+  const { context, calls } = fixture({
+    '/api/user/2/swiggy': { connected: true, address: { id: 'home', label: 'Home' } },
+    '/api/user/2/swiggy/favourites': [],
+    '/api/user/2/swiggy/live-cart': { cart: { item: 'Real Dish', restaurant: 'Real Place', to_pay: 160, orderable: true } },
+  });
+  await context.bootPromise;
+  assert.equal(vm.runInContext('S.liveCart.item', context), 'Real Dish');
+  assert.equal(vm.runInContext('S.liveCart.to_pay', context), 160);
+  assert.ok(calls.some(c => c.url.endsWith('/swiggy/live-cart') && c.options.method === 'GET'));
+});
+
+test('an external cart is visible but cannot be placed without a new review', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'home' }, order_enabled: true };
+    S.liveCart = { item: '<External item>', restaurant: 'Real Place', to_pay: 160, orderable: false };`, context);
+  const html = vm.runInContext('livePlacesScreen()', context);
+  assert.ok(!html.includes('data-act="review-live-checkout"') && !html.includes('<External item>'));
+  assert.match(html, /clear/);
+});
+
+test('checkout names and escapes the reviewed restaurant', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.checkoutReview = { restaurant: '<Kitchen>', item: 'Dish', quantity: 1,
+    address: 'Full address', to_pay: 160, payment_label: 'Cash' };`, context);
+  const html = vm.runInContext('checkoutReviewDialog()', context);
+  assert.match(html, /&lt;Kitchen&gt;/);
+  assert.ok(!html.includes('<Kitchen>'));
 });
