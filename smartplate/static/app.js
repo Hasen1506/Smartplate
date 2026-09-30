@@ -91,6 +91,16 @@ function setBusy(b) {
   S.busy = b;
   const el = document.getElementById("busybar");
   if (el) el.classList.toggle("on", b);
+  document.body.setAttribute("aria-busy", String(b));
+  document.querySelectorAll("button").forEach(button => {
+    if (b && !button.disabled) {
+      button.dataset.busyDisabled = "true";
+      button.disabled = true;
+    } else if (!b && button.dataset.busyDisabled === "true") {
+      button.disabled = false;
+      delete button.dataset.busyDisabled;
+    }
+  });
 }
 // Wrap every user-triggered action: show progress, surface errors instead of failing silently.
 async function guard(fn) {
@@ -1281,6 +1291,9 @@ function onboardChip(group, value, multi) {
 
 /* ---------------------------------------------------------------- wiring */
 function wire() {
+  // Actions may render new controls before their request finishes. Keep those
+  // controls disabled too, while preserving stock/rule-based disabled states.
+  setBusy(S.busy);
   const on = (sel, ev, fn) => document.querySelectorAll(sel).forEach(el => el.addEventListener(ev, fn));
   on("[data-tab]", "click", (e) => { e.preventDefault(); guard(() => goTab(e.currentTarget.dataset.tab)); });
   on("[data-go]", "click", (e) => { const [t, sub] = e.currentTarget.dataset.go.split(":"); guard(() => goTab(t, sub || null)); });

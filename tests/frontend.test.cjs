@@ -92,6 +92,26 @@ test('busy action guard ignores a second click during the same action', async ()
   assert.equal(context.actionCount, 1);
 });
 
+test('pending actions disable review buttons across render and preserve unavailable items', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  const review = { disabled: false, dataset: {} };
+  const unavailable = { disabled: true, dataset: {} };
+  let buttons = [review, unavailable];
+  context.document.querySelectorAll = selector => selector === 'button' ? buttons : [];
+  const pending = vm.runInContext(`guard(async () => {
+    await new Promise(resolve => globalThis.finishAction = resolve);
+  })`, context);
+  assert.equal(review.disabled, true);
+  const renderedReview = { disabled: false, dataset: {} };
+  buttons = [renderedReview, unavailable];
+  vm.runInContext('render()', context);
+  assert.equal(renderedReview.disabled, true);
+  context.finishAction(); await pending;
+  assert.equal(renderedReview.disabled, false);
+  assert.equal(unavailable.disabled, true);
+  assert.equal(renderedReview.dataset.busyDisabled, undefined);
+});
+
 /* ---- everyday screens ---- */
 function richView(context) {
   vm.runInContext(`S.view.plan.week_start = '2026-09-21';

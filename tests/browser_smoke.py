@@ -2,6 +2,7 @@
 Run explicitly in CI after installing Playwright. Production never imports this.
 """
 import json
+import time
 from pathlib import Path
 from threading import Thread
 
@@ -70,6 +71,12 @@ def test_browser_live_menu_cart_review_reload_order_and_tracking(pilot, viewport
         browser = playwright.chromium.launch()
         page, errors = open_profile(browser, pilot, viewport)
         try:
+            # Force a slow response: Review must wait for search to finish rather
+            # than silently dropping the click while the action guard is busy.
+            def slow_dish_search(route):
+                time.sleep(0.25)
+                route.continue_()
+            page.route("**/swiggy/dishes**", slow_dish_search)
             page.get_by_role("textbox", name="Restaurant or cuisine").fill("Hotel Saravana Bhavan")
             page.get_by_role("button", name="Search Swiggy", exact=True).click()
             page.locator('[data-live-fav="r-1"]').click()
