@@ -111,7 +111,7 @@ test('no saved profile opens the welcome screen instead of a sample', async () =
   vm.runInContext("localStorage.getItem = () => null", context);
   await vm.runInContext('boot()', context);
   assert.equal(vm.runInContext('S.welcome', context), true);
-  assert.match(element.innerHTML, /Set up my week/);
+  assert.match(element.innerHTML, /Create my private profile/);
   assert.ok(!calls.some(c => c.url.includes('/plan')));
 });
 

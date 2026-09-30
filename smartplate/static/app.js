@@ -277,15 +277,15 @@ function welcomeScreen() {
   const samples = (S.users || []).filter(u => u.setup_done);
   return `<main class="welcome">
     <div class="brand big">Smart<em>Plate</em></div>
-    <h1 class="hero">Your week of food, sorted.</h1>
-    <p class="lede">Within your budget, around your allergies, from the places you already like. When it's time, you get one meal and one button.</p>
+    <h1 class="hero">Meals from the places you like.</h1>
+    <p class="lede">Create your private profile and connect Swiggy to find real restaurants and dishes for your saved delivery address.</p>
     <ul class="promise">
-      <li><b>No endless scrolling.</b> Your usual places, three dishes each, with prices that include delivery.</li>
-      <li><b>Knows when to order.</b> Order-by times that avoid the rush and allow for rain and holidays.</li>
+      <li><b>Remember your favourites.</b> Search local restaurants and browse their current Swiggy menus after connecting.</li>
+      <li><b>Review before ordering.</b> Check the restaurant, dish, delivery address and current payable total.</li>
       <li><b>Plans around your rules.</b> The sample planner filters declared allergies and caps estimated spend. Check ingredients and the final price in Swiggy before ordering.</li>
     </ul>
     ${S.signin ? "" : errbar(false)}
-    <button class="primary big" data-act="start-onboard">Set up my week · 2 minutes</button>
+    <button class="primary big" data-act="start-onboard">Create my private profile</button>
     ${S.signin ? `<form id="signin" class="card signin">
         <h3 class="k">Sign in to your profile</h3>
         ${S.error ? `<p class="inline-err" role="alert">⚠ ${esc(S.error)}</p>` : ""}
@@ -296,7 +296,7 @@ function welcomeScreen() {
       : `<button class="ghost big" data-act="signin-open">I already have a profile · Sign in</button>`}
     ${samples.length ? `<details class="samples"><summary>Or look around a sample profile</summary>
       ${samples.map(u => `<button class="ghost" data-user="${u.id}">${esc(u.name)} · ${esc(u.city)}</button>`).join("")}</details>` : ""}
-    <p class="fine">Trial: sample Chennai restaurants and prices. Weather is live when online. Ordering opens Swiggy for you to confirm. SmartPlate never pays or orders on its own.</p>
+    <p class="fine">Live menus require an approved Swiggy connection. The optional weekly planner uses sample Chennai dishes and estimated prices. Ingredients and allergy safety must be checked with the restaurant. Every real order requires your confirmation.</p>
   </main>`;
 }
 
@@ -313,7 +313,7 @@ function topbar() {
   return `<header class="topbar"><div class="inner">
     <div class="brand">Smart<em>Plate</em></div>
     <span class="spacer"></span>
-    <span class="pill ${left < 0 ? "bad" : "ok"}" title="Planned spend this week">${rupee0(Math.abs(left))} ${left < 0 ? "over" : "left"}</span>
+    ${swiggyReady() && ["today", "places"].includes(S.tab) ? `<span class="pill accent">Live Swiggy menu</span>` : `<span class="pill ${left < 0 ? "bad" : "ok"}" title="Sample weekly plan estimate">Plan estimate · ${rupee0(Math.abs(left))} ${left < 0 ? "over" : "left"}</span>`}
     <button class="avatar" data-go="more:profiles" title="Profile: ${esc(S.view.user?.name)}" aria-label="Profile and settings">${esc((S.view.user?.name || "?").slice(0, 1))}</button>
   </div></header>`;
 }
