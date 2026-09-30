@@ -90,7 +90,7 @@ def build_week(user_id, body, *, revision=False):
         if unknown_prices:
             notices.append(f"{restaurant['name']}: {unknown_prices} items have unverified price units and are excluded")
         for item in menu['items'][:150]:
-            if item['in_stock'] is False or item['price'] is None or item['price'] <= 0:
+            if item['in_stock'] is False or item['price'] is None or item['price'] <= 0 or item['price'] > 100000:
                 continue
             if user['diet'] in ('veg', 'vegan') and item['veg'] is not True:
                 continue
@@ -191,7 +191,10 @@ def revise_week(user_id, body):
     existing = week(user_id)
     if not existing:
         raise ValueError('Build a week before revising it')
-    if body.get('expected_version') != existing.get('version'):
+    version = body.get('expected_version')
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError('Supply the current integer plan version')
+    if version != existing.get('version'):
         raise live.CartChanged('This week changed; refresh before revising it')
     if clock.now().date() >= dt.date.fromisoformat(existing['start_date']) + dt.timedelta(days=7):
         raise ValueError('This week ended; build a new week')

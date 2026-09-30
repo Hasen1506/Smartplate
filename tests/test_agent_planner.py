@@ -213,3 +213,10 @@ def test_invalid_solver_incumbent_is_not_trusted():
     assert not live_planner.valid_incumbent(problem)
     x.varValue=1
     assert live_planner.valid_incumbent(problem)
+
+
+def test_bad_provider_prices_cannot_enter_milp():
+    result=live_planner.solve(slots(),candidates()+[
+        {'id':'corrupt','restaurant_id':'real-r','price':1e100},
+        {'id':'nan','restaurant_id':'real-r','price':float('nan')}],700,50)
+    assert result['covered']==7 and all(i['id']=='cheap' for i in result['items'])

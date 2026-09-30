@@ -38,6 +38,8 @@ def solve(slots, candidates, budget, reserve, *, preferences=None, previous=None
     The fallback is feasible, deterministic, and explicitly not certified optimal.
     """
     preferences, previous = preferences or {}, previous or {}
+    candidates = [c for c in candidates if isinstance(c.get('price'), (int, float)) and not isinstance(c['price'], bool)
+                  and math.isfinite(c['price']) and 0 < c['price'] <= 100000]
     candidates = sorted(candidates, key=lambda c: (paise(c['price']), c['restaurant_id'], c['id']))
     def key(c):
         return c['restaurant_id'] + ':' + c['id']
