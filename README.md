@@ -169,13 +169,15 @@ instead of silently ordered.
 
 Without a Swiggy sign-in, ordering is a **hand-off**: *Order on Swiggy* opens Swiggy's
 public search for that restaurant and dish, the person orders there, then taps *I had
-it* so the budget and nutrition stay accurate.
+it* to record the planned meal estimate. This does not verify the actual purchase,
+charged amount or nutrition of the food received.
 
 With a sign-in (More → Swiggy connection), SmartPlate reads saved addresses,
 searches real restaurants, shows menus, maintains favourites and puts an exact
 reviewed dish in the cart. It can place a user-confirmed Cash on Delivery order
 only when `SMARTPLATE_LIVE_ORDERS=on`; otherwise checkout remains in Swiggy.
-These flows are tested against a fake server. The real sign-in currently fails
+These flows have automated API and real Chromium desktop/phone walkthrough tests
+against an isolated fake server. The real sign-in last checked on 30 September failed
 at Swiggy's allowlist page, so the first authenticated menu and cart calls remain
 to be tested after provider approval.
 The simulated auto-ordering path (idempotent, spend-limited) remains under More. No

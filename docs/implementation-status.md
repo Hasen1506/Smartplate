@@ -20,9 +20,11 @@ It is not a claim that every expansion has been built.
 | Purchase visibility | Provider recent orders beside local attempts, plus tracking for recorded provider order IDs; uncertainty stays blocked pending operator reconciliation | `tests/test_swiggy_live.py` |
 | Provider errors | Failed MCP/payload responses surface errors; 401 expires the saved connection; 429 exposes Retry-After where usable | `tests/test_swiggy_live.py` |
 | Honest demo boundary | Connected Today/Places use real menu flow; sample weekly optimization and estimates remain labelled; no fabricated fallback restaurants for live search | `tests/frontend.test.cjs` |
+| Export and calendar input protection | CSV text labels cannot become spreadsheet formulas; calendar import rejects foreign plans, invalid IDs and malformed events without partial inserts | `tests/test_export_security.py`, `tests/test_followups.py` |
 | Deployment preparation | Paid single-instance disk Blueprint, database readiness, live-order startup guard, consistent SQLite backup and restore test; private exports use header authentication | `tests/test_hosting.py`, `tests/test_backup_sqlite.py`, `tests/test_followups.py` |
+| Browser walkthroughs in CI | Actual Chromium on desktop and phone viewports exercises favourites, menu search, cart/reload, approval/placement/tracking, credential-free export, recovery rotation and deletion; checks script/CSP errors and horizontal overflow | `tests/browser_smoke.py` |
 
-All provider integration tests use a fake MCP server with documented response
+All provider integration and browser tests use a fake MCP server with documented response
 shapes. That fake is test infrastructure, never a source of live user menu data.
 CI cannot prove that a real account has the tools, payloads, stock or COD support.
 
@@ -41,6 +43,10 @@ The weekly planner still uses the demo catalogue. There is no production weekly
 optimizer fed by all live favourites, no unattended ordering, and no guaranteed
 live weekly spend ceiling. The current real menu flow is user selection, not a
 fully autonomous meal agent.
+
+The welcome screen describes the connected real-menu flow. New profile creation
+leads to connection setup. Weekly screens explicitly mark sample dishes, nutrition
+and prices; their budget card is an estimate and does not claim actual live spend.
 
 ## Still external or operational
 
@@ -81,6 +87,7 @@ restart during OAuth, private profiles on two browsers, saved addresses across
 pages, no serviceability, closed restaurants, empty/truncated menus, price/stock
 changes, options, expired authorization, rate limits, externally edited cart,
 unavailable COD, a reviewed supervised order, tracking/history, and an ambiguous
-response without retry. Also check phone layouts/keyboard navigation, persistent
-redeploy, backup restore and reminder delivery. Keep placement off until these
+response without retry. CI covers desktop/phone Chromium with an isolated provider;
+actual devices, keyboard navigation and other browsers still need pilot checks.
+Also verify persistent redeploy, off-host restore and reminder delivery. Keep placement off until these
 gates are met.

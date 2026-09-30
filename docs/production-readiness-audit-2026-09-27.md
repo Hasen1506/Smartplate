@@ -13,6 +13,10 @@ It also implements paginated restaurant dish search, private data export/deletio
 owned community-post removal, recovery-code/device revocation and a browser CSP.
 Reconnecting clears old account address/cart approvals. These are real code changes
 with regression tests; live Swiggy access and operator deployment are still required.
+Real Chromium desktop/phone walkthroughs now run in CI against an isolated fake
+provider. Calendar import validates plan ownership and rolls back malformed input;
+CSV exports keep untrusted labels as text. Welcome and weekly-budget copy no longer
+promise live prices or actual spending from the sample planner.
 
 ## 30 September 2026 follow-up: live rejection and pilot preparation
 
@@ -28,7 +32,7 @@ There is no separate OAuth client ID to request: Swiggy documents [dynamic clien
 
 **Reviewed:** 27 September 2026, with a direct sign-in check on 30 September. Repository: [Hasen1506/Smartplate](https://github.com/Hasen1506/Smartplate), `main` at `733b69b5e768bfe5ef6bf67f889427bc75f118f2`. This is a source, public-documentation and Render UI audit, plus frontend and GitHub CI checks. I did not have Render logs, confirmation of the exact Swiggy-approved URI, or a live Swiggy account. The browser itself confirmed the Render origin was rejected at sign-in.
 
-## Verdict
+## Verdict on the originally reviewed main branch
 
 SmartPlate is a capable **Chennai trial**: a working planner, installable web app, private profile keys, a simulator, and a solid automated test baseline. It is **not ready for real commerce or durable personal data**. The most important distinction is that a green simulator test does not validate Swiggy OAuth, live menus, item identity, allergy safety, cart semantics, checkout, or payment. The app itself says that the live connection has not been tested against Swiggy.
 
@@ -36,7 +40,7 @@ The immediate connection blocker is **exact redirect approval for the deployed a
 
 ## Changes prepared in draft PR #17
 
-The [draft PR](https://github.com/Hasen1506/Smartplate/pull/17) addresses several code-level problems found below. It shows the exact callback URL in Settings and corrects misleading sign-in and planning copy. It adds a fresh, restaurant-scoped `search_menu` preview of an exact item and explicit confirmation before `update_food_cart`. The server rechecks the item and planned session before changing the cart, refuses unverified stock, customizations, vegan/allergen/medical profiles, and checks the result with `get_food_cart`. It also rejects documented `success: false` provider replies and stops guessing the units of ambiguous menu prices. These changes are **proposed, not deployed or validated against Swiggy staging**. The findings below describe the reviewed `main` version; the PR narrows these risks but cannot clear provider approval, live contract, durable storage, or purchase lifecycle gates.
+The [draft PR](https://github.com/Hasen1506/Smartplate/pull/17) addresses code-level problems found below. It shows the exact callback URL in Settings and corrects misleading sign-in and planning copy. It adds a fresh, restaurant-scoped `search_menu` preview of an exact item and explicit confirmation before `update_food_cart`. The server rechecks the item and planned session before changing the cart, refuses unverified stock, customizations, vegan/allergen/medical profiles, and checks the result with `get_food_cart`. It also rejects documented `success: false` provider replies and stops guessing the units of ambiguous menu prices. These changes are **implemented on the draft branch, not deployed or validated against Swiggy staging**. The findings below describe the reviewed `main` version; the PR cannot clear external provider approval, real contract or operational deployment gates.
 
 ## What works today, and what does not
 
@@ -108,4 +112,4 @@ The [draft PR](https://github.com/Hasen1506/Smartplate/pull/17) addresses severa
 
 ## Verification and remaining unknowns
 
-The reviewed GitHub `main` CI run passed. The [30 September implementation CI](https://github.com/Hasen1506/Smartplate/actions/runs/36668422525), at `48fd2aa6adc4fb277b1d8eee66d815f107bc64e2`, passed 225 Python and 29 frontend tests plus sourcing and syntax checks. Tests cover private profile/export/deletion ownership, deletion rollback, credential exclusion, recovery/device revocation, address and dish pagination, fresh cart identity/diet/options/stock/payment/total changes, expired/replaced approvals, uncertain submissions without retry, cart/tracking reload and browser bootstrap/security policy. Provider tests use a fake MCP server with documented envelopes; no authenticated Swiggy cart, payment or order has been invoked. Phone/browser walkthroughs and actual provider/deployment tests remain release gates.
+The reviewed GitHub `main` CI run passed. The [30 September implementation CI](https://github.com/Hasen1506/Smartplate/actions/runs/36670566112), at `bde1bfb8a4b1594e45066b10ed17f12f40c7692a`, passed 228 Python and 29 frontend tests, sourcing and syntax checks, and four real Chromium walkthroughs across desktop and phone viewports. Tests cover private profile/export/deletion ownership, deletion rollback, credential exclusion, recovery/device revocation, address and dish pagination, fresh cart identity/diet/options/stock/payment/total changes, expired/replaced approvals, uncertain submissions without retry, cart/tracking reload, CSV formula protection and calendar ownership/input rollback. Browser tests exercise the whole menu-to-order flow, downloads, recovery rotation and deletion with no script/CSP errors or horizontal overflow. All provider calls in tests use an isolated fake MCP server; no real authenticated Swiggy cart, payment or order has been invoked. Actual provider, real-device and deployment checks remain release gates.
