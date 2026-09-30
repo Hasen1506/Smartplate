@@ -9,6 +9,8 @@ in the draft branch. The follow-up also fixes shared-profile Swiggy privacy, car
 restoration after reload, final restaurant/item/quantity/address verification,
 latest-approval concurrency, profile-wide uncertain-order blocking, paginated
 addresses/item search, provider 401/429 handling, and readable tracking after reload.
+It also implements paginated restaurant dish search, private data export/deletion,
+owned community-post removal, recovery-code/device revocation and a browser CSP.
 Reconnecting clears old account address/cart approvals. These are real code changes
 with regression tests; live Swiggy access and operator deployment are still required.
 
@@ -106,4 +108,4 @@ The [draft PR](https://github.com/Hasen1506/Smartplate/pull/17) addresses severa
 
 ## Verification and remaining unknowns
 
-The reviewed GitHub `main` CI run passed. The [30 September follow-up CI](https://github.com/Hasen1506/Smartplate/actions/runs/36650717023) passed 215 Python and 24 frontend tests plus sourcing and syntax checks. Subsequent tracking/reconnection changes require a final run after upload. I inspected the deployed Render sign-in but have not invoked any authenticated Swiggy cart, order or payment tool.
+The reviewed GitHub `main` CI run passed. The [30 September implementation CI](https://github.com/Hasen1506/Smartplate/actions/runs/36668422525), at `48fd2aa6adc4fb277b1d8eee66d815f107bc64e2`, passed 225 Python and 29 frontend tests plus sourcing and syntax checks. Tests cover private profile/export/deletion ownership, deletion rollback, credential exclusion, recovery/device revocation, address and dish pagination, fresh cart identity/diet/options/stock/payment/total changes, expired/replaced approvals, uncertain submissions without retry, cart/tracking reload and browser bootstrap/security policy. Provider tests use a fake MCP server with documented envelopes; no authenticated Swiggy cart, payment or order has been invoked. Phone/browser walkthroughs and actual provider/deployment tests remain release gates.

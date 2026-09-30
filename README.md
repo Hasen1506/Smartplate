@@ -180,3 +180,8 @@ at Swiggy's allowlist page, so the first authenticated menu and cart calls remai
 to be tested after provider approval.
 The simulated auto-ordering path (idempotent, spend-limited) remains under More. No
 background worker places orders. See [the integration notes](docs/vendor/swiggy/README.md).
+
+See [implementation status](docs/implementation-status.md) for the exact pilot
+scope, tested code and remaining recommendations. Private profiles now support
+credential-free data export, explicit deletion and recovery-code/device revocation
+in More → Profiles. Real restaurant menus also support paginated dish search.

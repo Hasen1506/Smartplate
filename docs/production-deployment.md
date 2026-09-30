@@ -20,6 +20,29 @@ No Swiggy account, OAuth code, cart, payment, or real order was used in the obse
 6. For a supervised order pilot only, confirm Swiggy explicitly permits Food placement and its COD response matches the adapter. Set `SMARTPLATE_LIVE_ORDERS=on` only after a support owner, refund/cancellation route, backup restore, and staging test exist. Start with a small allowed order and a single user. Every real order requires a fresh approval that displays full address, item, total and payment method. If the response is uncertain, inspect Swiggy orders and contact support; do not retry the same cart blindly. UPI placement is intentionally unsupported in SmartPlate; users can use Swiggy checkout for those payments.
 7. Monitor `/readyz`, failed OAuth, provider errors, unknown order attempts, backup age and disk fill. Roll back code by redeploying the prior known-good commit while retaining the persistent disk and secret. Do not roll back the database file over live orders without an incident plan.
 
+## Data controls and incident recovery
+
+Private profiles can download their local data and permanently delete their active
+database records from **More → Profiles**. Exports omit tokens, password/device
+hashes and push encryption material. Deletion also removes new published community
+templates linked to that profile, its pending OAuth/checkout state, subscriptions
+and order attempts. It does not cancel orders or delete an independent Swiggy
+account. Legacy public templates without an author ID need operator review rather
+than guessing their owner from a name. Document backup retention and account
+deletion handling; an old restore can resurrect deleted data and revoked credentials.
+
+Users can replace a compromised recovery code from the same screen. Rotation
+invalidates earlier profile codes and device tokens and clears pending approvals.
+Password sign-in remains available; change a compromised password separately.
+Never rotate the global `SMARTPLATE_SECRET` as an account recovery action.
+
+Keep uncertain order attempts blocked until the support owner obtains provider
+evidence of acceptance or non-placement. The recent-orders view and stored order
+IDs aid investigation. There is no automatic matching by names/totals and no
+public "retry anyway" control. A record without a provider ID requires provider
+support reconciliation before any manual database correction. Preserve an incident
+record and backup before correcting financial attempt state.
+
 ## Release boundary
 
 The PR prepares the app for a **small supervised pilot**, not an unqualified public commerce launch. The live provider contract remains untested until Swiggy accepts this origin. A single SQLite web process, browser-held recovery keys, best-effort in-process reminders, and a demo meal planner remain limits for wider scale. If the provider rejects `onrender.com` as a domain class, register a domain you control, point it to this service, request that **exact** new callback, and update `SMARTPLATE_PUBLIC_URL` only after approval. `smartplate.app` cannot be used without acquiring control of it.
