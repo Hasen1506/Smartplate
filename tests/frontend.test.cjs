@@ -199,6 +199,14 @@ test('recent provider orders and uncertain attempts are visible without raw mark
   assert.ok(!html.includes('<Home>') && !html.includes('<Restaurant>'));
 });
 
+test('live configuration routes orders to real Places instead of a dead simulator', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.meta.swiggy_provider = 'live';`, context);
+  assert.match(vm.runInContext('ordersPanel()', context), /Open live Places/);
+  assert.ok(!vm.runInContext('ordersPanel()', context).includes('data-act="exec"'));
+  assert.ok(!vm.runInContext('weekScreen()', context).includes('data-act="exec"'));
+});
+
 test('week rows are draggable and carry weather and holidays', async () => {
   const { context } = fixture(); await context.bootPromise;
   richView(context);
