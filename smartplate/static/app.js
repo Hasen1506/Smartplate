@@ -36,7 +36,23 @@ const keys = {
   put(id, key, name) { const a = this.all(); a[id] = { key, name }; store.set("smartplate.keys", JSON.stringify(a)); },
   drop(id) { const a = this.all(); delete a[id]; store.set("smartplate.keys", JSON.stringify(a)); },
 };
-const withKey = (url) => { const k = keys.get(S.userId); return k ? `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(k)}` : url; };
+async function downloadPrivate(path, filename, mime) {
+  const headers = {};
+  const key = keys.get(S.userId);
+  if (key) headers["X-SmartPlate-Key"] = key;
+  const response = await fetch(path, { headers });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || response.statusText);
+  }
+  const url = URL.createObjectURL(new Blob([await response.blob()], { type: mime }));
+  try {
+    const link = document.createElement("a");
+    link.href = url; link.download = filename;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (error) { URL.revokeObjectURL(url); throw error; }
+}
 function mergeUsers(open) {
   const priv = Object.entries(keys.all()).map(([id, v]) => ({ id: Number(id), name: v.name || "My profile", city: "Chennai", setup_done: true, private: true }));
   return [...priv, ...open.filter(u => !priv.some(p => p.id === u.id))];
@@ -386,7 +402,7 @@ function reminderRow() {
   }
   return `<section class="remind" aria-label="Reminders"><span class="fine">Never miss an order-by time:</span>
     ${btn}
-    <a class="btn ghost small" href="${esc(withKey(`/api/user/${S.userId}/reminders.ics`))}" download>📅 Add to my calendar</a></section>`;
+    <button class="btn ghost small" data-act="download-ics">📅 Add to my calendar</button></section>`;
 }
 
 /* Push reminders arrive at the order-by time even when SmartPlate is closed
@@ -992,7 +1008,7 @@ function receiptsPanel() {
   return `<h2 class="sec">Expenses</h2>
     <div class="sub">Meals you confirmed and simulated orders. These are not tax invoices. Check the business/personal suggestions before you use them.</div>
     <div class="row" style="margin-bottom:12px"><button class="primary" data-act="genrcpt">Update from this week</button>
-      <a class="btn ghost" href="${esc(withKey(`/api/receipts/${S.userId}/export.csv`))}">Export CSV ↓</a></div>
+      <button class="btn ghost" data-act="download-csv">Export CSV ↓</button></div>
     ${r ? `<div class="stats"><div class="stat"><div class="label">Total</div><div class="val">${rupee(r.total)}</div></div>
       <div class="stat"><div class="label">Business</div><div class="val">${rupee(r.business_total)}</div></div></div>
       <div class="card scroll-x"><table><tr><th>date</th><th>item</th><th>category</th><th>amount</th></tr>${rows || `<tr><td class="empty" colspan="4">No expenses yet. Confirm a meal with “I had it”.</td></tr>`}</table></div>` : `<div class="card empty">Loading…</div>`}`;
@@ -1226,6 +1242,8 @@ function wire() {
     "confirm-cart": fillCart, "confirm-live-cart": addLiveItemToCart,
     "review-live-checkout": reviewLiveCheckout, "place-live-order": placeLiveOrder,
     "track-live-order": trackLiveOrder, "live-order-history": loadLiveOrderHistory, savetpl: saveTemplate,
+    "download-ics": () => downloadPrivate(`/api/user/${S.userId}/reminders.ics`, "smartplate-reminders.ics", "text/calendar"),
+    "download-csv": () => downloadPrivate(`/api/receipts/${S.userId}/export.csv`, "smartplate-expenses.csv", "text/csv"),
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
     "start-onboard": async () => startOnboard(), notify: toggleAlerts,
     "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); location.href = r.authorize_url; },
