@@ -30,14 +30,20 @@ def enqueue(pairs, at, reconcile=False):
 def drain(at=None, sender=None):
     from . import push
     from .integrations import webpush
+    injected_time = at is not None
     at = at or clock.now()
     sender = sender or webpush.send
     sent = 0
     # Snapshot IDs only; claims are transactional so concurrent workers cannot send
     # the same reminder while its lease is active.
     with db.cursor() as cur:
-        ids = [r['id'] for r in cur.execute("SELECT id FROM reminder_jobs WHERE state IN ('pending','sending') AND due_ts<=? ORDER BY due_ts LIMIT 100", (at.isoformat(),))]
+        cur.execute('INSERT OR REPLACE INTO worker_heartbeats VALUES (?,?)', ('reminders', clock.now().isoformat()))
+        ids = [r['id'] for r in cur.execute("SELECT id FROM reminder_jobs WHERE state IN ('pending','sending') AND due_ts<=? "
+            "AND (retry_ts IS NULL OR retry_ts<=?) AND (state!='sending' OR lease_ts IS NULL OR lease_ts<=?) "
+            "ORDER BY due_ts LIMIT 100", (at.isoformat(), at.isoformat(), at.isoformat()))]
     for jid in ids:
+        if not injected_time:
+            at = clock.now()  # long batches must still respect the twenty-minute deadline
         with db.cursor() as cur:
             cur.execute('BEGIN IMMEDIATE')
             job = cur.execute('SELECT * FROM reminder_jobs WHERE id=?', (jid,)).fetchone()
@@ -61,6 +67,7 @@ def drain(at=None, sender=None):
         except Exception:
             code = 0
         with db.cursor() as cur:
+            cur.execute('INSERT OR REPLACE INTO worker_heartbeats VALUES (?,?)', ('reminders', clock.now().isoformat()))
             if code in (404, 410):
                 cur.execute('DELETE FROM push_subscriptions WHERE id=?', (sub['id'],))
                 cur.execute('DELETE FROM push_sent WHERE subscription_id=?', (sub['id'],))
@@ -78,5 +85,5 @@ def drain(at=None, sender=None):
                 cur.execute('UPDATE reminder_jobs SET state=?,last_code=?,lease_ts=NULL,retry_ts=? WHERE id=? AND lease_ts=?',
                             (state, code, retry.isoformat(), jid, lease))
     with db.cursor() as cur:
-        cur.execute('INSERT OR REPLACE INTO worker_heartbeats VALUES (?,?)', ('reminders', at.isoformat()))
+        cur.execute('INSERT OR REPLACE INTO worker_heartbeats VALUES (?,?)', ('reminders', clock.now().isoformat()))
     return sent

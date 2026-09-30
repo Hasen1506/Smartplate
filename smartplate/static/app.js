@@ -309,7 +309,7 @@ function welcomeScreen() {
       : `<button class="ghost big" data-act="signin-open">I already have a profile · Sign in</button>`}
     ${samples.length ? `<details class="samples"><summary>Or look around a sample profile</summary>
       ${samples.map(u => `<button class="ghost" data-user="${u.id}">${esc(u.name)} · ${esc(u.city)}</button>`).join("")}</details>` : ""}
-    <p class="fine">Live menus require an approved Swiggy connection. The optional weekly planner uses sample Chennai dishes and estimated prices. Ingredients and allergy safety must be checked with the restaurant. Every real order requires your confirmation.</p>
+    <p class="fine">Connect Swiggy to plan from your real restaurant favourites and current menus. Sample profiles use Chennai example dishes and estimates. Ingredients and allergy safety must be checked with the restaurant. Every real order requires your confirmation.</p>
   </main>`;
 }
 
@@ -675,7 +675,7 @@ function livePlacesScreen() {
       <p class="fine">Checked ${esc(menu.fetched)}. ${menu.truncated ? "Swiggy shortened this browse list; search in Swiggy for more dishes. " : ""}
       ${menu.hidden_nonveg ? `${menu.hidden_nonveg} marked non-veg dishes hidden. ` : ""}Ingredient and allergy safety cannot be established from this menu. Final price, fees, options and availability may change.</p>
       <div class="lmlist">${rows || `<p class="fine">No dishes returned for this restaurant and search.</p>`}</div>${menu.search?.has_more ? `<button data-act="more-live-dishes">Load more matching dishes</button>` : ""}</section>` : ""}
-    <details><summary>Sample planner (demo data)</summary><p class="fine">The weekly plan and sample Chennai list currently use seeded data. They do not determine which live Swiggy items are orderable.</p></details>`;
+    <details><summary>Sample planner (demo data)</summary><p class="fine">The optional sample catalogue uses example dishes and estimates. Your connected Week uses Swiggy menus from real favourites. Sample dishes never determine which live items are orderable.</p></details>`;
 }
 
 async function searchLivePlaces(query) {

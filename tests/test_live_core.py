@@ -211,3 +211,16 @@ def test_retry_budget_is_bounded_and_private_profiles_never_get_sample_reminders
     with db.cursor() as cur:
         assert cur.execute('SELECT state FROM reminder_jobs').fetchone()[0] in ('failed', 'expired')
     assert client.get('/api/user/3/reminders').get_json() == []
+
+
+def test_backoff_jobs_cannot_starve_ready_deliveries(core):
+    client, _ = core
+    at = clock.now()
+    sub, _ = queued(client, at)
+    with db.cursor() as cur:
+        for i in range(120):
+            cur.execute('INSERT INTO reminder_jobs(user_id,subscription_id,event_key,payload,due_ts,retry_ts) VALUES (?,?,?,?,?,?)',
+                (3, sub['id'], f'backoff:{i}', '{}', (at - dt.timedelta(seconds=1)).isoformat(),
+                 (at + dt.timedelta(minutes=5)).isoformat()))
+    sender = FakeService()
+    assert reminder_queue.drain(at, sender) == 1 and len(sender.calls) == 1
