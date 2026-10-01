@@ -858,7 +858,9 @@ function moreScreen() {
   const back = `<button class="ghost small back" data-go="more:">← More</button>`;
   const body = { settings: settingsPanel, calendar: calendarPanel, insights, orders: ordersPanel, cooking: cookingPanel,
     receipts: receiptsPanel, community: communityPanel, connection: connectionPanel, profiles: profilesPanel, agents: personalAgentPanel }[S.more];
-  return back + (body ? body() : "");
+  const exampleNote = swiggyReady() && ['insights','cooking','receipts','community'].includes(S.more)
+    ? '<p class="consent">Sample planner examples: these nutrition, recipe and expense estimates do not describe your live Swiggy meals. Open Week for your real menu plan and recorded spending.</p>' : '';
+  return back + exampleNote + (body ? body() : "");
 }
 
 function calendarPanel() {
@@ -1402,7 +1404,7 @@ function wire() {
       adoptView(await api(`/api/user/${S.userId}/setup`, 'PATCH', body));
       if (keys.get(S.userId)) keys.put(S.userId, keys.get(S.userId), S.view.user.name);
       S.users = mergeUsers(await api('/api/users')); S.orderReview = null;
-      S.tab = 'today'; S.more = null; toast('Saved. Upcoming meals re-planned.'); render();
+      S.tab = 'today'; S.more = null; toast(swiggyReady() ? 'Profile saved. Open Week to review and revise your real-menu plan.' : 'Saved. Upcoming meals re-planned.'); render();
     });
   };
 }

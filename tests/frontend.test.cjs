@@ -451,3 +451,11 @@ test('profile clearing removes delegated tokens, food memory and approval state'
   vm.runInContext(`for(const k of ['agentToken','agentReview','agentConnections','foodMemory','weekStatus'])S[k]={private:true};clearCurrentProfile()`,context);
   assert.equal(vm.runInContext("['agentToken','agentReview','agentConnections','foodMemory','weekStatus'].every(k=>S[k]===null)",context),true);
 });
+
+
+test('connected sample insights clearly distinguish examples from real meals',async()=>{
+  const {context}=fixture();await context.bootPromise;
+  vm.runInContext("S.swiggy={connected:true,address:{id:'home'}};S.more='insights';S.view.nutrition.daily_avg={}",context);
+  const html=vm.runInContext('moreScreen()',context);
+  assert.match(html,/Sample planner examples/);assert.match(html,/do not describe your live Swiggy meals/);
+});
