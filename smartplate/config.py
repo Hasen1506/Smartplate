@@ -42,6 +42,12 @@ SWIGGY_CALLBACK_PATH = os.environ.get("SMARTPLATE_SWIGGY_CALLBACK_PATH", "/swigg
 if SWIGGY_CALLBACK_PATH not in ("/swiggy/callback", "/auth/swiggy/callback"):
     raise ValueError("SMARTPLATE_SWIGGY_CALLBACK_PATH must be a supported callback route")
 
+# Generic menu "price" has no documented unit. Set only after provider confirmation
+# or comparing a real account menu with its authoritative cart payable total.
+SWIGGY_MENU_PRICE_UNIT = os.environ.get("SMARTPLATE_SWIGGY_MENU_PRICE_UNIT", "unknown")
+if SWIGGY_MENU_PRICE_UNIT not in ("unknown", "paise", "rupees"):
+    raise ValueError("SMARTPLATE_SWIGGY_MENU_PRICE_UNIT must be unknown, paise or rupees")
+
 # Server secret for encrypting stored tokens. render.yaml generates one; without it a
 # random key is created once and kept in the database (fine for a trial, not for
 # production, where the key must live outside the data it protects).
@@ -53,6 +59,7 @@ BEHIND_PROXY = os.environ.get("SMARTPLATE_BEHIND_PROXY", "1" if os.environ.get("
 PUSH_CONTACT = os.environ.get("SMARTPLATE_PUSH_CONTACT", "mailto:smartplate@example.invalid")
 PUSH_TICK_S = float(os.environ.get("SMARTPLATE_PUSH_TICK", "60"))
 PUSH_ENABLED = os.environ.get("SMARTPLATE_PUSH", "on") == "on"
+PUSH_WORKER = os.environ.get('SMARTPLATE_PUSH_WORKER', 'on') == 'on'
 VAPID_PRIVATE = os.environ.get("SMARTPLATE_VAPID_PRIVATE", "")   # base64url P-256 key; generated if unset
 
 # Default order-execution policy. Swiggy's cautious posture (§7.1) means we

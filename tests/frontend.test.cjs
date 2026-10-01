@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
-const source = fs.readFileSync('smartplate/static/app.js', 'utf8').replace(
+const source = fs.readFileSync('smartplate/static/live-core.js', 'utf8') + '\n' + fs.readFileSync('smartplate/static/app.js', 'utf8').replace(
   'boot().catch', 'globalThis.bootPromise = boot().catch');
 
 function fixture(overrides = {}) {
@@ -423,4 +423,39 @@ test('blocked storage cannot silently discard access during recovery rotation', 
   const before = calls.length;
   await assert.rejects(vm.runInContext('rotateRecoveryCode()', context), /Enable browser storage/);
   assert.equal(calls.length, before);
+});
+
+test('real-menu week escapes actual items and does not show sample nutrition', async () => {
+  const {context} = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy={connected:true,address:{id:'home',label:'Home'}}; S.liveWeek={start_date:'2026-09-30',budget:1500,fee_reserve:50,estimated_total:200,fetched:'2026-09-30',notices:[],slots:[{date:'2026-09-30',meal:'dinner',time:'19:00',item:{id:'real-1',name:'<img src=x>',restaurant:'Real place',price:150}}]};`, context);
+  const html=vm.runInContext('liveWeekScreen()',context);
+  assert.match(html,/Your real-menu week/); assert.match(html,/Nutrition and ingredient safety are unknown/);
+  assert.ok(!html.includes('<img')); assert.match(html,/&lt;img/);
+});
+
+test('profile clearing removes real-menu snapshots and all staged basket dialogs', async () => {
+  const {context} = fixture(); await context.bootPromise;
+  vm.runInContext(`for(const k of ['liveWeek','basketDraft','itemOptions','basketReview','addonReview']) S[k]={private:'previous user'}; clearCurrentProfile();`,context);
+  assert.equal(vm.runInContext("['liveWeek','basketDraft','itemOptions','basketReview','addonReview'].every(k=>S[k]===null)",context),true);
+});
+
+
+test('agent approval escapes the exact quote and never renders an expired purchase button',async()=>{
+  const {context}=fixture();await context.bootPromise;
+  vm.runInContext(`S.agentReview={review_id:'id',state:'expired',expires_ts:'soon',quote:{restaurant:'<Kitchen>',address:'<Address>',to_pay:160,payment_label:'Cash',items:[{quantity:1,name:'<Meal>',variants:[],addons:[]}]}}`,context);
+  const html=vm.runInContext('agentReviewDialog()',context);
+  assert.match(html,/&lt;Kitchen&gt;/);assert.match(html,/&lt;Address&gt;/);assert.ok(!html.includes('data-core-act="approve-agent-order"'));
+});
+test('profile clearing removes delegated tokens, food memory and approval state',async()=>{
+  const {context}=fixture();await context.bootPromise;
+  vm.runInContext(`for(const k of ['agentToken','agentReview','agentConnections','foodMemory','weekStatus'])S[k]={private:true};clearCurrentProfile()`,context);
+  assert.equal(vm.runInContext("['agentToken','agentReview','agentConnections','foodMemory','weekStatus'].every(k=>S[k]===null)",context),true);
+});
+
+
+test('connected sample insights clearly distinguish examples from real meals',async()=>{
+  const {context}=fixture();await context.bootPromise;
+  vm.runInContext("S.swiggy={connected:true,address:{id:'home'}};S.more='insights';S.view.nutrition.daily_avg={}",context);
+  const html=vm.runInContext('moreScreen()',context);
+  assert.match(html,/Sample planner examples/);assert.match(html,/do not describe your live Swiggy meals/);
 });

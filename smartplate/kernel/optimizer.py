@@ -1,7 +1,8 @@
 """The planner — a real MILP (PuLP/CBC) that selects one option per session.
 
-This is "the agent." It is a constraint solver, not an LLM: planning a week costs
-milliseconds of CPU (FEASIBILITY.md §1). Every one of the 17 gap features enters
+This is the sample-catalogue planner. The real-menu planning engine lives in
+live_planner.py. Neither planner requires an LLM call; runtime is bounded but
+latency and hosting cost require deployment measurement. Every one of the 17 gap features enters
 here as either a HARD filter on the candidate set (allergens, diet, rating floor,
 fasting, calendar/festival suspension) or a SOFT term in the objective (taste,
 nutrition, health, carbon, surge, weather, festival bias).
@@ -461,6 +462,9 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     # CBC minutes; a 0.1% objective gap returns the same plan in well under a second.
     prob.solve(pulp.PULP_CBC_CMD(msg=False, gapRel=config.SOLVER_GAP, timeLimit=config.SOLVER_TIME_LIMIT_S))
 
+    from ..live_planner import valid_incumbent
+    if not valid_incumbent(prob):
+        raise ValueError('Planner could not find a verified feasible plan; the previous decisions were preserved')
     decisions = _persist_decisions(plan, user, sessions, active, cand_map, x, ctx, pinned, at)
     return {
         "status": pulp.LpStatus[prob.status],

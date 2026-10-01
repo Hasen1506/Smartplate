@@ -187,3 +187,23 @@ See [implementation status](docs/implementation-status.md) for the exact pilot
 scope, tested code and remaining recommendations. Private profiles now support
 credential-free data export, explicit deletion and recovery-code/device revocation
 in More → Profiles. Real restaurant menus also support paginated dish search.
+
+## Real-menu core and local end-to-end walkthrough
+
+See [docs/live-core-walkthrough.md](docs/live-core-walkthrough.md) for the implemented
+provider-menu weekly plan, reviewed multi-item quantities, variants and add-ons,
+durable reminder jobs, operations status and localhost launcher. The owner supplied
+Swiggy approval for the exact Render callback on 30 September 2026, but a fresh
+sign-in still displayed the gateway whitelist error. Actual-account validation is
+still required; stub tests never place real purchases.
+
+
+## Personal-agent planning and food memory
+
+The draft live-core upgrade now exposes `/mcp` for scoped personal-agent connections
+(**More → Personal agent**), a stdio bridge, a coverage-first live MILP, versioned
+remaining-week revisions and persistent food preferences/spending. Purchases require
+owner browser approval of an exact fresh quote. See
+[agent architecture and client setup](docs/agent-architecture.md) for supported
+protocol versions, client authentication compatibility, tools and release gates.
+This code is distinct from evidence of successful live Swiggy login or checkout.

@@ -13,16 +13,17 @@ from smartplate import config
 from smartplate.app import create_app
 from smartplate.integrations import swiggy_connect
 from test_followups import _connect
-from test_swiggy_live import FakeLive
+from live_stub import FakeBasket
 
 pw = pytest.importorskip("playwright.sync_api")
+pw.expect.set_options(timeout=15000)
 
 
 @pytest.fixture
 def pilot(seeded, monkeypatch):
     monkeypatch.setattr(config, "LIVE_ORDERS", True)
     monkeypatch.setattr(config, "SWIGGY_PROVIDER", "live")
-    fake = FakeLive()
+    fake = FakeBasket()
     fake.dishes = {"Mini Tiffin": 12500}
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     app = create_app()
@@ -57,12 +58,70 @@ def open_profile(browser, pilot, viewport):
         document.addEventListener('securitypolicyviolation', e => policyViolations.push(e.violatedDirective));
     """)
     page.goto(pilot["url"])
-    pw.expect(page.get_by_role("heading", name="Order from your area")).to_be_visible()
+    try:
+        pw.expect(page.get_by_role("heading", name="Order from your area")).to_be_visible(timeout=15000)
+    except AssertionError:
+        print('Browser script errors:', errors)
+        raise
     return page, errors
 
 
 def no_overflow(page):
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Page overflows the viewport"
+
+
+@pytest.mark.parametrize('viewport', [{'width': 1280, 'height': 900}, {'width': 390, 'height': 844}], ids=['desktop', 'phone'])
+def test_browser_real_week_and_customized_basket(pilot, viewport):
+    pilot['fake'].dishes = {'Mini Tiffin': 12500, 'Veg Meals': 18000}
+    with pw.sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page, errors = open_profile(browser, pilot, viewport)
+        try:
+            page.get_by_role('textbox', name='Restaurant or cuisine').fill('Hotel Saravana Bhavan')
+            page.get_by_role('button', name='Search Swiggy', exact=True).click()
+            page.locator('[data-live-fav="r-1"]').click()
+            page.locator('[data-tab="week"]').click()
+            page.get_by_role('button', name='Plan from live favourites', exact=True).click()
+            pw.expect(page.locator('[data-live-week-slot]')).to_have_count(7)
+            no_overflow(page)
+            page.reload()
+            page.locator('[data-tab="week"]').click()
+            pw.expect(page.locator('[data-live-week-slot]')).to_have_count(7)
+            page.locator('[data-live-week-slot="0"]').click()
+            dialog = page.get_by_role('dialog')
+            dialog.get_by_role('button', name='Save to basket draft', exact=True).click()
+            page.locator('[data-item-options="m1"]').click()
+            dialog = page.get_by_role('dialog')
+            dialog.get_by_label('Quantity', exact=True).fill('2')
+            dialog.locator('select').select_option('large')
+            dialog.get_by_role('checkbox').check()
+            dialog.get_by_role('button', name='Save to basket draft', exact=True).click()
+            page.get_by_role('button', name='Review whole basket', exact=True).click()
+            dialog = page.get_by_role('dialog')
+            pw.expect(dialog).to_contain_text('Large')
+            dialog.get_by_role('button', name='Confirm and prepare basket', exact=True).click()
+            page.get_by_role('button', name='Review available add-ons', exact=True).click()
+            dialog = page.get_by_role('dialog')
+            dialog.get_by_label('Curd', exact=True).check()
+            dialog.get_by_label('Apply these same add-ons to all portions of each dish.', exact=True).check()
+            dialog.get_by_role('button', name='Confirm selected add-ons', exact=True).click()
+            page.reload()
+            page.get_by_role('button', name='Review and place order', exact=True).click()
+            dialog = page.get_by_role('dialog')
+            pw.expect(dialog).to_contain_text('Quantity 3')
+            pw.expect(dialog).to_contain_text('Curd')
+            pw.expect(dialog).to_contain_text('Large')
+            no_overflow(page)
+            dialog.get_by_role('button', name='Confirm and place order · ₹580', exact=True).click()
+            pw.expect(page.get_by_text('Swiggy order confirmed:', exact=True)).to_be_visible()
+            assert pilot['fake'].tool_calls().count('place_food_order') == 1
+            assert not errors and page.evaluate('policyViolations') == []
+        except Exception:
+            Path('test-artifacts').mkdir(exist_ok=True)
+            page.screenshot(path=f"test-artifacts/basket-{viewport['width']}.png", full_page=True)
+            raise
+        finally:
+            browser.close()
 
 
 @pytest.mark.parametrize("viewport", [{"width": 1280, "height": 900}, {"width": 390, "height": 844}], ids=["desktop", "phone"])
@@ -149,6 +208,60 @@ def test_browser_private_export_rotation_and_deletion(pilot, viewport, tmp_path)
         except Exception:
             Path("test-artifacts").mkdir(exist_ok=True)
             page.screenshot(path=f"test-artifacts/privacy-{viewport['width']}.png", full_page=True)
+            raise
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize('viewport', [{'width':1280,'height':900},{'width':390,'height':844}],ids=['desktop','phone'])
+def test_browser_agent_connection_memory_and_human_approval(pilot,viewport):
+    from urllib.parse import urlsplit
+    client=pilot['client']; uid=pilot['uid']; root=f'/api/user/{uid}/swiggy'
+    assert client.post(root+'/favourites',json={'restaurant_id':'r-1','restaurant_name':'Hotel Saravana Bhavan'}).status_code==200
+    with pw.sync_playwright() as playwright:
+        browser=playwright.chromium.launch()
+        page,errors=open_profile(browser,pilot,viewport)
+        try:
+            page.locator('[data-tab="more"]').click()
+            page.locator('[data-go="more:agents"]').click()
+            page.get_by_label('Connection name',exact=True).fill('My personal agent')
+            page.get_by_label('Plan',exact=True).check()
+            page.get_by_label('Memory',exact=True).check()
+            page.get_by_label('Prepare cart and request human checkout review',exact=True).check()
+            page.get_by_role('button',name='Create scoped connection',exact=True).click()
+            token=page.get_by_label('Agent access token',exact=True).input_value()
+            assert token and token not in page.url
+            headers={'Authorization':'Bearer '+token,'Accept':'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'}
+            def call(name,args=None):
+                response=client.post('/mcp',json={'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':args or {}}},headers=headers)
+                body=response.get_json()['result'];assert not body.get('isError'),body
+                return json.loads(body['content'][0]['text'])
+            call('plan_meals',{'budget':1500,'meals':['dinner'],'start_date':__import__('smartplate.clock',fromlist=['now']).now().date().isoformat()})
+            page.locator('[data-tab="week"]').click()
+            page.locator('[data-memory-slot]').first.click()
+            page.get_by_label('Preference',exact=True).select_option('like')
+            page.get_by_label('Dinner',exact=True).check()
+            page.get_by_label('Note',exact=True).fill('My reliable dinner')
+            page.get_by_role('button',name='Save preference',exact=True).click()
+            pw.expect(page.get_by_text('My reliable dinner',exact=False)).to_be_visible()
+            call('revise_plan',{'expected_version':call('get_week_status')['plan']['version']})
+            basket={'restaurant_id':'r-1','restaurant_name':'Hotel Saravana Bhavan','items':[{'item_id':'m0','item_name':'Mini Tiffin','quantity':1,'variants':{}}]}
+            quote=call('review_basket',basket)
+            call('prepare_order',{**basket,'expected_fingerprint':quote['fingerprint']})
+            review=call('request_order_review')
+            assert 'place_food_order' not in pilot['fake'].tool_calls()
+            path=urlsplit(review['approval_url']);page.goto(pilot['url']+path.path+'?'+path.query)
+            pw.expect(page.get_by_role('heading',name='Review your agent’s order',exact=True)).to_be_visible()
+            pw.expect(page.get_by_text('Pay ₹160',exact=False)).to_be_visible()
+            no_overflow(page)
+            page.get_by_role('button',name='Confirm and place this order',exact=True).click()
+            pw.expect(page.get_by_text('Swiggy order confirmed:',exact=True)).to_be_visible()
+            assert call('confirm_order',{'review_id':review['review_id']})['status']=='confirmed'
+            assert pilot['fake'].tool_calls().count('place_food_order')==1
+            assert not errors and page.evaluate('policyViolations')==[]
+        except Exception:
+            Path('test-artifacts').mkdir(exist_ok=True)
+            page.screenshot(path=f'test-artifacts/agent-{viewport["width"]}.png',full_page=True)
             raise
         finally:
             browser.close()

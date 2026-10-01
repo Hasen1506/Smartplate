@@ -424,3 +424,26 @@ details summary{cursor:pointer;font-weight:600;font-size:14px;padding:8px 0}
 .cartnote{display:grid;gap:8px}
 .cartnote .btn{justify-self:start}
 .signin .inline-err{margin:0;padding:8px 12px;border-radius:8px;background:var(--red-bg);color:var(--red);font-size:14px}
+
+
+
+/* Real-week and personal-agent forms: readable labels and bounded mobile fields. */
+#live-week-form, #food-event-form, #agent-connection-form, #food-memory-form {
+  display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));
+}
+#live-week-form label, #food-event-form label, #agent-connection-form label, #food-memory-form label {
+  display:flex; flex-direction:column; gap:6px; min-width:0;
+}
+#live-week-form input, #food-event-form input, #agent-connection-form input,
+#food-memory-form textarea, #food-memory-form select {
+  min-width:0; max-width:100%; padding:9px 11px; border:1px solid var(--rule-2); border-radius:8px; font:inherit;
+}
+#agent-connection-form label:has(input[type=checkbox]), #food-memory-form label:has(input[type=checkbox]) {
+  flex-direction:row; align-items:center;
+}
+#agent-connection-form input[type=checkbox], #food-memory-form input[type=checkbox] { flex:none; }
+#live-week-form p, #food-event-form p, #agent-connection-form p, #food-memory-form p,
+#live-week-form button, #food-event-form button, #agent-connection-form button, #food-memory-form button { grid-column:1/-1; }
+textarea[aria-label="Agent access token"] { width:100%; max-width:100%; font-size:14px; }
+.checkout-row:has([data-memory-slot]) { flex-wrap:wrap; gap:10px; }
+.checkout-row:has([data-memory-slot]) > div { flex:1 1 260px; min-width:0; }

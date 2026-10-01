@@ -7,12 +7,13 @@ from flask import Flask, Response, g, jsonify, redirect, request, send_from_dire
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
+from . import access, accounts, config, everyday, live_basket, live_core, profile_data, push, ratelimit, service
 from .domain import models, sentiment
 from .domain.checkout import CheckoutConflict
 from .kernel import agent_brain
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp
 from .runtime import initialize, state_lock
+from . import monitoring
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -31,6 +32,7 @@ def create_app() -> Flask:
 
     @app.before_request
     def validate_request():
+        monitoring.begin()
         # The trial is same-origin and single-process. Prevent another browser
         # origin from using the private forwarded port to edit the plan.
         if request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
@@ -82,12 +84,17 @@ def create_app() -> Flask:
             response.headers['Retry-After'] = str(error.retry_after)
         return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
+    @app.errorhandler(swiggy_live.CartChanged)
+    def cart_changed(error):
+        return jsonify(error=str(error), code='cart_changed'), 409
+
     @app.errorhandler(HTTPException)
     def http_error(error):
         return jsonify(error=error.description), error.code
 
     @app.after_request
     def response_headers(response):
+        monitoring.finish(response)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['X-Frame-Options'] = 'DENY'
@@ -96,9 +103,12 @@ def create_app() -> Flask:
             "frame-ancestors 'none'; form-action 'self'; connect-src 'self'; worker-src 'self'; "
             "img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com")
-        if request.path.startswith('/api/'):
+        if request.path.startswith('/api/') or request.path == '/mcp':
             response.headers['Cache-Control'] = 'no-store'
         return response
+
+    from . import agent_api
+    agent_api.register(app)
 
     # ---- UI ---- #
     @app.get("/")
@@ -123,6 +133,10 @@ def create_app() -> Flask:
             return jsonify(ok=False), 503
         return jsonify(ok=True)
 
+    @app.get('/ops/status')
+    def operations_status():
+        return monitoring.status()
+
     # Installable app: the manifest and the service worker are served from the root
     # so the worker's scope covers the whole app.
     @app.get("/manifest.webmanifest")
@@ -140,14 +154,15 @@ def create_app() -> Flask:
     def meta():
         brain = agent_brain.get_brain()
         return jsonify({
-            "version": "1.1.0",
+            "version": "1.2.0",
             "brain": brain.name,
             "brain_cost_per_decision": brain.cost_per_decision,
             "swiggy_provider": config.SWIGGY_PROVIDER,
+            "local_stub": app.config.get('LOCAL_STUB', False),
             "order_edit_window_min": config.ORDER_EDIT_WINDOW_MIN,
             "modes": config.MODE_LABELS,
             "mode_outcomes": {k: v["outcome"] for k, v in config.MODE_META.items()},
-            "note": "v1.1 plans with a MILP solver — no per-decision LLM cost (see FEASIBILITY.md).",
+            "note": "Live planning uses a bounded coverage-first MILP. Menu and fee estimates require fresh checkout; no nutrition or portion guarantee.",
             "weather_provider": config.WEATHER_PROVIDER,
             "catalog_city": everyday.CITY,
             "features": _FEATURE_MAP,
@@ -381,14 +396,15 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/reminders")
     def reminders_list(user_id):
-        from .domain import reminders
-        return jsonify(reminders.upcoming(service.current_plan(user_id)))
+        from . import clock
+        return jsonify(push._reminders(user_id, clock.now()))
 
     @app.get("/api/user/<int:user_id>/reminders.ics")
     def reminders_ics(user_id):
         from .domain import reminders
+        from . import clock
         view = service.current_plan(user_id)
-        body = reminders.to_ics(reminders.upcoming(view), plan_id=view["plan"]["id"], name=view["user"]["name"])
+        body = reminders.to_ics(push._reminders(user_id, clock.now()), plan_id=view["plan"]["id"], name=view["user"]["name"])
         return Response(body, mimetype="text/calendar", headers={
             "Content-Disposition": "attachment; filename=smartplate-reminders.ics"})
 
@@ -485,6 +501,72 @@ def create_app() -> Flask:
         return jsonify(swiggy_live.live_cart_preview(user_id, str(body.get("restaurant_id") or ""),
                           str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
                           str(body.get("item_name") or "")))
+
+    @app.get('/api/user/<int:user_id>/swiggy/week')
+    def live_week(user_id):
+        return jsonify(plan=live_core.week(user_id))
+
+    @app.post('/api/user/<int:user_id>/swiggy/week')
+    def generate_live_week(user_id):
+        return jsonify(plan=live_core.build_week(user_id, request.get_json()))
+
+    @app.post('/api/user/<int:user_id>/swiggy/week/revise')
+    def revise_live_week(user_id):
+        return jsonify(plan=live_core.revise_week(user_id, request.get_json()))
+
+    @app.get('/api/user/<int:user_id>/swiggy/week/status')
+    def live_week_status(user_id):
+        return jsonify(live_core.week_status(user_id))
+
+    @app.get('/api/user/<int:user_id>/food-memory')
+    def read_food_memory(user_id):
+        from . import food_memory
+        return jsonify(items=food_memory.memory(user_id))
+
+    @app.post('/api/user/<int:user_id>/food-memory')
+    def save_food_memory(user_id):
+        return jsonify(agent_api.remember_food(user_id, request.get_json()))
+
+    @app.post('/api/user/<int:user_id>/food-memory/forget')
+    def forget_food_memory(user_id):
+        from . import food_memory
+        body = request.get_json()
+        return jsonify(food_memory.forget(user_id, body.get('restaurant_id', ''), body.get('item_id', '')))
+
+    @app.post('/api/user/<int:user_id>/food-events')
+    def record_food_event(user_id):
+        from . import food_memory
+        return jsonify(food_memory.record(user_id, request.get_json()))
+
+    @app.post('/api/user/<int:user_id>/food-events/assign-order')
+    def assign_order_meal(user_id):
+        from . import food_memory
+        return jsonify(food_memory.assign_order(user_id, request.get_json()))
+
+    @app.post('/api/user/<int:user_id>/food-events/<int:event_id>/remove')
+    def remove_food_event(user_id, event_id):
+        from . import food_memory
+        return jsonify(food_memory.remove_event(user_id, event_id))
+
+    @app.post('/api/user/<int:user_id>/swiggy/item-options')
+    def item_options(user_id):
+        return jsonify(live_basket.details(user_id, request.get_json()))
+
+    @app.post('/api/user/<int:user_id>/swiggy/basket/preview')
+    def basket_preview(user_id):
+        return jsonify(live_basket.preview(user_id, request.get_json()))
+
+    @app.post('/api/user/<int:user_id>/swiggy/basket')
+    def basket_prepare(user_id):
+        return jsonify(live_basket.prepare(user_id, request.get_json()))
+
+    @app.get('/api/user/<int:user_id>/swiggy/basket/addons')
+    def basket_addon_review(user_id):
+        return jsonify(live_basket.addon_review(user_id))
+
+    @app.post('/api/user/<int:user_id>/swiggy/basket/addons')
+    def basket_addons(user_id):
+        return jsonify(live_basket.add_addons(user_id, request.get_json()))
 
     @app.post("/api/user/<int:user_id>/swiggy/live-cart")
     def swiggy_live_fill_cart(user_id):

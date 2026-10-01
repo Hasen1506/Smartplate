@@ -293,9 +293,11 @@ MIGRATIONS = [
 
 
 def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(config.DB_PATH)
+    conn = sqlite3.connect(config.DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute('PRAGMA synchronous = FULL')
+    conn.execute('PRAGMA busy_timeout = 15000')
     return conn
 
 
@@ -311,11 +313,14 @@ def cursor():
 
 def init_db() -> None:
     with cursor() as cur:
+        cur.execute('PRAGMA journal_mode = WAL')
         cur.executescript(SCHEMA)
+        cur.execute('CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)')
         for table, column, decl in MIGRATIONS:
             have = {r["name"] for r in cur.execute(f"PRAGMA table_info({table})")}
             if column not in have:
                 cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+            cur.execute('INSERT OR IGNORE INTO schema_migrations(name) VALUES (?)', (f'{table}.{column}',))
 
 
 # --- small json helpers so callers don't sprinkle json.loads everywhere ---

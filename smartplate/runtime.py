@@ -11,6 +11,12 @@ def initialize():
         db.init_db()
         from .integrations import swiggy_connect
         swiggy_connect.init_schema()
+        from . import live_core
+        live_core.init_schema()
+        from . import food_memory
+        food_memory.init_schema()
+        from . import agent_api
+        agent_api.init_schema()
         with db.cursor() as cur:
             empty = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
         if empty:
