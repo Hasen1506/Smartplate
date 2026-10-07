@@ -1,0 +1,217 @@
+{
+ "budget": {
+  "budget": 2000.0,
+  "daily_cap": null,
+  "prorated": false,
+  "remaining": 950.39,
+  "spend": 1049.61,
+  "weekly_budget": 2000.0
+ },
+ "counts": {
+  "cook": 0,
+  "delivery": 7,
+  "ordered": 0,
+  "skip": 14,
+  "snoozed": 0
+ },
+ "grid": {
+  "Fri 2026-10-16": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 157.62,
+    "item": "Pesarattu + Chutney",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Mon 2026-10-12": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 125.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Sat 2026-10-17": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 181.5,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Sun 2026-10-18": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 119.57,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Thu 2026-10-15": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 157.62,
+    "item": "Pesarattu + Chutney",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Tue 2026-10-13": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 186.75,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Wed 2026-10-14": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 121.55,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  }
+ },
+ "heads_up": [
+  "fast: Thu 15 Oct: Navratri",
+  "fast: Today: Navratri",
+  "fast: Tomorrow: Navratri",
+  "fast: Wed 14 Oct: Navratri",
+  "weather: Tomorrow: rain likely (80%)",
+  "weather: Wed 14 Oct: 38°C"
+ ],
+ "mode": "balanced",
+ "recommendation": {
+  "floor": 2443.0,
+  "suggested_rating_floor": 4.2,
+  "usual": 3570.0,
+  "variety": 4168.0
+ },
+ "week_start": "2026-10-12"
+}
