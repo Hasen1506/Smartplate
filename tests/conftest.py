@@ -65,6 +65,29 @@ def no_network(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
 
 
+_SEEDED = {}      # per worker process: a seeded database image per (fixture, day, solver settings)
+
+
+def _fresh_seeded_db(path: str, kind: str) -> dict:
+    """Give `path` a freshly seeded database. Seeding (schema, catalogue, sample profiles
+    and the starter plan's solve) is identical for every test of one kind on one day, so
+    it runs once per worker and later tests get a byte copy of that database: same data,
+    a new file, no state shared between tests. Cuts ~0.1 s of setup from every test."""
+    from smartplate import clock, config, db, seed
+    key = (kind, clock.today().isoformat(), config.SOLVER_GAP, config.SOLVER_MAX_NODES,
+           config.WEATHER_PROVIDER, config.SWIGGY_PROVIDER)
+    if key not in _SEEDED:
+        db.init_db()
+        info = seed.seed_all()
+        with open(path, "rb") as f:
+            _SEEDED[key] = (f.read(), info)
+        return dict(info)
+    image, info = _SEEDED[key]
+    with open(path, "wb") as f:
+        f.write(image)
+    return dict(info)
+
+
 @pytest.fixture()
 def seeded(monkeypatch):
     fd, path = tempfile.mkstemp(suffix=".db")
@@ -76,8 +99,7 @@ def seeded(monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", path)
     # deterministic plans: never let a live forecast change what the solver picks
     monkeypatch.setattr(config, "WEATHER_PROVIDER", "simulated")
-    db.init_db()
-    info = seed.seed_all()
+    info = _fresh_seeded_db(path, "seeded")
     yield info
     os.unlink(path)
 
@@ -109,8 +131,7 @@ def gt(monkeypatch, frozen):
     # Only the deterministic node cap may stop a solve in tests, never the wall clock.
     monkeypatch.setattr(config, "SOLVER_TIME_LIMIT_S", 300.0)
     monkeypatch.setattr(config, "SOLVER_MAX_NODES", 3000)
-    db.init_db()
-    seed.seed_all()
+    _fresh_seeded_db(path, "gt")
     yield frozen
     os.unlink(path)
 
