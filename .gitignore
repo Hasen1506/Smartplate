@@ -11,3 +11,4 @@ smartplate-trial.log
 .env.*
 !.env.example
 swiggy-contract.local.json
+/data/epicure/
