@@ -103,6 +103,12 @@ def gt(monkeypatch, frozen):
     monkeypatch.setattr(config, "SWIGGY_PROVIDER", "simulated")
     monkeypatch.setattr(config, "LIVE_ORDERS", False)
     monkeypatch.setattr(config, "PUSH_ENABLED", False)
+    # Prove optimality instead of stopping within 0.1%: with the planner's tie-break the
+    # optimum is unique, so every machine (x86 or ARM CBC build) returns the same week.
+    monkeypatch.setattr(config, "SOLVER_GAP", 0.0)
+    # Only the deterministic node cap may stop a solve in tests, never the wall clock.
+    monkeypatch.setattr(config, "SOLVER_TIME_LIMIT_S", 300.0)
+    monkeypatch.setattr(config, "SOLVER_MAX_NODES", 3000)
     db.init_db()
     seed.seed_all()
     yield frozen
