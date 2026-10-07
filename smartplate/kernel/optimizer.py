@@ -12,6 +12,7 @@ Objective per candidate (minimised):
 Budget is a HARD constraint; 'skip' is the always-feasible relief valve.
 """
 import datetime as dt
+import hashlib
 import math
 
 import pulp
@@ -28,6 +29,19 @@ MAX_DELIVERY_CANDIDATES = 6     # per meal, at least; grown so a week can be fil
 DISCOVERY_PER_SESSION = 2
 DISCOVERY_PEN = 0.3          # a new place must beat a usual one by this much to win
 HOLIDAY_DINNER_SURGE = 1.1   # holidays: everyone orders dinner at once
+
+
+TIEBREAK = 1e-4    # above CBC's integrality/optimality tolerances, far below any real preference
+
+
+def _tiebreak(session: dict, cand: dict) -> float:
+    """A small, fixed, content-derived nudge (< 1e-4) so two equally good weeks never
+    tie. Without it the solver's choice between equal plans depends on the CBC build
+    (x86 and ARM pick differently), so the same profile got different weeks on
+    different machines. Objective terms are rounded to 1e-5 and real preferences
+    differ by 0.01 or more, so it only decides between plans that are equal."""
+    key = f"{session['day']}|{session['meal']}|{_choice_key(cand)}".encode()
+    return int.from_bytes(hashlib.blake2b(key, digest_size=4).digest(), "big") / 2**32 * TIEBREAK
 
 
 def _choice_key(c: dict) -> tuple:
@@ -324,6 +338,7 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
 
 
 SKIP_PENALTY = {"comfort": 5.0, "balanced": 3.0, "survival": 1.6}
+LAST_SOLVE = {"proven_optimal": None, "status": None}    # the most recent solve (diagnostics, tests)
 
 
 def _is_past(session: dict, at: dt.datetime | None = None) -> bool:
@@ -407,7 +422,8 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
             x[(s["id"], i)] = v
             choice_vars.append(v)
             keep = config.STABILITY_W if previous.get(s["id"]) == _choice_key(c) else 0.0
-            obj_terms.append((_objective(c, w, ref_cost, user["carbon_pref"], skip_penalty) - keep) * v)
+            obj_terms.append((_objective(c, w, ref_cost, user["carbon_pref"], skip_penalty) - keep
+                              + _tiebreak(s, c)) * v)
             budget_terms.append(c["cost"] * v)
             day_terms.setdefault(s["day"], []).append(c["cost"] * v)
             if c["kind"] == "cook" and c.get("recipe_key"):   # countable cook (not free leftover)
@@ -447,11 +463,30 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     for day, amount in committed["by_day"].items():
         fixed_by_day[day] = fixed_by_day.get(day, 0.0) + amount
     fixed = committed["total"] + sum(c["cost"] for c in pinned.values())
-    prob += pulp.lpSum(budget_terms) <= max(0, cap - fixed)
+    room = max(0, cap - fixed)
+    prob += pulp.lpSum(budget_terms) <= room
     dcap = profile.daily_cap(user)
     if dcap:
         for day, terms in day_terms.items():
             prob += pulp.lpSum(terms) <= max(0, dcap - fixed_by_day.get(day, 0.0))
+    # Valid cuts (they remove no whole-meal plan): every delivery costs at least the
+    # cheapest one, so the money left caps how many deliveries fit — per week and per
+    # day. Without them the relaxation "orders" 12.4 meals and CBC enumerates thousands
+    # of near-identical weeks to prove 12 is the most: a daily-capped week ran into the
+    # 10-second limit, so its plan depended on how fast the server happened to be.
+    deliveries = [(v, c["cost"], s["day"]) for s in active for i, c in enumerate(cand_map[s["id"]])
+                  for v in [x[(s["id"], i)]] if c["kind"] == "delivery"]
+    if deliveries:
+        cheapest = min(cost for _, cost, _ in deliveries)
+        if cheapest > 0:
+            prob += pulp.lpSum(v for v, _, _ in deliveries) <= math.floor(room / cheapest + 1e-9)
+            if dcap:
+                for day in day_terms:
+                    day_cheapest = min((cost for _, cost, d in deliveries if d == day), default=0)
+                    if day_cheapest > 0:
+                        day_room = max(0, dcap - fixed_by_day.get(day, 0.0))
+                        prob += pulp.lpSum(v for v, _, d in deliveries if d == day) <= \
+                            math.floor(day_room / day_cheapest + 1e-9)
     if cook_vars:
         pinned_cooks = sum(1 for c in pinned.values() if c["kind"] == "cook")
         prob += pulp.lpSum(cook_vars) <= max(0, _cook_cap(user) - pinned_cooks)
@@ -484,11 +519,16 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
             prob += pulp.lpSum(vlist) <= max(0, 1 - pinned_same)
     # Proving exact optimality on a tight week (few safe dishes, small budget) can take
     # CBC minutes; a 0.1% objective gap returns the same plan in well under a second.
-    prob.solve(pulp.PULP_CBC_CMD(msg=False, gapRel=config.SOLVER_GAP, timeLimit=config.SOLVER_TIME_LIMIT_S))
+    # The node cap is the real work limit (the same on a busy server as on an idle one,
+    # so a plan never depends on load); the time limit only guards a pathological solve.
+    prob.solve(pulp.PULP_CBC_CMD(msg=False, gapRel=config.SOLVER_GAP, timeLimit=config.SOLVER_TIME_LIMIT_S,
+                                 maxNodes=config.SOLVER_MAX_NODES))
+    LAST_SOLVE.update(proven_optimal=prob.sol_status == pulp.LpSolutionOptimal, status=pulp.LpStatus[prob.status])
 
     decisions = _persist_decisions(plan, user, sessions, active, cand_map, x, ctx, pinned, at)
     return {
         "status": pulp.LpStatus[prob.status],
+        "proven_optimal": LAST_SOLVE["proven_optimal"],
         "plan_id": plan_id,
         "decisions": decisions,
         "diagnostics": _diagnostics(user, decisions, cap),
