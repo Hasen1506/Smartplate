@@ -214,7 +214,8 @@ def check_plan(plan_id: int, *, pins_or_spent_allowed_over: bool = True) -> list
         if kind in ("delivery", "cook"):
             spent = s["status"] in ("ordered", "confirmed")
             past = s["status"] == "active" and scheduler.is_past(s, at)
-            if spent or _pinned(s):
+            # an unconfirmed past meal is unknown, not spent (the app never assumes it)
+            if spent or (_pinned(s) and not past):
                 fixed += d["cost"]
                 fixed_by_day[s["day"]] = fixed_by_day.get(s["day"], 0.0) + d["cost"]
             elif not past:
@@ -293,26 +294,39 @@ def make_replay():
             data = json.loads(RECORDING.read_text()) if RECORDING.exists() else {"calls": []}
             self.recording = {(c["key"], c["cart"]): c["reply"] for c in data["calls"]}
             self.recorded = dict(self.recording)        # record mode adds to what is already recorded
+            self.unrecorded = []
 
         def reset(self):
             """Fresh cart and call log for the next example (the recording is unchanged)."""
             self.cart, self.cart_state, self.calls = None, "empty", []
 
+        strict = True        # journeys: an unrecorded call fails the test
+
         def tool(self, name, args):
             key = (_key(name, args), self.cart_state)
             if self.record:
-                reply = super().tool(name, args)
+                try:
+                    reply = super().tool(name, args)
+                except AssertionError:               # outside the contract fake: Swiggy refuses it
+                    return self._refusal(name)
                 self.recorded[key] = reply
             else:
                 if key not in self.recording:
-                    raise AssertionError(f"unrecorded Swiggy call {key[0]} (cart {key[1]}); "
-                                         "re-record with SMARTPLATE_RECORD_SWIGGY=1 after reviewing why it changed")
+                    if self.strict:
+                        self.unrecorded.append(key[0])
+                        raise AssertionError(f"unrecorded Swiggy call {key[0]} (cart {key[1]}); re-record "
+                                             "with SMARTPLATE_RECORD_SWIGGY=1 after reviewing why it changed")
+                    return self._refusal(name)       # fuzzing: answer like Swiggy does for a bad request
                 reply = json.loads(json.dumps(self.recording[key]))
             if name == "update_food_cart":
                 self.cart_state = "filled"
             if name == "place_food_order":
                 self.cart_state = "empty"
             return reply
+
+        @staticmethod
+        def _refusal(name):
+            return {"isError": True, "content": [{"type": "text", "text": f"{name}: not found for this request"}]}
 
         def save(self):
             RECORDING.parent.mkdir(parents=True, exist_ok=True)
