@@ -296,7 +296,14 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     skip_reason = "No safe option within your rating floor and budget — session skipped."
     if fasting:
         skip_reason = "Inside your fasting window — kept clear (cook/skip only)."
-    cands.append(_skip(forced=False, reason=skip_reason))
+    skip = _skip(forced=False, reason=skip_reason)
+    skip["fasting"] = bool(fasting)
+    # An empty meal is the whole meal's nutrition missing: charge it the same banded
+    # shortfall a dish with nothing in it would pay (it was a free 0 before).
+    # (Tight Week; the other modes keep their flat skip penalty — docs/IDEAS.md.)
+    skip["nutri"] = (nutrition.penalty(user, meal, {}, tol=ctx["nutri_tol"])
+                     if ctx.get("tight") and not fasting else 0.0)
+    cands.append(skip)
     return cands
 
 
@@ -315,7 +322,9 @@ def _skip(forced: bool, reason: str) -> dict:
 # --------------------------------------------------------------------------- #
 def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
     if cand["kind"] == "skip":
-        return 0.0 if cand.get("forced") else skip_penalty
+        if cand.get("forced"):
+            return 0.0
+        return round(skip_penalty + w["nutrition"] * cand.get("nutri", 0.0), 5)
     cost_norm = cand["cost"] / ref_cost if ref_cost else 0.0
     surge_premium = max(0.0, cand["surge_mult"] - 1.0)
     # cooking-yourself carries a soft, *personal* effort cost (not for free leftovers)
@@ -338,6 +347,14 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
 
 
 SKIP_PENALTY = {"comfort": 5.0, "balanced": 3.0, "survival": 1.6}
+# Tight Week's budget home-cook: the effort on top of a regular cook day. Large enough
+# that a delivery the money covers is preferred, smaller than any skip.
+BUDGET_COOK_PENALTY = 0.6
+
+
+def _unforced_skip(c: dict) -> bool:
+    """A skip the solver chose for money — not a fast, a trip, or a fasting window."""
+    return c["kind"] == "skip" and not c.get("forced") and not c.get("fasting")
 LAST_SOLVE = {"proven_optimal": None, "status": None}    # the most recent solve (diagnostics, tests)
 
 
@@ -395,6 +412,7 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     # Offer enough distinct dishes per meal that the repeat cap can't empty a slot.
     ctx["delivery_slots"] = max(MAX_DELIVERY_CANDIDATES, math.ceil(len(active) / MAX_ITEM_REPEAT) + 1)
     ctx["n_active"] = len(active)
+    ctx["tight"] = plan["mode"] == "survival"
 
     # Stability: one tap should change what the user touched, not reshuffle the week.
     # Each meal's current choice gets a small bonus, so it only changes when that buys
@@ -408,7 +426,7 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     prob = pulp.LpProblem("smartplate_week", pulp.LpMinimize)
     x = {}                     # (session_id, idx) -> binary var
     cand_map = {}              # session_id -> [candidates]
-    obj_terms, budget_terms, cook_vars, discovery_vars = [], [], [], []
+    obj_terms, budget_terms, cook_vars, discovery_vars, skip_vars = [], [], [], [], []
     day_terms = {}             # day -> [cost·var] for the optional daily cap
     item_vars = {}             # item_id -> [vars] for the variety cap
     item_day_vars = {}         # (item_id, day) -> [vars]: never the same dish twice in a day
@@ -428,6 +446,8 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
             day_terms.setdefault(s["day"], []).append(c["cost"] * v)
             if c["kind"] == "cook" and c.get("recipe_key"):   # countable cook (not free leftover)
                 cook_vars.append(v)
+            if _unforced_skip(c):
+                skip_vars.append(v)
             if c["kind"] == "delivery":
                 item_vars.setdefault(c["item_id"], []).append(v)
                 item_day_vars.setdefault((c["item_id"], s["day"]), []).append(v)
@@ -487,9 +507,20 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
                         day_room = max(0, dcap - fixed_by_day.get(day, 0.0))
                         prob += pulp.lpSum(v for v, _, d in deliveries if d == day) <= \
                             math.floor(day_room / day_cheapest + 1e-9)
+    extra_cooks = None
     if cook_vars:
         pinned_cooks = sum(1 for c in pinned.values() if c["kind"] == "cook")
-        prob += pulp.lpSum(cook_vars) <= max(0, _cook_cap(user) - pinned_cooks)
+        cook_room = max(0, _cook_cap(user) - pinned_cooks)
+        if ctx["tight"]:
+            # Tight Week offers a cheap home-cook before a skip, even past the user's
+            # usual cook count. Each extra cook costs more effort than a regular cook
+            # day and is minimised right after skips, so it only stands in for a meal
+            # the money can't otherwise cover — never for a delivery that fits.
+            extra_cooks = pulp.LpVariable("extra_cooks", lowBound=0, cat="Integer")
+            prob += pulp.lpSum(cook_vars) <= cook_room + extra_cooks
+            prob.objective += BUDGET_COOK_PENALTY * extra_cooks
+        else:
+            prob += pulp.lpSum(cook_vars) <= cook_room
     if discovery_vars:
         # "mostly my usual places": new places get at most the variety level's share —
         # of the meals the usual places can cover. Variety limits how often a new place
@@ -521,10 +552,32 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     # CBC minutes; a 0.1% objective gap returns the same plan in well under a second.
     # The node cap is the real work limit (the same on a busy server as on an idle one,
     # so a plan never depends on load); the time limit only guards a pathological solve.
-    prob.solve(pulp.PULP_CBC_CMD(msg=False, gapRel=config.SOLVER_GAP, timeLimit=config.SOLVER_TIME_LIMIT_S,
-                                 maxNodes=config.SOLVER_MAX_NODES))
+    solver = pulp.PULP_CBC_CMD(msg=False, gapRel=config.SOLVER_GAP, timeLimit=config.SOLVER_TIME_LIMIT_S,
+                               maxNodes=config.SOLVER_MAX_NODES)
+    if ctx["tight"] and skip_vars:
+        # Tight Week never skips a meal the money left could still cover. Lexicographic:
+        # first the fewest skips the budget, the daily cap and the variety rules allow,
+        # then the fewest extra home-cooks (they only stand in for a skip, never for a
+        # delivery the money covers), then the best week within both. (A flat skip
+        # penalty let any dish dearer than ~1.6x the average meal lose to skipping, so
+        # a ₹700 week skipped all 21 meals and spent nothing.)
+        objective = prob.objective
+        for name, group in (("fewest_skips", skip_vars),
+                            ("fewest_extra_cooks", [extra_cooks] if extra_cooks is not None else [])):
+            if not group:
+                continue
+            prob.setObjective(pulp.lpSum(group))
+            prob.solve(solver)
+            if prob.sol_status in (pulp.LpSolutionOptimal, pulp.LpSolutionIntegerFeasible):
+                prob += pulp.lpSum(group) <= sum(round(v.value() or 0) for v in group), name
+        prob.setObjective(objective)
+    prob.solve(solver)
     LAST_SOLVE.update(proven_optimal=prob.sol_status == pulp.LpSolutionOptimal, status=pulp.LpStatus[prob.status])
 
+    if ctx["tight"]:
+        _label_budget_skips(active, cand_map, x, room, dcap, fixed_by_day)
+        if extra_cooks is not None and round(extra_cooks.value() or 0) > 0:
+            _label_extra_cooks(active, cand_map, x, round(extra_cooks.value()))
     decisions = _persist_decisions(plan, user, sessions, active, cand_map, x, ctx, pinned, at)
     return {
         "status": pulp.LpStatus[prob.status],
@@ -533,6 +586,54 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
         "decisions": decisions,
         "diagnostics": _diagnostics(user, decisions, cap),
     }
+
+
+def _label_budget_skips(active, cand_map, x, room, dcap, fixed_by_day):
+    """Say plainly why a meal the solver left empty is empty: how much money is left and
+    what the cheapest safe option for that meal costs (or that the day's cap is used)."""
+    chosen, spend, day_spend = {}, 0.0, {}
+    for s in active:
+        cands = cand_map[s["id"]]
+        i = next((i for i in range(len(cands)) if (pulp.value(x[(s["id"], i)]) or 0) > 0.5), len(cands) - 1)
+        chosen[s["id"]] = cands[i]
+        spend += cands[i]["cost"]
+        day_spend[s["day"]] = day_spend.get(s["day"], 0.0) + cands[i]["cost"]
+    left = max(0.0, room - spend)
+    for s in active:
+        c = chosen[s["id"]]
+        if not _unforced_skip(c):
+            continue
+        options = [o["cost"] for o in cand_map[s["id"]] if o["kind"] != "skip"]
+        if not options:
+            reason = "Budget skip: no safe option for this meal within your rating floor."
+        else:
+            cheapest = min(options)
+            day_left = (max(0.0, dcap - fixed_by_day.get(s["day"], 0.0) - day_spend.get(s["day"], 0.0))
+                        if dcap else None)
+            if day_left is not None and day_left < cheapest <= left:
+                reason = (f"Budget skip: ₹{day_left:.0f} of today's daily cap is left; "
+                          f"the cheapest safe option here is ₹{cheapest:.0f}.")
+            elif cheapest > left:
+                reason = (f"Budget skip: ₹{left:.0f} of this week's budget is left; "
+                          f"the cheapest safe option here is ₹{cheapest:.0f}.")
+            else:
+                reason = ("Budget skip: the dishes that fit the money left are already planned "
+                          "as often as your variety setting allows.")
+        cand_map[s["id"]] = [{**o, "item_name": "Budget skip", "skip_reason": reason} if o is c else o
+                             for o in cand_map[s["id"]]]
+
+
+def _label_extra_cooks(active, cand_map, x, n_extra):
+    """Mark the cook days past the user's usual count as Tight Week stand-ins for a skip
+    (the latest ones in the week, so the user's own early cook days read as usual)."""
+    for s in reversed(active):
+        if n_extra <= 0:
+            return
+        cands = cand_map[s["id"]]
+        i = next((i for i in range(len(cands)) if (pulp.value(x[(s["id"], i)]) or 0) > 0.5), None)
+        if i is not None and cands[i]["kind"] == "cook" and cands[i].get("recipe_key"):
+            cand_map[s["id"]] = [{**c, "budget_cook": True} if j == i else c for j, c in enumerate(cands)]
+            n_extra -= 1
 
 
 def committed_spend(plan_id: int) -> dict:
