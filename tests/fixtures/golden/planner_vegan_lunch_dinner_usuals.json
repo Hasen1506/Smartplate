@@ -1,53 +1,53 @@
 {
  "budget": {
-  "budget": 2000.0,
+  "budget": 2600.0,
   "daily_cap": null,
   "prorated": false,
-  "remaining": 59.56,
-  "spend": 1940.44,
-  "weekly_budget": 2000.0
+  "remaining": 55.74,
+  "spend": 2544.26,
+  "weekly_budget": 2600.0
  },
  "counts": {
   "cook": 2,
-  "delivery": 10,
+  "delivery": 12,
   "ordered": 0,
-  "skip": 2,
+  "skip": 0,
   "snoozed": 0
  },
  "grid": {
   "Fri 2026-11-06": {
    "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 228.27,
+    "item": "Chana Masala Bowl",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "",
+    "restaurant": "The Bowl Company",
     "status": "active"
    },
    "lunch": {
-    "cost": 152.54,
-    "item": "Pesarattu + Chutney",
+    "cost": 294.56,
+    "item": "Quinoa Buddha Bowl",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "FreshMenu",
     "status": "active"
    }
   },
   "Mon 2026-11-02": {
    "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 220.92,
+    "cost": 228.27,
     "item": "Chana Masala Bowl",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "The Bowl Company",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 294.56,
+    "item": "Quinoa Buddha Bowl",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "FreshMenu",
     "status": "active"
    }
   },
@@ -71,11 +71,11 @@
   },
   "Sun 2026-11-08": {
    "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "",
+    "restaurant": "Home kitchen",
     "status": "active"
    },
    "lunch": {
@@ -97,11 +97,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 220.92,
-    "item": "Chana Masala Bowl",
+    "cost": 152.54,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "The Bowl Company",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    }
   },
@@ -143,9 +143,9 @@
   }
  },
  "heads_up": [
-  "budget: 2 meals didn't fit the budget",
+  "budget: ₹56 left this week",
   "holiday: Sun 08 Nov: Diwali",
-  "saving: Ordering a little earlier saves ₹337 this week",
+  "saving: Ordering a little earlier saves ₹419 this week",
   "weather: Sat 07 Nov: rain likely (80%)",
   "weather: Tomorrow: rain likely (80%)",
   "weather: Wed 04 Nov: 38°C"
