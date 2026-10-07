@@ -31,7 +31,8 @@ def merged_profile(members: list[dict]) -> dict:
         "allergens": sorted(allerg),
         "medical": sorted(medical),
         # Group meals must satisfy everyone, so use the MOST restrictive diet.
-        "diet": "veg" if any(m.get("diet") in ("veg", "vegan") for m in members) else "nonveg",
+        "diet": ("vegan" if any(m.get("diet") == "vegan" for m in members)
+                 else "veg" if any(m.get("diet") == "veg" for m in members) else "nonveg"),
         "_widest_diet": widest,
     }
 
