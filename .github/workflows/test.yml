@@ -23,9 +23,15 @@ jobs:
           node-version: '22'
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pip_audit -r requirements.txt --strict
-      - name: Unit, property, golden and differential tests
-        timeout-minutes: 4
-        run: python -m pytest -q -n auto --durations=15
+      - name: Unit and property tests
+        timeout-minutes: 3
+        run: >-
+          python -m pytest -q -n auto --durations=10
+          --ignore=tests/test_gt_golden_planner.py --ignore=tests/test_gt_journey.py
+          --ignore=tests/test_gt_differential.py
+      - name: Golden and differential tests
+        timeout-minutes: 3
+        run: python -m pytest -q -n auto --durations=10 tests/test_gt_golden_planner.py tests/test_gt_journey.py tests/test_gt_differential.py
       - run: node --check smartplate/static/app.js
       - run: node src/sourcing/menu-source.test.js
       - run: node --test tests/frontend.test.cjs
