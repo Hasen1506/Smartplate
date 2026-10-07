@@ -1,7 +1,6 @@
 """Flask JSON API and vanilla JavaScript UI; no frontend build step."""
 import os
-
-from urllib.parse import quote
+import secrets
 
 from flask import Flask, Response, g, jsonify, redirect, request, send_from_directory
 from werkzeug.exceptions import HTTPException
@@ -10,11 +9,12 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
 from .domain import models, sentiment
 from .domain.checkout import CheckoutConflict
-from .kernel import agent_brain
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp
-from .runtime import initialize, state_lock
+from .kernel import agent_brain
+from .runtime import initialize, user_lock
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+SWIGGY_COOKIE = "sp_swiggy_oauth"
 
 
 def create_app() -> Flask:
@@ -38,9 +38,6 @@ def create_app() -> Flask:
                 return jsonify(error='Cross-site requests are not allowed'), 403
             if not request.is_json or not isinstance(request.get_json(silent=True), dict):
                 return jsonify(error='Send a JSON object'), 400
-        if request.path.startswith('/api/'):
-            state_lock.acquire()
-            g.state_locked = True
         args = request.view_args or {}
         for key, table in (('plan_id', 'plans'), ('user_id', 'users'), ('session_id', 'sessions')):
             if key in args:
@@ -57,17 +54,41 @@ def create_app() -> Flask:
             if not all(access.allowed(uid, presented) for uid in owners):
                 return jsonify(error='This profile is private. Open it on the device that created it, '
                                      'or add it with its recovery code.'), 401
+            # Serialize per profile, not per process (M-05): plan edits and checkout for
+            # one person stay ordered while other people's requests run in parallel.
+            if '/swiggy' in request.path and request.path.startswith(('/api/user/', '/api/session/')):
+                # App-side quota on Swiggy routes so a script can't exhaust the shared MCP
+                # limit for everyone (M-06); placement has its own tighter limit.
+                for uid in owners:
+                    ratelimit.check(f"swiggy:{uid}", 120, 600)
+                    if request.path.endswith('/swiggy/checkout') and request.method == 'POST':
+                        ratelimit.check(f"swiggy-place:{uid}", 5, 3600)
+            locks = [user_lock(uid) for uid in sorted(o for o in owners if o is not None)]
+            for lock in locks:
+                lock.acquire()
+            g.user_locks = locks
 
     @app.teardown_request
-    def release_state_lock(error):
-        if g.pop('state_locked', False):
-            state_lock.release()
+    def release_user_locks(error):
+        for lock in reversed(g.pop('user_locks', [])):
+            lock.release()
 
     @app.errorhandler(ValueError)
-    @app.errorhandler(KeyError)
-    @app.errorhandler(TypeError)
     def invalid_input(error):
+        # ValueError is the app's "your input can't be used" signal; its text is written for people.
         return jsonify(error=str(error)), 400
+
+    @app.errorhandler(KeyError)
+    def missing_field(error):
+        # Usually a missing request field; never echo internal key names or data (L-07).
+        app.logger.info("KeyError on %s: %r", request.path, error)
+        return jsonify(error="A required field is missing or unknown."), 400
+
+    @app.errorhandler(TypeError)
+    def server_bug(error):
+        # A TypeError is a server bug, not a user mistake: log it and answer 500 (L-07).
+        app.logger.exception("Unhandled TypeError on %s", request.path)
+        return jsonify(error="Something went wrong on our side. Try again."), 500
 
     @app.errorhandler(ratelimit.TooMany)
     def too_many(error):
@@ -98,6 +119,8 @@ def create_app() -> Flask:
             "font-src 'self' https://fonts.gstatic.com")
         if request.path.startswith('/api/'):
             response.headers['Cache-Control'] = 'no-store'
+        if request.is_secure or (config.PUBLIC_URL or '').startswith('https://'):
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'   # L-11
         return response
 
     # ---- UI ---- #
@@ -254,12 +277,19 @@ def create_app() -> Flask:
 
     @app.post("/api/community/<int:template_id>/adopt")
     def community_adopt(template_id):
-        return jsonify(service.adopt_template(template_id) or {"error": "not found"})
+        # One counted adopt per address per template per day; repeats still answer (L-14).
+        try:
+            ratelimit.check(f"adopt:{request.remote_addr}:{template_id}", 1, 86400)
+            count = True
+        except ratelimit.TooMany:
+            count = False
+        found = service.adopt_template(template_id, count=count)
+        return (jsonify(found), 200) if found else (jsonify(error="not found"), 404)
 
     @app.post("/api/plan/<int:plan_id>/save-template")
     def save_template(plan_id):
         body = request.get_json(force=True, silent=True) or {}
-        tid = service.save_template(plan_id, body.get("title", "My plan"))
+        tid = service.save_template(plan_id, body.get("title", "My plan"), show_name=body.get("show_name") is True)
         return jsonify({"template_id": tid})
 
     # ---- receipts ---- #
@@ -412,11 +442,11 @@ def create_app() -> Flask:
 
     # ---- Swiggy sign-in, live browsing, cart and gated COD ordering ---- #
     def _public_base():
+        # X-Forwarded-* are honoured only through ProxyFix when BEHIND_PROXY is on; the
+        # host is then still checked against PUBLIC_URL / ALLOWED_HOSTS before use (M-04).
         if config.PUBLIC_URL:
             return config.PUBLIC_URL
-        proto = request.headers.get("X-Forwarded-Proto", request.scheme).split(",")[0].strip()
-        host = request.headers.get("X-Forwarded-Host", request.host).split(",")[0].strip()
-        return f"{proto}://{host}"
+        return request.host_url.rstrip("/")
 
     def _swiggy_callback_url():
         return f"{_public_base()}{config.SWIGGY_CALLBACK_PATH}"
@@ -429,7 +459,15 @@ def create_app() -> Flask:
 
     @app.post("/api/user/<int:user_id>/swiggy/connect")
     def swiggy_start(user_id):
-        return jsonify(authorize_url=swiggy_connect.start(user_id, _swiggy_callback_url()))
+        ratelimit.check(f"swiggy-connect:{user_id}", 10, 3600)
+        nonce = secrets.token_urlsafe(32)
+        response = jsonify(authorize_url=swiggy_connect.start(user_id, _swiggy_callback_url(), nonce))
+        # Ties Swiggy's redirect back to THIS browser (H-01). Lax is sent on the top-level
+        # GET redirect from Swiggy; the value never leaves the server except as this cookie.
+        response.set_cookie(SWIGGY_COOKIE, nonce, max_age=int(swiggy_connect.PENDING_TTL.total_seconds()),
+                            httponly=True, secure=request.is_secure or _swiggy_callback_url().startswith("https://"),
+                            samesite="Lax", path="/")
+        return response
 
     @app.post("/api/user/<int:user_id>/swiggy/discover")
     def swiggy_discover(user_id):
@@ -515,6 +553,10 @@ def create_app() -> Flask:
     def swiggy_order_status(user_id, order_id):
         return jsonify(swiggy_live.live_order_status(user_id, order_id))
 
+    @app.post("/api/user/<int:user_id>/swiggy/attempts/resolve")
+    def swiggy_resolve_attempt(user_id):
+        return jsonify(swiggy_live.resolve_attempt(user_id, request.get_json().get("confirmation")))
+
     @app.get("/api/user/<int:user_id>/swiggy/order-history")
     def swiggy_order_history(user_id):
         return jsonify(swiggy_live.live_order_history(user_id))
@@ -539,15 +581,28 @@ def create_app() -> Flask:
     def swiggy_callback():
         # Swiggy redirects the browser here; the single-use `state` ties it to the
         # profile that started sign-in, so no profile key is needed on this hop.
+        # Only fixed error codes go into the URL; the page maps them to its own text, so a
+        # crafted link can't show arbitrary warnings (L-13).
+        def done(location):
+            response = redirect(location)
+            response.delete_cookie(SWIGGY_COOKIE, path="/")
+            return response
         if request.args.get("error"):
-            return redirect("/?tab=more&swiggy_error=" + quote(request.args.get("error_description")
-                                                               or request.args["error"])[:300])
+            code = "denied" if request.args["error"] == "access_denied" else "failed"
+            return done(f"/?tab=more&swiggy_error={code}")
         try:
-            with state_lock:
-                swiggy_connect.finish(request.args.get("state", ""), request.args.get("code", ""))
+            swiggy_connect.finish(request.args.get("state", ""), request.args.get("code", ""),
+                                  request.cookies.get(SWIGGY_COOKIE))
         except swiggy_connect.SwiggyError as exc:
-            return redirect("/?tab=more&swiggy_error=" + quote(str(exc))[:300])
-        return redirect("/?tab=more&swiggy=connected")
+            code = {"swiggy_browser_mismatch": "other_browser"}.get(exc.code, "failed")
+            if "expired or was already used" in str(exc):
+                code = "expired"
+            app.logger.info("Swiggy callback refused: %s", exc)
+            return done(f"/?tab=more&swiggy_error={code}")
+        except Exception:                                # L-08: never a raw JSON page mid-redirect
+            app.logger.exception("Swiggy callback failed")
+            return done("/?tab=more&swiggy_error=failed")
+        return done("/?tab=more&swiggy=connected")
 
     @app.get("/api/user/<int:user_id>/calendar")
     def upcoming_calendar(user_id):

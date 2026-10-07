@@ -9,7 +9,7 @@ discipline. "We never silently substitute below your rating floor." (§3.1)
 from .. import db
 from ..domain import models
 from ..integrations import swiggy_mcp
-from . import optimizer
+from . import optimizer, scheduler
 
 
 def execute_plan(plan_id: int, *, provider=None) -> dict:
@@ -19,13 +19,14 @@ def execute_plan(plan_id: int, *, provider=None) -> dict:
     provider = provider or swiggy_mcp.get_provider()
 
     sessions = {s["id"]: s for s in models.sessions_for_plan(plan_id)}
+    at = optimizer.now()
     results = []
     for d in models.decisions_for_plan(plan_id):
         if d["chosen_kind"] != "delivery":
             continue
         session = sessions[d["session_id"]]
-        if session['status'] != 'active':
-            continue
+        if session['status'] != 'active' or scheduler.is_past(session, at):
+            continue                     # past meals are never ordered (matches checkout.preview)
         results.append(_execute_one(user, plan, session, d, ctx, provider))
 
     placed = [r for r in results if r["placed"]]

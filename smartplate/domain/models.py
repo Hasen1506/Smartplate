@@ -28,6 +28,11 @@ def get_user(user_id: int) -> dict | None:
     u["health_targets"] = db.jl(u["health_targets"], {})
     u["observances"] = db.jl(u.get("observances"))
     u["prefs"] = db.jl(u.get("prefs"), {})
+    # Household / group mode (§5.2.7): the other members' hard rules travel with the
+    # profile so every safety check (allergens.violates) enforces the union of them.
+    u["household_members"] = ([{k: m[k] for k in ("id", "name", "diet", "allergens", "medical")}
+                               for m in get_household_members(u["household_id"]) if m["id"] != u["id"]]
+                              if u.get("household_id") else [])
     return u
 
 

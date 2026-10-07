@@ -14,9 +14,14 @@ class CheckoutConflict(ValueError):
     """The reviewed checkout no longer matches the executable plan."""
 
 
-def preview(plan_id: int, decisions: list[dict]) -> dict:
+def preview(plan_id: int, decisions: list[dict], at=None) -> dict:
+    """Only upcoming, active deliveries: a meal whose time has passed is never ordered
+    (the rest of the app treats an unconfirmed past meal as unknown, not spent)."""
+    from ..kernel import optimizer, scheduler
+    at = at or optimizer.now()
     deliveries = [d for d in decisions if d["chosen_kind"] == "delivery"
-                  and d.get('session_status', 'active') == 'active']
+                  and d.get('session_status', 'active') == 'active'
+                  and not scheduler.is_past(d, at)]
     items = [{
         "decision_id": d["id"],
         "session_id": d["session_id"],

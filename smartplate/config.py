@@ -36,6 +36,12 @@ SWIGGY_TIMEOUT_S = float(os.environ.get("SMARTPLATE_SWIGGY_TIMEOUT", "10"))
 # Public base URL for the OAuth redirect when a proxy hides it (else derived per request).
 # Render sets RENDER_EXTERNAL_URL for every web service, so hosted installs need no setup.
 PUBLIC_URL = (os.environ.get("SMARTPLATE_PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+# Hosts the Swiggy OAuth redirect may use besides PUBLIC_URL's host and localhost
+# (comma-separated). Without PUBLIC_URL or this list, Swiggy sign-in only works on
+# localhost: a Host / X-Forwarded-Host header is never trusted to pick it (M-04).
+ALLOWED_HOSTS = tuple(h.strip().lower() for h in os.environ.get("SMARTPLATE_ALLOWED_HOSTS", "").split(",") if h.strip())
+# At most this many dynamically registered Swiggy OAuth clients (one per redirect URI).
+SWIGGY_MAX_CLIENTS = int(os.environ.get("SMARTPLATE_SWIGGY_MAX_CLIENTS", "3"))
 # The registered redirect path must exactly match Swiggy's approval. A proposed
 # URL in an application document is not proof that the host belongs to this app.
 SWIGGY_CALLBACK_PATH = os.environ.get("SMARTPLATE_SWIGGY_CALLBACK_PATH", "/swiggy/callback")

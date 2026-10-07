@@ -70,6 +70,8 @@ def create_profile(body: dict) -> dict:
 
 def update_setup(user_id: int, body: dict) -> dict:
     user = models.get_user(user_id)
+    if not user:
+        raise KeyError("Profile not found")
     cook = body.pop("cook", None) if isinstance(body, dict) else None
     if cook is not None and cook not in COOK_BY_ANSWER:
         raise ValueError("Choose how often you cook")
@@ -77,6 +79,11 @@ def update_setup(user_id: int, body: dict) -> dict:
     if not data and cook is None:
         raise ValueError("Nothing to update")
     prefs = dict(user["prefs"])
+    if "name" in data and not user.get("access_hash"):
+        raise ValueError("Sample profiles are shared by every visitor, so their name can't be changed. "
+                         "Set up your own profile instead.")
+    profile.check_caps(data.get("weekly_budget", user["weekly_budget"]),
+                       data["daily_cap"] if "daily_cap" in data else prefs.get("daily_cap"))
     updates = {}
     for key in ("name", "diet", "weekly_budget", "rating_floor"):
         if key in data:
@@ -269,8 +276,8 @@ def options(session_id: int) -> dict:
                  key=lambda d: (not d["fits"], d["score"]))[:SHORTLIST_NEW]
     for g in groups:
         g.pop("_best")
-    cooks = [r for r in reverse_mode.RECIPES if r["key"] in reverse_mode.RECIPE_BY_MEAL.get(session["meal"], [])
-             and not (user["diet"] in ("veg", "vegan") and not r["veg"])]
+    cook_all = [r for r in reverse_mode.RECIPES if r["key"] in reverse_mode.RECIPE_BY_MEAL.get(session["meal"], [])]
+    cooks = [r for r in cook_all if reverse_mode.unsafe_reason(user, r) is None]   # allergy/medical/diet: hard
     return {
         "session": {"id": session_id, "day": models.DAYS[session["day"]], "date": models.session_date(plan, session["day"]),
                     "meal": session["meal"], "status": session["status"], "pinned": bool(session.get("pinned"))},
@@ -279,7 +286,7 @@ def options(session_id: int) -> dict:
         "new": new, "has_favourites": bool(favs),
         "cook": [{"recipe_key": r["key"], "name": r["name"], "price": r["cost"], "kcal": r["kcal"],
                   "protein_g": r["protein_g"]} for r in cooks],
-        "hidden": {"not_safe": len(menu) - len(safe_all), "not_a_meal": len(safe_all) - len(safe),
+        "hidden": {"not_safe": len(menu) - len(safe_all), "cook_not_safe": len(cook_all) - len(cooks), "not_a_meal": len(safe_all) - len(safe),
                    "below_rating": len(safe) - len(rated_ok),
                    "not_again": len(rated_ok) - len(pool)},
         "current": {"item": current["item_name"], "kind": current["chosen_kind"], "cost": current["cost"]} if current else None,
@@ -314,8 +321,11 @@ def choose(session_id: int, body: dict) -> dict:
         pin = {"kind": "delivery", "item_id": item["id"]}
     elif body.get("recipe_key"):
         r = reverse_mode.recipe(body["recipe_key"])
-        if not r or (user["diet"] in ("veg", "vegan") and not r["veg"]):
-            raise ValueError("That recipe doesn't fit your diet")
+        if not r:
+            raise ValueError("That recipe isn't available")
+        reason = reverse_mode.unsafe_reason(user, r)
+        if reason:
+            raise ValueError(f"Not safe for you: {reason}. Your hard rules can't be overridden by a pick.")
         pin = {"kind": "cook", "recipe_key": r["key"]}
     elif body.get("action") == "skip":
         scheduler.set_status(session_id, "skipped", "You skipped this meal")

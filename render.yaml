@@ -1,8 +1,8 @@
 # One-click hosting on Render: https://render.com/deploy?repo=https://github.com/Hasen1506/Smartplate
 # The free plan sleeps after ~15 minutes idle (first visit then takes ~1 minute) and
 # its disk is wiped on every restart or redeploy, so profiles made there are a demo.
-# For data that survives, switch to a paid instance and add a disk mounted at /data
-# (then set SMARTPLATE_DB=/data/smartplate.db).
+# For data that survives (private profiles, recovery codes, Swiggy links), deploy
+# render.production.yaml instead: paid instance with a disk at /var/data.
 services:
   - type: web
     name: smartplate

@@ -20,6 +20,8 @@ import secrets
 from . import clock, db
 
 HEADER = "X-SmartPlate-Key"
+# A signed-in browser that has not been seen for this long must sign in again (L-03).
+DEVICE_IDLE_TTL = dt.timedelta(days=60)
 
 
 def new_key() -> tuple[str, str]:
@@ -73,7 +75,11 @@ def allowed(user_id: int | None, presented: str | None) -> bool:
 def _device(user_id: int, hashed: str) -> bool:
     now = clock.now()
     with db.cursor() as cur:
-        dev = cur.execute("SELECT id FROM devices WHERE user_id=? AND token_hash=?", (user_id, hashed)).fetchone()
+        dev = cur.execute("SELECT id, last_seen_ts FROM devices WHERE user_id=? AND token_hash=?",
+                          (user_id, hashed)).fetchone()
+        if dev and dt.datetime.fromisoformat(dev["last_seen_ts"]) < now - DEVICE_IDLE_TTL:
+            cur.execute("DELETE FROM devices WHERE id=?", (dev["id"],))
+            return False
         if dev:
             cur.execute("UPDATE devices SET last_seen_ts=? WHERE id=? AND last_seen_ts < ?",
                         (now.isoformat(timespec="seconds"), dev["id"],

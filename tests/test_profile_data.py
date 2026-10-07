@@ -31,7 +31,7 @@ def test_export_is_owned_and_excludes_all_credentials(client):
                     (uid, "secret-provider-token", "2026-09-30T00:00:00", "My real home"))
         cur.execute("INSERT INTO push_subscriptions(user_id,endpoint,p256dh,auth,created_ts) VALUES (?,?,?,?,?)",
                     (uid, "https://fcm.googleapis.com/my-device", "secret-encryption-key", "secret-auth", "now"))
-        cur.execute("INSERT INTO swiggy_pending VALUES (?,?,?,?,?)", ("secret-state", uid, "secret-verifier", "https://example.com/callback", "now"))
+        cur.execute("INSERT INTO swiggy_pending(state, user_id, verifier, redirect_uri, created_ts) VALUES (?,?,?,?,?)", ("secret-state", uid, "secret-verifier", "https://example.com/callback", "now"))
     client.post(f"/api/plan/{pid}/save-template", json={"title": "My published week"}, headers=headers)
     result = client.get(f"/api/user/{uid}/data.json", headers=headers)
     assert result.status_code == 200 and result.headers["Cache-Control"] == "no-store"

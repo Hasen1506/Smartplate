@@ -57,7 +57,7 @@ def _fetch_live(city: str) -> bool:
             code = int(daily["weather_code"][i] or 0)
             tmax = float(daily["temperature_2m_max"][i] or 30)
             prob = float((daily.get("precipitation_probability_max") or [0] * len(daily["time"]))[i] or 0)
-            rows.append((city, iso, classify(code, prob, tmax), tmax, prob, dt.datetime.now().isoformat()))
+            rows.append((city, iso, classify(code, prob, tmax), tmax, prob, clock.now().isoformat()))
     except Exception:  # network, proxy, schema drift — degrade to the synthetic feed
         _last_failure["ts"] = time.time()
         return False
@@ -72,7 +72,7 @@ def _cached(city: str, iso: str) -> dict | None:
         row = cur.execute("SELECT * FROM weather_cache WHERE city=? AND iso_date=?", (city, iso)).fetchone()
     if not row:
         return None
-    age_h = (dt.datetime.now() - dt.datetime.fromisoformat(row["fetched_ts"])).total_seconds() / 3600
+    age_h = (clock.now() - dt.datetime.fromisoformat(row["fetched_ts"])).total_seconds() / 3600
     return {"condition": row["condition"], "temp_c": row["temp_c"], "rain_prob": row["rain_prob"],
             "source": "live", "stale": age_h > CACHE_HOURS}
 

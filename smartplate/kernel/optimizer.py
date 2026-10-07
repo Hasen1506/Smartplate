@@ -339,7 +339,7 @@ def pinned_candidate(user, plan, session, ctx) -> dict | None:
         cand = _delivery_candidate(user, plan, session, item, ctx)
     elif pin.get("kind") == "cook":
         r = reverse_mode.recipe(pin.get("recipe_key") or "")
-        if not r or (user.get("diet") in ("veg", "vegan") and not r["veg"]):
+        if not r or reverse_mode.unsafe_reason(user, r):        # same hard rules as delivery
             return None
         cand = _cook_candidate(user, session, ctx, recipe=r)
     else:
@@ -536,7 +536,7 @@ def _persist_decisions(plan, user, sessions, active, cand_map, x, ctx, pinned=No
             continue
         cands = cand_map[s["id"]]
         chosen = next((cands[i] for i in range(len(cands))
-                       if x.get((s["id"], i)) and pulp.value(x[(s["id"], i)]) > 0.5), cands[-1])
+                       if x.get((s["id"], i)) and (pulp.value(x[(s["id"], i)]) or 0) > 0.5), cands[-1])
         decisions.append(_write_decision(plan, user, s, chosen, ctx))
     return decisions
 
@@ -580,12 +580,12 @@ def _write_decision(plan, user, session, chosen, ctx):
             "INSERT INTO decisions(session_id, plan_id, chosen_kind, restaurant_id, item_id, "
             "item_name, cost, surge_mult, substituted, reasons, nutrition, carbon_kg, "
             "recipe_key, time_shift, restaurant_name, rating, idempotency_key, created_ts) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (row["session_id"], row["plan_id"], row["chosen_kind"], row["restaurant_id"],
              row["item_id"], row["item_name"], row["cost"], row["surge_mult"], 0,
              row["reasons"], row["nutrition"], row["carbon_kg"],
              chosen.get("recipe_key"), db.jd(chosen["time_shift"]) if chosen.get("time_shift") else None,
-             chosen.get("restaurant_name"), chosen.get("rating", 0), None),
+             chosen.get("restaurant_name"), chosen.get("rating", 0), None, now().isoformat(timespec="seconds")),
         )
         row["id"] = cur.lastrowid
     return {**row, "day": session["day"], "meal": session["meal"],
@@ -626,8 +626,8 @@ def _carry_session(plan, session, past=False):
         cur.execute(
             "INSERT INTO decisions(session_id, plan_id, chosen_kind, item_name, cost, "
             "reasons, nutrition, restaurant_name, created_ts) "
-            "VALUES (?,?,?,?,0,?, '{}', '', datetime('now'))",
-            (session["id"], plan["id"], status, label, reasons))
+            "VALUES (?,?,?,?,0,?, '{}', '', ?)",
+            (session["id"], plan["id"], status, label, reasons, now().isoformat(timespec="seconds")))
         did = cur.lastrowid
     return {
         "id": did, "session_id": session["id"], "plan_id": plan["id"],

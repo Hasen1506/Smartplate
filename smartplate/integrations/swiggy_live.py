@@ -20,10 +20,12 @@ import datetime as dt
 import difflib
 import hashlib
 import json
-import math
 import logging
+import math
 import re
 import secrets
+import statistics
+import threading
 
 from .. import clock, config, db
 from . import swiggy_connect as sc
@@ -79,6 +81,56 @@ class CartChanged(SwiggyError):
     """The live item no longer matches the user's reviewed cart preview."""
 
 
+class NotSent(SwiggyError):
+    """The tool request never reached Swiggy (or Swiggy refused it unprocessed), so an
+    order attempt that fails this way is definitely not placed (M-01)."""
+
+    def __init__(self, error: SwiggyError):
+        super().__init__(str(error), code=error.code, retry_after=error.retry_after,
+                         http_status=getattr(error, "http_status", None))
+
+
+# One MCP session per profile and token, reused briefly instead of a fresh
+# initialize + notifications/initialized for every tool call (M-06).
+SESSION_TTL_S = 300
+ADDRESS_TTL = dt.timedelta(seconds=60)
+_sessions: dict[int, tuple[str, str, float]] = {}
+_address_cache: dict[int, tuple[str, dt.datetime, list]] = {}
+_cache_lock = threading.Lock()
+# HTTP statuses that mean Swiggy did not process the tools/call at all.
+UNPROCESSED = {400, 401, 403, 404, 405, 406, 409, 413, 415, 422, 429}
+
+
+def _token_key(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def forget_session(user_id: int) -> None:
+    with _cache_lock:
+        _sessions.pop(user_id, None)
+        _address_cache.pop(user_id, None)
+
+
+def _mcp_session(user_id: int, token: str, *, fresh: bool = False) -> tuple[str | None, bool]:
+    """(session id, reused?) — a cached live session, or a newly initialized one."""
+    import time
+    key = _token_key(token)
+    with _cache_lock:
+        cached = _sessions.get(user_id)
+    if cached and not fresh and cached[0] == key and time.monotonic() - cached[2] < SESSION_TTL_S:
+        return cached[1], True
+    headers, _ = sc.user_rpc(user_id, token, "initialize", {"protocolVersion": sc.CLIENT_VERSION, "capabilities": {},
+                                                "clientInfo": {"name": "SmartPlate", "version": "1.1.0"}}, 1)
+    session_id = headers.get("mcp-session-id")
+    sc.user_rpc(user_id, token, "notifications/initialized", {}, None, session_id)
+    with _cache_lock:
+        if session_id:                     # a server without sessions gets a fresh handshake each time
+            _sessions[user_id] = (key, session_id, time.monotonic())
+        else:
+            _sessions.pop(user_id, None)
+    return session_id, False
+
+
 # --------------------------------------------------------------------------- #
 # Calling tools
 # --------------------------------------------------------------------------- #
@@ -117,14 +169,30 @@ def call(user_id: int, name: str, arguments: dict) -> object:
         raise SwiggyError(f"SmartPlate does not support {name}.")
     if name == "place_food_order" and not config.LIVE_ORDERS:
         raise SwiggyError("Real order placement is disabled until Swiggy access and durable storage are approved.")
-    conn = _conn(user_id)
-    _tool(conn, name)
-    token = conn["access_token"]
-    headers, _ = sc.user_rpc(user_id, token, "initialize", {"protocolVersion": sc.CLIENT_VERSION, "capabilities": {},
-                                               "clientInfo": {"name": "SmartPlate", "version": "1.1.0"}}, 1)
-    session_id = headers.get("mcp-session-id")
-    sc.user_rpc(user_id, token, "notifications/initialized", {}, None, session_id)
-    _, result = sc.user_rpc(user_id, token, "tools/call", {"name": name, "arguments": arguments}, 2, session_id)
+    try:
+        conn = _conn(user_id)
+        _tool(conn, name)
+        token = conn["access_token"]
+        session_id, reused = _mcp_session(user_id, token)
+    except SwiggyError as exc:            # nothing was sent for this tool
+        raise NotSent(exc) from exc
+    try:
+        _, result = sc.user_rpc(user_id, token, "tools/call", {"name": name, "arguments": arguments}, 2, session_id)
+    except SwiggyError as exc:
+        status = getattr(exc, "http_status", None)
+        if status == 404:                 # MCP: the session ended; the request was not processed
+            forget_session(user_id)
+            if not reused or name == "place_food_order":
+                raise NotSent(exc) from exc         # an order is never re-sent automatically
+            try:
+                session_id, _ = _mcp_session(user_id, token, fresh=True)
+            except SwiggyError as again:
+                raise NotSent(again) from again
+            _, result = sc.user_rpc(user_id, token, "tools/call", {"name": name, "arguments": arguments}, 2, session_id)
+        elif status in UNPROCESSED:
+            raise NotSent(exc) from exc
+        else:
+            raise
     data = _payload(result)
     samples = db.jl(conn.get("samples"), {})
     samples[name] = {"arguments": sorted(arguments), "reply": _shape(data), "at": clock.now().isoformat(timespec="seconds")}
@@ -229,20 +297,99 @@ def records(data, *needs: str) -> list[dict]:
     return best
 
 
-def rupees(record: dict) -> float | None:
-    """Only convert a price when the provider names its units."""
+# Swiggy documents menu `price` as a bare number with no unit. Its web data uses paise,
+# the MCP cart reads in rupees; neither is guaranteed. A unit-named field wins; otherwise
+# the unit is inferred (whole numbers whose typical value is ≥ 1000 are paise — a ₹1,000+
+# median dish is implausible) and the price is marked as an estimate.
+PAISE_THRESHOLD = 1000
+_PRICE_TEXT = re.compile(r"\s*(₹|rs\.?|inr)?\s*([\d,]+(?:\.\d+)?)\s*", re.IGNORECASE)
+
+
+def _price_raw(record: dict) -> tuple[float | None, str | None]:
+    """(number, unit) for the first price field; unit is None when the provider doesn't name it."""
+    if not isinstance(record, dict):
+        return None, None
     lowered = {k.lower(): k for k in record}
     for alias in FIELDS["price"]:
         key = lowered.get(alias.lower())
-        if key is None or not isinstance(record[key], (int, float)) or isinstance(record[key], bool):
+        if key is None:
             continue
-        value = float(record[key])
+        value, unit = record[key], None
+        if isinstance(value, bool) or value is None:
+            continue
+        if isinstance(value, str):
+            match = _PRICE_TEXT.fullmatch(value)
+            if not match:
+                continue
+            unit = "rupees" if match.group(1) else None
+            value = float(match.group(2).replace(",", ""))
+        elif isinstance(value, (int, float)):
+            value = float(value)
+        else:
+            continue
         if not math.isfinite(value) or value < 0:
-            return None
+            return None, None
         if "paise" in key.lower():
-            return round(value / 100, 2)
-        if "rupee" in key.lower():
-            return value
+            unit = "paise"
+        elif "rupee" in key.lower():
+            unit = "rupees"
+        return value, unit
+    return None, None
+
+
+def infer_unit(values) -> str:
+    vals = [float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0]
+    if not vals or any(abs(v - round(v)) > 1e-9 for v in vals):      # paise are whole numbers
+        return "rupees"
+    return "paise" if statistics.median(vals) >= PAISE_THRESHOLD else "rupees"
+
+
+def menu_unit(rows) -> str:
+    """One unit for a whole menu, inferred from its unit-less prices together."""
+    return infer_unit([v for v, u in (_price_raw(r) for r in rows if isinstance(r, dict)) if v is not None and u is None])
+
+
+def rupees(record: dict, unit_hint: str | None = None) -> float | None:
+    """A rupee price from either form: named units are exact, bare numbers are inferred."""
+    value, unit = _price_raw(record)
+    if value is None:
+        return None
+    unit = unit or unit_hint or infer_unit([value])
+    return round(value / 100, 2) if unit == "paise" else round(value, 2)
+
+
+def price_estimated(record: dict) -> bool:
+    """True when the unit of this price was inferred rather than named by Swiggy."""
+    value, unit = _price_raw(record)
+    return value is not None and unit is None
+
+
+def cart_total(cart: dict, anchor: float | None = None) -> float | None:
+    """The payable total in rupees, or None when it can't be read unambiguously (L-05).
+
+    Unit-named fields are exact. A bare `to_pay` is read as rupees or paise only when
+    exactly one reading is plausible: against `anchor` (the reviewed dish price, in
+    rupees) it must cover the dish and stay within fees; without an anchor, a whole
+    number under 1000 is rupees (a cart under ₹10 isn't real) and anything else is
+    ambiguous. Ambiguous totals are never used to approve an order."""
+    pricing = cart.get("pricing") if isinstance(cart.get("pricing"), dict) else cart
+    for key, unit in (("toPayInPaise", "paise"), ("to_pay_in_paise", "paise"),
+                      ("toPayInRupees", "rupees"), ("to_pay_in_rupees", "rupees")):
+        for node in (pricing, cart):
+            value = node.get(key) if isinstance(node, dict) else None
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0:
+                return round(value / 100, 2) if unit == "paise" else round(float(value), 2)
+    raw = _num(pricing, "to_pay")
+    if raw is None:
+        raw = _num(cart, "to_pay")
+    if raw is None or raw <= 0:
+        return None
+    readings = {"rupees": round(raw, 2), "paise": round(raw / 100, 2)}
+    if anchor:
+        plausible = [v for v in readings.values() if anchor * 0.7 <= v <= anchor * 3 + 250]
+        return plausible[0] if len(plausible) == 1 else None
+    if abs(raw - round(raw)) > 1e-9 or raw < PAISE_THRESHOLD:
+        return readings["rupees"]
     return None
 
 
@@ -265,6 +412,13 @@ def _num(data, field: str):
     return None
 
 
+def _has_options(item: dict) -> bool:
+    """Variants or add-ons SmartPlate can't choose. A missing hasVariants/hasAddons flag
+    is not an option by itself: search_menu returns the option lists when they exist."""
+    return bool(item.get("variations") or item.get("variantsV2") or item.get("addons")
+                or _flag(_get(item, "variants")) is True or _flag(_get(item, "addons")) is True)
+
+
 def _similar(a: str, b: str) -> float:
     norm = lambda s: re.sub(r"[^a-z0-9 ]", "", (s or "").lower()).strip()
     a, b = norm(a), norm(b)
@@ -274,8 +428,13 @@ def _similar(a: str, b: str) -> float:
 # --------------------------------------------------------------------------- #
 # What the app uses
 # --------------------------------------------------------------------------- #
-def addresses(user_id: int) -> list[dict]:
+def addresses(user_id: int, *, fresh: bool = False) -> list[dict]:
     conn = _conn(user_id)
+    key = _token_key(conn["access_token"])
+    with _cache_lock:
+        cached = _address_cache.get(user_id)
+    if not fresh and cached and cached[0] == key and clock.now() - cached[1] < ADDRESS_TTL:
+        return [dict(a) for a in cached[2]]              # checkout re-reads addresses; reuse briefly (M-06)
     tool = _tool(conn, "get_addresses")
     rows, seen = [], set()
     for page in range(1, 21):
@@ -299,11 +458,13 @@ def addresses(user_id: int) -> list[dict]:
             "text": str(_get(r, "text") or "")} for r in rows]
     if not out:
         raise SwiggyError("Swiggy didn't return any saved addresses. Add one in the Swiggy app first.")
+    with _cache_lock:
+        _address_cache[user_id] = (key, clock.now(), [dict(a) for a in out])
     return out
 
 
 def choose_address(user_id: int, address_id: str) -> dict:
-    match = next((a for a in addresses(user_id) if a["id"] == str(address_id)), None)
+    match = next((a for a in addresses(user_id, fresh=True) if a["id"] == str(address_id)), None)
     if not match:
         raise ValueError("That address isn't on your Swiggy account")
     with db.cursor() as cur:
@@ -398,7 +559,9 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
     items = []
     hidden = 0
     browse = body.get("items") if isinstance(body, dict) else None
-    for row in browse if isinstance(browse, list) else records(data, "id", "name"):
+    rows = browse if isinstance(browse, list) else records(data, "id", "name")
+    unit = menu_unit(rows)
+    for row in rows:
         if not isinstance(row, dict) or _get(row, "id") is None or _get(row, "name") is None:
             continue
         veg = _flag(_get(row, "veg"))
@@ -406,7 +569,7 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
             hidden += 1
             continue
         items.append({"id": str(_get(row, "id")), "name": str(_get(row, "name")),
-                      "price": rupees(row), "veg": veg,
+                      "price": rupees(row, unit), "price_estimated": price_estimated(row), "veg": veg,
                       "in_stock": _flag(_get(row, "stock")),
                       "has_options": _flag(_get(row, "variants")) is True or _flag(_get(row, "addons")) is True})
     return {"restaurant": place, "address": conn.get("address_label") or _address(conn),
@@ -436,6 +599,7 @@ def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, q
     if not isinstance(rows, list):
         raise SwiggyError("Swiggy did not return a dish list. Try again later.")
     items, seen, hidden = [], set(), 0
+    unit = menu_unit(rows)
     for row in rows:
         if not isinstance(row, dict) or not _get(row, "menu_item_id") or not _get(row, "name"):
             continue
@@ -449,10 +613,9 @@ def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, q
         if item_id in seen:
             continue
         seen.add(item_id)
-        items.append({"id": item_id, "name": str(_get(row, "name")), "price": rupees(row), "veg": veg,
-                      "in_stock": _flag(_get(row, "stock")), "has_options": bool(row.get("variations") or
-                      row.get("variantsV2") or row.get("addons") or _flag(_get(row, "variants")) is True or
-                      _flag(_get(row, "addons")) is True)})
+        items.append({"id": item_id, "name": str(_get(row, "name")), "price": rupees(row, unit),
+                      "price_estimated": price_estimated(row), "veg": veg,
+                      "in_stock": _flag(_get(row, "stock")), "has_options": _has_options(row)})
     more = body.get("hasMore") is True
     next_offset = body.get("nextOffset") if more else None
     if more and (not isinstance(next_offset, int) or isinstance(next_offset, bool) or not offset < next_offset <= 10000):
@@ -487,10 +650,12 @@ def menu(user_id: int, restaurant: str, *, fresh: bool = False) -> dict:
     data = call(user_id, "get_restaurant_menu",
                 build_args(tool, {"restaurant": place["id"], "address": _address(conn)}))
     items = []
-    for r in records(data, "id", "name")[:150]:
+    rows = records(data, "id", "name")[:150]
+    unit = menu_unit(rows)
+    for r in rows:
         veg = _get(r, "veg")
-        items.append({"id": _get(r, "id"), "name": str(_get(r, "name")), "price": rupees(r),
-                      "veg": bool(veg) if veg is not None else None})
+        items.append({"id": _get(r, "id"), "name": str(_get(r, "name")), "price": rupees(r, unit),
+                      "price_estimated": price_estimated(r), "veg": bool(veg) if veg is not None else None})
     if not items:
         raise SwiggyError(f"Swiggy didn't return a menu for {place['name']} right now.")
     out = {"restaurant": restaurant, "swiggy": place, "items": items,
@@ -554,8 +719,7 @@ def cart_preview(session_id: int) -> dict:
     item = exact[0]
     if _get(item, "stock") not in (True, 1):
         raise SwiggyError("Swiggy did not confirm this dish is in stock. Check it in Swiggy before ordering.")
-    if (_get(item, "variants") not in (False, 0) or _get(item, "addons") not in (False, 0)
-            or item.get("variations") or item.get("variantsV2") or item.get("addons")):
+    if _has_options(item):
         raise SwiggyError("This dish needs options or add-ons SmartPlate cannot safely choose. "
                           "Customize it in Swiggy instead.")
     if user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
@@ -567,7 +731,8 @@ def cart_preview(session_id: int) -> dict:
     fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price")},
                                             sort_keys=True).encode()).hexdigest()
     return {**details, "address": conn.get("address_label") or "Selected Swiggy address",
-            "menu_price": rupees(item), "fingerprint": fingerprint}
+            "menu_price": rupees(item, menu_unit(records(data, "menu_item_id", "name"))),
+            "price_estimated": price_estimated(item), "fingerprint": fingerprint}
 
 
 def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
@@ -586,24 +751,39 @@ def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
             "checkout_url": CHECKOUT_URL}
 
 
+SAFETY_NOTE = ("SmartPlate cannot verify your ingredient or medical rules from Swiggy's menu, so it won't add "
+               "this to your cart. Check the dish with the restaurant and order it directly in Swiggy.")
+
+
+def _safety_blocked(user: dict) -> bool:
+    """A live dish picked from a menu is for this person; the shared household plan is
+    made safe for every member by the planner (allergens.violates)."""
+    return bool(user["allergens"] or user["medical"] or user["diet"] == "vegan")
+
+
 def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
                       item_id: str, item_name: str) -> dict:
-    """Review an item chosen from a real menu, without a seeded plan or fuzzy match."""
-    from ..domain import models
+    """Review an item chosen from a real menu, without a seeded plan or fuzzy match.
+
+    Always answers with a review (dish, current price, address). For profiles whose
+    allergy / medical / vegan rules SmartPlate can't verify from a menu, the review is
+    `orderable: False` with a Swiggy hand-off instead of an error, so the Review button
+    never dead-ends."""
+    from ..domain import models, timing
     user = models.get_user(user_id)
-    if user["allergens"] or user["medical"] or user["diet"] == "vegan":
-        raise SwiggyError("SmartPlate cannot verify your ingredient or medical rules from Swiggy's menu. "
-                          "Choose and check the dish directly in Swiggy before ordering.")
+    if not user:
+        raise ValueError("Profile not found")
     place = live_menu(user_id, restaurant_id, restaurant_name)["restaurant"]
     conn = _conn(user_id)
     address_id = _address(conn)
     tool = _tool(conn, "search_menu")
-    exact, offset, seen_offsets = [], 0, set()
+    exact, offset, seen_offsets, rows = [], 0, set(), []
     for _ in range(20):
         data = call(user_id, "search_menu", build_args(tool,
                     {"query": item_name, "address": address_id, "restaurant_scope": restaurant_id,
                      "offset": offset}))
-        exact = [r for r in records(data, "menu_item_id", "name")
+        rows = records(data, "menu_item_id", "name")
+        exact = [r for r in rows
                  if str(_get(r, "menu_item_id")) == str(item_id)
                  and _name(str(_get(r, "name"))) == _name(item_name)
                  and (_get(r, "restaurant_id") is None or str(_get(r, "restaurant_id")) == restaurant_id)]
@@ -619,32 +799,70 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
     if len(exact) != 1:
         raise SwiggyError("The selected dish is no longer an exact live menu match. Refresh the menu.")
     item = exact[0]
-    if _get(item, "stock") not in (True, 1):
-        raise SwiggyError("Swiggy did not confirm this dish is in stock. Refresh the menu.")
-    if (_get(item, "variants") not in (False, 0) or _get(item, "addons") not in (False, 0)
-            or item.get("variations") or item.get("variantsV2") or item.get("addons")):
-        raise SwiggyError("This dish needs options that SmartPlate cannot choose yet. Customize it in Swiggy.")
-    if user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
-        raise SwiggyError("Swiggy did not verify this dish as vegetarian. Check it in Swiggy.")
     details = {"user_id": user_id, "address_id": address_id, "restaurant_id": restaurant_id,
                "restaurant": place["name"], "item_id": str(item_id), "item": str(_get(item, "name"))}
+    review = {**details, "address": conn.get("address_label") or address_id,
+              "menu_price": rupees(item, menu_unit(rows)), "price_estimated": price_estimated(item),
+              "handoff_url": timing.swiggy_handoff(place["name"], str(_get(item, "name")))}
+    blocked = None
+    if _safety_blocked(user):
+        blocked = SAFETY_NOTE
+    elif _get(item, "stock") not in (True, 1):
+        blocked = "Swiggy did not confirm this dish is in stock. Refresh the menu or check it in Swiggy."
+    elif _has_options(item):
+        blocked = "This dish needs options that SmartPlate cannot choose yet. Customize it in Swiggy."
+    elif user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
+        blocked = "Swiggy did not verify this dish as vegetarian. Check it in Swiggy."
+    if blocked:
+        return {**review, "orderable": False, "reason": blocked, "fingerprint": None}
     fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price")},
                                             sort_keys=True).encode()).hexdigest()
-    return {**details, "address": conn.get("address_label") or address_id,
-            "menu_price": rupees(item), "fingerprint": fingerprint}
+    return {**review, "orderable": True, "reason": None, "fingerprint": fingerprint}
+
+
+def _unwrap(data: object) -> object:
+    """Strip the documented {success, data, message} envelope (once)."""
+    if isinstance(data, dict) and "data" in data and set(data) <= {"success", "data", "message", "error"}:
+        return data["data"]
+    return data
 
 
 def _cart_view(data: object, address_id: str) -> dict:
-    """Read the documented cart envelope. Malformed responses are never empty carts."""
-    body = data.get("data", data) if isinstance(data, dict) else {}
-    cart = body.get("data") if isinstance(body, dict) else None
-    if not isinstance(cart, dict):
-        cart = body.get("cart") if isinstance(body, dict) else None
-    if (not isinstance(cart, dict) or not isinstance(cart.get("items"), list)
-            or not all(isinstance(i, dict) for i in cart["items"])
-            or str(body.get("addressId")) != address_id):
+    """Read the documented cart envelope `{data: {data: cart, addressId}}`.
+
+    An empty cart may come back with no inner `data`/`items` at all; that is an empty
+    cart, not an unverified one. A reply for a *different* address, or one whose items
+    aren't readable, is never treated as empty. `address_verified` says whether Swiggy
+    echoed the address (required before placing an order)."""
+    body = _unwrap(data)
+    if isinstance(body, dict) and set(body) == {"text"}:
+        text = str(body["text"]).lower()
+        if "empty" in text:
+            return {"items": [], "address_verified": False}
         raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
-    return cart
+    if not isinstance(body, dict):
+        raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
+    inner = body.get("data") if "data" in body else body.get("cart")
+    if inner is None and "items" in body:
+        inner = body                                   # the cart itself, without the outer envelope
+    echoed = body.get("addressId")
+    if echoed is None and isinstance(inner, dict):
+        echoed = inner.get("addressId") or inner.get("address_id")
+    if echoed is not None and str(echoed) != str(address_id):
+        raise SwiggyError("Swiggy returned the cart for a different delivery address. Choose your address again.")
+    verified = echoed is not None
+    if inner is None or inner == {}:
+        return {"items": [], "address_verified": verified}
+    if not isinstance(inner, dict):
+        raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
+    items = inner.get("items")
+    if items is None:
+        if inner.get("item_count") not in (None, 0):
+            raise SwiggyError("Swiggy did not return the cart's items. Check your cart in Swiggy.")
+        items = []
+    if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
+        raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
+    return {**inner, "items": items, "address_verified": verified}
 
 
 def _intent(user_id: int) -> dict | None:
@@ -679,7 +897,9 @@ def current_live_cart(user_id: int) -> dict:
                 {"address": address_id, "restaurant_name": intent["restaurant_name"] if intent else None}))
     cart = _cart_view(data, address_id)
     if not cart["items"]:
-        return {"cart": None}
+        # An empty cart is an answer, not an error: say so instead of a stale warning.
+        return {"cart": None, "empty": True, "address_verified": cart["address_verified"],
+                "address": conn.get("address_label") or address_id}
     restaurant = cart.get("restaurant") or {}
     rid = str(restaurant.get("id")) if isinstance(restaurant, dict) else ""
     prepared = bool(intent and intent["address_id"] == address_id and rid == intent["restaurant_id"]
@@ -688,7 +908,8 @@ def current_live_cart(user_id: int) -> dict:
     name = restaurant.get("name") if isinstance(restaurant, dict) else None
     return {"cart": {"item": ", ".join(str(_get(i, "name") or "Unnamed item") for i in cart["items"]),
                      "restaurant": name or (intent["restaurant_name"] if prepared else "Check restaurant in Swiggy"),
-                     "to_pay": _num(cart, "to_pay"), "orderable": prepared,
+                     "to_pay": cart_total(cart, intent.get("menu_price") if prepared and intent else None),
+                     "orderable": prepared,
                      "checkout_url": CHECKOUT_URL}}
 
 
@@ -697,6 +918,8 @@ def fill_live_cart(user_id: int, restaurant_id: str, restaurant_name: str,
     if not expected_fingerprint:
         raise CartChanged("Review the exact live Swiggy item before adding it to your cart.")
     preview = live_cart_preview(user_id, restaurant_id, restaurant_name, item_id, item_name)
+    if not preview["orderable"]:
+        raise SwiggyError(preview["reason"])
     if preview["fingerprint"] != expected_fingerprint:
         raise CartChanged("The live item, restaurant or address changed. Review it again.")
     return _fill_reviewed_cart(user_id, preview)
@@ -708,8 +931,11 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     conn = _conn(user_id)
     current = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
                                                        {"address": preview["address_id"]}))
-    if _cart_view(current, preview["address_id"])["items"]:
+    before = _cart_view(current, preview["address_id"])
+    if before["items"]:
         raise SwiggyError("Your Swiggy cart already has items. Review or clear it in Swiggy before starting a new order.")
+    if not before["address_verified"]:          # an unconfirmed "empty" reply is never a safe base to add to
+        raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
     tool = _tool(conn, "update_food_cart")
     call(user_id, "update_food_cart", build_args(tool, {
         "cart_items": [_cart_item(tool, preview["item_id"])], "restaurant": restaurant_id,
@@ -723,9 +949,12 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
             or str(restaurant.get("id")) != restaurant_id):
         raise SwiggyError("SmartPlate could not confirm the item in Swiggy's cart. Check your cart before trying again.")
     with db.cursor() as cur:
-        cur.execute("INSERT OR REPLACE INTO swiggy_cart_intents VALUES (?,?,?,?,?)",
-                    (user_id, preview["address_id"], restaurant_id, preview["restaurant"], preview["item_id"]))
-    return {**preview, "to_pay": _num(view, "to_pay"), "checkout_url": CHECKOUT_URL, "orderable": True}
+        cur.execute("INSERT OR REPLACE INTO swiggy_cart_intents(user_id, address_id, restaurant_id, restaurant_name, "
+                    "item_id, menu_price) VALUES (?,?,?,?,?,?)",
+                    (user_id, preview["address_id"], restaurant_id, preview["restaurant"], preview["item_id"],
+                     preview.get("menu_price")))
+    return {**preview, "to_pay": cart_total(view, preview.get("menu_price")), "checkout_url": CHECKOUT_URL,
+            "orderable": True}
 
 
 def _checkout_state(user_id: int) -> dict:
@@ -751,7 +980,9 @@ def _checkout_state(user_id: int) -> dict:
         raise SwiggyError("Swiggy did not verify the cart dish as vegetarian. Check it in Swiggy.")
     if item.get("variants") or item.get("addons") or item.get("variations") or item.get("variantsV2"):
         raise SwiggyError("The cart has customizations that SmartPlate did not review. Check it in Swiggy.")
-    total = _num(cart.get("pricing") or {}, "to_pay")
+    if not cart.get("address_verified"):
+        raise SwiggyError("Swiggy did not confirm the cart's delivery address. Refresh your cart or check it in Swiggy.")
+    total = cart_total(cart, intent.get("menu_price"))
     if total is None or total <= 0 or total > 1000:
         raise SwiggyError("Swiggy did not return a valid payable total within its ₹1,000 Builders Club limit.")
     options = call(user_id, "get_payment_options", build_args(_tool(conn, "get_payment_options"),
@@ -779,6 +1010,7 @@ def live_checkout_preview(user_id: int) -> dict:
     Only the latest approval for this profile can be submitted.
     """
     preview = _checkout_state(user_id)
+    reconcile_attempts(user_id)
     with db.cursor() as cur:
         unresolved = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? "
                                  "AND state IN ('started','unknown') LIMIT 1", (user_id,)).fetchone()
@@ -821,12 +1053,12 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
         if unresolved:
             raise CartChanged("An earlier order attempt is unresolved. Check Swiggy orders first.")
         cur.execute("INSERT INTO swiggy_order_attempts(user_id, fingerprint, cart_fingerprint, "
-                    "address_id, state, created_ts) VALUES (?,?,?,?,?,?)",
+                    "address_id, state, created_ts, to_pay) VALUES (?,?,?,?,?,?,?)",
                     (user_id, expected_fingerprint, preview["fingerprint"], preview["address_id"],
-                     "started", clock.now().isoformat()))
+                     "started", clock.now().isoformat(), preview["to_pay"]))
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
-    conn = _conn(user_id)
     try:
+        conn = _conn(user_id)             # inside the try: an expired token here is "not sent" (M-01)
         result = call(user_id, "place_food_order", build_args(_tool(conn, "place_food_order"),
                 {"address": preview["address_id"], "payment_method": preview["payment_method"]}))
         body = result.get("data", result) if isinstance(result, dict) else {}
@@ -846,6 +1078,14 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
         return {"order_id": str(order_id), "status": "confirmed", "item": preview["item"],
                 "to_pay": preview["to_pay"], "address": preview["address"],
                 "message": str(result.get("message") or "")}
+    except NotSent:
+        # The order request never reached Swiggy (or was refused unprocessed): nothing was
+        # placed, so this attempt must not block the next review (M-01).
+        with db.cursor() as cur:
+            cur.execute("UPDATE swiggy_order_attempts SET state='failed', resolved_ts=? "
+                        "WHERE user_id=? AND fingerprint=? AND state='started'",
+                        (clock.now().isoformat(), user_id, expected_fingerprint))
+        raise
     except Exception:
         with db.cursor() as cur:
             cur.execute("UPDATE swiggy_order_attempts SET state='unknown' "
@@ -896,8 +1136,133 @@ def live_order_history(user_id: int) -> dict:
                "item": item_names(r), "total": str(r.get("orderTotal") or ""),
                "status": str(r.get("orderStatus") or ""), "ordered_time": str(r.get("orderedTime") or "")}
               for r in rows if isinstance(r, dict) and r.get("orderId")]
+    _reconcile_with(user_id, rows)
     with db.cursor() as cur:
-        attempts = cur.execute("SELECT state, order_id, address_id, created_ts FROM swiggy_order_attempts "
+        attempts = cur.execute("SELECT state, order_id, address_id, created_ts, to_pay FROM swiggy_order_attempts "
                                "WHERE user_id=? ORDER BY created_ts DESC LIMIT 20", (user_id,)).fetchall()
     return {"provider_orders": recent, "attempts": [dict(r) for r in attempts],
             "address": conn.get("address_label") or address_id}
+
+
+# --------------------------------------------------------------------------- #
+# Recovering from an uncertain placement (M-01)
+# --------------------------------------------------------------------------- #
+RESOLVE_COOLDOWN = dt.timedelta(minutes=10)
+_ACTIVE_STATES = ("started", "unknown")
+
+
+def _amount(text) -> float | None:
+    match = _PRICE_TEXT.fullmatch(str(text or ""))
+    return float(match.group(2).replace(",", "")) if match else None
+
+
+def _order_time(text) -> dt.datetime | None:
+    """Swiggy's `orderedTime` in the formats seen in its APIs; None when unreadable."""
+    if isinstance(text, (int, float)) and not isinstance(text, bool) and text > 1e9:
+        stamp = text / 1000 if text > 1e12 else text
+        return dt.datetime.fromtimestamp(stamp, dt.timezone.utc).astimezone(
+            clock._TZ or dt.timezone.utc).replace(tzinfo=None)
+    value = str(text or "").strip()
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.astimezone(clock._TZ).replace(tzinfo=None) if parsed.tzinfo and clock._TZ else parsed.replace(tzinfo=None)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%d %b %Y, %I:%M %p", "%b %d, %Y, %I:%M %p", "%d %b %Y %I:%M %p"):
+        try:
+            return dt.datetime.strptime(value, fmt)          # noqa: DTZ007 - Swiggy shows local (IST) times
+        except ValueError:
+            continue
+    return None
+
+
+def _matching_order(attempt: dict, orders: list) -> dict | None:
+    """A provider order that is this attempt: same payable total (±₹1), not cancelled,
+    not claimed by another attempt, and provably recent (placed after the attempt
+    started, or still active). An old order with the same total never matches."""
+    if attempt.get("to_pay") is None:
+        return None
+    with db.cursor() as cur:
+        claimed = {r["order_id"] for r in cur.execute(
+            "SELECT order_id FROM swiggy_order_attempts WHERE order_id IS NOT NULL")}
+    for row in orders:
+        if not isinstance(row, dict) or not row.get("orderId") or str(row["orderId"]) in claimed:
+            continue
+        if "CANCEL" in str(row.get("orderStatus") or "").upper():
+            continue
+        total = _amount(row.get("orderTotal"))
+        if total is None or abs(total - float(attempt["to_pay"])) > 1:
+            continue
+        placed = _order_time(row.get("orderedTime"))
+        started = dt.datetime.fromisoformat(attempt["created_ts"]) - dt.timedelta(minutes=2)
+        if (placed is not None and placed >= started) or (placed is None and row.get("isActiveOrder") is True):
+            return row
+    return None
+
+
+def _reconcile_with(user_id: int, orders: list) -> int:
+    with db.cursor() as cur:
+        open_attempts = [dict(r) for r in cur.execute(
+            "SELECT fingerprint, to_pay, created_ts FROM swiggy_order_attempts WHERE user_id=? "
+            "AND state IN ('started','unknown') ORDER BY created_ts", (user_id,))]
+    fixed = 0
+    for attempt in open_attempts:
+        match = _matching_order(attempt, orders)
+        if match:
+            with db.cursor() as cur:
+                cur.execute("UPDATE swiggy_order_attempts SET state='confirmed', order_id=?, resolved_ts=? "
+                            "WHERE user_id=? AND fingerprint=? AND state IN ('started','unknown')",
+                            (str(match["orderId"]), clock.now().isoformat(), user_id, attempt["fingerprint"]))
+                cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
+            fixed += 1
+    return fixed
+
+
+def _provider_orders(user_id: int) -> list:
+    conn = _conn(user_id)
+    data = call(user_id, "get_food_orders", build_args(_tool(conn, "get_food_orders"),
+                                                        {"address": _address(conn)}))
+    body = data.get("data", data) if isinstance(data, dict) else {}
+    rows = body.get("orders") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        raise SwiggyError("Swiggy did not return an order list. Check the Swiggy app before retrying an order.")
+    return rows
+
+
+def reconcile_attempts(user_id: int) -> int:
+    """Mark uncertain attempts confirmed when Swiggy's order history shows them. Never
+    marks anything 'not placed' on its own: absence in a lagging history proves nothing."""
+    with db.cursor() as cur:
+        pending = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? "
+                              "AND state IN ('started','unknown') LIMIT 1", (user_id,)).fetchone()
+    if not pending or "get_food_orders" not in {t.get("name") for t in db.jl(_conn(user_id)["tools"])}:
+        return 0
+    try:
+        return _reconcile_with(user_id, _provider_orders(user_id))
+    except SwiggyError:
+        return 0                                   # the unresolved block stays; nothing is assumed
+
+
+def resolve_attempt(user_id: int, confirmation) -> dict:
+    """The person checked Swiggy and says no order was placed. Allowed only after a
+    cooldown and only when Swiggy's current order history shows no matching order."""
+    if confirmation != "NO_ORDER_IN_SWIGGY":
+        raise ValueError("Confirm that you checked Swiggy and no order was placed")
+    with db.cursor() as cur:
+        attempts = [dict(r) for r in cur.execute(
+            "SELECT fingerprint, to_pay, created_ts FROM swiggy_order_attempts WHERE user_id=? "
+            "AND state IN ('started','unknown')", (user_id,))]
+    if not attempts:
+        return {"resolved": 0, "message": "No uncertain order attempts."}
+    newest = max(dt.datetime.fromisoformat(a["created_ts"]) for a in attempts)
+    if clock.now() - newest < RESOLVE_COOLDOWN:
+        wait = int((RESOLVE_COOLDOWN - (clock.now() - newest)).total_seconds() // 60) + 1
+        raise ValueError(f"Wait about {wait} more minute(s) for Swiggy's order history to update, then check again.")
+    orders = _provider_orders(user_id)
+    if _reconcile_with(user_id, orders):
+        return {"resolved": 0, "message": "Swiggy shows this order was placed. It is now recorded as confirmed."}
+    with db.cursor() as cur:
+        cur.execute("UPDATE swiggy_order_attempts SET state='not_placed', resolved_ts=? WHERE user_id=? "
+                    "AND state IN ('started','unknown')", (clock.now().isoformat(), user_id))
+        count = cur.rowcount
+    return {"resolved": count, "message": "Marked as not placed. You can review the cart again."}

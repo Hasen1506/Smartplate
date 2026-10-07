@@ -266,13 +266,24 @@ def _secure_profile(client, uid=1):
     client.environ_base["HTTP_X_SMARTPLATE_KEY"] = key
 
 
+APP = "https://app.example"          # the app's public HTTPS origin in these tests
+
+
+def _allow_app_host():
+    from smartplate import config
+    if "app.example" not in config.ALLOWED_HOSTS:
+        config.ALLOWED_HOSTS = (*config.ALLOWED_HOSTS, "app.example")
+
+
 def _connect(client, swiggy, uid=1):
+    """Connect as a real browser does: start and finish on the app's own HTTPS origin, so
+    the sign-in cookie set at start comes back with Swiggy's redirect."""
+    _allow_app_host()
     _secure_profile(client, uid)
-    url = client.post(f"/api/user/{uid}/swiggy/connect", json={},
-                      headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example"}).get_json()["authorize_url"]
+    url = client.post(f"/api/user/{uid}/swiggy/connect", json={}, base_url=APP).get_json()["authorize_url"]
     q = swiggy.approve(url)
     assert q["redirect_uri"] == "https://app.example/swiggy/callback"
-    return client.get(f"/swiggy/callback?state={q['state']}&code=code-1"), q
+    return client.get(f"/swiggy/callback?state={q['state']}&code=code-1", base_url=APP), q
 
 
 def test_swiggy_sign_in_and_discovery_end_to_end(client, swiggy):
@@ -294,43 +305,46 @@ def test_swiggy_sign_in_and_discovery_end_to_end(client, swiggy):
 def test_swiggy_can_use_approved_auth_callback_path_on_app_origin(client, swiggy, monkeypatch):
     from smartplate import config
     monkeypatch.setattr(config, "SWIGGY_CALLBACK_PATH", "/auth/swiggy/callback")
+    _allow_app_host()
     _secure_profile(client)
-    headers = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example"}
-    status = client.get("/api/user/1/swiggy", headers=headers).get_json()
+    status = client.get("/api/user/1/swiggy", base_url=APP).get_json()
     assert status["callback_url"] == "https://app.example/auth/swiggy/callback"
-    url = client.post("/api/user/1/swiggy/connect", json={}, headers=headers).get_json()["authorize_url"]
+    url = client.post("/api/user/1/swiggy/connect", json={}, base_url=APP).get_json()["authorize_url"]
     q = swiggy.approve(url)
     assert q["redirect_uri"] == status["callback_url"]
-    result = client.get(f"/auth/swiggy/callback?state={q['state']}&code=code-1")
+    result = client.get(f"/auth/swiggy/callback?state={q['state']}&code=code-1", base_url=APP)
     assert result.status_code == 302
     assert result.headers["Location"].endswith("swiggy=connected")
 
 
 def test_swiggy_state_is_single_use_and_checked(client, swiggy):
     r, q = _connect(client, swiggy)
-    replay = client.get(f"/swiggy/callback?state={q['state']}&code=code-1")
-    assert "swiggy_error" in replay.headers["Location"]
-    forged = client.get("/swiggy/callback?state=forged&code=code-1")
+    replay = client.get(f"/swiggy/callback?state={q['state']}&code=code-1", base_url=APP)
+    assert replay.headers["Location"].endswith("swiggy_error=expired")
+    forged = client.get("/swiggy/callback?state=forged&code=code-1", base_url=APP)
     assert "swiggy_error" in forged.headers["Location"]
-    denied = client.get("/swiggy/callback?error=access_denied&error_description=User+cancelled")
-    assert "User%20cancelled" in denied.headers["Location"]
+    denied = client.get("/swiggy/callback?error=access_denied&error_description=User+cancelled", base_url=APP)
+    assert denied.headers["Location"].endswith("swiggy_error=denied")             # fixed codes only (L-13)
+    crafted = client.get("/swiggy/callback?error=x&error_description=Your+account+is+hacked", base_url=APP)
+    assert "hacked" not in crafted.headers["Location"]
 
 
 def test_swiggy_registration_reused_and_pkce_enforced(client, swiggy):
     _connect(client, swiggy)
-    url = client.post("/api/user/1/swiggy/connect", json={},
-                      headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.example"}).get_json()["authorize_url"]
+    url = client.post("/api/user/1/swiggy/connect", json={}, base_url=APP).get_json()["authorize_url"]
     assert swiggy.registrations == 1                                                 # one client per redirect URI
     q = swiggy.approve(url)
     swiggy.codes["code-1"] = "not-the-challenge"                                    # tampered verifier/challenge
-    bad = client.get(f"/swiggy/callback?state={q['state']}&code=code-1")
+    bad = client.get(f"/swiggy/callback?state={q['state']}&code=code-1", base_url=APP)
     assert "swiggy_error" in bad.headers["Location"]
 
 
 def test_swiggy_requires_https_and_handles_expiry_and_disconnect(client, swiggy, monkeypatch):
     _secure_profile(client)
-    r = client.post("/api/user/1/swiggy/connect", json={}, headers={"X-Forwarded-Host": "evil.example"})
+    r = client.post("/api/user/1/swiggy/connect", json={}, base_url="http://evil.example")
     assert r.status_code == 502 and "HTTPS" in r.get_json()["error"]
+    r = client.post("/api/user/1/swiggy/connect", json={}, base_url="https://evil.example")
+    assert r.status_code == 502 and "SMARTPLATE_PUBLIC_URL" in r.get_json()["error"]          # M-04
     _connect(client, swiggy)
     swiggy.token = "rotated"                                                        # server no longer accepts ours
     r = client.post("/api/user/1/swiggy/discover", json={})

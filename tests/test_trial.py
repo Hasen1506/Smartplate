@@ -47,8 +47,10 @@ def test_latest_plan_resumes_without_duplicates(client):
 
 
 def test_preferences_persist_and_replan(client):
+    # Shared sample profiles can't be renamed by visitors (L-09); everything else still saves.
+    assert client.patch('/api/user/1', json={'name': 'Trial'}).status_code == 400
     response = client.patch('/api/user/1', json={
-        'name': 'Trial', 'weekly_budget': 1000, 'diet': 'vegan',
+        'weekly_budget': 1000, 'diet': 'vegan',
         'allergens': ['peanut', 'gluten'], 'medical': [], 'max_cook_per_week': 3,
         'rating_floor': 4.2, 'kcal': 1900, 'protein_g': 75})
     assert response.status_code == 200
@@ -58,7 +60,7 @@ def test_preferences_persist_and_replan(client):
     user = models.get_user(1)
     assert user['medical'] == [] and user['diet'] == 'vegan'
     assert user['health_targets']['max_cook_per_week'] == 3
-    assert create_app().test_client().get('/api/user/1/plan').get_json()['user']['name'] == 'Trial'
+    assert create_app().test_client().get('/api/user/1/plan').get_json()['user']['name'] != 'Trial'
 
 
 @pytest.mark.parametrize('bad', [float('nan'), float('inf'), -1, True, '100'])

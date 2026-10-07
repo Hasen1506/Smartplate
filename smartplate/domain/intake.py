@@ -111,6 +111,35 @@ def parse(text: str) -> dict:
 # --------------------------------------------------------------------------- #
 # Persistence — entries accumulate across real days to feed the rolling ledger.
 # --------------------------------------------------------------------------- #
+INTAKE_MEALS = ("", "breakfast", "lunch", "dinner", "snack")
+INTAKE_SOURCES = ("manual", "ordered", "cooked")
+MAX_BACKDATE_DAYS = 90
+
+
+def validate_entry(iso_date, meal, source) -> tuple[str | None, str, str]:
+    """Reject anything the ledger can't place on a real recent day (L-02)."""
+    if iso_date not in (None, ""):
+        if not isinstance(iso_date, str):
+            raise ValueError("Send the date as YYYY-MM-DD")
+        try:
+            day = dt.date.fromisoformat(iso_date.strip())
+        except ValueError:
+            raise ValueError("Send the date as YYYY-MM-DD") from None
+        today = clock.today()
+        if not today - dt.timedelta(days=MAX_BACKDATE_DAYS) <= day <= today + dt.timedelta(days=1):
+            raise ValueError(f"Log meals from the last {MAX_BACKDATE_DAYS} days only")
+        iso_date = day.isoformat()
+    else:
+        iso_date = None
+    meal = meal or ""
+    if not isinstance(meal, str) or meal.strip().lower() not in INTAKE_MEALS:
+        raise ValueError("Choose breakfast, lunch, dinner or snack")
+    source = source or "manual"
+    if not isinstance(source, str) or source not in INTAKE_SOURCES:
+        raise ValueError("Unknown intake source")
+    return iso_date, meal.strip().lower(), source
+
+
 def record(user_id: int, nutrition: dict, *, iso_date: str | None = None, meal: str = "",
            source: str = "manual", plan_id: int | None = None, note: str = "") -> int:
     iso_date = iso_date or clock.today().isoformat()
@@ -118,10 +147,11 @@ def record(user_id: int, nutrition: dict, *, iso_date: str | None = None, meal: 
         cur.execute(
             "INSERT INTO intake_log(user_id, plan_id, iso_date, meal, source, "
             "kcal, protein_g, carbs_g, fat_g, sugar_g, note, created_ts) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (user_id, plan_id, iso_date, meal, source,
              nutrition.get("kcal", 0), nutrition.get("protein_g", 0), nutrition.get("carbs_g", 0),
-             nutrition.get("fat_g", 0), nutrition.get("sugar_g", 0), note))
+             nutrition.get("fat_g", 0), nutrition.get("sugar_g", 0), note,
+             clock.now().isoformat(timespec="seconds")))     # app clock (IST), not SQLite UTC (L-06)
         return cur.lastrowid
 
 
@@ -129,8 +159,8 @@ def recent(user_id: int, days: int = 30) -> list[dict]:
     since = (clock.today() - dt.timedelta(days=max(1, days) - 1)).isoformat()
     with db.cursor() as cur:
         rows = cur.execute(
-            "SELECT * FROM intake_log WHERE user_id=? AND iso_date>=? ORDER BY iso_date, id",
-            (user_id, since)).fetchall()
+            "SELECT * FROM intake_log WHERE user_id=? AND iso_date>=? AND iso_date<=? ORDER BY iso_date, id",
+            (user_id, since, (clock.today() + dt.timedelta(days=1)).isoformat())).fetchall()
     return [db.row_to_dict(r) for r in rows]
 
 

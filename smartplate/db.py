@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS calendar_events (     -- §5.1.2
     day INTEGER NOT NULL,
     start_min INTEGER NOT NULL,                    -- minutes from midnight
     end_min INTEGER NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'busy',            -- busy | travel
+    kind TEXT NOT NULL DEFAULT 'busy',            -- busy | travel | allday (shown, not planned around)
     title TEXT NOT NULL DEFAULT ''
 );
 
@@ -289,6 +289,7 @@ MIGRATIONS = [
     ("sessions", "pinned", "TEXT"),
     ("festivals", "observance", "TEXT NOT NULL DEFAULT ''"),
     ("festivals", "approx", "INTEGER NOT NULL DEFAULT 0"),
+    ("calendar_events", "uid", "TEXT"),                  # .ics UID: re-imports replace, not duplicate
 ]
 
 

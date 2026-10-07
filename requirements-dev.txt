@@ -1,0 +1,4 @@
+# Test and audit tools; production installs only requirements.txt.
+-r requirements.txt
+pytest==9.0.3
+pip-audit==2.10.1

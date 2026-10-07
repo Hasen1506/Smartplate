@@ -1,4 +1,6 @@
 """Sign-in for private profiles, device tokens, rate limits and token encryption."""
+import datetime as dt
+
 import pytest
 
 from smartplate import db, ratelimit, vault
@@ -99,13 +101,42 @@ def test_account_rules(client):
     assert r.status_code == 400 and "Sample profiles" in r.get_json()["error"]
 
 
-def test_changing_the_password_keeps_signed_in_devices(client):
+def test_changing_the_password_signs_out_other_devices(client):
+    """L-03: a leaked password must not keep working through device tokens it issued."""
     uid, owner = _with_login(client)
     key = client.post("/api/signin", json={"login": "priya", "password": "correct horse"}).get_json()["key"]
-    client.post(f"/api/user/{uid}/account", json={"login": "priya", "password": "a new password"}, headers=owner)
+    here = client.post("/api/signin", json={"login": "priya", "password": "correct horse"}).get_json()["key"]
+    client.post(f"/api/user/{uid}/account", json={"login": "priya", "password": "a new password"},
+                headers={"X-SmartPlate-Key": here})
     assert client.post("/api/signin", json={"login": "priya", "password": "correct horse"}).status_code == 400
     assert client.post("/api/signin", json={"login": "priya", "password": "a new password"}).status_code == 200
-    assert client.get(f"/api/user/{uid}/plan", headers={"X-SmartPlate-Key": key}).status_code == 200
+    assert client.get(f"/api/user/{uid}/plan", headers={"X-SmartPlate-Key": key}).status_code == 401
+    assert client.get(f"/api/user/{uid}/plan", headers={"X-SmartPlate-Key": here}).status_code == 200   # the browser that changed it
+    assert client.get(f"/api/user/{uid}/plan", headers=owner).status_code == 200                         # recovery key unaffected
+    # re-saving the same password (e.g. renaming the login) signs nobody out
+    again = client.post("/api/signin", json={"login": "priya", "password": "a new password"}).get_json()["key"]
+    client.post(f"/api/user/{uid}/account", json={"login": "priya2", "password": "a new password"}, headers=owner)
+    assert client.get(f"/api/user/{uid}/plan", headers={"X-SmartPlate-Key": again}).status_code == 200
+
+
+def test_idle_device_tokens_expire(client, monkeypatch):
+    uid, owner = _with_login(client)
+    key = client.post("/api/signin", json={"login": "priya", "password": "correct horse"}).get_json()["key"]
+    from smartplate import access, clock
+    later = clock.now() + access.DEVICE_IDLE_TTL + dt.timedelta(days=1)
+    monkeypatch.setattr(clock, "now", lambda: later)
+    assert client.get(f"/api/user/{uid}/plan", headers={"X-SmartPlate-Key": key}).status_code == 401
+
+
+def test_third_party_failures_do_not_lock_out_the_owner(client):
+    """L-04: failures from another address don't lock the owner's sign-in name."""
+    _with_login(client)
+    for _ in range(6):
+        client.post("/api/signin", json={"login": "priya", "password": "wrong guess"},
+                    environ_base={"REMOTE_ADDR": "203.0.113.9"})
+    assert client.post("/api/signin", json={"login": "priya", "password": "x" * 9},
+                       environ_base={"REMOTE_ADDR": "203.0.113.9"}).status_code == 429       # the guesser is limited
+    assert client.post("/api/signin", json={"login": "priya", "password": "correct horse"}).status_code == 200
 
 
 def test_new_profiles_are_rate_limited_per_address(client):
@@ -131,7 +162,7 @@ def test_recovery_rotation_revokes_old_codes_devices_and_approvals(client):
     uid, old = _with_login(client, login="rotate-me")
     phone = client.post("/api/signin", json={"login": "rotate-me", "password": "correct horse", "device": "Phone"}).get_json()
     with db.cursor() as cur:
-        cur.execute("INSERT INTO swiggy_pending VALUES (?,?,?,?,?)", ("old-state", uid, "verifier", "https://example.com/callback", "now"))
+        cur.execute("INSERT INTO swiggy_pending(state, user_id, verifier, redirect_uri, created_ts) VALUES (?,?,?,?,?)", ("old-state", uid, "verifier", "https://example.com/callback", "now"))
         cur.execute("INSERT INTO swiggy_checkout_quotes VALUES (?,?,?,?)", ("old-quote", uid, "cart", "now"))
     route = f"/api/user/{uid}/account/rotate-key"
     assert client.post(route, json={"confirmation": "ROTATE"}).status_code == 401

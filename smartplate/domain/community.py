@@ -3,9 +3,8 @@
 Power users save Survival/Tight-Week plans; others browse and clone them.
 A simple network-effect surface. Moderation hooks are left as TODOs for scale.
 """
-import datetime as dt
 
-from .. import db
+from .. import clock, db
 
 
 def list_templates(city: str | None = None) -> list[dict]:
@@ -34,7 +33,7 @@ def save_template(author: str, title: str, plan: dict, decisions: list[dict], au
              "item": d.get("item_name"), "cost": d.get("cost", 0)}
             for d in decisions
         ],
-        "saved": dt.date.today().isoformat(),
+        "saved": clock.today().isoformat(),
     }
     with db.cursor() as cur:
         cur.execute(
@@ -46,9 +45,10 @@ def save_template(author: str, title: str, plan: dict, decisions: list[dict], au
         return cur.lastrowid
 
 
-def adopt(template_id: int) -> dict | None:
+def adopt(template_id: int, count: bool = True) -> dict | None:
     with db.cursor() as cur:
-        cur.execute("UPDATE community_templates SET adopts = adopts + 1 WHERE id=?", (template_id,))
+        if count:
+            cur.execute("UPDATE community_templates SET adopts = adopts + 1 WHERE id=?", (template_id,))
         row = cur.execute("SELECT * FROM community_templates WHERE id=?", (template_id,)).fetchone()
     if not row:
         return None

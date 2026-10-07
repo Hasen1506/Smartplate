@@ -74,6 +74,8 @@ def current_plan(user_id):
 def update_preferences(user_id, body):
     """Validate the entire edit before writing. Replan only unplaced meals."""
     user = models.get_user(user_id)
+    if not user:
+        raise KeyError("Profile not found")
     allowed = {'name', 'weekly_budget', 'rating_floor', 'diet', 'allergens', 'medical',
                'kcal', 'protein_g', 'max_cook_per_week'}
     if set(body) - allowed:
@@ -87,7 +89,10 @@ def update_preferences(user_id, body):
         if body['diet'] not in ('veg', 'nonveg', 'vegan'):
             raise ValueError('Choose vegetarian, non-vegetarian, or vegan')
         updates['diet'] = body['diet']
-    for key, lo, hi in [('weekly_budget', 0, 1000000), ('rating_floor', 0, 5),
+    if 'name' in body and not user.get('access_hash'):
+        raise ValueError("Sample profiles are shared by every visitor, so their name can't be changed. "
+                         "Set up your own profile instead.")
+    for key, lo, hi in [('weekly_budget', profile.BUDGET_MIN, profile.BUDGET_MAX), ('rating_floor', 0, 5),
                          ('kcal', 1, 20000), ('protein_g', 1, 1000), ('max_cook_per_week', 0, 21)]:
         if key not in body:
             continue
@@ -115,6 +120,7 @@ def update_preferences(user_id, body):
             updates[key] = db.jd(sorted(set(body[key])))
     if not updates:
         raise ValueError('No preferences supplied')
+    profile.check_caps(updates.get('weekly_budget', user['weekly_budget']), user['prefs'].get('daily_cap'))
     with db.cursor() as cur:
         cur.execute('UPDATE users SET ' + ', '.join(f'{key}=?' for key in updates) + ' WHERE id=?',
                     (*updates.values(), user_id))
@@ -130,6 +136,9 @@ def set_session_status(session_id: int, status: str, note: str = "") -> None:
     if before and before["status"] == "confirmed" and status != "confirmed":
         with db.cursor() as cur:        # undoing "I had it" also removes its logged intake
             cur.execute("DELETE FROM intake_log WHERE note=?", (f"session:{session_id}",))
+            # ...and its expense receipt: a meal never had is not an expense (L-01)
+            cur.execute("DELETE FROM receipts WHERE decision_id IN (SELECT id FROM decisions WHERE session_id=?)",
+                        (session_id,))
 
 
 def command(plan_id: int, text: str) -> dict:
@@ -240,6 +249,7 @@ def estimate_intake(text: str) -> dict:
 def log_intake(user_id: int, text: str, *, iso_date: str | None = None, meal: str = "",
                source: str = "manual", plan_id: int | None = None) -> dict:
     """Parse free text AND persist it so the rolling ledger accumulates across days."""
+    iso_date, meal, source = intake.validate_entry(iso_date, meal, source)
     parsed = intake.parse(text)
     eid = intake.record(user_id, parsed["nutrition"], iso_date=iso_date, meal=meal,
                         source=source, plan_id=plan_id, note=text)
@@ -376,20 +386,32 @@ def grocery_basket(plan_id: int) -> dict:
     return reverse_mode.basket_for_recipes(keys)
 
 
+ANONYMOUS_AUTHOR = "A SmartPlate user"
+
+
 def list_community(city=None):
     return community.list_templates(city)
 
 
-def adopt_template(template_id: int):
-    return community.adopt(template_id)
+def adopt_template(template_id: int, count: bool = True):
+    return community.adopt(template_id, count=count)
 
 
-def save_template(plan_id: int, title: str):
+def save_template(plan_id: int, title: str, show_name: bool = False):
     plan = models.get_plan(plan_id)
-    user = models.get_user(plan["user_id"])
+    user = models.get_user(plan["user_id"]) if plan else None
+    if not plan or not user:
+        raise KeyError("Plan not found")
+    if not user.get("access_hash"):
+        raise ValueError("Sample profiles are shared by every visitor. Set up your own profile to share a week.")
+    if not isinstance(title, str) or not 1 <= len(title.strip()) <= 80:
+        raise ValueError("Give the week a title of 1–80 characters")
+    title = title.strip()
     decisions = [d for d in models.decisions_for_plan(plan_id) if d["chosen_kind"] in ("delivery", "cook")]
     meta = {"city": user["city"], "budget": user["weekly_budget"], "mode": plan["mode"]}
-    return community.save_template(user["name"], title, meta, decisions, author_user_id=user["id"])
+    # The display name is published only when the person explicitly opts in (L-14).
+    author = user["name"] if show_name is True else ANONYMOUS_AUTHOR
+    return community.save_template(author, title, meta, decisions, author_user_id=user["id"])
 
 
 def record_receipts(plan_id: int) -> dict:
