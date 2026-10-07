@@ -19,10 +19,10 @@
   "Fri 2026-11-06": {
    "dinner": {
     "cost": 125.0,
-    "item": "Masala Dosa",
+    "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    },
    "lunch": {
@@ -127,10 +127,10 @@
   "Wed 2026-11-04": {
    "dinner": {
     "cost": 127.08,
-    "item": "Mini Tiffin",
+    "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    },
    "lunch": {
