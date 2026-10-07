@@ -22,6 +22,9 @@ LATE_OK = dt.timedelta(minutes=20)
 log = logging.getLogger("smartplate.push")
 _worker: threading.Thread | None = None
 _stop = threading.Event()
+# Subscriptions whose push service answered 429/5xx wait before the next try (L-12).
+_backoff: dict[int, tuple[dt.datetime, int]] = {}
+BACKOFF_FIRST, BACKOFF_MAX = dt.timedelta(minutes=1), dt.timedelta(minutes=30)
 
 
 def vapid_private() -> str:
@@ -87,18 +90,21 @@ def due(at: dt.datetime | None = None) -> list[tuple[dict, dict]]:
     at = at or clock.now()
     with db.cursor() as cur:
         subs = [db.row_to_dict(r) for r in cur.execute("SELECT * FROM push_subscriptions ORDER BY user_id, id")]
-        sent = {(r["subscription_id"], r["session_id"], r["at"]) for r in cur.execute("SELECT * FROM push_sent")}
+        # One reminder per meal per subscription, even if a re-plan moves its order-by time (L-12).
+        sent = {(r["subscription_id"], r["session_id"]) for r in cur.execute("SELECT * FROM push_sent")}
     out, views = [], {}
     for sub in subs:
         uid = sub["user_id"]
         if uid not in views:
             try:
-                views[uid] = reminders.upcoming(service.current_plan(uid), at - LATE_OK)
+                from .runtime import user_lock
+                with user_lock(uid):                  # only this profile's requests wait (M-05)
+                    views[uid] = reminders.upcoming(service.current_plan(uid), at - LATE_OK)
             except Exception:                         # a deleted profile, a plan that can't solve
                 log.exception("push: reminders for user %s failed", uid)
                 views[uid] = []
         for r in views[uid]:
-            if dt.datetime.fromisoformat(r["at"]) <= at and (sub["id"], r["session_id"], r["at"]) not in sent:
+            if dt.datetime.fromisoformat(r["at"]) <= at and (sub["id"], r["session_id"]) not in sent:
                 out.append((sub, r))
     return out
 
@@ -114,6 +120,9 @@ def send_due(at: dt.datetime | None = None, sender=None, pairs=None) -> int:
                                  (sub["id"], sub["user_id"], sub["endpoint"])).fetchone()
         if not active:  # profile deleted or alerts disabled after the due snapshot
             continue
+        wait = _backoff.get(sub["id"])
+        if wait and wait[0] > at:
+            continue
         payload = {"title": r["title"], "body": r["body"], "url": r["link"] or "/?tab=today",
                    "tag": f"smartplate-{r['session_id']}"}
         try:
@@ -127,6 +136,16 @@ def send_due(at: dt.datetime | None = None, sender=None, pairs=None) -> int:
                 cur.execute("DELETE FROM push_subscriptions WHERE id=?", (sub["id"],))
                 cur.execute("DELETE FROM push_sent WHERE subscription_id=?", (sub["id"],))
                 continue
+            if code == 429 or code >= 500:            # push service busy: back off, don't hammer it
+                tries = (wait[1] if wait else 0) + 1
+                _backoff[sub["id"]] = (at + min(BACKOFF_FIRST * 2 ** (tries - 1), BACKOFF_MAX), tries)
+                continue
+            if not 200 <= code < 300:                 # 400/413 etc.: this payload will never be accepted
+                cur.execute("INSERT OR IGNORE INTO push_sent(subscription_id, session_id, at, sent_ts) VALUES (?,?,?,?)",
+                            (sub["id"], r["session_id"], r["at"], at.isoformat(timespec="seconds")))
+                log.warning("push: %s rejected a reminder with HTTP %s; not retrying", sub["endpoint"][:40], code)
+                continue
+            _backoff.pop(sub["id"], None)
             if 200 <= code < 300:
                 cur.execute("INSERT OR IGNORE INTO push_sent(subscription_id, session_id, at, sent_ts) VALUES (?,?,?,?)",
                             (sub["id"], r["session_id"], r["at"], at.isoformat(timespec="seconds")))
@@ -150,11 +169,9 @@ def test_message(user_id: int, sender=None) -> dict:
 
 
 def _loop():
-    from .runtime import state_lock
     while not _stop.wait(config.PUSH_TICK_S):
         try:
-            with state_lock:                          # plans may roll forward while we read them
-                pairs = due()
+            pairs = due()                             # per-profile locks inside, never the whole API
             if pairs:                                 # network calls happen outside the lock
                 send_due(pairs=pairs)
         except Exception:
