@@ -111,7 +111,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     scheduled_ts TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',         -- active|snoozed|skipped|cooked|ordered|confirmed (§5.1.5)
     note TEXT NOT NULL DEFAULT '',
-    pinned TEXT                                    -- the user's own pick: {"kind","item_id"|"recipe_key"}
+    pinned TEXT,                                   -- the user's own pick: {"kind","item_id"|"recipe_key"}
+    eaters TEXT                                    -- household member ids eating it (NULL = the usual people)
 );
 
 CREATE TABLE IF NOT EXISTS decisions (
@@ -237,6 +238,12 @@ CREATE TABLE IF NOT EXISTS intake_log (          -- "I made/ate X" → rolling n
     created_ts TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS grocery_have (        -- grocery lines the cook already has at home this week
+    plan_id INTEGER NOT NULL,
+    item TEXT NOT NULL,
+    PRIMARY KEY (plan_id, item)
+);
+
 CREATE TABLE IF NOT EXISTS grocery_swaps (       -- an ingredient swapped for this week's cooking (Epicure)
     plan_id INTEGER NOT NULL,
     token TEXT NOT NULL,                           -- the recipe/basket ingredient (Epicure token)
@@ -330,6 +337,7 @@ MIGRATIONS = [
     ("festivals", "observance", "TEXT NOT NULL DEFAULT ''"),
     ("festivals", "approx", "INTEGER NOT NULL DEFAULT 0"),
     ("calendar_events", "uid", "TEXT"),                  # .ics UID: re-imports replace, not duplicate
+    ("sessions", "eaters", "TEXT"),                      # household: who eats this meal (split by consumption)
 ]
 
 

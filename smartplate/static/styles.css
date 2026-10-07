@@ -424,6 +424,11 @@ details summary{cursor:pointer;font-weight:600;font-size:14px;padding:8px 0}
 .cartnote{display:grid;gap:8px}
 .cartnote .btn{justify-self:start}
 .signin .inline-err{margin:0;padding:8px 12px;border-radius:8px;background:var(--red-bg);color:var(--red);font-size:14px}
+/* household + grocery */
+.chips button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+tr.have td{color:var(--muted)}
+.card.person{padding:12px 16px}
+.have-it{white-space:nowrap}
 /* Epicure swaps (cooking panel) */
 .ingredients .tag{cursor:default}
 .ingredients button.tag{cursor:pointer}
