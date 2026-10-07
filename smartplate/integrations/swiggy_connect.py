@@ -25,6 +25,7 @@ SMARTPLATE_SECRET), never returned by the API, and deleted on disconnect.
 import base64
 import datetime as dt
 import hashlib
+import hmac
 import json
 import secrets
 import urllib.error
@@ -99,6 +100,10 @@ COLUMNS = [                                      # added after gate 1 shipped
     ("swiggy_connections", "address_label", "TEXT"),
     ("swiggy_connections", "samples", "TEXT NOT NULL DEFAULT '{}'"),
     ("swiggy_order_attempts", "cart_fingerprint", "TEXT"),
+    ("swiggy_pending", "browser_hash", "TEXT"),       # binds the callback to the browser that started it
+    ("swiggy_order_attempts", "resolved_ts", "TEXT"),
+    ("swiggy_order_attempts", "to_pay", "REAL"),
+    ("swiggy_cart_intents", "menu_price", "REAL"),
 ]
 CLIENT_VERSION = "2025-06-18"          # protocol we offer; the server's reply is what we record
 PENDING_TTL = dt.timedelta(minutes=15)
@@ -108,9 +113,9 @@ READ_PREFIXES = ("get_", "search_", "fetch_", "track_", "list_")
 class SwiggyError(RuntimeError):
     """A connection step failed; the message is safe to show the user."""
 
-    def __init__(self, message, *, code="swiggy_error", retry_after=None):
+    def __init__(self, message, *, code="swiggy_error", retry_after=None, http_status=None):
         super().__init__(message)
-        self.code, self.retry_after = code, retry_after
+        self.code, self.retry_after, self.http_status = code, retry_after, http_status
 
 
 def init_schema() -> None:
@@ -189,11 +194,34 @@ def _metadata() -> dict:
     return meta
 
 
+def redirect_allowed(redirect_uri: str) -> bool:
+    """Only the configured public host, explicitly allowed hosts, or localhost (M-04)."""
+    parsed = urllib.parse.urlsplit(redirect_uri)
+    host = (parsed.hostname or "").lower()
+    if parsed.path != config.SWIGGY_CALLBACK_PATH or parsed.query or parsed.fragment:
+        return False
+    if host in ("localhost", "127.0.0.1"):
+        return True
+    if parsed.scheme != "https":
+        return False
+    allowed = set(config.ALLOWED_HOSTS)
+    if config.PUBLIC_URL:
+        allowed.add((urllib.parse.urlsplit(config.PUBLIC_URL).hostname or "").lower())
+    return host in allowed
+
+
 def _client_id(meta: dict, redirect_uri: str) -> str:
     with db.cursor() as cur:
         row = cur.execute("SELECT client_id FROM swiggy_clients WHERE redirect_uri=?", (redirect_uri,)).fetchone()
+        registered = cur.execute("SELECT COUNT(*) FROM swiggy_clients").fetchone()[0]
     if row:
         return row["client_id"]
+    if not redirect_allowed(redirect_uri):
+        raise SwiggyError("This server's public address isn't configured for Swiggy sign-in. "
+                          "Set SMARTPLATE_PUBLIC_URL (or SMARTPLATE_ALLOWED_HOSTS) to the app's HTTPS address.")
+    if registered >= config.SWIGGY_MAX_CLIENTS:
+        raise SwiggyError("SmartPlate has already registered its Swiggy sign-in addresses. "
+                          "Ask the operator to check SMARTPLATE_PUBLIC_URL.")
     reg = meta.get("registration_endpoint")
     if not reg:
         raise SwiggyError("Swiggy requires a pre-registered client for this address. "
@@ -224,14 +252,24 @@ def private_owner(user_id: int) -> bool:
     return bool(row and row["access_hash"])
 
 
-def start(user_id: int, redirect_uri: str) -> str:
-    """Begin sign-in; returns the Swiggy authorization URL to send the browser to."""
+def browser_digest(nonce: str) -> str:
+    return hashlib.sha256(("swiggy-oauth:" + nonce).encode()).hexdigest()
+
+
+def start(user_id: int, redirect_uri: str, browser_nonce: str | None = None) -> str:
+    """Begin sign-in; returns the Swiggy authorization URL to send the browser to.
+
+    `browser_nonce` is also set as an HttpOnly cookie on the browser that asked;
+    the callback is accepted only from a browser presenting it (H-01)."""
     if not private_owner(user_id):
         raise SwiggyError("Create or sign in to your own private SmartPlate profile before connecting Swiggy. "
                           "Sample profiles are shared by every visitor.")
     if not redirect_uri.startswith("https://") and "://localhost" not in redirect_uri \
             and "://127.0.0.1" not in redirect_uri:
         raise SwiggyError("Swiggy sign-in needs HTTPS (or localhost for development)")
+    if not redirect_allowed(redirect_uri):
+        raise SwiggyError("This server's public address isn't configured for Swiggy sign-in. "
+                          "Set SMARTPLATE_PUBLIC_URL (or SMARTPLATE_ALLOWED_HOSTS) to the app's HTTPS address.")
     init_schema()
     meta = _metadata()
     client_id = _client_id(meta, redirect_uri)
@@ -240,8 +278,9 @@ def start(user_id: int, redirect_uri: str) -> str:
     with db.cursor() as cur:
         cur.execute("DELETE FROM swiggy_pending WHERE created_ts < ?",
                     ((clock.now() - PENDING_TTL).isoformat(),))
-        cur.execute("INSERT INTO swiggy_pending(state, user_id, verifier, redirect_uri, created_ts) VALUES (?,?,?,?,?)",
-                    (state, user_id, verifier, redirect_uri, clock.now().isoformat()))
+        cur.execute("INSERT INTO swiggy_pending(state, user_id, verifier, redirect_uri, created_ts, browser_hash) "
+                    "VALUES (?,?,?,?,?,?)", (state, user_id, verifier, redirect_uri, clock.now().isoformat(),
+                                            browser_digest(browser_nonce) if browser_nonce else None))
     q = urllib.parse.urlencode({
         "response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri,
         "code_challenge": challenge, "code_challenge_method": "S256", "state": state,
@@ -249,14 +288,20 @@ def start(user_id: int, redirect_uri: str) -> str:
     return f"{meta['authorization_endpoint']}?{q}"
 
 
-def finish(state: str, code: str) -> int:
-    """OAuth callback: validate state, exchange the code, run discovery. Returns user id."""
+def finish(state: str, code: str, browser_nonce: str | None = None) -> int:
+    """OAuth callback: validate state and the starting browser, exchange the code, run
+    discovery. Returns user id. A discovery failure after the token is saved is not a
+    sign-in failure: the connection stays and tools can be refreshed later (L-08)."""
     init_schema()
     with db.cursor() as cur:
         row = cur.execute("SELECT * FROM swiggy_pending WHERE state=?", (state or "",)).fetchone()
         cur.execute("DELETE FROM swiggy_pending WHERE state=?", (state or "",))       # single use
     if not row or dt.datetime.fromisoformat(row["created_ts"]) < clock.now() - PENDING_TTL:
         raise SwiggyError("This sign-in link expired or was already used. Start again from SmartPlate.")
+    expected = row["browser_hash"]
+    if not expected or not browser_nonce or not hmac.compare_digest(expected, browser_digest(browser_nonce)):
+        raise SwiggyError("This Swiggy sign-in was started in a different browser. Open SmartPlate on this "
+                          "device and tap Connect Swiggy again.", code="swiggy_browser_mismatch")
     if not code:
         raise SwiggyError("Swiggy didn't return a sign-in code")
     if not private_owner(row["user_id"]):
@@ -268,10 +313,19 @@ def finish(state: str, code: str) -> int:
         "resource": f"{config.SWIGGY_MCP_BASE}/food"}, form=True)
     if status != 200:
         raise SwiggyError(f"Swiggy didn't accept the sign-in (HTTP {status}). Try again.")
-    tok = json.loads(raw)
-    if not tok.get("access_token"):
+    try:
+        tok = json.loads(raw)
+    except ValueError:
+        raise SwiggyError("Swiggy's sign-in reply couldn't be read. Try again.") from None
+    if not isinstance(tok, dict) or not tok.get("access_token"):
         raise SwiggyError("Swiggy's reply had no access token")
-    expires = (clock.now() + dt.timedelta(seconds=int(tok["expires_in"]))).isoformat() if tok.get("expires_in") else None
+    try:
+        lifetime = int(tok["expires_in"]) if tok.get("expires_in") is not None else None
+    except (TypeError, ValueError):
+        lifetime = None                                  # unknown lifetime: Swiggy's 401 will tell us
+    if lifetime is not None and not 0 < lifetime <= 90 * 86400:
+        lifetime = None
+    expires = (clock.now() + dt.timedelta(seconds=lifetime)).isoformat() if lifetime else None
     with db.cursor() as cur:
         cur.execute("INSERT INTO swiggy_connections(user_id, access_token, expires_ts, connected_ts) VALUES (?,?,?,?) "
                     "ON CONFLICT(user_id) DO UPDATE SET access_token=excluded.access_token, "
@@ -282,7 +336,13 @@ def finish(state: str, code: str) -> int:
         cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (row["user_id"],))
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (row["user_id"],))
         cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (row["user_id"],))
-    discover(row["user_id"])
+    from . import swiggy_live
+    swiggy_live.forget_session(row["user_id"])     # a new sign-in never reuses old sessions or addresses
+    try:
+        discover(row["user_id"])
+    except SwiggyError:
+        import logging
+        logging.getLogger(__name__).warning("Swiggy connected but tool discovery failed; user can refresh tools")
     return row["user_id"]
 
 
@@ -298,14 +358,15 @@ def _rpc(token, method, params, rid, session_id=None):
         payload["id"] = rid
     status, headers, raw = _json("POST", f"{config.SWIGGY_MCP_BASE}/food", payload, token=token, extra=extra)
     if status == 401:
-        raise SwiggyError("Your Swiggy sign-in has expired. Connect again.", code="swiggy_auth_expired")
+        raise SwiggyError("Your Swiggy sign-in has expired. Connect again.", code="swiggy_auth_expired",
+                          http_status=401)
     if status == 429:
         wait = headers.get("retry-after", "")
         wait = min(int(wait), 86400) if str(wait).isdigit() else None
         raise SwiggyError("Swiggy is limiting requests. Wait before trying again; an order is never retried automatically.",
-                          code="swiggy_rate_limited", retry_after=wait)
+                          code="swiggy_rate_limited", retry_after=wait, http_status=429)
     if status >= 400:
-        raise SwiggyError(f"Swiggy's MCP server returned HTTP {status}")
+        raise SwiggyError(f"Swiggy's MCP server returned HTTP {status}", http_status=status)
     return headers, (_parse_rpc(headers, raw, rid) if rid is not None else None)
 
 
@@ -389,6 +450,8 @@ def status(user_id: int) -> dict:
 
 
 def disconnect(user_id: int) -> dict:
+    from . import swiggy_live
+    swiggy_live.forget_session(user_id)
     init_schema()
     with db.cursor() as cur:
         cur.execute("DELETE FROM swiggy_connections WHERE user_id=?", (user_id,))
