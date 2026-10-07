@@ -249,14 +249,21 @@ def recommend_budget(plan_id: int) -> dict:
     return recommender.recommend(user, meals)
 
 
+def _meal_text(text) -> str:
+    if not isinstance(text, str):
+        raise ValueError("Describe what you ate in words, e.g. \"2 idli and sambar\"")
+    return text
+
+
 def estimate_intake(text: str) -> dict:
     """Free-text 'I made X' → nutrition estimate to confirm (docs §7), no persistence."""
-    return intake.parse(text)
+    return intake.parse(_meal_text(text))
 
 
 def log_intake(user_id: int, text: str, *, iso_date: str | None = None, meal: str = "",
                source: str = "manual", plan_id: int | None = None) -> dict:
     """Parse free text AND persist it so the rolling ledger accumulates across days."""
+    text = _meal_text(text)
     iso_date, meal, source = intake.validate_entry(iso_date, meal, source)
     parsed = intake.parse(text)
     eid = intake.record(user_id, parsed["nutrition"], iso_date=iso_date, meal=meal,
