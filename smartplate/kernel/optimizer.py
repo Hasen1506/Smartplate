@@ -196,12 +196,15 @@ def _delivery_candidate(user, plan, session, item, ctx):
     base_cost = item["price"] + item["delivery_fee"]
 
     # Surge + optional time-shift (calendar-aware) -------------------------- #
-    peak_mult = surge.predict(user["city"], day, meal, cond)
-    fest = ctx["festivals"].get(day)
-    if fest and fest["effect"] in ("holiday", "feast") and meal == "dinner":
-        peak_mult = round(peak_mult * HOLIDAY_DINNER_SURGE, 3)
-    conflict = calendar_sync.conflicts_with_peak(ctx["calendar"], day, meal)
-    shift = surge.time_shift_option(user["city"], day, meal, cond, base_cost, peak=peak_mult)
+    if surge.applies(item):
+        peak_mult = surge.predict(user["city"], day, meal, cond)
+        fest = ctx["festivals"].get(day)
+        if fest and fest["effect"] in ("holiday", "feast") and meal == "dinner":
+            peak_mult = round(peak_mult * HOLIDAY_DINNER_SURGE, 3)
+        conflict = calendar_sync.conflicts_with_peak(ctx["calendar"], day, meal)
+        shift = surge.time_shift_option(user["city"], day, meal, cond, base_cost, peak=peak_mult)
+    else:                                          # live Swiggy dish: Swiggy's own price
+        peak_mult, conflict, shift = 1.0, None, None
     time_shift = None
     surge_mult = peak_mult
     if conflict and shift:                         # meeting at peak → move it (§5.1.2)
