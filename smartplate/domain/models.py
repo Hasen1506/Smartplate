@@ -83,6 +83,16 @@ def menu_for_city(city: str) -> list[dict]:
     return items
 
 
+def menu_for_user(user: dict) -> list[dict]:
+    """The catalogue a user's plan is built from: their live Swiggy menus when they have
+    refreshed them (domain/live_catalog), otherwise the sample catalogue for their city.
+    The two are never mixed."""
+    from . import live_catalog
+    if user.get("id") and live_catalog.has_live(user["id"]):
+        return menu_for_city(live_catalog.city_key(user["id"]))
+    return menu_for_city(user["city"])
+
+
 def restaurants_for_city(city: str) -> list[dict]:
     with db.cursor() as cur:
         rows = cur.execute("SELECT * FROM restaurants WHERE city=? ORDER BY rating DESC, name",
