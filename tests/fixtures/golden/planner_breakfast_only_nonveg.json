@@ -1,0 +1,104 @@
+{
+ "budget": {
+  "budget": 900.0,
+  "daily_cap": null,
+  "prorated": false,
+  "remaining": 79.83,
+  "spend": 820.17,
+  "weekly_budget": 900.0
+ },
+ "counts": {
+  "cook": 0,
+  "delivery": 7,
+  "ordered": 0,
+  "skip": 0,
+  "snoozed": 0
+ },
+ "grid": {
+  "Fri 2026-11-06": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   }
+  },
+  "Mon 2026-11-02": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Masala Dosa",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   }
+  },
+  "Sat 2026-11-07": {
+   "breakfast": {
+    "cost": 121.55,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   }
+  },
+  "Sun 2026-11-08": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   }
+  },
+  "Thu 2026-11-05": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   }
+  },
+  "Tue 2026-11-03": {
+   "breakfast": {
+    "cost": 121.55,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   }
+  },
+  "Wed 2026-11-04": {
+   "breakfast": {
+    "cost": 117.07,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   }
+  }
+ },
+ "heads_up": [
+  "holiday: Sun 08 Nov: Diwali",
+  "saving: Ordering a little earlier saves ₹47 this week",
+  "weather: Sat 07 Nov: rain likely (80%)",
+  "weather: Tomorrow: rain likely (80%)",
+  "weather: Wed 04 Nov: 38°C"
+ ],
+ "mode": "balanced",
+ "recommendation": {
+  "floor": 595.0,
+  "suggested_rating_floor": 4.4,
+  "usual": 1785.0,
+  "variety": 1785.0
+ },
+ "week_start": "2026-11-02"
+}
