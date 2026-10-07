@@ -1,8 +1,10 @@
 """Property-based ground truth (Hypothesis): invariants that must never break.
 
 Runs are deterministic (derandomized, no example database — see conftest.py's "ci"
-profile) and seeded from the frozen clock. `HYPOTHESIS_PROFILE=deep` explores ~400
-examples per property for a local soak.
+profile) and seeded from the frozen clock. On CI each property gets an example budget
+sized to its cost (`_budget`), so unit + property tests stay near a minute;
+`HYPOTHESIS_PROFILE=deep` ignores those budgets and explores ~400 examples per
+property for a local soak.
 
 Invariants:
   1. allergen / medical / diet rules: nothing unsafe is planned, pinned or carted
@@ -20,6 +22,8 @@ Invariants:
 import datetime as dt
 import json
 import math
+
+import os
 
 import pytest
 from hypothesis import assume, example, given, note, settings
@@ -40,6 +44,14 @@ INSTANTS = [
     dt.datetime(2026, 11, 8, 10, 0),              # Sunday: plans next week
     NAVRATRI_MONDAY,                              # a week of Navratri fast days
 ]
+
+
+def _budget(n: int):
+    """CI example count for one property, scaled to what one example costs (a whole
+    week solved one to five times). The deep soak keeps its own, much larger count."""
+    if os.environ.get("HYPOTHESIS_PROFILE", "ci") == "deep":
+        return lambda f: f
+    return settings(max_examples=n)
 
 
 @st.composite
@@ -92,6 +104,7 @@ def _assert_clean(pid):
 # --------------------------------------------------------------------------- #
 # 1–5: every plan obeys the hard rules
 # --------------------------------------------------------------------------- #
+@_budget(15)
 @given(body=profiles(), at=st.sampled_from(INSTANTS), mode=st.sampled_from(sorted(config.MODE_LABELS)))
 def test_every_plan_obeys_hard_invariants(gt, body, at, mode):
     uid, pid = _create(gt, body, at, mode)
@@ -109,6 +122,7 @@ def test_every_plan_obeys_hard_invariants(gt, body, at, mode):
             assert item_violation(user, menu[iid]) is None, (menu[iid]["name"], user["diet"], user["allergens"])
 
 
+@_budget(15)
 @given(body=profiles(), mode=st.sampled_from(["balanced", "comfort"]))
 def test_no_needless_skips_when_money_and_safe_dishes_suffice(gt, body, mode):
     """'Every enabled meal slot is filled': when the budget clearly covers every meal
@@ -139,6 +153,7 @@ REPLANS = st.lists(st.sampled_from(["reoptimize", "mode", "favourite", "budget_d
                    min_size=1, max_size=4)
 
 
+@_budget(8)
 @given(body=profiles(), ops=REPLANS, pick=st.integers(0, 10_000))
 def test_pinned_meals_survive_replans(gt, body, ops, pick):
     body = {**_with_budget(body, max(body["weekly_budget"], 1200)), "observances": []}
@@ -184,6 +199,7 @@ def test_pinned_meals_survive_replans(gt, body, ops, pick):
         _assert_clean(pid)
 
 
+@_budget(8)
 @given(body=profiles())
 def test_a_pin_that_becomes_unsafe_is_dropped_never_kept(gt, body):
     body = {**body, "observances": [], "allergens": [], "medical": [], "diet": "nonveg"}
@@ -201,6 +217,7 @@ def test_a_pin_that_becomes_unsafe_is_dropped_never_kept(gt, body):
 # --------------------------------------------------------------------------- #
 # 7: money adds up
 # --------------------------------------------------------------------------- #
+@_budget(15)
 @given(body=profiles(), at=st.sampled_from(INSTANTS))
 def test_checkout_preview_and_budget_add_up(gt, body, at):
     uid, pid = _create(gt, body, at)
@@ -261,6 +278,7 @@ def _orders_count():
         return cur.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
 
 
+@_budget(12)
 @given(body=profiles(), approval=APPROVALS)
 def test_nothing_is_ordered_without_explicit_approval(gt, body, approval):
     from smartplate.app import create_app
@@ -318,7 +336,7 @@ _VALID = {"restaurant_id": "r-1", "restaurant_name": "Hotel Saravana Bhavan (Ady
           "item_name": "Mini Tiffin"}
 
 
-@settings(max_examples=40)
+@_budget(20)
 @given(steps=st.lists(st.tuples(st.sampled_from(["preview", "fill", "checkout_preview", "checkout"]), LIVE_BODIES),
                       min_size=1, max_size=6))
 @example(steps=[("preview", _VALID), ("fill", {**_VALID, "expected_fingerprint": "CART_FP"}),
@@ -415,7 +433,7 @@ def _routes():
     return sorted(out)
 
 
-@settings(max_examples=150)
+@_budget(60)
 @given(data=st.data())
 def test_fuzzed_api_inputs_never_500(gt, monkeypatch, data):
     from smartplate import ratelimit
