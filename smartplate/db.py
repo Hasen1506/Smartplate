@@ -237,6 +237,15 @@ CREATE TABLE IF NOT EXISTS intake_log (          -- "I made/ate X" → rolling n
     created_ts TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS grocery_swaps (       -- an ingredient swapped for this week's cooking (Epicure)
+    plan_id INTEGER NOT NULL,
+    token TEXT NOT NULL,                           -- the recipe/basket ingredient (Epicure token)
+    swap_token TEXT NOT NULL,                      -- what the user will use instead
+    reason TEXT NOT NULL DEFAULT 'swap',           -- swap | out_of_stock
+    created_ts TEXT NOT NULL,
+    PRIMARY KEY (plan_id, token)
+);
+
 CREATE TABLE IF NOT EXISTS favourites (          -- "my usual places": the only list the user browses
     user_id INTEGER NOT NULL,
     restaurant_id INTEGER NOT NULL,
