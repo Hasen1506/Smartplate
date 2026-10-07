@@ -137,11 +137,11 @@ def _mcp_session(user_id: int, token: str, *, fresh: bool = False) -> tuple[str 
 def _conn(user_id: int) -> dict:
     conn = sc._connection(user_id)
     if not conn:
-        raise SwiggyError("Connect your Swiggy account first (More → Swiggy connection).")
+        raise sc.SwiggyNotConnected()
     if conn["expires_ts"] and dt.datetime.fromisoformat(conn["expires_ts"]) <= clock.now():
-        raise SwiggyError("Your Swiggy sign-in has expired. Connect again.")
+        raise sc.SwiggyNotConnected("Your Swiggy sign-in has expired. Connect again.", code="swiggy_auth_expired")
     if not conn["access_token"]:
-        raise SwiggyError("Your Swiggy sign-in can no longer be read on this server. Connect again.")
+        raise sc.SwiggyNotConnected("Your Swiggy sign-in can no longer be read on this server. Connect again.")
     return conn
 
 
