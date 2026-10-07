@@ -131,5 +131,6 @@ them is built. Grouped by the PR that surfaced it.
   those lines "(sample)".
 - **A real peak-time signal**, if one ever exists: compare checked cart totals by slot
   (lunch rush versus 15:00) from the user's own bills before claiming any time-shift saving.
-- **Sample weather fallback** shows "(sample)" in Insights, but the week grid's weather icon
-  carries no label when the live forecast is unavailable. Label it there too, or hide it.
+- **Sample weather fallback** is labelled in Insights and in the week's footer line, but the
+  weather icon on each day carries no "(sample)" mark when the live forecast is unavailable.
+  Mark the icon too, or hide it.
