@@ -3,204 +3,206 @@
   "budget": 1400.0,
   "daily_cap": 250.0,
   "prorated": false,
-  "remaining": 610.68,
-  "spend": 789.32,
+  "remaining": 0.28,
+  "spend": 1399.72,
   "weekly_budget": 1400.0
  },
  "counts": {
-  "cook": 2,
-  "delivery": 6,
+  "cook": 13,
+  "delivery": 8,
   "ordered": 0,
-  "skip": 13,
+  "skip": 0,
   "snoozed": 0
  },
  "grid": {
   "Fri 2026-11-06": {
    "breakfast": {
-    "cost": 110.0,
+    "cost": 35.0,
+    "item": "Cook: Masala oats + veg",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 115.72,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
     "status": "active"
-   },
-   "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
    }
   },
   "Mon 2026-11-02": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Mini Tiffin",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   }
-  },
-  "Sat 2026-11-07": {
-   "breakfast": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   }
-  },
-  "Sun 2026-11-08": {
-   "breakfast": {
-    "cost": 150.0,
-    "item": "Veg Meals",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   }
-  },
-  "Thu 2026-11-05": {
-   "breakfast": {
-    "cost": 115.0,
-    "item": "Mini Tiffin",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   }
-  },
-  "Tue 2026-11-03": {
-   "breakfast": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   }
-  },
-  "Wed 2026-11-04": {
-   "breakfast": {
-    "cost": 91.62,
-    "item": "Masala Chai + Bun Butter",
+    "cost": 105.0,
+    "item": "Egg Puff + Chai",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Chai Kings",
     "status": "active"
    },
    "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "",
+    "restaurant": "Home kitchen",
     "status": "active"
    },
    "lunch": {
-    "cost": 117.7,
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   }
+  },
+  "Sat 2026-11-07": {
+   "breakfast": {
+    "cost": 35.0,
+    "item": "Cook: Masala oats + veg",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   }
+  },
+  "Sun 2026-11-08": {
+   "breakfast": {
+    "cost": 35.0,
+    "item": "Cook: Masala oats + veg",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 115.72,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
     "status": "active"
    }
+  },
+  "Thu 2026-11-05": {
+   "breakfast": {
+    "cost": 105.0,
+    "item": "Egg Puff + Chai",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Chai Kings",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 94.68,
+    "item": "Masala Chai + Bun Butter",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Chai Kings",
+    "status": "active"
+   }
+  },
+  "Tue 2026-11-03": {
+   "breakfast": {
+    "cost": 110.5,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   }
+  },
+  "Wed 2026-11-04": {
+   "breakfast": {
+    "cost": 101.8,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 96.3,
+    "item": "Masala Chai + Bun Butter",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Chai Kings",
+    "status": "active"
+   }
   }
  },
  "heads_up": [
-  "budget: 13 meals didn't fit the budget",
+  "budget: ₹0 left this week",
   "holiday: Sun 08 Nov: Diwali",
+  "saving: Ordering a little earlier saves ₹65 this week",
+  "weather: Tomorrow: rain likely (80%)",
   "weather: Wed 04 Nov: 38°C"
  ],
  "mode": "survival",
