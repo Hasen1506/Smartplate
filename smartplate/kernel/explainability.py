@@ -35,6 +35,7 @@ def reasons_for(decision: dict, context: dict) -> list[str]:
         r.append("Something new from outside your usual places — within your variety setting.")
     if context.get("liked"):
         r.append("You liked this before.")
+    r.extend(context.get("flavour") or [])
     if decision.get("substituted"):
         r.append(f"Substituted: first choice '{decision['original_name']}' "
                  f"({decision.get('sub_reason', 'unavailable')}) — picked the next best above your "
