@@ -44,10 +44,10 @@
   "Mon 2026-11-02": {
    "breakfast": {
     "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
+    "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    },
    "dinner": {
@@ -96,10 +96,10 @@
   "Sun 2026-11-08": {
    "breakfast": {
     "cost": 115.0,
-    "item": "Mini Tiffin",
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "dinner": {
