@@ -17,32 +17,6 @@
  "grid": {
   "Fri 2026-11-06": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Murugan Idli Shop",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 119.57,
-    "item": "Vegan Sambar Rice",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Sangeetha Veg",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 120.98,
-    "item": "Masala Dosa",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
-    "status": "active"
-   }
-  },
-  "Mon 2026-11-02": {
-   "breakfast": {
     "cost": 145.0,
     "item": "Pesarattu + Chutney",
     "kind": "delivery",
@@ -64,6 +38,32 @@
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Third Wave Coffee",
+    "status": "active"
+   }
+  },
+  "Mon 2026-11-02": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 125.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 120.98,
+    "item": "Masala Dosa",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    }
   },
@@ -95,8 +95,8 @@
   },
   "Sun 2026-11-08": {
    "breakfast": {
-    "cost": 145.0,
-    "item": "Pesarattu + Chutney",
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Murugan Idli Shop",
@@ -121,19 +121,19 @@
   },
   "Thu 2026-11-05": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "dinner": {
-    "cost": 125.0,
-    "item": "Mini Tiffin",
+    "cost": 119.57,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "lunch": {
