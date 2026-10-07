@@ -64,12 +64,15 @@ app code, then every plan, re-plan and checkout is checked against it:
   Every golden plan asserts `proven_optimal`; a week that only reaches the node cap is covered by
   the property tests, which check rules rather than exact dishes.
 - Goldens are stable across `PYTHONHASHSEED` values; CI also pins `PYTHONHASHSEED=0`.
+- **Speed:** each worker seeds the database once per fixture kind (`conftest.py::_fresh_seeded_db`)
+  and gives every later test a byte copy, a new file with identical data, which cuts ~0.1 s of
+  setup from each of ~230 tests.
 
 ## Commands
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q -n auto                                   # unit + property + golden + differential (~60 s on 2 cores)
+pytest -q -n auto                                   # unit + property + golden + differential (~55 s on 2 cores)
 pip install playwright==1.63.0 && playwright install chromium
 pytest -q tests/browser_journey.py tests/browser_smoke.py   # browser E2E
 # PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium to use a system Chromium
