@@ -1,0 +1,381 @@
+{
+ "after_settings": {
+  "Fri 2026-11-06": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "ordered"
+   },
+   "dinner": {
+    "cost": 119.57,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "ordered"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Mon 2026-11-02": {
+   "breakfast": {
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "ordered"
+   },
+   "dinner": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 120.98,
+    "item": "Masala Dosa",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "ordered"
+   }
+  },
+  "Sat 2026-11-07": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 104.13,
+    "item": "Masala Chai + Bun Butter",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Chai Kings",
+    "status": "ordered"
+   }
+  },
+  "Sun 2026-11-08": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 101.79,
+    "item": "Masala Chai + Bun Butter",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Chai Kings",
+    "status": "ordered"
+   },
+   "lunch": {
+    "cost": 157.8,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "ordered"
+   }
+  },
+  "Thu 2026-11-05": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "ordered"
+   },
+   "dinner": {
+    "cost": 119.57,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": true,
+    "restaurant": "Sangeetha Veg",
+    "status": "ordered"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Tue 2026-11-03": {
+   "breakfast": {
+    "cost": 110.5,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "ordered"
+   },
+   "dinner": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 178.8,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": true,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "ordered"
+   }
+  },
+  "Wed 2026-11-04": {
+   "breakfast": {
+    "cost": 101.8,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "ordered"
+   },
+   "dinner": {
+    "cost": 127.08,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": true,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 123.05,
+    "item": "Masala Dosa",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "ordered"
+   }
+  }
+ },
+ "approval": {
+  "order_count": 19,
+  "placed": 13,
+  "substituted": 2,
+  "total": 2401.73
+ },
+ "expenses": {
+  "rows": 13,
+  "total": 1612.99
+ },
+ "rated": "Pesarattu + Chutney",
+ "week": {
+  "Fri 2026-11-06": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 119.57,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 126.24,
+    "item": "Filter Coffee + Vada",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Third Wave Coffee",
+    "status": "active"
+   }
+  },
+  "Mon 2026-11-02": {
+   "breakfast": {
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 125.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 120.98,
+    "item": "Masala Dosa",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   }
+  },
+  "Sat 2026-11-07": {
+   "breakfast": {
+    "cost": 149.18,
+    "item": "Ghee Pongal",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 173.55,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   }
+  },
+  "Sun 2026-11-08": {
+   "breakfast": {
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 101.79,
+    "item": "Masala Chai + Bun Butter",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Chai Kings",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 157.8,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   }
+  },
+  "Thu 2026-11-05": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 125.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 126.24,
+    "item": "Filter Coffee + Vada",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Third Wave Coffee",
+    "status": "active"
+   }
+  },
+  "Tue 2026-11-03": {
+   "breakfast": {
+    "cost": 110.5,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 107.28,
+    "item": "Masala Chai + Bun Butter",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Chai Kings",
+    "status": "active"
+   }
+  },
+  "Wed 2026-11-04": {
+   "breakfast": {
+    "cost": 101.8,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 121.55,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 123.05,
+    "item": "Masala Dosa",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   }
+  }
+ }
+}
