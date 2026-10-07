@@ -60,6 +60,29 @@ class Version:
         monkeypatch.setattr(cfg, "SWIGGY_PROVIDER", "simulated")
         monkeypatch.setattr(clock, "now", lambda: self.at)
         monkeypatch.setattr(clock, "today", lambda: self.at.date())
+        monkeypatch.setattr(cfg, "SOLVER_GAP", 0.0)
+        # as in conftest's `gt`: only the deterministic node cap (where a version has
+        # one) may stop a solve, never the wall clock of a busy CI runner
+        monkeypatch.setattr(cfg, "SOLVER_TIME_LIMIT_S", 300.0, raising=False)
+        monkeypatch.setattr(cfg, "SOLVER_MAX_NODES", 3000, raising=False)
+        opt = importlib.import_module(f"{self.pkg}.kernel.optimizer")
+        if not hasattr(opt, "_tiebreak"):
+            # Baselines predate the planner's tie-break. Give them the same one, so two
+            # equally good weeks resolve identically in every version and on every CBC
+            # build; it is far below the 5-decimal objective, so it changes no real choice.
+            from smartplate.kernel.optimizer import _tiebreak
+            build, objective = opt.build_candidates, opt._objective
+
+            def build_candidates(user, plan, session, ctx):
+                cands = build(user, plan, session, ctx)
+                for c in cands:
+                    c["_tiebreak"] = _tiebreak(session, c)
+                return cands
+
+            def _objective(cand, *args):
+                return objective(cand, *args) + cand.get("_tiebreak", 0.0)
+            monkeypatch.setattr(opt, "build_candidates", build_candidates)
+            monkeypatch.setattr(opt, "_objective", _objective)
         self.mod["db"].init_db()
         self.mod["seed"].seed_all(optimize_starter=False)
 
