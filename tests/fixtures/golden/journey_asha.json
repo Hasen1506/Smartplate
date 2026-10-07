@@ -34,11 +34,11 @@
      "status": "active"
     },
     "lunch": {
-     "cost": 120.98,
-     "item": "Masala Dosa",
+     "cost": 105.2,
+     "item": "Curd Rice",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Hotel Saravana Bhavan",
+     "restaurant": "Sangeetha Veg",
      "status": "active"
     }
    },
@@ -70,19 +70,19 @@
    },
    "Sat 2026-11-07": {
     "breakfast": {
-     "cost": 171.28,
-     "item": "Ghee Podi Dosa",
+     "cost": 165.75,
+     "item": "Veg Meals",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Murugan Idli Shop",
+     "restaurant": "Hotel Saravana Bhavan",
      "status": "active"
     },
     "dinner": {
-     "cost": 45.0,
-     "item": "Cook: Dal + rice",
-     "kind": "cook",
+     "cost": 0.0,
+     "item": "Skip",
+     "kind": "skip",
      "pinned": false,
-     "restaurant": "Home kitchen",
+     "restaurant": "",
      "status": "active"
     },
     "lunch": {
@@ -138,29 +138,29 @@
      "status": "active"
     },
     "lunch": {
-     "cost": 105.2,
-     "item": "Curd Rice",
+     "cost": 120.98,
+     "item": "Masala Dosa",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Sangeetha Veg",
+     "restaurant": "Hotel Saravana Bhavan",
      "status": "active"
     }
    },
    "Tue 2026-11-03": {
     "breakfast": {
-     "cost": 165.75,
-     "item": "Veg Meals",
+     "cost": 171.28,
+     "item": "Ghee Podi Dosa",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Hotel Saravana Bhavan",
+     "restaurant": "Murugan Idli Shop",
      "status": "active"
     },
     "dinner": {
-     "cost": 0.0,
-     "item": "Skip",
-     "kind": "skip",
+     "cost": 45.0,
+     "item": "Cook: Dal + rice",
+     "kind": "cook",
      "pinned": false,
-     "restaurant": "",
+     "restaurant": "Home kitchen",
      "status": "active"
     },
     "lunch": {
@@ -748,11 +748,11 @@
      "status": "ordered"
     },
     "dinner": {
-     "cost": 45.0,
-     "item": "Cook: Dal + rice",
-     "kind": "cook",
+     "cost": 0.0,
+     "item": "Skip",
+     "kind": "skip",
      "pinned": false,
-     "restaurant": "Home kitchen",
+     "restaurant": "",
      "status": "past"
     },
     "lunch": {
@@ -878,11 +878,11 @@
      "status": "ordered"
     },
     "dinner": {
-     "cost": 0.0,
-     "item": "Skip",
-     "kind": "skip",
+     "cost": 45.0,
+     "item": "Cook: Dal + rice",
+     "kind": "cook",
      "pinned": false,
-     "restaurant": "",
+     "restaurant": "Home kitchen",
      "status": "past"
     },
     "lunch": {
