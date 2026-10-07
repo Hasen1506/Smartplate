@@ -17,11 +17,11 @@
  "grid": {
   "Fri 2026-11-06": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Mini Tiffin",
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "dinner": {
@@ -77,11 +77,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "",
     "status": "active"
    },
    "lunch": {
@@ -103,11 +103,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "",
     "status": "active"
    },
    "lunch": {
@@ -121,19 +121,19 @@
   },
   "Thu 2026-11-05": {
    "breakfast": {
-    "cost": 110.0,
-    "item": "Vegan Sambar Rice",
+    "cost": 115.0,
+    "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    },
    "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "",
+    "restaurant": "Home kitchen",
     "status": "active"
    },
    "lunch": {
@@ -155,11 +155,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "",
+    "restaurant": "Home kitchen",
     "status": "active"
    },
    "lunch": {
