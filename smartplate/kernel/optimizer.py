@@ -12,6 +12,7 @@ Objective per candidate (minimised):
 Budget is a HARD constraint; 'skip' is the always-feasible relief valve.
 """
 import datetime as dt
+import math
 
 import pulp
 
@@ -21,7 +22,7 @@ from ..domain import (allergens, carbon, fatigue, festivals, health, leftovers,
 from ..integrations import calendar_sync
 from . import explainability, scheduler
 
-MAX_DELIVERY_CANDIDATES = 6
+MAX_DELIVERY_CANDIDATES = 6     # per meal, at least; grown so a week can be filled (delivery_slots)
 # With usual places set, each meal also sees this many "something new" options; the
 # week-level count of new picks is capped by the user's variety level.
 DISCOVERY_PER_SESSION = 2
@@ -269,7 +270,10 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
             picked = [_delivery_candidate(user, plan, session, it, ctx) for it in pool[: n * 2]]
             picked.sort(key=lambda c: c["cost"] - 60 * c["taste"])
             return picked[:n]
-        cands = best(usual, MAX_DELIVERY_CANDIDATES) + best(fresh, DISCOVERY_PER_SESSION)
+        slots = ctx.get("delivery_slots", MAX_DELIVERY_CANDIDATES)
+        # few usual dishes for many meals: offer enough new ones to fill the week
+        n_fresh = DISCOVERY_PER_SESSION if MAX_ITEM_REPEAT * len(usual) >= ctx.get("n_active", 0) else slots
+        cands = best(usual, slots) + best(fresh, n_fresh)
 
     cook = _cook_candidate(user, session, ctx)
     if cook:
@@ -370,6 +374,12 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
             with db.cursor() as cur:                       # stale pin: drop it, replan the slot
                 cur.execute("UPDATE sessions SET pinned=NULL WHERE id=?", (s["id"],))
     active = [s for s in open_sessions if s["id"] not in pinned]
+    # Every meal offers the same short list, and a dish may appear at most
+    # MAX_ITEM_REPEAT times a week. Six dishes therefore cap a week at 12 deliveries:
+    # a 21-meal week skipped 9 meals "for budget" with most of the budget unspent.
+    # Offer enough distinct dishes per meal that the repeat cap can't empty a slot.
+    ctx["delivery_slots"] = max(MAX_DELIVERY_CANDIDATES, math.ceil(len(active) / MAX_ITEM_REPEAT) + 1)
+    ctx["n_active"] = len(active)
 
     # Stability: one tap should change what the user touched, not reshuffle the week.
     # Each meal's current choice gets a small bonus, so it only changes when that buys
@@ -446,12 +456,27 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
         pinned_cooks = sum(1 for c in pinned.values() if c["kind"] == "cook")
         prob += pulp.lpSum(cook_vars) <= max(0, _cook_cap(user) - pinned_cooks)
     if discovery_vars:
-        # "mostly my usual places": new places get at most the variety level's share
+        # "mostly my usual places": new places get at most the variety level's share —
+        # of the meals the usual places can cover. Variety limits how often a new place
+        # replaces a usual one; it must not leave a meal empty when the usual places
+        # (each dish at most MAX_ITEM_REPEAT times) and cooking can't fill the week.
         n_new = max(1, fatigue.target_novel_count(fatigue.variety_pref(user), len(active)))
-        prob += pulp.lpSum(discovery_vars) <= n_new
-    for vlist in item_vars.values():                            # variety: cap repeats per dish
-        if len(vlist) > MAX_ITEM_REPEAT:
-            prob += pulp.lpSum(vlist) <= MAX_ITEM_REPEAT
+        usual_dishes = {c["item_id"] for cands in cand_map.values() for c in cands
+                        if c["kind"] == "delivery" and not c.get("discovery")}
+        per_day = {}
+        for s in active:
+            per_day[s["day"]] = per_day.get(s["day"], 0) + 1
+        usual_room = min(MAX_ITEM_REPEAT * len(usual_dishes),               # repeats a week…
+                         sum(min(n, len(usual_dishes)) for n in per_day.values()))   # …and once a day
+        cookable = sum(1 for cands in cand_map.values() if any(c["kind"] == "cook" and c.get("recipe_key")
+                                                                 for c in cands))
+        cook_room = min(cookable, max(0, _cook_cap(user) - sum(1 for c in pinned.values() if c["kind"] == "cook")))
+        uncovered = len(active) - usual_room - cook_room
+        prob += pulp.lpSum(discovery_vars) <= max(n_new, uncovered)
+    for item_id, vlist in item_vars.items():                    # variety: cap repeats per dish —
+        pinned_n = sum(1 for c in pinned.values() if c.get("item_id") == item_id)   # pins count too
+        if len(vlist) + pinned_n > MAX_ITEM_REPEAT:
+            prob += pulp.lpSum(vlist) <= max(0, MAX_ITEM_REPEAT - pinned_n)
     for (item_id, day), vlist in item_day_vars.items():
         pinned_same = sum(1 for sid, c in pinned.items() if c.get("item_id") == item_id
                           and next(s["day"] for s in sessions if s["id"] == sid) == day)
