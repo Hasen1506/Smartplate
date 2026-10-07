@@ -1,0 +1,161 @@
+{
+ "budget": {
+  "budget": 2000.0,
+  "daily_cap": null,
+  "prorated": false,
+  "remaining": 59.56,
+  "spend": 1940.44,
+  "weekly_budget": 2000.0
+ },
+ "counts": {
+  "cook": 2,
+  "delivery": 10,
+  "ordered": 0,
+  "skip": 2,
+  "snoozed": 0
+ },
+ "grid": {
+  "Fri 2026-11-06": {
+   "dinner": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 152.54,
+    "item": "Pesarattu + Chutney",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   }
+  },
+  "Mon 2026-11-02": {
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 220.92,
+    "item": "Chana Masala Bowl",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "The Bowl Company",
+    "status": "active"
+   }
+  },
+  "Sat 2026-11-07": {
+   "dinner": {
+    "cost": 266.2,
+    "item": "Rajma Chawal Bowl",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "The Bowl Company",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 173.55,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   }
+  },
+  "Sun 2026-11-08": {
+   "dinner": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 157.8,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   }
+  },
+  "Thu 2026-11-05": {
+   "dinner": {
+    "cost": 119.57,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 220.92,
+    "item": "Chana Masala Bowl",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "The Bowl Company",
+    "status": "active"
+   }
+  },
+  "Tue 2026-11-03": {
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 262.24,
+    "item": "Rajma Chawal Bowl",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "The Bowl Company",
+    "status": "active"
+   }
+  },
+  "Wed 2026-11-04": {
+   "dinner": {
+    "cost": 121.55,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 155.15,
+    "item": "Pesarattu + Chutney",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   }
+  }
+ },
+ "heads_up": [
+  "budget: 2 meals didn't fit the budget",
+  "holiday: Sun 08 Nov: Diwali",
+  "saving: Ordering a little earlier saves ₹337 this week",
+  "weather: Sat 07 Nov: rain likely (80%)",
+  "weather: Tomorrow: rain likely (80%)",
+  "weather: Wed 04 Nov: 38°C"
+ ],
+ "mode": "balanced",
+ "recommendation": {
+  "floor": 1848.0,
+  "suggested_rating_floor": 4.2,
+  "usual": 2520.0,
+  "variety": 2520.0
+ },
+ "week_start": "2026-11-02"
+}
