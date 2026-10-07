@@ -58,7 +58,22 @@ def _instruction_relevant(condition: str, item: dict) -> bool:
 
 
 def violates(user: dict, item: dict) -> str | None:
-    """Return a human reason string if the item is unsafe for the user, else None."""
+    """Return a human reason string if the item is unsafe for the user, else None.
+
+    A profile in a household also carries its other members (`household_members`);
+    a shared plan must be safe for every one of them (§5.2.7).
+    """
+    reason = _violates_one(user, item)
+    if reason:
+        return reason
+    for member in user.get("household_members") or []:
+        reason = _violates_one(member, item)
+        if reason:
+            return f"{reason} — {member.get('name') or 'a household member'}"
+    return None
+
+
+def _violates_one(user: dict, item: dict) -> str | None:
     user_allergens = set(user.get("allergens", []))
     item_allergens = set(item.get("allergens", []))
     clash = user_allergens & item_allergens
@@ -87,7 +102,7 @@ def household_safe(members: list[dict], item: dict) -> str | None:
     """Group mode (§5.2.7): an item must be safe for EVERY member. The union of
     all members' allergens/medical rules is the hard constraint."""
     for m in members:
-        reason = violates(m, item)
+        reason = _violates_one(m, item)
         if reason:
             return f"{m['name']}: {reason}"
     return None
