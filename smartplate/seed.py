@@ -212,7 +212,7 @@ def _community():
     payload = db.jd({"sessions": [
         {"day": 0, "meal": "lunch", "kind": "delivery", "item": "Veg Meals", "cost": 150},
         {"day": 0, "meal": "dinner", "kind": "cook", "item": "Dal + rice", "cost": 45}],
-        "saved": dt.date.today().isoformat()})
+        "saved": clock.today().isoformat()})
     with db.cursor() as cur:
         cur.executemany(
             "INSERT INTO community_templates(author,title,city,budget,mode,payload,adopts) "
