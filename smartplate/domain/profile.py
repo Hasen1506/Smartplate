@@ -16,6 +16,9 @@ import math
 from . import nutrition
 
 MEALS = ("breakfast", "lunch", "dinner")
+# One set of limits for onboarding, settings and PATCH /api/user (L-10).
+BUDGET_MIN, BUDGET_MAX = 100, 100000
+DAILY_CAP_MIN, DAILY_CAP_MAX = 50, 20000
 DIETS = ("veg", "nonveg", "vegan")
 ALLERGENS = ("peanut", "dairy", "gluten", "egg", "soy", "shellfish", "fish", "sesame", "tree_nut")
 MEDICAL = ("diabetes", "hypertension", "celiac")
@@ -132,7 +135,7 @@ def validate_setup(body: dict) -> dict:
     extra = set(body) - allowed
     if extra:
         raise ValueError(f"Unsupported field: {sorted(extra)[0]}")
-    out = {}
+    out: dict = {}
     if "name" in body:
         if not isinstance(body["name"], str) or not 1 <= len(body["name"].strip()) <= 80:
             raise ValueError("Enter a name of 1–80 characters")
@@ -149,9 +152,10 @@ def validate_setup(body: dict) -> dict:
         if key in body:
             out[key] = _choices(body[key], key, allowed_values)
     if "weekly_budget" in body:
-        out["weekly_budget"] = _number(body["weekly_budget"], "Weekly budget", 100, 100000)
+        out["weekly_budget"] = weekly_budget(body["weekly_budget"])
     if "daily_cap" in body:
-        out["daily_cap"] = None if body["daily_cap"] in (None, 0) else _number(body["daily_cap"], "Daily limit", 50, 20000)
+        out["daily_cap"] = None if body["daily_cap"] in (None, 0) else _number(body["daily_cap"], "Daily limit",
+                                                                                       DAILY_CAP_MIN, DAILY_CAP_MAX)
     if "rating_floor" in body:
         out["rating_floor"] = _number(body["rating_floor"], "Minimum rating", 0, 5)
     if "meals" in body:
@@ -176,6 +180,20 @@ def validate_setup(body: dict) -> dict:
         if len(favs) > 12:
             raise ValueError("Pick up to 12 usual places")
         out["favourites"] = sorted(set(favs))
-    if out.get("daily_cap") and out.get("weekly_budget") and out["daily_cap"] * 7 < out["weekly_budget"] * 0.3:
-        raise ValueError("Daily limit is too low to use a meaningful part of the weekly budget")
+    if out.get("daily_cap") and out.get("weekly_budget"):
+        check_caps(out["weekly_budget"], out["daily_cap"])
     return out
+
+
+def weekly_budget(value) -> float:
+    return _number(value, "Weekly budget", BUDGET_MIN, BUDGET_MAX)
+
+
+def check_caps(weekly: float, daily: float | None) -> None:
+    """Cross-field rules between the weekly budget and an optional daily limit."""
+    if not daily:
+        return
+    if daily > weekly:
+        raise ValueError(f"Daily limit (₹{daily:,.0f}) can't be more than the weekly budget (₹{weekly:,.0f})")
+    if daily * 7 < weekly * 0.3:
+        raise ValueError("Daily limit is too low to use a meaningful part of the weekly budget")
