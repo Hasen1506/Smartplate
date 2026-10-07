@@ -142,7 +142,7 @@ def decisions_for_plan(plan_id: int) -> list[dict]:
     with db.cursor() as cur:
         rows = cur.execute(
             "SELECT d.*, s.day AS day, s.meal AS meal, s.status AS session_status, "
-            "s.scheduled_ts AS scheduled_ts, s.pinned AS pinned "
+            "s.scheduled_ts AS scheduled_ts, s.pinned AS pinned, s.eaters AS eaters "
             "FROM decisions d JOIN sessions s ON s.id = d.session_id "
             "WHERE d.plan_id=? ORDER BY s.day, "
             "CASE s.meal WHEN 'breakfast' THEN 0 WHEN 'lunch' THEN 1 ELSE 2 END",
