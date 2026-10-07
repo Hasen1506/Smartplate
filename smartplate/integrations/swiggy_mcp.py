@@ -14,7 +14,6 @@ It implements the pieces the brainstorm flags as non-optional:
 import hashlib
 import json
 import random
-import time
 from functools import wraps
 
 from .. import config, db
@@ -167,4 +166,5 @@ def place_order(decision: dict, restaurant: dict, item: dict, *, user_id, plan_i
 
 
 def _now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S")
+    from .. import clock  # the app clock (IST), not the server's local time (L-06)
+    return clock.now().isoformat(timespec="seconds")
