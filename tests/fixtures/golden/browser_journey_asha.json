@@ -2,34 +2,34 @@
  "after_settings": {
   "Fri 2026-11-06": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Murugan Idli Shop",
     "status": "ordered"
    },
    "dinner": {
-    "cost": 119.57,
-    "item": "Vegan Sambar Rice",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Sangeetha Veg",
-    "status": "ordered"
-   },
-   "lunch": {
     "cost": 0.0,
     "item": "Skip",
     "kind": "skip",
     "pinned": false,
     "restaurant": "",
     "status": "active"
+   },
+   "lunch": {
+    "cost": 115.72,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
    }
   },
   "Mon 2026-11-02": {
    "breakfast": {
-    "cost": 145.0,
-    "item": "Pesarattu + Chutney",
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Murugan Idli Shop",
@@ -54,6 +54,14 @@
   },
   "Sat 2026-11-07": {
    "breakfast": {
+    "cost": 110.5,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "ordered"
+   },
+   "dinner": {
     "cost": 0.0,
     "item": "Skip",
     "kind": "skip",
@@ -61,31 +69,23 @@
     "restaurant": "",
     "status": "active"
    },
-   "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
    "lunch": {
-    "cost": 104.13,
-    "item": "Masala Chai + Bun Butter",
-    "kind": "delivery",
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
     "pinned": false,
-    "restaurant": "Chai Kings",
-    "status": "ordered"
+    "restaurant": "",
+    "status": "active"
    }
   },
   "Sun 2026-11-08": {
    "breakfast": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "",
-    "status": "active"
+    "restaurant": "Murugan Idli Shop",
+    "status": "ordered"
    },
    "dinner": {
     "cost": 101.79,
@@ -106,11 +106,11 @@
   },
   "Thu 2026-11-05": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
+    "cost": 90.0,
+    "item": "Masala Chai + Bun Butter",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Chai Kings",
     "status": "ordered"
    },
    "dinner": {
@@ -132,19 +132,19 @@
   },
   "Tue 2026-11-03": {
    "breakfast": {
-    "cost": 110.5,
-    "item": "Curd Rice",
-    "kind": "delivery",
+    "cost": 35.0,
+    "item": "Cook: Masala oats + veg",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
-    "status": "ordered"
+    "restaurant": "Home kitchen",
+    "status": "active"
    },
    "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "",
+    "restaurant": "Home kitchen",
     "status": "active"
    },
    "lunch": {
@@ -166,12 +166,12 @@
     "status": "ordered"
    },
    "dinner": {
-    "cost": 127.08,
-    "item": "Mini Tiffin",
+    "cost": 121.55,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": true,
-    "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
+    "restaurant": "Sangeetha Veg",
+    "status": "ordered"
    },
    "lunch": {
     "cost": 123.05,
@@ -186,30 +186,30 @@
  "approval": {
   "order_count": 19,
   "placed": 13,
-  "substituted": 2,
-  "total": 2401.73
+  "substituted": 1,
+  "total": 2408.69
  },
  "expenses": {
   "rows": 13,
-  "total": 1612.99
+  "total": 1600.84
  },
- "rated": "Pesarattu + Chutney",
+ "rated": "Idli Sambar (4 pc)",
  "week": {
   "Fri 2026-11-06": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "dinner": {
-    "cost": 119.57,
-    "item": "Vegan Sambar Rice",
+    "cost": 125.0,
+    "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    },
    "lunch": {
@@ -223,8 +223,8 @@
   },
   "Mon 2026-11-02": {
    "breakfast": {
-    "cost": 145.0,
-    "item": "Pesarattu + Chutney",
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Murugan Idli Shop",
@@ -249,11 +249,11 @@
   },
   "Sat 2026-11-07": {
    "breakfast": {
-    "cost": 149.18,
-    "item": "Ghee Pongal",
+    "cost": 110.5,
+    "item": "Curd Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "dinner": {
@@ -275,8 +275,8 @@
   },
   "Sun 2026-11-08": {
    "breakfast": {
-    "cost": 145.0,
-    "item": "Pesarattu + Chutney",
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Murugan Idli Shop",
@@ -301,19 +301,19 @@
   },
   "Thu 2026-11-05": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "dinner": {
-    "cost": 125.0,
-    "item": "Mini Tiffin",
+    "cost": 119.57,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "lunch": {
@@ -327,11 +327,11 @@
   },
   "Tue 2026-11-03": {
    "breakfast": {
-    "cost": 110.5,
-    "item": "Curd Rice",
+    "cost": 149.18,
+    "item": "Ghee Pongal",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    },
    "dinner": {
