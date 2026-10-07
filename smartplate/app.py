@@ -705,6 +705,46 @@ def create_app() -> Flask:
             raise ValueError("Send the two meal ids to swap as a and b")
         return jsonify(everyday.swap(plan_id, a, b))
 
+    # ---- household (domain/household.py) ---- #
+    @app.post("/api/user/<int:user_id>/household")
+    def household_create(user_id):
+        return jsonify(service.household_action(user_id, "create", request.get_json()))
+
+    @app.patch("/api/user/<int:user_id>/household")
+    def household_update(user_id):
+        return jsonify(service.household_action(user_id, "update", request.get_json()))
+
+    @app.post("/api/user/<int:user_id>/household/leave")
+    def household_leave(user_id):
+        return jsonify(service.household_action(user_id, "leave"))
+
+    @app.post("/api/user/<int:user_id>/household/members")
+    def household_add(user_id):
+        return jsonify(service.household_action(user_id, "add", request.get_json()))
+
+    @app.patch("/api/user/<int:user_id>/household/members/<int:member_id>")
+    def household_edit(user_id, member_id):
+        return jsonify(service.household_action(user_id, "edit", request.get_json(), member_id))
+
+    @app.delete("/api/user/<int:user_id>/household/members/<int:member_id>")
+    def household_remove(user_id, member_id):
+        return jsonify(service.household_action(user_id, "remove", None, member_id))
+
+    @app.post("/api/session/<int:session_id>/eaters")
+    def session_eaters(session_id):
+        body = request.get_json()
+        if "eaters" not in body:
+            raise ValueError("Send eaters: the people eating this meal, or null for the usual people")
+        return jsonify(service.set_eaters(session_id, body["eaters"]))
+
+    @app.post("/api/plan/<int:plan_id>/grocery-have")
+    def grocery_have(plan_id):
+        return jsonify(service.set_grocery_have(plan_id, request.get_json()))
+
+    @app.get("/api/plan/<int:plan_id>/recap")
+    def week_recap(plan_id):
+        return jsonify(service.week_recap(plan_id))
+
     @app.get("/api/plan/<int:plan_id>/swaps")
     def swap_options(plan_id):
         return jsonify(service.swap_options(plan_id, request.args.get("token", "")))
