@@ -18,7 +18,7 @@ import math
 import pulp
 
 from .. import clock, config, db
-from ..domain import (allergens, carbon, fatigue, festivals, health, learning, leftovers,
+from ..domain import (allergens, carbon, fatigue, festivals, flavour, health, learning, leftovers,
                       models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
 from ..integrations import calendar_sync
 from . import explainability, scheduler
@@ -157,6 +157,8 @@ def build_context(user: dict, plan: dict) -> dict:
     return {
         "learned": learned,
         "menu": menu,
+        # Epicure flavour signals ("more like this", cuisine tilt); {} when neither is set
+        "flavour": flavour.context(user, menu),
         "festivals": festivals.for_week(plan["week_start"]),
         "festivals_all": festivals.for_week_all(plan["week_start"]),
         "weather": weather.week(user["city"], plan["week_start"]),
@@ -213,6 +215,9 @@ def _delivery_candidate(user, plan, session, item, ctx):
     taste_score, senti = _taste(user, item)
     if item["id"] in ctx["taste"]["liked"]:
         taste_score = round(taste_score + taste.LIKE_BONUS, 4)
+    fbonus, fwhy = flavour.bonus(ctx.get("flavour") or {}, item["name"])
+    if fbonus:
+        taste_score = round(taste_score + fbonus, 4)
     discovery = bool(ctx["taste"]["favourites"]) and item["restaurant_id"] not in ctx["taste"]["favourites"]
     nutri = nutrition.penalty(user, meal, item, tol=ctx["nutri_tol"])
     hp = health.protein_penalty(user, item)
@@ -240,7 +245,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "weather_bias": weather.taste_bias(cond, item),
         "festival_bias": festivals.taste_bias(ctx["festivals"].get(day), item),
         "nutrition": {k: item.get(k, 0) for k in ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")},
-        "tags": item.get("tags", []),
+        "tags": item.get("tags", []), "flavour_why": fwhy,
     }
 
 
@@ -767,6 +772,7 @@ def _decision_context(user, session, chosen, ctx):
         "pinned": chosen.get("pinned", False),
         "discovery": chosen.get("discovery", False),
         "liked": chosen.get("item_id") in ctx["taste"]["liked"],
+        "flavour": chosen.get("flavour_why") or [],
     }
 
 
