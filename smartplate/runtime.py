@@ -23,6 +23,7 @@ def initialize():
         swiggy_connect.init_schema()
         with db.cursor() as cur:
             empty = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
+        from .seed import remove_invented_community, seed_all
         if empty:
-            from .seed import seed_all
             seed_all()
+        remove_invented_community()
