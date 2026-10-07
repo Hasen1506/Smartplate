@@ -1,0 +1,214 @@
+{
+ "budget": {
+  "budget": 1400.0,
+  "daily_cap": 250.0,
+  "prorated": false,
+  "remaining": 610.68,
+  "spend": 789.32,
+  "weekly_budget": 1400.0
+ },
+ "counts": {
+  "cook": 2,
+  "delivery": 6,
+  "ordered": 0,
+  "skip": 13,
+  "snoozed": 0
+ },
+ "grid": {
+  "Fri 2026-11-06": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Mon 2026-11-02": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Sat 2026-11-07": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Sun 2026-11-08": {
+   "breakfast": {
+    "cost": 150.0,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Thu 2026-11-05": {
+   "breakfast": {
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Tue 2026-11-03": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Wed 2026-11-04": {
+   "breakfast": {
+    "cost": 91.62,
+    "item": "Masala Chai + Bun Butter",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Chai Kings",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 117.7,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   }
+  }
+ },
+ "heads_up": [
+  "budget: 13 meals didn't fit the budget",
+  "holiday: Sun 08 Nov: Diwali",
+  "weather: Wed 04 Nov: 38°C"
+ ],
+ "mode": "survival",
+ "recommendation": {
+  "floor": 2443.0,
+  "suggested_rating_floor": 4.4,
+  "usual": 6069.0,
+  "variety": 6368.0
+ },
+ "week_start": "2026-11-02"
+}
