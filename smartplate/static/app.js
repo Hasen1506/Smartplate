@@ -1201,7 +1201,39 @@ function receiptsPanel() {
 }
 
 /* ---- settings: the same five answers as onboarding, editable ---- */
-function settingsPanel() {
+const RHYTHM = [["order", "I order it"], ["cook", "I cook it"], ["skip", "I skip it"]];
+function rhythmOf(u) {
+  const p = u.prefs || {}, meals = u.meals || p.meals || MEALS;
+  return p.rhythm || Object.fromEntries(MEALS.map(m => [m, meals.includes(m) ? "order" : "skip"]));
+}
+function settingsPanel() { return settingsPanelBody() + tuningForm(); }
+// Your rhythm, calorie split, targets and variety: the planner's assumptions, yours to change.
+function tuningForm() {
+  const u = S.view.user, nt = u.nutrition_targets || {}, ht = u.health_targets || {}, r = rhythmOf(u);
+  const share = { breakfast: 0.25, lunch: 0.4, dinner: 0.35, ...(nt.meal_share || {}) };
+  const pct = m => Math.round(share[m] * 100);
+  const t = S.view.nutrition?.daily_target || {};
+  return `<form id="tuning" class="card tuning"><h3 class="k">How you eat</h3>
+    <div class="settings-grid">${MEALS.map(m => `<label>${cap1(m)}<select name="rh_${m}">${RHYTHM.map(([k, l]) =>
+      `<option value="${k}" ${r[m] === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>`).join("")}</div>
+    <h3 class="k">Planner settings</h3>
+    <div class="settings-grid">${MEALS.map(m => `<label>${cap1(m)} share of calories (%)<input name="sh_${m}" type="number" min="10" max="70" value="${pct(m)}"></label>`).join("")}
+      <label>Calories a day<input name="kcal" type="number" min="1000" max="4500" value="${nt.kcal ?? t.kcal ?? ""}"></label>
+      <label>Protein a day (g)<input name="protein_g" type="number" min="20" max="250" value="${nt.protein_g ?? t.protein_g ?? ""}"></label>
+      <label>Same dish at most (times a week)<input name="max_repeat" type="number" min="1" max="7" value="${ht.max_item_repeat ?? 2}"></label></div>
+    <p class="fine">The split must add up to 100%. Want the same lunch every day? Set "same dish" to 5 or more.</p>
+    <button class="primary">Save how I eat</button></form>`;
+}
+function readTuning(form) {
+  const f = new FormData(form), n = k => Number(f.get(k));
+  const rhythm = Object.fromEntries(MEALS.map(m => [m, f.get(`rh_${m}`)]));
+  const meal_share = Object.fromEntries(MEALS.map(m => [m, n(`sh_${m}`) / 100]));
+  const tuning = { meal_share, max_repeat: n("max_repeat") };
+  if (f.get("kcal")) tuning.kcal = n("kcal");
+  if (f.get("protein_g")) tuning.protein_g = n("protein_g");
+  return { rhythm, tuning };
+}
+function settingsPanelBody() {
   const u = S.view.user, n = S.view.nutrition.daily_target, p = u.prefs || {};
   const meals = u.meals || MEALS;
   const body = p.body || {};
@@ -1281,6 +1313,7 @@ const OB_STEPS = ["What you eat", "Your meals", "Budget", "Goal"];
 function startOnboard() {
   S.onboard = { step: 0,
     d: { name: "", diet: "nonveg", allergens: [], medical: [], observances: [], meals: ["lunch", "dinner"], cook: "sometimes",
+      rhythm: { breakfast: "skip", lunch: "order", dinner: "order" },
       favourites: [], weekly_budget: null, daily_cap: null, goal: "none", body: null } };
   S.welcome = false; S.sheet = null; render();
 }
@@ -1302,11 +1335,12 @@ function onboardingScreen() {
         <div class="chips">${[["navratri", "Navratri"], ["ramadan", "Ramadan"], ["karva_chauth", "Karva Chauth"]].map(([k, l]) => chip("observances", k, l, d.observances.includes(k))).join("")}</div>
       </details>`;
   } else if (st === 1) {
-    body = `<h1>Which meals should we plan?</h1><p class="fine">Most people start with just dinner, or lunch and dinner.</p>
-      <div class="chips">${MEALS.map(m => chip("meals", m, `${MEAL_ICON[m]} ${cap1(m)}`, d.meals.includes(m))).join("")}</div>
-      <h3 class="k">How often do you cook?</h3>
-      <div class="chips">${[["never", "Never"], ["sometimes", "1–2× a week"], ["often", "3–5× a week"], ["most", "Most days"]].map(([k, l]) => chip("cook", k, l, d.cook === k, false)).join("")}</div>
-      <p class="fine">Cook days are cheaper. We'll suggest simple recipes and one grocery list.</p>`;
+    body = `<h1>How do you eat on a normal day?</h1><p class="fine">For each meal: do you order it, cook it, or skip it? We plan only what you tell us.</p>
+      ${MEALS.map(m => `<div class="rhythm-row"><b>${MEAL_ICON[m]} ${cap1(m)}</b>
+        <div class="chips">${RHYTHM.map(([k, l]) => chip(`rh_${m}`, k, l, d.rhythm[m] === k, false)).join("")}</div></div>`).join("")}
+      <h3 class="k">On days you order, swap in a cheap home-cook sometimes?</h3>
+      <div class="chips">${[["never", "No"], ["sometimes", "1–2× a week"], ["often", "3–5× a week"], ["most", "Most days"]].map(([k, l]) => chip("cook", k, l, d.cook === k, false)).join("")}</div>
+      <p class="fine">Meals you cook get simple recipe ideas and one grocery list.</p>`;
   } else if (st === 2) {
     body = `<h1>What's your weekly food budget?</h1>
       <p class="fine">Enter your own limit. After you connect Swiggy and choose a delivery address, check current menu prices and the final cart total. The sample planner cannot quote live Swiggy prices.</p>
@@ -1355,7 +1389,7 @@ async function onboardNav(dir) {
     o.step -= 1; S.error = null; render(); return;
   }
   const d = o.d;
-  if (o.step === 1 && !d.meals.length) throw new Error("Pick at least one meal to plan");
+  if (o.step === 1 && MEALS.every(m => d.rhythm[m] === "skip")) throw new Error("Pick at least one meal you order or cook");
   if (o.step === 2) {
     if (!d.weekly_budget) throw new Error("Enter a weekly budget greater than ₹0");
     if (d.weekly_budget < 100 || d.weekly_budget > 100000) throw new Error("Weekly budget must be between ₹100 and ₹1,00,000");
@@ -1364,6 +1398,7 @@ async function onboardNav(dir) {
   }
   if (o.step === OB_STEPS.length - 1) {
     const body = { ...d, name: d.name || "Me" };
+    delete body.meals;                     // the rhythm says which meals are planned
     if (!body.body) delete body.body;
     if (!body.daily_cap) delete body.daily_cap;
     const view = await api("/api/profiles", "POST", body);
@@ -1381,6 +1416,7 @@ function onboardChip(group, value, multi) {
   const d = S.onboard.d;
   readOnboardInputs();
   if (group === "budgetpick") { d.weekly_budget = Number(value); render(); return; }
+  if (group.startsWith("rh_")) { d.rhythm[group.slice(3)] = value; render(); return; }
   if (group === "favourites") value = Number(value);
   if (multi) {
     const arr = d[group];
@@ -1506,6 +1542,9 @@ function wire() {
   if (account) account.onsubmit = (e) => { e.preventDefault(); guard(saveAccount); };
   const recover = document.getElementById("recover");
   if (recover) recover.onsubmit = (e) => { e.preventDefault(); guard(() => useRecoveryCode(document.getElementById("rcode").value)); };
+  const tuning = document.getElementById("tuning");
+  if (tuning) tuning.onsubmit = e => { e.preventDefault(); const body = readTuning(tuning);
+    guard(async () => { adoptView(await api(`/api/user/${S.userId}/setup`, "PATCH", body)); toast("Saved. Upcoming meals re-planned."); render(); }); };
   const preferences = document.getElementById('preferences');
   if (preferences) preferences.onsubmit = e => {
     e.preventDefault();
