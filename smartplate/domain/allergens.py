@@ -86,7 +86,9 @@ def _violates_one(user: dict, item: dict) -> str | None:
             return f"unsafe for {condition}"
 
     diet = user.get("diet", "nonveg")
-    if diet in ("veg", "vegan") and not item.get("veg", 1):
+    # Indian veg/non-veg marks (FSSAI) count egg as non-vegetarian, so a dish with
+    # egg is never "veg" even if a catalogue row mislabels it (Egg Puff did).
+    if diet in ("veg", "vegan") and (not item.get("veg", 1) or "egg" in item_allergens):
         return f"not {diet}"
     if diet == "vegan" and "dairy" in item_allergens:
         return "contains dairy (vegan)"

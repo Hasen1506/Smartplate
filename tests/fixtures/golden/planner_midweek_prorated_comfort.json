@@ -1,0 +1,160 @@
+{
+ "budget": {
+  "budget": 1500.0,
+  "daily_cap": null,
+  "prorated": true,
+  "remaining": 279.77,
+  "spend": 1220.23,
+  "weekly_budget": 2100.0
+ },
+ "counts": {
+  "cook": 0,
+  "delivery": 10,
+  "ordered": 0,
+  "past": 4,
+  "skip": 0,
+  "snoozed": 0
+ },
+ "grid": {
+  "Fri 2026-11-06": {
+   "dinner": {
+    "cost": 125.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 120.98,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   }
+  },
+  "Mon 2026-11-02": {
+   "dinner": {
+    "cost": 0.0,
+    "item": "Not planned",
+    "kind": "past",
+    "pinned": false,
+    "restaurant": "",
+    "status": "past"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Not planned",
+    "kind": "past",
+    "pinned": false,
+    "restaurant": "",
+    "status": "past"
+   }
+  },
+  "Sat 2026-11-07": {
+   "dinner": {
+    "cost": 133.1,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 115.7,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   }
+  },
+  "Sun 2026-11-08": {
+   "dinner": {
+    "cost": 124.41,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 120.98,
+    "item": "Masala Dosa",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   }
+  },
+  "Thu 2026-11-05": {
+   "dinner": {
+    "cost": 125.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 120.98,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   }
+  },
+  "Tue 2026-11-03": {
+   "dinner": {
+    "cost": 0.0,
+    "item": "Not planned",
+    "kind": "past",
+    "pinned": false,
+    "restaurant": "",
+    "status": "past"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Not planned",
+    "kind": "past",
+    "pinned": false,
+    "restaurant": "",
+    "status": "past"
+   }
+  },
+  "Wed 2026-11-04": {
+   "dinner": {
+    "cost": 127.08,
+    "item": "Masala Dosa",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 107.0,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   }
+  }
+ },
+ "heads_up": [
+  "holiday: Sun 08 Nov: Diwali",
+  "saving: Ordering a little earlier saves ₹206 this week",
+  "weather: Sat 07 Nov: rain likely (80%)",
+  "weather: Today: 38°C"
+ ],
+ "mode": "comfort",
+ "recommendation": {
+  "floor": 1848.0,
+  "suggested_rating_floor": 4.4,
+  "usual": 4284.0,
+  "variety": 4508.25
+ },
+ "week_start": "2026-11-02"
+}

@@ -154,7 +154,7 @@ def _menu(rmap: dict):
          ["fresh", "healthy and tasty"]),
         ("Chai Kings", "Masala Chai + Bun Butter", 70, "cafe", 350, 7, 48, 14, 18, 1, ["dairy","gluten"], ["light"], 0.5, 4.2, 0.7,
          ["perfect chai", "quick"]),
-        ("Chai Kings", "Egg Puff + Chai", 85, "cafe", 380, 11, 40, 18, 12, 1, ["egg","gluten","dairy"], ["light"], 0.6, 4.0, 0.6,
+        ("Chai Kings", "Egg Puff + Chai", 85, "cafe", 380, 11, 40, 18, 12, 0, ["egg","gluten","dairy"], ["light"], 0.6, 4.0, 0.6,
          ["good snack", "sometimes cold"]),
         ("Sangeetha Veg", "Parotta + Veg Kurma", 120, "south indian", 720, 14, 92, 28, 7, 1, ["gluten","dairy"], ["comfort","veg"], 0.9, 4.1, 0.6,
          ["comfort classic", "a bit oily"]),

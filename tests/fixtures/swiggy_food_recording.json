@@ -1,0 +1,255 @@
+{
+ "calls": [
+  {
+   "cart": "empty",
+   "key": "get_addresses {\"page\":1,\"pageSize\":10}",
+   "reply": {
+    "content": [
+     {
+      "text": "{\"addresses\": [{\"id\": \"addr-home\", \"annotation\": \"Home\", \"address\": \"12 Lake View Rd, Adyar\"}, {\"id\": \"addr-work\", \"annotation\": \"Work\", \"address\": \"OMR, Perungudi\"}]}",
+      "type": "text"
+     }
+    ]
+   }
+  },
+  {
+   "cart": "filled",
+   "key": "get_food_cart {\"addressId\":\"addr-home\",\"restaurantName\":\"Hotel Saravana Bhavan (Adyar)\"}",
+   "reply": {
+    "structuredContent": {
+     "data": {
+      "addressId": "addr-home",
+      "data": {
+       "items": [
+        {
+         "in_stock": true,
+         "is_veg": true,
+         "menu_item_id": "m0",
+         "name": "Mini Tiffin",
+         "quantity": 1,
+         "total": 125.0
+        }
+       ],
+       "pricing": {
+        "delivery_charge": 35,
+        "item_total": 125.0,
+        "to_pay": 160.0
+       },
+       "restaurant": {
+        "id": "r-1",
+        "name": "Hotel Saravana Bhavan (Adyar)"
+       }
+      }
+     },
+     "success": true
+    }
+   }
+  },
+  {
+   "cart": "empty",
+   "key": "get_food_cart {\"addressId\":\"addr-home\"}",
+   "reply": {
+    "structuredContent": {
+     "data": {
+      "addressId": "addr-home",
+      "data": {
+       "items": []
+      }
+     },
+     "success": true
+    }
+   }
+  },
+  {
+   "cart": "filled",
+   "key": "get_payment_options {\"addressId\":\"addr-home\"}",
+   "reply": {
+    "structuredContent": {
+     "data": {
+      "cod": {
+       "available": true,
+       "displayName": "Cash on Delivery",
+       "id": "Cash"
+      }
+     },
+     "success": true
+    }
+   }
+  },
+  {
+   "cart": "empty",
+   "key": "get_restaurant_menu {\"addressId\":\"addr-home\",\"restaurantId\":\"r-1\"}",
+   "reply": {
+    "structuredContent": {
+     "menu": {
+      "categories": [
+       {
+        "items": [
+         {
+          "isVeg": 1,
+          "itemId": "m0",
+          "name": "Mini Tiffin",
+          "priceInPaise": 12500
+         },
+         {
+          "isVeg": 1,
+          "itemId": "m1",
+          "name": "Ghee Pongal",
+          "priceInPaise": 14000
+         },
+         {
+          "isVeg": 1,
+          "itemId": "m2",
+          "name": "Peanut Chutney Dosa",
+          "priceInPaise": 13000
+         }
+        ],
+        "title": "Mains"
+       }
+      ]
+     },
+     "restaurant": {
+      "id": "r-1",
+      "isOpen": true,
+      "name": "Hotel Saravana Bhavan (Adyar)"
+     }
+    }
+   }
+  },
+  {
+   "cart": "filled",
+   "key": "place_food_order {\"addressId\":\"addr-home\",\"paymentMethod\":\"Cash\"}",
+   "reply": {
+    "structuredContent": {
+     "data": {
+      "normalizedStatus": "success",
+      "orderId": "real-order-17",
+      "status": "CONFIRMED"
+     },
+     "success": true
+    }
+   }
+  },
+  {
+   "cart": "empty",
+   "key": "search_menu {\"addressId\":\"addr-home\",\"query\":\"Mini Tiffin\",\"restaurantIdOfAddedItem\":\"r-1\"}",
+   "reply": {
+    "structuredContent": {
+     "data": {
+      "items": [
+       {
+        "hasAddons": false,
+        "hasVariants": false,
+        "inStock": true,
+        "isVeg": true,
+        "menu_item_id": "m0",
+        "name": "Mini Tiffin",
+        "priceInPaise": 12500,
+        "restaurant_id": "r-1"
+       },
+       {
+        "hasAddons": false,
+        "hasVariants": false,
+        "inStock": true,
+        "isVeg": true,
+        "menu_item_id": "m1",
+        "name": "Ghee Pongal",
+        "priceInPaise": 14000,
+        "restaurant_id": "r-1"
+       },
+       {
+        "hasAddons": false,
+        "hasVariants": false,
+        "inStock": true,
+        "isVeg": true,
+        "menu_item_id": "m2",
+        "name": "Peanut Chutney Dosa",
+        "priceInPaise": 13000,
+        "restaurant_id": "r-1"
+       }
+      ]
+     },
+     "success": true
+    }
+   }
+  },
+  {
+   "cart": "empty",
+   "key": "search_menu {\"addressId\":\"addr-home\",\"query\":\"tiffin\",\"restaurantIdOfAddedItem\":\"r-1\"}",
+   "reply": {
+    "structuredContent": {
+     "data": {
+      "items": [
+       {
+        "hasAddons": false,
+        "hasVariants": false,
+        "inStock": true,
+        "isVeg": true,
+        "menu_item_id": "m0",
+        "name": "Mini Tiffin",
+        "priceInPaise": 12500,
+        "restaurant_id": "r-1"
+       },
+       {
+        "hasAddons": false,
+        "hasVariants": false,
+        "inStock": true,
+        "isVeg": true,
+        "menu_item_id": "m1",
+        "name": "Ghee Pongal",
+        "priceInPaise": 14000,
+        "restaurant_id": "r-1"
+       },
+       {
+        "hasAddons": false,
+        "hasVariants": false,
+        "inStock": true,
+        "isVeg": true,
+        "menu_item_id": "m2",
+        "name": "Peanut Chutney Dosa",
+        "priceInPaise": 13000,
+        "restaurant_id": "r-1"
+       }
+      ]
+     },
+     "success": true
+    }
+   }
+  },
+  {
+   "cart": "empty",
+   "key": "search_restaurants {\"addressId\":\"addr-home\",\"query\":\"Hotel Saravana Bhavan\"}",
+   "reply": {
+    "structuredContent": {
+     "restaurants": [
+      {
+       "availabilityStatus": "OPEN",
+       "avgRating": 4.3,
+       "name": "Hotel Saravana Bhavan (Adyar)",
+       "restaurantId": "r-1",
+       "sla": "30 mins"
+      },
+      {
+       "avgRating": 4.0,
+       "name": "Completely Different Kitchen",
+       "restaurantId": "r-2"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "cart": "empty",
+   "key": "update_food_cart {\"addressId\":\"addr-home\",\"cartItems\":[{\"menu_item_id\":\"m0\",\"quantity\":1}],\"restaurantId\":\"r-1\",\"restaurantName\":\"Hotel Saravana Bhavan (Adyar)\"}",
+   "reply": {
+    "content": [
+     {
+      "text": "Cart updated",
+      "type": "text"
+     }
+    ]
+   }
+  }
+ ],
+ "provenance": "Recorded from the documented Swiggy Food MCP contract fake (tests/test_swiggy_live.py FakeLive): no real Swiggy account, cart or order is ever used by tests."
+}

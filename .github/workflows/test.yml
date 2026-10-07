@@ -2,11 +2,19 @@ name: SmartPlate checks
 on: [push, pull_request]
 permissions:
   contents: read
+concurrency:                          # a newer push supersedes a running check of the same ref
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      HYPOTHESIS_PROFILE: ci          # derandomized, no example database: identical runs everywhere
+      PYTHONHASHSEED: "0"
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0              # the differential suite reads the pre-#19 and #19 trees from history
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -15,13 +23,23 @@ jobs:
           node-version: '22'
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pip_audit -r requirements.txt --strict
-      - run: python -m pytest -q
+      - name: Unit and property tests
+        timeout-minutes: 3
+        run: >-
+          python -m pytest -q -n auto --durations=10
+          --ignore=tests/test_gt_golden_planner.py --ignore=tests/test_gt_journey.py
+          --ignore=tests/test_gt_differential.py
+      - name: Golden and differential tests
+        timeout-minutes: 3
+        run: python -m pytest -q -n auto --durations=10 tests/test_gt_golden_planner.py tests/test_gt_journey.py tests/test_gt_differential.py
       - run: node --check smartplate/static/app.js
       - run: node src/sourcing/menu-source.test.js
       - run: node --test tests/frontend.test.cjs
       - run: python -m pip install playwright==1.63.0
       - run: python -m playwright install --with-deps chromium
-      - run: python -m pytest -q tests/browser_smoke.py
+      - name: Browser E2E (golden first-week journey + smoke)
+        timeout-minutes: 5
+        run: python -m pytest -q tests/browser_journey.py tests/browser_smoke.py --durations=10
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

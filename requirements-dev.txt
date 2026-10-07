@@ -2,3 +2,5 @@
 -r requirements.txt
 pytest==9.0.3
 pip-audit==2.10.1
+hypothesis==6.168.5
+pytest-xdist==3.8.0
