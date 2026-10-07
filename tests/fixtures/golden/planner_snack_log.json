@@ -1,0 +1,90 @@
+{
+ "ledger": {
+  "calories": {
+   "balance": 1884.0,
+   "carries": true,
+   "credit_today": 1884.0,
+   "note": "banked from lighter days — extra headroom today",
+   "timescale": "weekly",
+   "today_allowance": 3884.0
+  },
+  "days_logged": 2,
+  "protein": {
+   "adherence_pct": 0,
+   "carries": false,
+   "chronic_miss": false,
+   "days_hit": 0,
+   "days_total": 2,
+   "note": "under on protein several days — biasing upcoming meals higher",
+   "timescale": "daily",
+   "today_floor_g": 60
+  },
+  "sugar": {
+   "carries": false,
+   "ok": true,
+   "over_by": 0.0,
+   "timescale": "daily_cap"
+  },
+  "today_distribution": {
+   "even_enough": false,
+   "meals_under": 1,
+   "note": "1 meal(s) low on protein — spread it out, don't backload one meal",
+   "per_meal_target_g": 60,
+   "total_g": 4,
+   "total_meets_daily": false
+  }
+ },
+ "snacks": [
+  {
+   "confidence": 0.0,
+   "items": [],
+   "note": "Estimate — confirm before logging. Couldn't match: 1 samosa, chai.",
+   "nutrition": {
+    "carbs_g": 0,
+    "fat_g": 0,
+    "kcal": 0,
+    "protein_g": 0,
+    "sugar_g": 0
+   },
+   "unmatched": [
+    "1 samosa",
+    "chai"
+   ]
+  },
+  {
+   "confidence": 1.0,
+   "items": [
+    {
+     "dish": "idli",
+     "kcal": 116,
+     "qty": 2
+    }
+   ],
+   "note": "Estimate — confirm before logging.",
+   "nutrition": {
+    "carbs_g": 24,
+    "fat_g": 0,
+    "kcal": 116,
+    "protein_g": 4,
+    "sugar_g": 0
+   },
+   "unmatched": []
+  },
+  {
+   "confidence": 0.0,
+   "items": [],
+   "note": "Estimate — confirm before logging. Couldn't match: a banana, peanut chikki.",
+   "nutrition": {
+    "carbs_g": 0,
+    "fat_g": 0,
+    "kcal": 0,
+    "protein_g": 0,
+    "sugar_g": 0
+   },
+   "unmatched": [
+    "a banana",
+    "peanut chikki"
+   ]
+  }
+ ]
+}
