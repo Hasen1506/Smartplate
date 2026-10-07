@@ -20,7 +20,8 @@ from . import access, clock, db, ratelimit
 LOGIN_RE = re.compile(r"^[a-z0-9._@+-]{3,64}$")
 MIN_PASSWORD = 8
 MAX_PASSWORD = 200
-FAIL_LIMIT, FAIL_WINDOW_S = 5, 15 * 60                     # per sign-in name
+FAIL_LIMIT, FAIL_WINDOW_S = 5, 15 * 60                     # per sign-in name from one address
+NAME_LIMIT, NAME_WINDOW_S = 60, 60 * 60                    # per sign-in name from all addresses
 IP_LIMIT, IP_WINDOW_S = 30, 15 * 60                        # per address, any name
 _DUMMY = generate_password_hash("not-a-real-password")    # equal work for unknown names
 
@@ -65,10 +66,16 @@ def set_login(user_id: int, body: dict, presented: str | None = None) -> dict:
         taken = cur.execute("SELECT user_id FROM logins WHERE login=?", (login,)).fetchone()
         if taken and taken["user_id"] != user_id:
             raise ValueError("That sign-in name is taken. Try another.")
+        existing = cur.execute("SELECT pw_hash FROM logins WHERE user_id=?", (user_id,)).fetchone()
         now = _now()
         cur.execute("INSERT INTO logins(user_id, login, pw_hash, created_ts, updated_ts) VALUES (?,?,?,?,?) "
                     "ON CONFLICT(user_id) DO UPDATE SET login=excluded.login, pw_hash=excluded.pw_hash, "
                     "updated_ts=excluded.updated_ts", (user_id, login, generate_password_hash(pw), now, now))
+        if existing and not check_password_hash(existing["pw_hash"], pw):
+            # A new password signs out every other browser (L-03): a leaked password
+            # must not keep working through the device tokens it already issued.
+            keep = access.digest(presented) if presented else ""
+            cur.execute("DELETE FROM devices WHERE user_id=? AND token_hash<>?", (user_id, keep))
     return summary(user_id, presented)
 
 
@@ -78,12 +85,16 @@ def sign_in(body: dict, ip: str = "") -> dict:
     raw = body.get("login")
     login = raw.strip().lower() if isinstance(raw, str) else ""
     pw = body.get("password") if isinstance(body.get("password"), str) else ""
-    ratelimit.check(f"signin:{login}", FAIL_LIMIT, FAIL_WINDOW_S, record=False)
+    # Failures count per (name, address), so a stranger elsewhere cannot lock the owner
+    # out (L-04); a much higher per-name ceiling still slows distributed guessing.
+    ratelimit.check(f"signin:{login}:{ip}", FAIL_LIMIT, FAIL_WINDOW_S, record=False)
+    ratelimit.check(f"signin-name:{login}", NAME_LIMIT, NAME_WINDOW_S, record=False)
     with db.cursor() as cur:
         row = cur.execute("SELECT l.user_id, l.pw_hash, u.name FROM logins l JOIN users u ON u.id=l.user_id "
                           "WHERE l.login=?", (login,)).fetchone()
     if not check_password_hash(row["pw_hash"] if row else _DUMMY, pw[:MAX_PASSWORD]) or not row:
-        ratelimit.hit(f"signin:{login}")
+        ratelimit.hit(f"signin:{login}:{ip}")
+        ratelimit.hit(f"signin-name:{login}")
         raise ValueError("That name and password don't match.")
     token = secrets.token_urlsafe(24)
     label = body.get("device") if isinstance(body.get("device"), str) else ""
