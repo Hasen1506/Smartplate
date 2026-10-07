@@ -701,3 +701,11 @@ test('merge E+G: one grocery line shows its pack count, who it serves, a have-it
   assert.ok(!html.includes('data-oos="rice"'));            // already have it: nothing to report out of stock
   assert.match(html, /Prices are for the original items/);
 });
+
+test('community: an empty list says nobody has shared yet, never shows sample members', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext('S.community = []', context);
+  const html = vm.runInContext('communityPanel()', context);
+  assert.match(html, /Nobody has shared a week here so far/);
+  assert.doesNotMatch(html, /Sample weeks/);
+});
