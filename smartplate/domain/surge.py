@@ -13,6 +13,13 @@ _BASE = {"breakfast": 1.0, "lunch": 1.15, "dinner": 1.25}
 _WEATHER_BUMP = {"clear": 0.0, "hot": 0.05, "rain": 0.30, "storm": 0.45}
 
 
+def applies(item: dict) -> bool:
+    """The surge model is the sample catalogue's demo signal. Swiggy publishes no surge
+    data, so a live Swiggy dish is never priced above what Swiggy lists (no invented
+    multiplier, no "order earlier to save ₹X" claim)."""
+    return item.get("source") != "live"
+
+
 def predict(city: str, day: int, meal: str, condition: str) -> float:
     with db.cursor() as cur:
         row = cur.execute(
