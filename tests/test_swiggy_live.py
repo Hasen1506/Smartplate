@@ -335,7 +335,9 @@ def test_required_fields_we_cannot_fill_are_named():
 
 def test_live_menu_needs_a_connection_and_is_private(client, swiggy):
     r = client.get("/api/user/1/swiggy/menu?restaurant=X")
-    assert r.status_code == 502 and "Connect your Swiggy account" in r.get_json()["error"]
+    body = r.get_json()                       # not connected is the user's to fix: 409 + Connect, never 502
+    assert r.status_code == 409 and body["error"] == "swiggy_not_connected"
+    assert "Connect your Swiggy account" in body["message"] and body["action"]["act"] == "swiggy-connect"
     v = client.post("/api/profiles", json={"name": "P", "diet": "veg", "weekly_budget": 2000,
                                            "meals": ["dinner"], "favourites": [6]}).get_json()
     assert client.get(f"/api/user/{v['user']['id']}/swiggy/addresses").status_code == 401
@@ -566,7 +568,7 @@ def test_shared_legacy_connection_is_never_exposed(client, swiggy):
     state = client.get("/api/user/1/swiggy").get_json()
     assert not state["connected"] and state["requires_private_profile"]
     assert "tools" not in state and "address" not in state
-    assert client.get("/api/user/1/swiggy/addresses").status_code == 502
+    assert client.get("/api/user/1/swiggy/addresses").status_code == 409     # not connected for this profile
     assert len(swiggy.calls) == before
 
 
