@@ -348,7 +348,8 @@ def test_swiggy_requires_https_and_handles_expiry_and_disconnect(client, swiggy,
     _connect(client, swiggy)
     swiggy.token = "rotated"                                                        # server no longer accepts ours
     r = client.post("/api/user/1/swiggy/discover", json={})
-    assert r.status_code == 502 and "expired" in r.get_json()["error"]
+    assert r.status_code == 409 and r.get_json()["code"] == "swiggy_auth_expired"   # reconnect, not an outage
+    assert "expired" in r.get_json()["message"]
     from smartplate import clock
     later = clock.now() + dt.timedelta(days=6)
     monkeypatch.setattr(clock, "now", lambda: later)
