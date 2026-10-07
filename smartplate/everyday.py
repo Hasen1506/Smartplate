@@ -256,6 +256,7 @@ def options(session_id: int) -> dict:
         return {"item_id": it["id"], "name": it["name"], "price": c["cost"], "rating": it["item_rating"],
                 "kcal": n.get("kcal"), "protein_g": n.get("protein_g"), "tags": it.get("tags", []),
                 "fits": c["cost"] <= ceiling, "why": " · ".join(why), "score": score,
+                "nutrition_estimated": bool(it.get("nutrition_estimated")),
                 "current": bool(current and current.get("item_id") == it["id"]),
                 "instructions": allergens.order_instructions(user, {**n, "tags": it.get("tags", [])})}
 
@@ -310,7 +311,7 @@ def choose(session_id: int, body: dict) -> dict:
     session, plan, user = _session_bundle(session_id)
     _editable(session)
     if body.get("item_id") is not None:
-        item = next((it for it in models.menu_for_city(user["city"]) if it["id"] == body["item_id"]), None)
+        item = next((it for it in models.menu_for_user(user) if it["id"] == body["item_id"]), None)
         if not item:
             raise ValueError("That dish isn't available right now")
         if not optimizer.meal_suitable(item, session["meal"]):
