@@ -35,3 +35,16 @@ them is built. Grouped by the PR that surfaced it.
   MCP calls.
 - **Real delivery fee per restaurant** learned from previous cart bills (the planner uses a
   ₹35 estimate until the cart is checked).
+
+## From PR C (order any meal and the whole week)
+
+- **Scheduled placement** the day Swiggy offers a scheduled-order (or pre-order) tool:
+  `week_orders.SCHEDULING` is the single switch to flip.
+- **Group a day's meals from one restaurant into one cart** (lunch + dinner from the same
+  place) to pay one delivery fee; today each meal is its own cart.
+- **Learn real fees per restaurant and slot** from checked bills, and feed them back to the
+  planner's cost so the next week's estimate matches what is paid.
+- **Push "cart ready" at each order-by time** for queued meals (web push exists), with one
+  tap opening the queue row.
+- **Budget guard at cart check**: if the checked total pushes the week over budget, offer to
+  re-plan the remaining meals before approving.

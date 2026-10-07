@@ -425,6 +425,10 @@ details summary{cursor:pointer;font-weight:600;font-size:14px;padding:8px 0}
 .cartnote .btn{justify-self:start}
 .signin .inline-err{margin:0;padding:8px 12px;border-radius:8px;background:var(--red-bg);color:var(--red);font-size:14px}
 
+/* order this week */
+.oq fieldset{border:none;padding:0;margin:6px 0}
+.oq-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line, #eee)}
+.bill{width:100%;max-width:320px;font-size:13px}.bill .num{text-align:right}.bill .total td{border-top:1px solid var(--line, #ddd)}
 /* what the plan is built from (live Swiggy menus or labelled sample dishes) */
 .source{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border:1px solid var(--line, #ddd);border-radius:10px;padding:8px 12px;margin:8px 0}
 .source.sample{border-style:dashed}

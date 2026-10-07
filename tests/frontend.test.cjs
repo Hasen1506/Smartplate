@@ -426,6 +426,25 @@ test('blocked storage cannot silently discard access during recovery rotation', 
   assert.equal(calls.length, before);
 });
 
+test('order this week: any slot and day, the real bill, and tap-to-place without an order API', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.orderQueue = { plan_id: 42, order_enabled: false, queued: 2, planned_total: 400, confirmed_total: 262.5,
+    scheduling: { supported: false, why: "Swiggy's order tool places an order immediately" },
+    meals: [
+      { session_id: 7, day_index: 2, meal: 'breakfast', item: 'Mini Tiffin', restaurant: 'HSB', planned_cost: 150, queued: true, state: 'queued', orderable: true },
+      { session_id: 9, day_index: 2, meal: 'dinner', item: 'Veg Meals', restaurant: 'HSB', planned_cost: 250, queued: true, state: 'cart_ready', to_pay: 262.5, orderable: true,
+        bill: { to_pay: 262.5, itemised: true, lines: [{ label: 'Items', amount: 210 }, { label: 'Delivery', amount: 35 }, { label: 'Platform fee', amount: 10 }, { label: 'GST & taxes', amount: 7.5 }] } },
+      { session_id: 11, day_index: 3, meal: 'lunch', item: 'Curd Rice', planned_cost: 100, queued: false, orderable: true }] };`, context);
+  const html = vm.runInContext('ordersPanel()', context);
+  assert.match(html, /value="breakfast"/); assert.match(html, /value="dinner"/); assert.match(html, /value="lunch"/);
+  assert.match(html, /data-oq-cart="7"/);
+  assert.match(html, /Platform fee/); assert.match(html, /GST &amp; taxes/);
+  assert.match(html, /Cart ready — tap to place in Swiggy/);
+  assert.doesNotMatch(html, /Approve/);
+  vm.runInContext(`S.orderQueue.order_enabled = true`, context);
+  assert.match(vm.runInContext('ordersPanel()', context), /Approve ₹262.5 and place/);
+});
+
 test('the week says what it is planned from and offers the next step', async () => {
   const { context } = fixture(); await context.bootPromise;
   vm.runInContext(`S.view.source = { kind: 'sample', connected: true, label: 'Sample dishes (not real restaurants)', note: 'x' };`, context);

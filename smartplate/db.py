@@ -68,6 +68,15 @@ CREATE TABLE IF NOT EXISTS menu_items (
     reviews TEXT NOT NULL DEFAULT '[]'             -- short snippets for local sentiment (§3.1)
 );
 
+CREATE TABLE IF NOT EXISTS order_queue (          -- meals the user picked to order (domain/week_orders)
+    session_id INTEGER PRIMARY KEY,
+    plan_id INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT 'queued',         -- queued | cart_ready | placed | handed_off
+    to_pay REAL,
+    bill TEXT,
+    updated_ts TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS live_catalog_state (   -- the user's live Swiggy catalogue (domain/live_catalog)
     user_id INTEGER PRIMARY KEY,
     fetched_ts TEXT NOT NULL,

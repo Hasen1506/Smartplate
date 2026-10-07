@@ -1086,7 +1086,40 @@ function insights() {
 }
 
 /* ---- orders / substitution / idempotency ---- */
+/* ---- order any meal / the whole week: pick slots and days, then cart check → approve → place ---- */
+const DAY3 = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function billLines(bill) {
+  if (!bill) return `<p class="fine">Swiggy didn't return an itemised bill; the total is what Swiggy shows.</p>`;
+  return `<table class="bill">${bill.lines.map(l => `<tr><td>${esc(l.label)}</td><td class="num">${rupee(l.amount)}</td></tr>`).join("")}
+    <tr class="total"><td><b>To pay</b></td><td class="num"><b>${rupee(bill.to_pay)}</b></td></tr></table>`;
+}
+function orderQueuePanel() {
+  const q = S.orderQueue;
+  if (!q) return "";
+  const queued = new Set(q.meals.filter(m => m.queued).map(m => `${m.meal}:${m.day_index}`));
+  const slots = ["breakfast", "lunch", "dinner"].filter(meal => q.meals.some(m => m.meal === meal));
+  const pickedMeals = slots.filter(meal => q.meals.some(m => m.queued && m.meal === meal));
+  const pickedDays = [...new Set(q.meals.filter(m => m.queued).map(m => m.day_index))];
+  const step = m => m.state === "placed" ? `<span class="tag good">placed</span>`
+    : m.state === "handed_off" ? `<span class="tag good">in Swiggy</span>`
+    : m.state === "cart_ready" ? `<span class="row gap"><b>${rupee(m.to_pay)}</b>
+        <button class="small primary" data-oq-place="${m.session_id}">${q.order_enabled ? `Approve ${rupee(m.to_pay)} and place` : "Cart ready — tap to place in Swiggy"}</button></span>`
+    : m.queued ? `<button class="small" data-oq-cart="${m.session_id}">Check the real cart</button>` : "";
+  const rows = q.meals.filter(m => m.queued).map(m => `<div class="oq-row"><div><b>${DAY3[m.day_index]} ${esc(m.meal)}</b> · ${esc(m.item)}
+      <span class="fine">${esc(m.restaurant || "")} · planned ${rupee0(m.planned_cost)}${m.order_at ? ` · order by ${esc(m.order_at)}` : ""}</span></div>
+      ${step(m)}${m.bill && m.state === "cart_ready" ? billLines(m.bill) : ""}</div>`).join("");
+  return `<section class="card oq" aria-label="Order this week"><h2 class="sec">Order this week</h2>
+    <p class="sub">Pick the meals and days to order. Each one is checked in your real Swiggy cart (with delivery, fees and GST) and needs your approval of that exact total.</p>
+    <fieldset class="row gap"><legend class="fine">Meals</legend>${slots.map(meal => `<label><input type="checkbox" name="oq-meal" value="${meal}" ${pickedMeals.includes(meal) ? "checked" : ""}> ${cap1(meal)}</label>`).join("")}</fieldset>
+    <fieldset class="row gap"><legend class="fine">Days</legend>${DAY3.map((d, i) => `<label><input type="checkbox" name="oq-day" value="${i}" ${pickedDays.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</fieldset>
+    <button data-act="oq-save">Add to my order list</button>
+    ${rows ? `<div class="oq-list">${rows}</div><p class="fine">${q.queued} meal${q.queued === 1 ? "" : "s"} · planned ${rupee0(q.planned_total)}${q.confirmed_total ? ` · checked in Swiggy ${rupee(q.confirmed_total)}` : ""}</p>` : ""}
+    <p class="fine">${esc(q.scheduling.why)}</p></section>`;
+}
 function ordersPanel() {
+  return orderQueuePanel() + ordersPanelBody();
+}
+function ordersPanelBody() {
   if (S.meta.swiggy_provider !== "simulated") return `<h2 class="sec">Real Swiggy orders</h2>
     <p class="sub">The sample weekly planner cannot schedule or place real orders. Choose a restaurant and exact item for your saved address in Places, then review its live cart.</p>
     <button class="primary" data-go="places">Open live Places</button>`;
@@ -1370,6 +1403,18 @@ function wire() {
   on("[data-meal]", "drop", (e) => { e.preventDefault(); const from = e.dataTransfer.getData("text/plain"), to = e.currentTarget.dataset.meal;
     if (from && from !== to) guard(() => swapMeals(from, to)); });
   on("[data-close]", "click", (e) => { if (e.target.dataset.close) { S.drawer = null; render(); } });
+  on("[data-oq-cart]", "click", (e) => { const sid = e.currentTarget.dataset.oqCart; guard(async () => {
+    const p = await api(`/api/session/${sid}/swiggy-cart/preview`);
+    const c = await api(`/api/session/${sid}/order/cart`, "POST", { expected_fingerprint: p.fingerprint });
+    toast(`In your Swiggy cart: ${rupee(c.to_pay)} to pay`);
+    S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`); render(); }); });
+  on("[data-oq-place]", "click", (e) => { const sid = e.currentTarget.dataset.oqPlace; guard(async () => {
+    let body = {};
+    if (S.orderQueue?.order_enabled) body = { expected_fingerprint: (await api(`/api/user/${S.userId}/swiggy/checkout/preview`)).fingerprint };
+    const r = await api(`/api/session/${sid}/order/place`, "POST", body);
+    if (r.mode === "tap_to_place") window.open?.(r.url, "_blank");
+    toast(r.mode === "placed" ? "Order placed" : r.message);
+    S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`); render(); }); });
   on("[data-close-err]", "click", () => { S.error = null; S.errorCode = null; render(); });
   on("[data-close-review]", "click", (e) => { if (e.target.dataset.closeReview) { S.orderReview = null; render(); } });
   on("[data-close-cart-review]", "click", (e) => { if (e.target.dataset.closeCartReview) { S.cartReview = null; render(); } });
@@ -1396,6 +1441,10 @@ function wire() {
     "download-csv": () => downloadPrivate(`/api/receipts/${S.userId}/export.csv`, "smartplate-expenses.csv", "text/csv"),
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
     "start-onboard": async () => startOnboard(), notify: toggleAlerts,
+    "oq-save": async () => {
+      const vals = n => [...document.querySelectorAll(`input[name="${n}"]:checked`)].map(i => i.value);
+      S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`, "POST", { meals: vals("oq-meal"), days: vals("oq-day").map(Number) });
+      toast(`${S.orderQueue.queued} meal${S.orderQueue.queued === 1 ? "" : "s"} on your order list`); render(); },
     "live-menus": async () => { S.view = await api(`/api/plan/${S.planId}/live-menus`, "POST", {}); toast("Planned from your live Swiggy menus"); render(); },
     "sample-menus": async () => { S.view = await api(`/api/plan/${S.planId}/sample-menus`, "POST", {}); toast("Back to sample dishes"); render(); },
     "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); location.href = r.authorize_url; },
@@ -1474,6 +1523,7 @@ async function goTab(tab, sub = null) {
   if (S.more === "community") S.community = await api("/api/community");
   if (S.more === "receipts") S.receipts = await api(`/api/receipts/${S.userId}`);
   if (S.more === "orders") S.exec = await api(`/api/plan/${S.planId}/orders`);
+  if (S.more === "orders") S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`).catch(() => null);
   if (S.more === "calendar") S.calendar = await api(`/api/user/${S.userId}/calendar`);
   if (S.more === "connection") S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
   if (S.more === "profiles") S.account = keys.get(S.userId) ? await api(`/api/user/${S.userId}/account`) : null;

@@ -7,7 +7,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
-from .domain import live_catalog, models, sentiment
+from .domain import live_catalog, models, sentiment, week_orders
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp
 from .kernel import agent_brain
@@ -216,6 +216,36 @@ def create_app() -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         service.reoptimize(plan_id, body.get("mode"))
         return jsonify(service.plan_view(plan_id))
+
+    # ---- order any meal / the whole week (domain/week_orders) ---- #
+    @app.get("/api/plan/<int:plan_id>/order-queue")
+    def order_queue(plan_id):
+        return jsonify(week_orders.queue_view(plan_id))
+
+    @app.post("/api/plan/<int:plan_id>/order-queue")
+    def set_order_queue(plan_id):
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(week_orders.set_queue(plan_id, body.get("meals"), body.get("days")))
+
+    @app.post("/api/session/<int:session_id>/order/cart")
+    def order_check_cart(session_id):
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(week_orders.check_cart(session_id, body.get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
+
+    @app.post("/api/session/<int:session_id>/order/place")
+    def order_place(session_id):
+        body = request.get_json(force=True, silent=True) or {}
+        session = models.get_session(session_id)
+        if not session:
+            raise ValueError("Meal not found")
+        user_id = models.get_plan(session["plan_id"])["user_id"]
+        try:
+            return jsonify(week_orders.place(session_id, user_id, body.get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
 
     @app.post("/api/plan/<int:plan_id>/live-menus")
     def plan_from_live_menus(plan_id):

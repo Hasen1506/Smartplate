@@ -393,6 +393,44 @@ def cart_total(cart: dict, anchor: float | None = None) -> float | None:
     return None
 
 
+BILL_FIELDS = [   # (label, keys Swiggy may use) in display order; amounts as Swiggy returns them
+    ("Items", ("item_total", "itemTotal", "items_total", "subtotal", "sub_total")),
+    ("Delivery", ("delivery_charge", "deliveryCharge", "delivery_fee", "deliveryFee")),
+    ("Platform fee", ("platform_fee", "platformFee", "convenience_fee", "convenienceFee")),
+    ("Packaging", ("packaging_charge", "packagingCharge", "packaging_charges", "packing_charges", "packingCharges")),
+    ("Small-cart fee", ("small_cart_fee", "smallCartFee")),
+    ("GST & taxes", ("gst", "taxes", "tax", "total_tax", "totalTax", "gst_and_restaurant_charges")),
+    ("Discount", ("discount", "total_discount", "totalDiscount", "coupon_discount")),
+]
+
+
+def bill_breakdown(cart: dict, anchor: float | None = None) -> dict | None:
+    """The cart's bill line by line, exactly as Swiggy returned it: items, delivery,
+    platform and packaging fees, GST, discounts and the payable total. Lines Swiggy did
+    not return are left out (never guessed); any gap between the lines and the total is
+    shown as "Other charges" so the lines always add up to what will be paid."""
+    total = cart_total(cart, anchor)
+    if total is None:
+        return None
+    pricing = cart.get("pricing") if isinstance(cart.get("pricing"), dict) else cart
+    raw = []
+    for label, keys in BILL_FIELDS:
+        for key in keys:
+            value = pricing.get(key) if isinstance(pricing, dict) else None
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value:
+                raw.append((label, -abs(value) if label == "Discount" else float(value)))
+                break
+    # Lines come in the same unit as the cart (rupees or paise): use the reading whose
+    # sum is closer to the payable total.
+    raw_sum = sum(v for _, v in raw)
+    scale = 100.0 if raw and abs(raw_sum / 100 - total) < abs(raw_sum - total) else 1.0
+    lines = [{"label": label, "amount": round(v / scale, 2)} for label, v in raw]
+    gap = round(total - sum(line["amount"] for line in lines), 2)
+    if lines and abs(gap) >= 0.01:
+        lines.append({"label": "Other charges (as Swiggy shows them)", "amount": gap})
+    return {"lines": lines, "to_pay": total, "itemised": bool(lines) and abs(gap) < 0.01}
+
+
 def _num(data, field: str):
     """The shallowest numeric `field` anywhere in a reply (e.g. the cart's amount to pay)."""
     queue = [data]
@@ -748,7 +786,7 @@ def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
     return {"session_id": session_id, "restaurant": preview["restaurant"], "item": preview["item"],
             "planned": cell["item"], "planned_cost": cell["cost"], "menu_price": preview["menu_price"],
             "to_pay": to_pay, "over_plan": round(to_pay - cell["cost"], 2) if to_pay is not None else None,
-            "checkout_url": CHECKOUT_URL}
+            "bill": prepared.get("bill"), "checkout_url": CHECKOUT_URL}
 
 
 SAFETY_NOTE = ("SmartPlate cannot verify your ingredient or medical rules from Swiggy's menu, so it won't add "
@@ -954,7 +992,7 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
                     (user_id, preview["address_id"], restaurant_id, preview["restaurant"], preview["item_id"],
                      preview.get("menu_price")))
     return {**preview, "to_pay": cart_total(view, preview.get("menu_price")), "checkout_url": CHECKOUT_URL,
-            "orderable": True}
+            "bill": bill_breakdown(view, preview.get("menu_price")), "orderable": True}
 
 
 def _checkout_state(user_id: int) -> dict:
@@ -1000,7 +1038,7 @@ def _checkout_state(user_id: int) -> dict:
                "quantity": item.get("quantity"), "to_pay": total, "payment_method": str(cod["id"])}
     fingerprint = hashlib.sha256(json.dumps(details, sort_keys=True).encode()).hexdigest()
     return {**details, "payment_label": str(cod.get("displayName") or "Cash on Delivery"),
-            "fingerprint": fingerprint}
+            "bill": bill_breakdown(cart, intent.get("menu_price")), "fingerprint": fingerprint}
 
 
 def live_checkout_preview(user_id: int) -> dict:
