@@ -6,6 +6,12 @@ import tempfile
 
 import pytest
 
+# Epicure: the suite always uses the small offline fixture (real file formats, a subset of
+# the vectors), checked against the fixture's own SHA-256 sums. Set before smartplate.config loads.
+_EPICURE_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "epicure")
+os.environ["SMARTPLATE_EPICURE_DIR"] = _EPICURE_FIXTURE
+os.environ["SMARTPLATE_EPICURE_CHECKSUMS"] = os.path.join(_EPICURE_FIXTURE, "SHA256SUMS")
+
 try:                                    # deterministic property runs everywhere (see tests/test_gt_properties.py)
     from hypothesis import HealthCheck, settings
 
