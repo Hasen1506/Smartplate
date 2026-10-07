@@ -118,6 +118,19 @@ class SwiggyError(RuntimeError):
         self.code, self.retry_after, self.http_status = code, retry_after, http_status
 
 
+NOT_CONNECTED_CODES = frozenset({"swiggy_not_connected", "swiggy_auth_expired"})
+
+
+class SwiggyNotConnected(SwiggyError):
+    """There is no usable Swiggy sign-in for this user: never connected, expired, rejected
+    by Swiggy, or unreadable on this server. The fix is the user's (Connect again), not an
+    upstream outage, so the API answers 409 with a Connect action rather than 502."""
+
+    def __init__(self, message="Connect your Swiggy account first (More → Swiggy connection).", *,
+                 code="swiggy_not_connected", http_status=None):
+        super().__init__(message, code=code, http_status=http_status)
+
+
 def init_schema() -> None:
     with db.cursor() as cur:
         cur.executescript(SCHEMA)
@@ -358,8 +371,8 @@ def _rpc(token, method, params, rid, session_id=None):
         payload["id"] = rid
     status, headers, raw = _json("POST", f"{config.SWIGGY_MCP_BASE}/food", payload, token=token, extra=extra)
     if status == 401:
-        raise SwiggyError("Your Swiggy sign-in has expired. Connect again.", code="swiggy_auth_expired",
-                          http_status=401)
+        raise SwiggyNotConnected("Your Swiggy sign-in has expired. Connect again.", code="swiggy_auth_expired",
+                                 http_status=401)
     if status == 429:
         wait = headers.get("retry-after", "")
         wait = min(int(wait), 86400) if str(wait).isdigit() else None
@@ -392,9 +405,9 @@ def classify(tool: dict) -> str:
 def discover(user_id: int) -> dict:
     conn = _connection(user_id)
     if not conn:
-        raise SwiggyError("Not connected to Swiggy")
+        raise SwiggyNotConnected()
     if not conn["access_token"]:
-        raise SwiggyError("Your Swiggy sign-in can no longer be read on this server. Connect again.")
+        raise SwiggyNotConnected("Your Swiggy sign-in can no longer be read on this server. Connect again.")
     headers, init = user_rpc(user_id, conn["access_token"], "initialize", {
         "protocolVersion": CLIENT_VERSION, "capabilities": {},
         "clientInfo": {"name": "SmartPlate", "version": "1.1.0"}}, 1)
