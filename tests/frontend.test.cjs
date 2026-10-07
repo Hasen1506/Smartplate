@@ -226,7 +226,8 @@ test('live configuration routes orders to real Places instead of a dead simulato
   assert.match(vm.runInContext('ordersPanel()', context), /Open live Places/);
   assert.ok(!vm.runInContext('ordersPanel()', context).includes('data-act="exec"'));
   assert.ok(!vm.runInContext('weekScreen()', context).includes('data-act="exec"'));
-  assert.match(vm.runInContext('weekScreen()', context), /Sample weekly planner/);
+  vm.runInContext(`S.view.source = { kind: 'sample', connected: false, label: 'Sample dishes (not real restaurants)', note: 'Connect Swiggy to plan from real restaurants near you.' };`, context);
+  assert.match(vm.runInContext('weekScreen()', context), /Sample dishes \(not real restaurants\)/);
   const budget = vm.runInContext('budgetCard()', context);
   assert.match(budget, /Sample plan estimate/);
   assert.match(budget, /actual purchases are reviewed separately/);
@@ -423,6 +424,18 @@ test('blocked storage cannot silently discard access during recovery rotation', 
   const before = calls.length;
   await assert.rejects(vm.runInContext('rotateRecoveryCode()', context), /Enable browser storage/);
   assert.equal(calls.length, before);
+});
+
+test('the week says what it is planned from and offers the next step', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.view.source = { kind: 'sample', connected: true, label: 'Sample dishes (not real restaurants)', note: 'x' };`, context);
+  assert.match(vm.runInContext('weekScreen()', context), /data-act="live-menus"/);
+  vm.runInContext(`S.view.source = { kind: 'sample', connected: false, label: 'Sample dishes (not real restaurants)', note: 'x' };`, context);
+  assert.match(vm.runInContext('weekScreen()', context), /data-act="swiggy-connect"/);
+  vm.runInContext(`S.view.source = { kind: 'live', label: 'Live Swiggy menus · 1 restaurant, 3 dishes', note: 'Nutrition is estimated', fetched: '2026-11-02T08:00' };`, context);
+  const html = vm.runInContext('weekScreen()', context);
+  assert.match(html, /Live Swiggy menus/); assert.match(html, /Nutrition is estimated/);
+  assert.match(vm.runInContext('budgetCard()', context), /live Swiggy prices/);
 });
 
 test('an unconnected Swiggy offers Connect, not Retry (409 swiggy_not_connected)', async () => {

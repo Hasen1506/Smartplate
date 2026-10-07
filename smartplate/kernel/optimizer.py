@@ -129,8 +129,13 @@ def week_cap(user: dict, plan: dict) -> float:
 
 def build_context(user: dict, plan: dict) -> dict:
     sig = taste.signals(user["id"])
+    menu = models.menu_for_user(user)
+    if any(it.get("source") == "live" for it in menu):
+        # The live catalogue is the user's own places (their live favourites, or what they
+        # searched): every one is a usual place, none a "new" discovery.
+        sig = {**sig, "favourites": {it["restaurant_id"] for it in menu}}
     return {
-        "menu": models.menu_for_city(user["city"]),
+        "menu": menu,
         "festivals": festivals.for_week(plan["week_start"]),
         "festivals_all": festivals.for_week_all(plan["week_start"]),
         "weather": weather.week(user["city"], plan["week_start"]),

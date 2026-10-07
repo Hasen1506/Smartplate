@@ -380,7 +380,7 @@ function budgetCard() {
   const left = cap - spend, pct = cap ? Math.min(100, (spend / cap) * 100) : 0;
   const modes = S.meta?.modes || {};
   return `<section class="budget card" aria-label="Budget">
-    <div class="brow"><div><div class="lbl">Sample plan estimate</div>
+    <div class="brow"><div><div class="lbl">${S.view.source?.kind === "live" ? "Plan estimate · live Swiggy prices" : "Sample plan estimate"}</div>
       <div class="big ${left < 0 ? "neg" : ""}">${rupee0(Math.abs(left))} <small>${left < 0 ? "over budget" : "left of " + rupee0(cap)}</small></div></div>
       <div class="seg" role="group" aria-label="How tight is money this week?">${Object.entries(modes).map(([k, l]) =>
         `<button class="${S.view.plan.mode === k ? "on" : ""}" data-mode="${k}" title="${esc(S.meta.mode_outcomes?.[k] || "")}">${esc(l)}</button>`).join("")}</div></div>
@@ -542,12 +542,23 @@ function weekScreen() {
   return `<div class="whead"><h1 class="greet">Week of ${esc(fmtDate(v.plan.week_start))}</h1>
       <button class="ghost small" data-act="reopt" title="Recompute with your current rules">↻ Re-plan</button></div>
     ${moving}
-    <p class="fine">Sample weekly planner: dishes, nutrition and prices come from the demo catalogue. Open Places for real restaurants and current Swiggy menus after connecting.</p>
+    ${sourceLine(v.source)}
     <p class="fine">Tap a meal to change it. Drag it onto another meal (or use <b>Move</b>) to swap them. The rest of the week re-balances each time.</p>
     ${gone.length ? `<p class="fine gone">${esc(gone.map(x => x.d.day).join(", "))}: before this plan started.</p>` : ""}
     <div class="days">${shown.map(({ d, i, ctx }) => dayRow(d, i, ctx)).join("")}</div>
     <div class="row gap"><button data-act="newweek">Plan next week</button>
       ${S.meta.swiggy_provider === "simulated" ? `<button class="ghost" data-act="exec" title="Try SmartPlate placing every delivery for you (simulation)">Simulate auto-ordering…</button>` : ""}</div>`;
+}
+// What the plan is built from: live Swiggy menus, or clearly-labelled sample dishes.
+function sourceLine(src) {
+  if (!src) return "";
+  if (src.kind === "live") return `<div class="source live" role="note"><b>${esc(src.label)}</b>
+      <span class="fine">${esc(src.note)} Updated ${esc(src.fetched || "")}.</span>
+      <span class="row gap"><button class="ghost small" data-act="live-menus">↻ Refresh live menus</button>
+      <button class="ghost small" data-act="sample-menus">Use sample dishes</button></span></div>`;
+  return `<div class="source sample" role="note"><b>${esc(src.label)}</b> <span class="fine">${esc(src.note)}</span>
+      ${src.connected ? `<button class="small" data-act="live-menus">Plan from my Swiggy restaurants</button>`
+        : `<button class="small" data-act="swiggy-connect">Connect Swiggy</button>`}</div>`;
 }
 function fmtDate(iso) {
   if (!iso) return "";
@@ -1385,6 +1396,8 @@ function wire() {
     "download-csv": () => downloadPrivate(`/api/receipts/${S.userId}/export.csv`, "smartplate-expenses.csv", "text/csv"),
     genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
     "start-onboard": async () => startOnboard(), notify: toggleAlerts,
+    "live-menus": async () => { S.view = await api(`/api/plan/${S.planId}/live-menus`, "POST", {}); toast("Planned from your live Swiggy menus"); render(); },
+    "sample-menus": async () => { S.view = await api(`/api/plan/${S.planId}/sample-menus`, "POST", {}); toast("Back to sample dishes"); render(); },
     "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); location.href = r.authorize_url; },
     "swiggy-discover": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/discover`, "POST", {}); toast("Tool list refreshed"); render(); },
     "swiggy-addresses": async () => { S.swAddrs = await api(`/api/user/${S.userId}/swiggy/addresses`); render(); },

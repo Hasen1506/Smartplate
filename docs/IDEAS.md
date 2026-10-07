@@ -19,3 +19,19 @@ them is built. Grouped by the PR that surfaced it.
   recipes when their costs are within a few rupees.
 - **One Connect banner for all live Swiggy surfaces.** The error bar now offers Connect on a
   409; the live-cart and checkout panels still show their own inline error text.
+
+## From PR B (live menus into the planner)
+
+- **Learn nutrition from check-ins** ("ate half", "still hungry") so a live dish's estimate
+  narrows over time; show a confidence band instead of one number.
+- **A curated dish-nutrition table** (IFCT 2017 values per canonical dish) in a config file,
+  reviewed by a nutritionist, replacing the regex templates in `domain/live_catalog.py`.
+- **Ask the restaurant about allergens**: live dishes for allergy profiles are filtered by
+  name only. Add the "will ask" order instruction to every live pick for an allergy profile,
+  and keep the existing rule that ordering stays a review, not a cart.
+- **Refresh live menus on a schedule** (e.g. Sunday evening before the weekly plan) and on
+  address change, instead of only on tap.
+- **Per-locality cache** of live menus shared across users at the same address area, to cut
+  MCP calls.
+- **Real delivery fee per restaurant** learned from previous cart bills (the planner uses a
+  ₹35 estimate until the cart is checked).
