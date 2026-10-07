@@ -98,6 +98,13 @@ def create_app() -> Flask:
 
     @app.errorhandler(swiggy_connect.SwiggyError)
     def swiggy_error(error):
+        if error.code in swiggy_connect.NOT_CONNECTED_CODES:
+            # The user's own sign-in is missing or no longer accepted: a state they fix
+            # by connecting, not an upstream failure (502 pages ops and misleads monitoring).
+            uid = (request.view_args or {}).get("user_id")
+            return jsonify(error=error.code, code=error.code, message=str(error),
+                           action={"label": "Connect Swiggy", "act": "swiggy-connect"},
+                           connect_url=f"/api/user/{uid}/swiggy/connect" if uid else None), 409
         response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after)
         if error.retry_after is not None:
             response.headers['Retry-After'] = str(error.retry_after)
