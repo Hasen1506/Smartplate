@@ -53,8 +53,16 @@ def _execute_one(user, plan, session, decision, ctx, provider):
     sub_info = None
     if not res.ok and res.error == "menu_load":
         # substitute to next-best above the rating floor (never below) -------- #
+        others = [d for d in models.decisions_for_plan(plan["id"])
+                  if d["session_id"] != session["id"] and d["chosen_kind"] == "delivery"
+                  and d["session_status"] in ("active", "ordered", "confirmed")]
+        week_n = {}
+        for d in others:
+            week_n[d["item_id"]] = week_n.get(d["item_id"], 0) + 1
+        taken = ({d["item_id"] for d in others if d["day"] == session["day"]}           # once a day
+                 | {i for i, n in week_n.items() if n >= optimizer.MAX_ITEM_REPEAT})    # twice a week
         alt = _next_best(user, plan, session, ctx, exclude_restaurant=decision["restaurant_id"],
-                         max_cost=decision['cost'])
+                         max_cost=decision['cost'], exclude_items=taken)
         if alt and alt["kind"] == "delivery":
             substituted = True
             sub_info = {"from": decision["item_name"], "to": alt["item_name"],
@@ -81,7 +89,9 @@ def _execute_one(user, plan, session, decision, ctx, provider):
     }
 
 
-def _next_best(user, plan, session, ctx, exclude_restaurant, max_cost=None):
+def _next_best(user, plan, session, ctx, exclude_restaurant, max_cost=None, exclude_items=()):
+    """Best replacement above the rating floor and within the reviewed price — never a
+    dish the planner's own variety rules would refuse (twice a day, thrice a week)."""
     cands = optimizer.build_candidates(user, plan, session, ctx)
     w = ctx["weights"]
     ref = max(1.0, user["weekly_budget"] / 21)
@@ -89,7 +99,7 @@ def _next_best(user, plan, session, ctx, exclude_restaurant, max_cost=None):
             if c["kind"] == "delivery" and c["restaurant_id"] != exclude_restaurant
             # the promise is hard at execution time regardless of the planner's
             # rating-floor mode: never substitute below the user's chosen ★.
-            and c.get("rating", 0) >= user["rating_floor"]]
+            and c.get("rating", 0) >= user["rating_floor"] and c.get("item_id") not in exclude_items]
     if max_cost is not None:
         pool = [c for c in pool if c['cost'] <= max_cost]
     if not pool:
