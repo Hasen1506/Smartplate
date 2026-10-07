@@ -34,8 +34,16 @@ def targets_for(user: dict) -> dict:
     return t
 
 
+def meal_shares(user: dict) -> dict:
+    """The user's own calorie split across meals when they set one, else the default."""
+    own = (user.get("nutrition_targets") or {}).get("meal_share")
+    if isinstance(own, dict) and own:
+        return {**MEAL_SHARE, **{k: float(v) for k, v in own.items() if k in MEAL_SHARE}}
+    return dict(MEAL_SHARE)
+
+
 def meal_target(user: dict, meal: str) -> dict:
-    share = MEAL_SHARE.get(meal, 0.33)
+    share = meal_shares(user).get(meal, 0.33)
     return {k: v * share for k, v in targets_for(user).items()}
 
 
