@@ -7,7 +7,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
-from .domain import live_catalog, models, sentiment, week_orders
+from .domain import learning, live_catalog, models, sentiment, week_orders
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp
 from .kernel import agent_brain
@@ -681,7 +681,19 @@ def create_app() -> Flask:
 
     @app.post("/api/session/<int:session_id>/rate")
     def session_rate(session_id):
-        return jsonify(everyday.rate(session_id, request.get_json().get("score")))
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(everyday.rate(session_id, body.get("score"), body.get("reasons")))
+
+    @app.get("/api/user/<int:user_id>/learned")
+    def learned(user_id):
+        return jsonify({"learned": learning.chips(user_id), "reasons": learning.REASONS})
+
+    @app.post("/api/user/<int:user_id>/learned/undo")
+    def learned_undo(user_id):
+        learning.undo(user_id, (request.get_json(force=True, silent=True) or {}).get("key", ""))
+        view = service.current_plan(user_id)
+        service.reoptimize(view["plan"]["id"])
+        return jsonify({"learned": learning.chips(user_id), "plan": service.plan_view(view["plan"]["id"])})
 
     @app.post("/api/plan/<int:plan_id>/swap")
     def plan_swap(plan_id):
