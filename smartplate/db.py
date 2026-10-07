@@ -68,6 +68,16 @@ CREATE TABLE IF NOT EXISTS menu_items (
     reviews TEXT NOT NULL DEFAULT '[]'             -- short snippets for local sentiment (§3.1)
 );
 
+CREATE TABLE IF NOT EXISTS rating_reasons (       -- one-tap "why" behind a rating (domain/learning)
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    session_id INTEGER NOT NULL,
+    reason TEXT NOT NULL,                         -- late | small | spicy | pricey | great
+    item_id INTEGER,
+    restaurant_id INTEGER,
+    created_ts TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS order_queue (          -- meals the user picked to order (domain/week_orders)
     session_id INTEGER PRIMARY KEY,
     plan_id INTEGER NOT NULL,
