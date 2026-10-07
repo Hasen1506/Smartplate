@@ -3,13 +3,12 @@ No real account, cart or order is used by these tests."""
 import json
 
 import pytest
+from test_followups import FakeSwiggy, _connect
 
-from smartplate import db
-from smartplate import config
+from smartplate import config, db
 from smartplate.app import create_app
 from smartplate.integrations import swiggy_connect, swiggy_live
 from smartplate.integrations.swiggy_connect import SwiggyError
-from test_followups import FakeSwiggy, _connect
 
 SCHEMAS = {
     "get_addresses": {"type": "object", "properties": {"page": {"type": "number"}, "pageSize": {"type": "number"}}},
@@ -361,7 +360,11 @@ def test_vegetarians_do_not_see_non_veg_dishes(client, swiggy, monkeypatch):
 def test_reading_helpers():
     assert swiggy_live.rupees({"priceInRupees": 180}) == 180
     assert swiggy_live.rupees({"priceInPaise": 950}) == 9.5
-    assert swiggy_live.rupees({"price": 180}) is None
+    # Swiggy's bare `price` has no documented unit: read it in either form (live QA saw
+    # every dish as "Price in cart" when bare prices were dropped).
+    assert swiggy_live.rupees({"price": 180}) == 180 and swiggy_live.price_estimated({"price": 180})
+    assert swiggy_live.rupees({"price": 18000}) == 180                             # paise
+    assert swiggy_live.rupees({"price": "₹149"}) == 149 and not swiggy_live.price_estimated({"price": "₹149"})
     assert swiggy_live.rupees({"price": 25000, "priceInPaise": 25000}) == 250.0
     assert swiggy_live.rupees({"name": "x"}) is None
     assert swiggy_live._num({"a": {"b": [{"toPay": "₹ 212"}]}}, "to_pay") == 212.0
@@ -423,8 +426,9 @@ def test_checkout_rechecks_external_cart_changes(client, swiggy, monkeypatch, ch
 
 
 def test_latest_quote_wins_and_expired_quotes_never_place(client, swiggy, monkeypatch):
-    from smartplate import clock
     import datetime as dt
+
+    from smartplate import clock
     first = _prepared_checkout(client, swiggy, monkeypatch)
     second = client.get("/api/user/3/swiggy/checkout/preview").get_json()
     assert client.post("/api/user/3/swiggy/checkout", json={"expected_fingerprint": first["fingerprint"]}).status_code == 409
