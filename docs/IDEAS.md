@@ -62,3 +62,16 @@ them is built. Grouped by the PR that surfaced it.
   the place serves small portions; scale its other dishes too, with the user's consent.
 - **Show the learned effect in the plan** ("planned less: Chennai Mess — you said late twice")
   as a reason line on the decision, not only as a chip.
+
+## From PR F (onboarding rhythm and editable planner settings)
+
+- **Rhythm by weekday** ("I cook dinner on weekends, order on weekdays"; "office cafeteria
+  Monday to Thursday"): today the rhythm is one setting per meal for every day.
+- **Re-normalise the calorie split over the meals actually planned** (a dinner-only user
+  still gets dinner's 35% share as the target); offer it as the default for new users after
+  a golden-reviewed change.
+- **Snacks as a rhythm option** (planned, not only logged).
+- **Learn the variety cap from swaps**: users who keep swapping back to the same dish want a
+  higher cap; suggest it instead of making them find the setting.
+- **Home-cooked meal without a recipe**: when no suggested recipe fits the user's rules, let
+  them log what they actually cooked so nutrition still adds up.

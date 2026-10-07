@@ -75,7 +75,7 @@ def test_browser_golden_first_week(server):
             page.locator('[data-ob="allergens"][data-val="peanut"]').click()
             expect(page.locator('[data-ob="allergens"][data-val="peanut"]')).to_have_attribute("aria-pressed", "true")
             page.get_by_role("button", name="Continue").click()
-            page.locator('[data-ob="meals"][data-val="breakfast"]').click()
+            page.locator('[data-ob="rh_breakfast"][data-val="order"]').click()      # rhythm: order all three
             page.get_by_role("button", name="Continue").click()
             page.locator("#ob-budget").fill("2500")
             page.get_by_role("button", name="Continue").click()

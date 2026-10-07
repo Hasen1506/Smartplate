@@ -61,6 +61,22 @@ COOK_EFFORT_PENALTY = 0.35   # soft cost of cooking yourself (time/effort)
 MAX_ITEM_REPEAT = 2          # variety: don't order the same dish more than twice a week
 
 
+def item_repeat(user: dict) -> int:
+    """How often the same dish may be planned in a week: the user's own setting (some
+    people want the same lunch every day), else the default of twice."""
+    try:
+        n = int((user.get("health_targets") or {}).get("max_item_repeat", MAX_ITEM_REPEAT))
+    except (TypeError, ValueError):
+        return MAX_ITEM_REPEAT
+    return min(7, max(1, n))
+
+
+def rhythm(user: dict) -> dict:
+    """meal -> 'order' | 'cook' | 'skip', as the user told us at onboarding ({} = all ordered)."""
+    r = (user.get("prefs") or {}).get("rhythm")
+    return r if isinstance(r, dict) else {}
+
+
 def _cook_cap(user: dict) -> int:
     """Cooks/week the user is willing to do — their stated rhythm, else the default.
     Stored in health_targets so no schema change is needed; absent ⇒ the default
@@ -277,6 +293,14 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
             "leftover": lo["label"], "forced": True,
         }]
 
+    # --- a meal the user cooks themselves (their rhythm): a home recipe, never delivery
+    if rhythm(user).get(meal) == "cook":
+        cook = _cook_candidate(user, session, ctx)
+        if cook:
+            cook["routine"] = True               # their routine, not one of the flexible cook days
+            return [cook, _skip(forced=False, reason="Your home-cooked meal didn't fit the budget — skipped.")]
+        return [_skip(forced=True, reason=f"You cook {meal} yourself (no recipe suggestion fits your rules).")]
+
     # --- delivery candidates (apply ALL hard filters) -------------------- #
     scheduled_min = models.MEAL_WINDOWS[meal][1]
     fasting = health.in_fasting_window(user, scheduled_min)
@@ -298,7 +322,7 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
             return picked[:n]
         slots = ctx.get("delivery_slots", MAX_DELIVERY_CANDIDATES)
         # few usual dishes for many meals: offer enough new ones to fill the week
-        n_fresh = DISCOVERY_PER_SESSION if MAX_ITEM_REPEAT * len(usual) >= ctx.get("n_active", 0) else slots
+        n_fresh = DISCOVERY_PER_SESSION if ctx.get("max_repeat", MAX_ITEM_REPEAT) * len(usual) >= ctx.get("n_active", 0) else slots
         cands = best(usual, slots) + best(fresh, n_fresh)
 
     cook = _cook_candidate(user, session, ctx)
@@ -423,7 +447,9 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     # MAX_ITEM_REPEAT times a week. Six dishes therefore cap a week at 12 deliveries:
     # a 21-meal week skipped 9 meals "for budget" with most of the budget unspent.
     # Offer enough distinct dishes per meal that the repeat cap can't empty a slot.
-    ctx["delivery_slots"] = max(MAX_DELIVERY_CANDIDATES, math.ceil(len(active) / MAX_ITEM_REPEAT) + 1)
+    repeat = item_repeat(user)
+    ctx["max_repeat"] = repeat
+    ctx["delivery_slots"] = max(MAX_DELIVERY_CANDIDATES, math.ceil(len(active) / repeat) + 1)
     ctx["n_active"] = len(active)
     ctx["tight"] = plan["mode"] == "survival"
 
@@ -457,8 +483,8 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
                               + _tiebreak(s, c)) * v)
             budget_terms.append(c["cost"] * v)
             day_terms.setdefault(s["day"], []).append(c["cost"] * v)
-            if c["kind"] == "cook" and c.get("recipe_key"):   # countable cook (not free leftover)
-                cook_vars.append(v)
+            if c["kind"] == "cook" and c.get("recipe_key") and not c.get("routine"):
+                cook_vars.append(v)                   # countable cook (not leftover, not their routine)
             if _unforced_skip(c):
                 skip_vars.append(v)
             if c["kind"] == "delivery":
@@ -545,7 +571,7 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
         per_day = {}
         for s in active:
             per_day[s["day"]] = per_day.get(s["day"], 0) + 1
-        usual_room = min(MAX_ITEM_REPEAT * len(usual_dishes),               # repeats a week…
+        usual_room = min(repeat * len(usual_dishes),                        # repeats a week…
                          sum(min(n, len(usual_dishes)) for n in per_day.values()))   # …and once a day
         cookable = sum(1 for cands in cand_map.values() if any(c["kind"] == "cook" and c.get("recipe_key")
                                                                  for c in cands))
@@ -554,8 +580,8 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
         prob += pulp.lpSum(discovery_vars) <= max(n_new, uncovered)
     for item_id, vlist in item_vars.items():                    # variety: cap repeats per dish —
         pinned_n = sum(1 for c in pinned.values() if c.get("item_id") == item_id)   # pins count too
-        if len(vlist) + pinned_n > MAX_ITEM_REPEAT:
-            prob += pulp.lpSum(vlist) <= max(0, MAX_ITEM_REPEAT - pinned_n)
+        if len(vlist) + pinned_n > repeat:
+            prob += pulp.lpSum(vlist) <= max(0, repeat - pinned_n)
     for (item_id, day), vlist in item_day_vars.items():
         pinned_same = sum(1 for sid, c in pinned.items() if c.get("item_id") == item_id
                           and next(s["day"] for s in sessions if s["id"] == sid) == day)
@@ -644,7 +670,9 @@ def _label_extra_cooks(active, cand_map, x, n_extra):
             return
         cands = cand_map[s["id"]]
         i = next((i for i in range(len(cands)) if (pulp.value(x[(s["id"], i)]) or 0) > 0.5), None)
-        if i is not None and cands[i]["kind"] == "cook" and cands[i].get("recipe_key"):
+        # only the countable cooks the extra-cook budget counted (never the user's routine)
+        if (i is not None and cands[i]["kind"] == "cook" and cands[i].get("recipe_key")
+                and not cands[i].get("routine")):
             cand_map[s["id"]] = [{**c, "budget_cook": True} if j == i else c for j, c in enumerate(cands)]
             n_extra -= 1
 

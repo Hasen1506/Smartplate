@@ -27,6 +27,75 @@ COOK_BY_ANSWER = {"never": 0, "sometimes": 2, "often": 5, "most": 10}
 # --------------------------------------------------------------------------- #
 # Set-up
 # --------------------------------------------------------------------------- #
+RHYTHM_CHOICES = ("order", "cook", "skip")
+KCAL_RANGE, PROTEIN_RANGE, SHARE_RANGE, REPEAT_RANGE = (1000, 4500), (20, 250), (0.1, 0.7), (1, 7)
+
+
+def _pop_rhythm(body: dict) -> dict | None:
+    """The user's real eating rhythm: for each meal, do they order it, cook it, or skip
+    it? (Instead of assuming three ordered meals.) Returns None when not given."""
+    if not isinstance(body, dict) or "rhythm" not in body:
+        return None
+    r = body.pop("rhythm")
+    if not isinstance(r, dict) or not r or set(r) - set(profile.MEALS):
+        raise ValueError("Rhythm must say, for breakfast, lunch and dinner, whether you order, cook or skip it")
+    if any(v not in RHYTHM_CHOICES for v in r.values()):
+        raise ValueError("For each meal choose order, cook or skip")
+    full = {m: r.get(m, "skip") for m in profile.MEALS}
+    if all(v == "skip" for v in full.values()):
+        raise ValueError("Pick at least one meal you order or cook")
+    return full
+
+
+def _pop_tuning(body: dict) -> dict | None:
+    """User-editable planner settings: calorie split, daily targets, variety cap."""
+    if not isinstance(body, dict) or "tuning" not in body:
+        return None
+    t = body.pop("tuning")
+    if not isinstance(t, dict) or set(t) - {"meal_share", "kcal", "protein_g", "max_repeat"}:
+        raise ValueError("Tuning takes meal_share, kcal, protein_g and max_repeat")
+    out = {}
+
+    def num(key, lo, hi, cast=float):
+        v = t[key]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
+            raise ValueError(f"{key} must be between {lo} and {hi}")
+        return cast(v)
+    if "meal_share" in t:
+        share = t["meal_share"]
+        if not isinstance(share, dict) or not share or set(share) - set(profile.MEALS):
+            raise ValueError("meal_share maps breakfast/lunch/dinner to a fraction of the day's calories")
+        for k, v in share.items():
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not SHARE_RANGE[0] <= v <= SHARE_RANGE[1]:
+                raise ValueError(f"Each meal's share must be between {SHARE_RANGE[0]:.0%} and {SHARE_RANGE[1]:.0%}")
+        total = sum(share.values())
+        if len(share) == len(profile.MEALS) and abs(total - 1) > 0.02:
+            raise ValueError("The calorie split must add up to 100%")
+        out["meal_share"] = {k: round(float(v), 3) for k, v in share.items()}
+    if "kcal" in t:
+        out["kcal"] = num("kcal", *KCAL_RANGE, cast=int)
+    if "protein_g" in t:
+        out["protein_g"] = num("protein_g", *PROTEIN_RANGE, cast=int)
+    if "max_repeat" in t:
+        out["max_repeat"] = num("max_repeat", *REPEAT_RANGE, cast=int)
+    return out
+
+
+def json_or(raw, fallback: dict) -> dict:
+    import json
+    return dict(json.loads(raw)) if raw else dict(fallback or {})
+
+
+def _apply_tuning(nt: dict, ht: dict, tuning: dict | None) -> None:
+    if not tuning:
+        return
+    for k in ("meal_share", "kcal", "protein_g"):
+        if k in tuning:
+            nt[k] = tuning[k]
+    if "protein_g" in tuning:
+        ht["protein_floor_g"] = tuning["protein_g"]
+    if "max_repeat" in tuning:
+        ht["max_item_repeat"] = tuning["max_repeat"]
 def _targets_blob(data: dict, existing: dict | None = None) -> tuple[dict, dict, list[str]]:
     targets, working = profile.targets_from_goal(data.get("goal", "none"), data.get("body"))
     nt = dict(existing or {})
@@ -40,6 +109,10 @@ def create_profile(body: dict) -> dict:
     cook = body.pop("cook", "never") if isinstance(body, dict) else "never"
     if cook not in COOK_BY_ANSWER:
         raise ValueError("Choose how often you cook")
+    rhythm = _pop_rhythm(body)
+    tuning = _pop_tuning(body)
+    if rhythm:
+        body["meals"] = [m for m in profile.MEALS if rhythm[m] != "skip"]
     data = profile.validate_setup(body)
     if "weekly_budget" not in data:
         raise ValueError("Set a weekly food budget")
@@ -49,9 +122,12 @@ def create_profile(body: dict) -> dict:
     nt, targets, working = _targets_blob(data)
     key, key_hash = access.new_key()
     ht = {"protein_floor_g": targets["protein_g"], "max_cook_per_week": COOK_BY_ANSWER[cook]}
+    _apply_tuning(nt, ht, tuning)
     prefs = {"setup_done": True, "meals": data["meals"], "daily_cap": data.get("daily_cap"),
              "goal": data["goal"], "body": data.get("body"), "area": data.get("area", ""),
              "cook": cook, "targets_working": working}
+    if rhythm:
+        prefs["rhythm"] = rhythm
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO users(name, city, diet, weekly_budget, rating_floor, mode, allergens, medical, "
@@ -75,8 +151,12 @@ def update_setup(user_id: int, body: dict) -> dict:
     cook = body.pop("cook", None) if isinstance(body, dict) else None
     if cook is not None and cook not in COOK_BY_ANSWER:
         raise ValueError("Choose how often you cook")
+    rhythm = _pop_rhythm(body)
+    tuning = _pop_tuning(body)
+    if rhythm:
+        body["meals"] = [m for m in profile.MEALS if rhythm[m] != "skip"]
     data = profile.validate_setup(body)
-    if not data and cook is None:
+    if not data and cook is None and tuning is None:
         raise ValueError("Nothing to update")
     prefs = dict(user["prefs"])
     if "name" in data and not user.get("access_hash"):
@@ -109,6 +189,15 @@ def update_setup(user_id: int, body: dict) -> dict:
         else:
             nt = {**user["nutrition_targets"], "variety": data["variety"]}
         updates["nutrition_targets"] = db.jd(nt)
+    if rhythm:
+        prefs["rhythm"] = rhythm
+    elif "meals" in data and prefs.get("rhythm"):      # a plain meal list keeps cook/order for those meals
+        prefs["rhythm"] = {m: (prefs["rhythm"].get(m, "order") if m in data["meals"] else "skip")
+                           for m in profile.MEALS}
+    if tuning:
+        nt_now = json_or(updates.get("nutrition_targets"), user["nutrition_targets"])
+        _apply_tuning(nt_now, ht, tuning)
+        updates["nutrition_targets"] = db.jd(nt_now)
     updates["health_targets"] = db.jd(ht)
     prefs["setup_done"] = True
     updates["prefs"] = db.jd(prefs)
