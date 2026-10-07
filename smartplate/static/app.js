@@ -58,6 +58,9 @@ function mergeUsers(open) {
   return [...priv, ...open.filter(u => !priv.some(p => p.id === u.id))];
 }
 
+// Swiggy answers 409 with one of these when the user's own sign-in is missing or no longer
+// accepted: the fix is a Connect button, not a Retry.
+const SWIGGY_RECONNECT = new Set(["swiggy_not_connected", "swiggy_auth_expired"]);
 async function api(path, method = "GET", body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
   const k = S.userId ? keys.get(S.userId) : null;
@@ -66,11 +69,13 @@ async function api(path, method = "GET", body) {
   const r = await fetch(path, opt);
   if (!r.ok) {
     const data = await r.json().catch(() => ({}));
-    if (data.code === "swiggy_auth_expired" && S.swiggy) {
-      S.swiggy.connected = false; S.swiggy.expired = true;
+    if (SWIGGY_RECONNECT.has(data.code) && S.swiggy) {
+      S.swiggy.connected = false; S.swiggy.expired = data.code === "swiggy_auth_expired";
       S.liveCart = null; S.checkoutReview = null;
     }
-    throw new Error(data.message || data.error || r.statusText);
+    const err = new Error(data.message || data.error || r.statusText);
+    err.code = data.code;
+    throw err;
   }
   return r.json();
 }
@@ -105,9 +110,9 @@ function setBusy(b) {
 // Wrap every user-triggered action: show progress, surface errors instead of failing silently.
 async function guard(fn) {
   if (S.busy) return;
-  setBusy(true); S.error = null;
+  setBusy(true); S.error = null; S.errorCode = null;
   try { await fn(); }
-  catch (e) { S.error = e.message || String(e); render(); }
+  catch (e) { S.error = e.message || String(e); S.errorCode = e.code || null; render(); }
   finally { setBusy(false); }
 }
 async function reloadPlan() { S.view = await api(`/api/plan/${S.planId}`); render(); }
@@ -320,7 +325,8 @@ function welcomeScreen() {
 function errbar(retry = true) {
   if (!S.error) return "";
   return `<div class="errbar" role="alert"><span>⚠ ${esc(S.error)}</span>
-    ${retry ? `<button class="retry ghost" data-act="reload">Retry</button>` : ""}
+    ${SWIGGY_RECONNECT.has(S.errorCode) ? `<button class="retry" data-act="swiggy-connect">Connect Swiggy</button>`
+      : retry ? `<button class="retry ghost" data-act="reload">Retry</button>` : ""}
     <button class="x" data-close-err="1" title="Dismiss" aria-label="Dismiss">✕</button></div>`;
 }
 
@@ -1353,7 +1359,7 @@ function wire() {
   on("[data-meal]", "drop", (e) => { e.preventDefault(); const from = e.dataTransfer.getData("text/plain"), to = e.currentTarget.dataset.meal;
     if (from && from !== to) guard(() => swapMeals(from, to)); });
   on("[data-close]", "click", (e) => { if (e.target.dataset.close) { S.drawer = null; render(); } });
-  on("[data-close-err]", "click", () => { S.error = null; render(); });
+  on("[data-close-err]", "click", () => { S.error = null; S.errorCode = null; render(); });
   on("[data-close-review]", "click", (e) => { if (e.target.dataset.closeReview) { S.orderReview = null; render(); } });
   on("[data-close-cart-review]", "click", (e) => { if (e.target.dataset.closeCartReview) { S.cartReview = null; render(); } });
   on("[data-close-live-review]", "click", (e) => { if (e.target.dataset.closeLiveReview) { S.liveOrderReview = null; render(); } });

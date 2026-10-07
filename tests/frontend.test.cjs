@@ -30,7 +30,7 @@ function fixture(overrides = {}) {
       createElement: () => element, addEventListener() {}, body: element },
     localStorage: { getItem: () => '2', setItem() {} },
     fetch: async (url, options) => { calls.push({ url, options });
-      return { ok: !!replies[url], json: async () => replies[url] || { error: 'Unexpected route' } }; },
+      return { ok: !!replies[url] && !replies[url].__status, json: async () => replies[url] || { error: 'Unexpected route' } }; },
     setTimeout: () => {}, console,
   });
   vm.runInContext(source, context);
@@ -423,4 +423,19 @@ test('blocked storage cannot silently discard access during recovery rotation', 
   const before = calls.length;
   await assert.rejects(vm.runInContext('rotateRecoveryCode()', context), /Enable browser storage/);
   assert.equal(calls.length, before);
+});
+
+test('an unconnected Swiggy offers Connect, not Retry (409 swiggy_not_connected)', async () => {
+  const { context } = fixture({ '/api/user/2/swiggy/addresses': { __status: 409, error: 'swiggy_not_connected',
+    code: 'swiggy_not_connected', message: 'Connect your Swiggy account first (More → Swiggy connection).',
+    action: { label: 'Connect Swiggy', act: 'swiggy-connect' } } });
+  await context.bootPromise;
+  await vm.runInContext("guard(() => api('/api/user/2/swiggy/addresses'))", context);
+  const bar = vm.runInContext('errbar()', context);
+  assert.match(bar, /data-act="swiggy-connect"/);
+  assert.match(bar, /Connect your Swiggy account first/);
+  assert.doesNotMatch(bar, /data-act="reload"/);
+  // a real upstream failure keeps Retry
+  vm.runInContext("S.error = 'Swiggy returned an error'; S.errorCode = 'swiggy_error'", context);
+  assert.match(vm.runInContext('errbar()', context), /data-act="reload"/);
 });

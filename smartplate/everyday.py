@@ -492,7 +492,7 @@ def heads_up(view: dict, user: dict, plan: dict, decisions: list[dict], at: dt.d
                             "We don't assume what you ate."})
 
     skipped_budget = [d for d in decisions if d["chosen_kind"] == "skip" and d["session_status"] == "active"
-                      and not d.get("past") and any("budget" in r for r in d.get("reasons", []))]
+                      and not d.get("past") and any("budget" in r.lower() for r in d.get("reasons", []))]
     rec = view.get("recommendation") or {}
     if skipped_budget:
         more = ""
