@@ -9,7 +9,7 @@ import datetime as dt
 import math
 
 from . import config, db
-from .domain import (carbon, checkout, community, festivals, health, household, intake,
+from .domain import (carbon, checkout, community, festivals, health, household, intake, live_catalog,
                      ledger, models, nutrition, profile, receipts, reverse_mode, taste, timing, weather)
 from .kernel import (agent_brain, budget, explainability, optimizer, recommender,
                      scheduler, variance)
@@ -228,6 +228,7 @@ def plan_view(plan_id: int) -> dict:
     from . import everyday
     view["next_up"] = everyday.next_up(view, at)
     view["heads_up"] = everyday.heads_up(view, user, plan, decisions, at)
+    view["source"] = live_catalog.source_for(user["id"])
     return view
 
 
