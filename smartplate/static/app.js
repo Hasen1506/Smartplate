@@ -13,7 +13,7 @@ const S = {
   busy: false, error: null, hideCold: false, orderReview: null, cartReview: null,
   liveResults: null, liveFavourites: null, liveBrowseMenu: null, liveOrderReview: null, liveCart: null,
   checkoutReview: null, placedOrder: null, liveOrderStatus: null, liveOrderHistory: null, liveCartError: null,
-  sheet: null, swapPick: null, moving: null, onboard: null, places: null, calendar: null, welcome: false, signin: false, account: null,
+  sheet: null, hhEdit: null, recap: null, swapPick: null, moving: null, onboard: null, places: null, calendar: null, welcome: false, signin: false, account: null,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
 const MEAL_ICON = { breakfast: "☀", lunch: "◐", dinner: "☾" };
@@ -670,6 +670,7 @@ function sheetDialog() {
     ${d.usual_more ? `<p class="fine">+${d.usual_more} more usual places. <a href="#" data-tab="places">Edit your list</a></p>` : ""}
     ${d.new.length ? `<h3 class="k">Something new</h3>${d.new.map(x => dishBtn(x, x.restaurant)).join("")}` : ""}
     ${d.cook.length ? `<h3 class="k">Cook at home</h3><div class="chips">${d.cook.map(c => `<button data-cook="${esc(c.recipe_key)}">${esc(c.name)} · ${rupee0(c.price)}</button>`).join("")}</div>` : ""}
+    ${eatersBlock(s)}
     <div class="sheet-foot">
       <button class="ghost" data-choose-auto="${s.id}">Let SmartPlate choose</button>
       <button class="ghost" data-sess="${s.id}:skipped">Skip this meal</button>
@@ -679,6 +680,21 @@ function sheetDialog() {
   </section></div>`;
 }
 
+function eatersBlock(s) {
+  const h = S.view.household;
+  if (!h) return "";
+  const cell = S.view.grid.flatMap(d => Object.values(d.meals)).find(m => m.session_id === s.id);
+  const on = new Set(cell?.eaters || []);
+  return `<h3 class="k">Who's eating</h3><div class="chips">${h.people.map(p => `<button class="${on.has(p.id) ? "on" : ""}" aria-pressed="${on.has(p.id)}" data-eater="${s.id}:${p.id}">${esc(p.name)}</button>`).join("")}</div>
+    <p class="fine">Used to split the cost by who eats. Shared meals stay safe for everyone in the household either way.</p>`;
+}
+async function toggleEater(sid, pid) {
+  const cell = S.view.grid.flatMap(d => Object.values(d.meals)).find(m => m.session_id === sid);
+  const cur = new Set(cell?.eaters || []);
+  if (cur.has(pid)) cur.delete(pid); else cur.add(pid);
+  if (!cur.size) { toast("At least one person eats each meal. Skip the meal instead."); return; }
+  adoptView(await api(`/api/session/${sid}/eaters`, "POST", { eaters: [...cur] })); render();
+}
 function moreLikeBlock(d, s) {
   if (!epicureOn() || d.current?.kind !== "delivery") return "";
   const sim = S.sheet.similar;
@@ -939,6 +955,8 @@ function cartNote(c) {
 function moreScreen() {
   const items = [["settings", "Settings", "Budget, meals, diet, allergies, goal"], ["calendar", "Coming up", "Holidays, festivals, your fasts"],
     ["insights", "Nutrition & insights", "Daily averages vs targets, weather"], ["orders", "Auto-ordering (simulation)", "Try SmartPlate placing orders with a spend limit"],
+    ["recap", "This week", "What you spent and ate, against your plan"],
+    ["household", "Household", "People you cook and order for"],
     ["cooking", "Cooking & groceries", "Recipes and one grocery list for cook days"], ["receipts", "Expenses", "What you spent; CSV export"],
     ["community", "Community weeks", "Plans others shared"], ["connection", "Swiggy connection", "What's live and what's not"],
     ["profiles", "Profiles", "Switch or add a profile"]];
@@ -949,6 +967,7 @@ function moreScreen() {
   }
   const back = `<button class="ghost small back" data-go="more:">← More</button>`;
   const body = { settings: settingsPanel, calendar: calendarPanel, insights, orders: ordersPanel, cooking: cookingPanel,
+    household: householdPanel, recap: recapPanel,
     receipts: receiptsPanel, community: communityPanel, connection: connectionPanel, profiles: profilesPanel }[S.more];
   return back + (body ? body() : "");
 }
@@ -1124,7 +1143,8 @@ function insights() {
   const hh = v.household ? `<div class="card"><h3 class="k">Household · ${esc(v.household.name)}</h3>
     <div class="sub">Shared meals meet every member's rules.</div>
     <div class="kv"><span class="tag">members: ${v.household.members.map(esc).join(", ")}</span>
-      ${v.household.merged_allergens.map(a => `<span class="tag warn">no ${esc(a)}</span>`).join("")}</div></div>` : "";
+      ${v.household.merged_allergens.map(a => `<span class="tag warn">no ${esc(a)}</span>`).join("")}</div>
+    <button class="ghost small" data-go="more:household">Manage household</button></div>` : "";
   return `<h2 class="sec">Nutrition & insights</h2><div class="grid-cards" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
     <div class="card"><h3 class="k">Planned meals · average per day (${N.days || 7} days)</h3>
       ${macro("kcal", "")}${macro("protein_g", "g")}${macro("carbs_g", "g")}${macro("fat_g", "g")}${macro("sugar_g", "g")}
@@ -1202,14 +1222,19 @@ function cookingPanel() {
   const ing = (i) => i.swap
     ? `<span class="tag swapped">${esc(i.swap.name)} <small>for ${esc(i.name)}</small> <button class="x" data-unswap="${esc(i.token)}" aria-label="Use ${esc(i.name)} again">✕</button></span>`
     : (i.swappable ? `<button class="tag" data-swap-ing="${esc(i.token)}" title="Swap ${esc(i.name)}">${esc(i.name)} ⇄</button>` : `<span class="tag">${esc(i.name)}</span>`);
-  const recipes = c.recipes.map(r => `<div class="card"><h3 class="k">${esc(r.session)} · ${rupee(r.cost)}</h3>
+  const recipes = c.recipes.map(r => `<div class="card"><h3 class="k">${esc(r.session)} · ${rupee(r.cost)}${r.servings > 1 ? ` a serving · ${r.servings} eating` : ""}</h3>
     <div style="font-weight:600;margin-bottom:6px">${esc(r.name)}</div>
     ${r.ingredients?.length ? `<div class="kv ingredients">${r.ingredients.map(ing).join("")}</div>` : ""}
     <ol style="margin-left:18px">${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol></div>`).join("") || `<div class="card empty">No cook days this week. Set how often you cook in Settings.</div>`;
-  const basket = c.basket.items.map(b => `<tr><td>${b.swap ? `<s>${esc(b.name)}</s> → <b>${esc(b.swap.name)}</b>${b.swap.reason === "out_of_stock" ? " <small>(out of stock)</small>" : ""}` : esc(b.name)}</td>
-    <td>${esc(b.recipe)}</td><td>${rupee(b.price)}</td>
-    <td>${b.swap ? `<button class="ghost small" data-unswap="${esc(b.token)}">Undo</button>`
-      : (b.swappable ? `<button class="ghost small" data-oos="${esc(b.token)}">Out of stock?</button>` : "")}</td></tr>`).join("");
+  const unit = (b) => b.unit === "g" ? (b.need >= 1000 ? `${(b.need / 1000).toFixed(1).replace(/\.0$/, "")} kg` : `${b.need} g`) : `${b.need} ${b.unit}`;
+  const label = (b) => b.swap ? `<s>${esc(b.name)}</s> → <b>${esc(b.swap.name)}</b>${b.swap.reason === "out_of_stock" ? " <small>(out of stock)</small>" : ""}`
+    : (b.have ? `<s>${esc(b.name)}</s>` : esc(b.name));
+  const basket = c.basket.items.map(b => `<tr class="${b.have ? "have" : ""}"><td>${b.qty > 1 ? `${b.qty} × ` : ""}${label(b)}
+      <small class="fine">needs ${esc(unit(b))} for ${b.servings} serving${b.servings === 1 ? "" : "s"}</small></td><td>${esc(b.recipe)}</td>
+    <td>${b.have ? "—" : rupee(b.price)}</td>
+    <td><label class="check have-it"><input type="checkbox" data-have="${esc(b.name)}" ${b.have ? "checked" : ""}> Have it</label>
+      ${b.swap ? `<button class="ghost small" data-unswap="${esc(b.token)}">Undo</button>`
+        : (b.swappable && !b.have ? `<button class="ghost small" data-oos="${esc(b.token)}">Out of stock?</button>` : "")}</td></tr>`).join("");
   const swapped = c.basket.items.some(b => b.swap);
   const safe = (c.safe_with_swap || []).map(f => `<li><b>${esc(f.name)}</b>: ${f.swaps.map(x => `use ${esc(x.to_name)} instead of ${esc(x.from_name)}`).join(", ")}</li>`).join("");
   return `<h2 class="sec">Cooking & groceries</h2><p class="sub">${esc(c.headline)}</p>
@@ -1218,7 +1243,8 @@ function cookingPanel() {
       ${safe ? `<div class="card"><h3 class="k">Also safe with a swap</h3><ul class="fine">${safe}</ul>
         <p class="fine">These recipes are left out of your plan as written. With these swaps nobody's allergies or diet are broken.</p></div>` : ""}</div>
       <div style="flex:1;min-width:240px"><div class="card"><h3 class="k">Grocery list · ${rupee(c.basket.total)}</h3>
-        <table><tr><th>item</th><th>for</th><th>₹</th><th></th></tr>${basket || `<tr><td class="empty">—</td></tr>`}</table>
+        <table><tr><th>item</th><th>for</th><th>₹</th><th></th></tr>${basket || `<tr><td class="empty" colspan="4">Nothing left to buy for this week's cooking.</td></tr>`}</table>
+        <p class="fine">For the cook meals still ahead${S.view.household ? ", for everyone eating each one" : ""}, rounded up to whole packs. Tick what you already have.</p>
         ${swapped ? `<p class="fine">Prices are for the original items. Check the swap's price in the shop.</p>` : ""}</div></div>
     </div>`;
 }
@@ -1232,6 +1258,91 @@ function swapPicker() {
       : `<p class="fine">No swap that does the same job is safe for everyone eating.</p>`}
     <p class="fine">Only ingredients that fit everyone's allergies and diet are shown${d.hidden_unsafe ? ` (${d.hidden_unsafe} left out)` : ""}. Closest in flavour first.</p>
     <button class="ghost small" data-act="swap-cancel">Cancel</button></div>`;
+}
+
+/* ---- household: the people you cook and order for ---- */
+const ALLERGY_LIST = ['peanut', 'dairy', 'gluten', 'egg', 'soy', 'shellfish', 'fish', 'sesame', 'tree_nut'];
+const DIET_NAME = { veg: "Vegetarian", vegan: "Vegan", nonveg: "Non-vegetarian" };
+function personForm(id, m = {}) {
+  const meals = S.view.user.meals || MEALS;
+  const box = (name, v, on, label) => `<label class="check"><input type="checkbox" name="${name}" value="${v}" ${on ? "checked" : ""}>${esc(label)}</label>`;
+  return `<form id="${id}" class="card preferences">
+    <div class="settings-grid"><label>Name<input name="name" maxlength="40" value="${esc(m.name || "")}" required></label>
+    <label>Diet<select name="diet">${Object.entries(DIET_NAME).map(([k, v]) => `<option value="${k}" ${(m.diet || "nonveg") === k ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
+    <fieldset><legend>Allergies (always excluded from shared meals)</legend><div class="checks">${ALLERGY_LIST.map(a => box("allergens", a, (m.allergens || []).includes(a), cap1(a.replace("_", " ")))).join("")}</div></fieldset>
+    <fieldset><legend>Medical filters</legend><div class="checks">${["diabetes", "hypertension", "celiac"].map(c => box("medical", c, (m.medical || []).includes(c), cap1(c))).join("")}</div></fieldset>
+    <fieldset><legend>Usually eats with you</legend><div class="checks">${meals.map(x => box("meals", x, (m.meals || meals).includes(x), cap1(x))).join("")}</div></fieldset>
+    <div class="row"><button type="submit" class="primary">${m.id ? "Save" : "Add to household"}</button>
+      ${m.id ? `<button type="button" class="ghost" data-act="hh-edit-cancel">Cancel</button>` : ""}</div></form>`;
+}
+function readPerson(form) {
+  const f = new FormData(form);
+  return { name: f.get("name"), diet: f.get("diet"), allergens: f.getAll("allergens"), medical: f.getAll("medical"), meals: f.getAll("meals") };
+}
+function householdPanel() {
+  const h = S.view.household;
+  if (!h) {
+    if (!keys.get(S.userId)) return `<h2 class="sec">Household</h2><div class="card"><p>Sample profiles are shared by every visitor. <a href="#" data-act="start-onboard">Set up your own profile</a> to plan for a household.</p></div>`;
+    return `<h2 class="sec">Household</h2><p class="sub">Cooking or ordering for more than you? Add the people you share meals with. Every shared meal will meet all their allergies and diets, and you can split the cost.</p>
+      <form id="hh-create" class="card row" style="align-items:flex-end"><label style="flex:1">Household name<input name="name" maxlength="40" value="Home" required></label>
+        <button type="submit" class="primary">Create household</button></form>`;
+  }
+  const r = h.rules;
+  const rule = (x, label) => `<span class="tag warn">${esc(label)} · ${esc(x.who.join(", "))}</span>`;
+  const rules = [...r.allergens.map(x => rule(x, `No ${x.rule.replace("_", " ")}`)), ...r.medical.map(x => rule(x, cap1(x.rule))),
+    ...(r.diet.rule !== "nonveg" ? [rule(r.diet, DIET_NAME[r.diet.rule])] : [])].join("");
+  const people = h.people.map(p => S.hhEdit === p.id ? personForm("hh-edit", p) : `<div class="card person"><div class="row" style="align-items:center">
+      <div style="flex:1"><b>${esc(p.name)}</b>${p.you ? " <small>(you)</small>" : ""}
+        <div class="sub">${DIET_NAME[p.diet] || esc(p.diet)}${p.allergens.length ? ` · no ${p.allergens.map(a => esc(a.replace("_", " "))).join(", ")}` : ""}${p.medical.length ? ` · ${p.medical.map(esc).join(", ")}` : ""} · eats ${p.meals.map(esc).join(", ") || "no planned meals"}</div></div>
+      ${p.managed ? `<button class="ghost small" data-hh-edit="${p.id}">Edit</button><button class="ghost small" data-hh-remove="${p.id}" data-hh-name="${esc(p.name)}">Remove</button>`
+        : (p.you ? `<button class="ghost small" data-go="more:settings">Your settings</button>` : `<span class="fine">Has their own profile</span>`)}</div></div>`).join("");
+  const shares = h.split.map(x => `<tr><td>${esc(x.member)}</td><td class="mono">${rupee(x.share)}</td></tr>`).join("");
+  return `<h2 class="sec">Household · ${esc(h.name)}</h2>
+    <div class="card"><h3 class="k">Shared meals meet everyone's rules</h3>
+      <div class="kv">${rules || `<span class="fine">Nobody here has an allergy, medical filter or diet limit.</span>`}</div>
+      <p class="fine">Planned restaurant dishes and recipes that break any of these are never picked for the household.</p></div>
+    <h3 class="k">People</h3>${people}
+    ${S.hhEdit ? "" : `<details class="card"><summary>Add someone you cook or order for</summary>${personForm("hh-add")}</details>`}
+    <div class="card"><h3 class="k">Splitting this week's planned spend</h3>
+      <label>Split costs<select id="hh-split"><option value="even" ${h.split_method === "even" ? "selected" : ""}>Evenly</option>
+        <option value="by_consumption" ${h.split_method === "by_consumption" ? "selected" : ""}>By who eats each meal</option></select></label>
+      <table><tr><th>person</th><th>share</th></tr>${shares}</table>
+      <p class="fine">${h.split_method === "by_consumption" ? "Each meal's cost is divided among the people eating it: those who usually eat that meal, or whoever you tick in the meal's sheet." : "The week's planned spend divided equally."} Planned estimate, ${rupee(S.view.budget.spend)} in total.</p></div>
+    <details class="card"><summary>Stop sharing</summary><p>People without their own profile are removed. Your plan goes back to your own rules only.</p>
+      <button class="ghost" data-act="hh-leave">Stop sharing this household</button></details>`;
+}
+async function householdCall(path, method, body, msg) {
+  adoptView(await api(`/api/user/${S.userId}/household${path}`, method, body));
+  S.hhEdit = null; toast(msg); render();
+}
+
+/* ---- weekly recap ---- */
+function recapPanel() {
+  const r = S.recap;
+  if (!r) return `<h2 class="sec">This week</h2><p class="fine">Loading…</p>`;
+  const s = r.spend, m = r.meals, n = r.nutrition;
+  const pct = (a, b) => b ? Math.round(100 * a / b) : 0;
+  const vsLast = s.last_week != null ? `<div class="sub">Last week you spent ${rupee0(s.last_week)}.</div>` : "";
+  const nut = n.days_logged ? `<div class="nbar"><span>kcal</span><div class="track"><i style="width:${Math.min(100, pct(n.avg.kcal, n.target.kcal))}%"></i></div><span class="mono">${Math.round(n.avg.kcal)} / ${Math.round(n.target.kcal)}</span></div>
+      <div class="nbar"><span>protein</span><div class="track"><i style="width:${Math.min(100, pct(n.avg.protein_g, n.target.protein_g))}%"></i></div><span class="mono">${Math.round(n.avg.protein_g)} / ${Math.round(n.target.protein_g)}g</span></div>
+      <p class="fine">Average per day on the ${n.days_logged} day${n.days_logged === 1 ? "" : "s"} you logged meals. Protein target met on ${n.protein_days}.</p>`
+    : `<p class="fine">No meals logged yet this week. Tap “I had it” on a meal, or log what you ate, and it shows here.</p>`;
+  const split = r.household ? `<div class="card"><h3 class="k">${esc(r.household.name)} · who owes what so far</h3>
+      <table>${r.household.split.map(x => `<tr><td>${esc(x.member)}</td><td class="mono">${rupee(x.share)}</td></tr>`).join("")}</table>
+      <p class="fine">${r.household.split_method === "by_consumption" ? "By who ate each meal you marked as had." : "Spent so far, split evenly."}</p></div>` : "";
+  return `<h2 class="sec">This week</h2><p class="sub">From what actually happened: meals you marked as had or ordered.</p>
+    <div class="stats">
+      <div class="stat"><div class="label">Spent</div><div class="val">${rupee0(s.spent)}<small>/${rupee0(s.budget)}</small></div></div>
+      <div class="stat"><div class="label">Still planned</div><div class="val">${rupee0(s.planned)}</div></div>
+      <div class="stat"><div class="label">${s.left < 0 ? "Over" : "Left"}</div><div class="val">${rupee0(Math.abs(s.left))}</div></div></div>
+    <div class="grid-cards" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+    <div class="card"><h3 class="k">Meals</h3>
+      <p>${m.had} had (${m.ordered} ordered, ${m.cooked} cooked) · ${m.ahead} still ahead · ${m.skipped} skipped</p>
+      ${m.unmarked ? `<p class="fine">${m.unmarked} past meal${m.unmarked === 1 ? " isn't" : "s aren't"} marked. They count as neither spent nor skipped until you mark them.</p>` : ""}
+      ${r.top_place ? `<p class="fine">Most ordered from: ${esc(r.top_place.name)} (${r.top_place.times}×)</p>` : ""}
+      <p class="fine">Spent on delivery ${rupee0(s.delivery)}, on cooking ${rupee0(s.cooked)}.</p>${vsLast}</div>
+    <div class="card"><h3 class="k">Nutrition</h3>${nut}<div class="callout">General wellness estimates, not medical advice.</div></div>
+    ${split}</div>`;
 }
 
 /* ---- community ---- */
@@ -1549,6 +1660,18 @@ function wire() {
   on("[data-close-live-review]", "click", (e) => { if (e.target.dataset.closeLiveReview) { S.liveOrderReview = null; render(); } });
   on("[data-close-checkout-review]", "click", (e) => { if (e.target.dataset.closeCheckoutReview) { S.checkoutReview = null; render(); } });
   on("[data-cmd]", "click", (e) => guard(() => quickCmd(e.currentTarget.dataset.cmd)));
+  on("[data-eater]", "click", (e) => { const [sid, pid] = e.currentTarget.dataset.eater.split(":").map(Number); guard(() => toggleEater(sid, pid)); });
+  on("[data-have]", "change", (e) => guard(async () => { adoptView(await api(`/api/plan/${S.planId}/grocery-have`, "POST", { item: e.currentTarget.dataset.have, have: e.currentTarget.checked })); render(); }));
+  on("[data-hh-edit]", "click", (e) => { S.hhEdit = Number(e.currentTarget.dataset.hhEdit); render(); });
+  on("[data-hh-remove]", "click", (e) => { const t = e.currentTarget; guard(() => householdCall(`/members/${t.dataset.hhRemove}`, "DELETE", {}, `${t.dataset.hhName} removed. Upcoming meals re-planned.`)); });
+  const hhCreate = document.getElementById("hh-create");
+  if (hhCreate) hhCreate.onsubmit = (e) => { e.preventDefault(); guard(() => householdCall("", "POST", { name: new FormData(hhCreate).get("name") }, "Household created. Add the people you cook for.")); };
+  const hhAdd = document.getElementById("hh-add");
+  if (hhAdd) hhAdd.onsubmit = (e) => { e.preventDefault(); const p = readPerson(hhAdd); guard(() => householdCall("/members", "POST", p, `${p.name} added. Upcoming meals re-planned for everyone's rules.`)); };
+  const hhEdit = document.getElementById("hh-edit");
+  if (hhEdit) hhEdit.onsubmit = (e) => { e.preventDefault(); guard(() => householdCall(`/members/${S.hhEdit}`, "PATCH", readPerson(hhEdit), "Saved. Upcoming meals re-planned.")); };
+  const hhSplit = document.getElementById("hh-split");
+  if (hhSplit) hhSplit.onchange = () => guard(() => householdCall("", "PATCH", { split: hhSplit.value }, "Split updated."));
   on("[data-more-like]", "click", (e) => guard(() => moreLikeThis(e.currentTarget.dataset.moreLike)));
   on("[data-forget-like]", "click", (e) => { e.preventDefault(); guard(() => forgetMoreLike(e.currentTarget.dataset.forgetLike)); });
   on("[data-swap-ing]", "click", (e) => guard(() => openSwap(e.currentTarget.dataset.swapIng, "swap")));
@@ -1592,6 +1715,8 @@ function wire() {
     "sign-out": signOut,
     "rotate-recovery": rotateRecoveryCode,
     "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); }, "cancel-move": async () => { S.moving = null; render(); },
+    "hh-edit-cancel": async () => { S.hhEdit = null; render(); },
+    "hh-leave": () => householdCall("/leave", "POST", {}, "Stopped sharing. Your plan uses your own rules again."),
     "swap-cancel": async () => { S.swapPick = null; render(); },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
@@ -1660,6 +1785,7 @@ async function goTab(tab, sub = null) {
     S.places = await api(`/api/restaurants?user_id=${S.userId}`);
   if (S.more === "community") S.community = await api("/api/community");
   if (S.more === "receipts") S.receipts = await api(`/api/receipts/${S.userId}`);
+  if (S.more === "recap") S.recap = await api(`/api/plan/${S.planId}/recap`);
   if (S.more === "orders") S.exec = await api(`/api/plan/${S.planId}/orders`);
   if (S.more === "orders") S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`).catch(() => null);
   if (S.more === "calendar") S.calendar = await api(`/api/user/${S.userId}/calendar`);
