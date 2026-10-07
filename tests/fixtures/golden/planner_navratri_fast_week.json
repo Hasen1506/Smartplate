@@ -51,11 +51,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 125.0,
-    "item": "Mini Tiffin",
+    "cost": 157.62,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "lunch": {
@@ -103,11 +103,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 119.57,
-    "item": "Vegan Sambar Rice",
+    "cost": 125.0,
+    "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    },
    "lunch": {
@@ -129,11 +129,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 157.62,
-    "item": "Pesarattu + Chutney",
+    "cost": 119.57,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "lunch": {
