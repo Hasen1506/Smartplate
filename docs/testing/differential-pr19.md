@@ -38,7 +38,7 @@ changed by #19 and 91 by this PR; the extra 16 and 5 were equal-cost weeks that 
 resolve differently, which is exactly the machine-dependence fixed below.
 
 The CI test (`test_planner_differences_are_all_intentional`) runs 20 derandomized Hypothesis
-profiles per push (20.8 s on the CI runner); the 150-profile figures above come from the same
+profiles per push (about 14 s on the CI runner); the 150-profile figures above come from the same
 `Version` machinery run by hand.
 
 ## Intentional differences
