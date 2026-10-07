@@ -34,7 +34,6 @@ def seed_all(optimize_starter: bool = True) -> dict:
     _menu(rmap)
     _contexts()
     _favourites(rmap)
-    _community()
     plan_id = _starter_plan()
     if optimize_starter and plan_id:
         from .kernel import optimizer
@@ -209,17 +208,20 @@ def _favourites(rmap: dict):
                                                 "Hotel Saravana Bhavan", "FreshMenu", "Murugan Idli Shop")])
 
 
-def _community():
-    payload = db.jd({"sessions": [
-        {"day": 0, "meal": "lunch", "kind": "delivery", "item": "Veg Meals", "cost": 150},
-        {"day": 0, "meal": "dinner", "kind": "cook", "item": "Dal + rice", "cost": 45}],
-        "saved": clock.today().isoformat()})
+# Community weeks are only what real people shared. Earlier trials seeded two invented
+# members ("campus_survivor", "veg_athlete") with invented adoption counts; they are not
+# seeded any more and are removed from databases that still hold them.
+INVENTED_COMMUNITY = (("campus_survivor", "₹1500/week student survival"),
+                      ("veg_athlete", "High-protein veg week"))
+
+
+def remove_invented_community() -> int:
     with db.cursor() as cur:
-        cur.executemany(
-            "INSERT INTO community_templates(author,title,city,budget,mode,payload,adopts) "
-            "VALUES (?,?,?,?,?,?,?)",
-            [("campus_survivor", "₹1500/week student survival", "Chennai", 1500, "survival", payload, 142),
-             ("veg_athlete", "High-protein veg week", "Chennai", 2200, "balanced", payload, 88)])
+        n = 0
+        for author, title in INVENTED_COMMUNITY:
+            n += cur.execute("DELETE FROM community_templates WHERE author=? AND title=? AND author_user_id IS NULL",
+                             (author, title)).rowcount
+    return n
 
 
 def _starter_plan() -> int:
