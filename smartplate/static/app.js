@@ -523,13 +523,29 @@ function learningLine() {
   const l = S.view.learning || {};
   const src = S.view.weather_source === "live" ? "Live weather: Open-Meteo (CC BY 4.0)." : "Sample weather (offline).";
   const n = (k, one, many) => `${k || 0} ${k === 1 ? one : many}`;
-  return `<p class="fine center">Learning from ${n(l.favourites, "usual place", "usual places")} · ${n(l.ratings, "rating", "ratings")} · ${n(l.orders, "meal had", "meals had")}. ${src}</p>`;
+  return learnedChips() + `<p class="fine center">Learning from ${n(l.favourites, "usual place", "usual places")} · ${n(l.ratings, "rating", "ratings")} · ${n(l.orders, "meal had", "meals had")}. ${src}</p>`;
 }
 function rateRow(c) {
   const g = c.rating_given;
   return `<div class="rate" role="group" aria-label="Rate this meal"><span>How was it?</span>
     <button class="${g === 1 ? "on" : ""}" data-rate="${c.session_id}:1" aria-pressed="${g === 1}">👍 Good</button>
-    <button class="${g === -1 ? "on" : ""}" data-rate="${c.session_id}:-1" aria-pressed="${g === -1}">👎 Not again</button></div>`;
+    <button class="${g === -1 ? "on" : ""}" data-rate="${c.session_id}:-1" aria-pressed="${g === -1}">👎 Not again</button></div>
+    <div class="reasons" role="group" aria-label="Why? (one tap)">${Object.entries(RATE_REASONS).map(([k, label]) =>
+      `<button class="chip ${(c.reasons_given || []).includes(k) ? "on" : ""}" data-reason="${c.session_id}:${k}">${esc(label)}</button>`).join("")}</div>`;
+}
+const RATE_REASONS = { late: "Late", small: "Small portion", spicy: "Too spicy", pricey: "Too pricey", great: "Great" };
+async function rateReason(sid, reason) {
+  const r = await api(`/api/session/${sid}/rate`, "POST", { reasons: [reason] });
+  adoptView(r.plan);
+  toast({ late: "Noted — that place gets planned less", small: "Noted — that dish counts as less food",
+    spicy: "Noted — less of that dish", pricey: "Noted — cheaper picks will weigh more", great: "Great — more like that" }[reason]);
+  render();
+}
+function learnedChips() {
+  const l = S.view.learned || [];
+  if (!l.length) return "";
+  return `<div class="learned" aria-label="What SmartPlate learned">${l.map(x => `<span class="chip">${esc(x.text)}
+    <button class="x" data-unlearn="${esc(x.key)}" title="Undo" aria-label="Undo: ${esc(x.text)}">✕</button></span>`).join("")}</div>`;
 }
 
 /* ================================================================ WEEK */
@@ -1386,6 +1402,9 @@ function wire() {
   on("[data-user]", "click", (e) => guard(() => switchUser(e.currentTarget.dataset.user)));
   on("[data-sheet]", "click", (e) => guard(() => openSheet(e.currentTarget.dataset.sheet)));
   on("[data-confirm]", "click", (e) => { e.stopPropagation(); guard(() => confirmMeal(e.currentTarget.dataset.confirm)); });
+  on("[data-reason]", "click", (e) => { const [sid, k] = e.currentTarget.dataset.reason.split(":"); guard(() => rateReason(sid, k)); });
+  on("[data-unlearn]", "click", (e) => { const key = e.currentTarget.dataset.unlearn; guard(async () => {
+    const r = await api(`/api/user/${S.userId}/learned/undo`, "POST", { key }); adoptView(r.plan); toast("Undone"); render(); }); });
   on("[data-rate]", "click", (e) => { const [sid, sc] = e.currentTarget.dataset.rate.split(":"); guard(() => rateMeal(sid, Number(sc))); });
   on("[data-handoff]", "click", (e) => { S.handedOff = Number(e.currentTarget.dataset.handoff); setTimeout(render, 50); });
   on("[data-fav]", "click", (e) => guard(() => toggleFav(e.currentTarget.dataset.fav)));
