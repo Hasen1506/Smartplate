@@ -7,7 +7,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
-from .domain import models, sentiment
+from .domain import live_catalog, models, sentiment
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp
 from .kernel import agent_brain
@@ -215,6 +215,27 @@ def create_app() -> Flask:
     def optimize(plan_id):
         body = request.get_json(force=True, silent=True) or {}
         service.reoptimize(plan_id, body.get("mode"))
+        return jsonify(service.plan_view(plan_id))
+
+    @app.post("/api/plan/<int:plan_id>/live-menus")
+    def plan_from_live_menus(plan_id):
+        """Read the user's live Swiggy menus and re-plan from them (409 when not connected)."""
+        plan = models.get_plan(plan_id)
+        if not plan:
+            raise ValueError("Plan not found")
+        ratelimit.check(f"live-menus:{plan['user_id']}", 10, 3600)
+        result = live_catalog.refresh(plan["user_id"])
+        service.reoptimize(plan_id)
+        return jsonify({**service.plan_view(plan_id), "refreshed": result})
+
+    @app.post("/api/plan/<int:plan_id>/sample-menus")
+    def plan_from_sample_menus(plan_id):
+        """Go back to the sample catalogue (clears the user's live catalogue)."""
+        plan = models.get_plan(plan_id)
+        if not plan:
+            raise ValueError("Plan not found")
+        live_catalog.clear(plan["user_id"])
+        service.reoptimize(plan_id)
         return jsonify(service.plan_view(plan_id))
 
     @app.get("/api/plan/<int:plan_id>/recommend-budget")
@@ -581,6 +602,7 @@ def create_app() -> Flask:
 
     @app.post("/api/user/<int:user_id>/swiggy/disconnect")
     def swiggy_disconnect(user_id):
+        live_catalog.clear(user_id)          # no live menus without a live connection
         return jsonify(swiggy_connect.disconnect(user_id))
 
     @app.get("/swiggy/callback")
