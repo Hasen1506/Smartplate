@@ -33,7 +33,7 @@ def export(user_id):
         plan_scope = "SELECT id FROM plans WHERE user_id=?"
         decision_scope = f"SELECT id FROM decisions WHERE plan_id IN ({plan_scope})"
         subscription_scope = "SELECT id FROM push_subscriptions WHERE user_id=?"
-        for table in ("plans", "sessions", "decisions", "grocery_baskets"):
+        for table in ("plans", "sessions", "decisions", "grocery_baskets", "grocery_swaps"):
             scope = "user_id=?" if table == "plans" else f"plan_id IN ({plan_scope})"
             data[table] = _clean(cur.execute(f"SELECT * FROM {table} WHERE {scope}", (user_id,)).fetchall())
         data["orders"] = _clean(cur.execute(f"SELECT * FROM orders WHERE decision_id IN ({decision_scope})", (user_id,)).fetchall())
@@ -55,7 +55,7 @@ def delete(user_id, confirmation):
         subscription_scope = "SELECT id FROM push_subscriptions WHERE user_id=?"
         cur.execute(f"DELETE FROM orders WHERE decision_id IN ({decision_scope})", (user_id,))
         cur.execute(f"DELETE FROM push_sent WHERE subscription_id IN ({subscription_scope})", (user_id,))
-        for table in ("grocery_baskets", "decisions", "sessions"):
+        for table in ("grocery_baskets", "grocery_swaps", "decisions", "sessions"):
             cur.execute(f"DELETE FROM {table} WHERE plan_id IN ({plan_scope})", (user_id,))
         cur.execute("DELETE FROM community_templates WHERE author_user_id=?", (user_id,))
         for table in USER_TABLES:
