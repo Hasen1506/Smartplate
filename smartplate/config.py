@@ -21,6 +21,9 @@ LIVE_ORDERS = os.environ.get("SMARTPLATE_LIVE_ORDERS", "off") == "on"
 # Solver limits: relative optimality gap and a hard time cap per weekly solve.
 SOLVER_GAP = float(os.environ.get("SMARTPLATE_SOLVER_GAP", "0.001"))
 SOLVER_TIME_LIMIT_S = float(os.environ.get("SMARTPLATE_SOLVER_TIME_LIMIT", "10"))
+# Branch-and-bound node cap: a deterministic work limit, so a hard week returns the same
+# plan however busy the server is (the time limit above is only a backstop).
+SOLVER_MAX_NODES = int(os.environ.get("SMARTPLATE_SOLVER_MAX_NODES", "20000"))
 
 # Plan stability: bonus for keeping a meal's current pick on a re-plan (0 disables).
 STABILITY_W = float(os.environ.get("SMARTPLATE_STABILITY", "0.3"))
