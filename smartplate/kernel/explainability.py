@@ -15,6 +15,9 @@ def reasons_for(decision: dict, context: dict) -> list[str]:
         return r
     if kind == "cook":
         dish = str(decision['item_name']).removeprefix("Cook: ")
+        if decision.get("routine"):
+            r.append(f"You cook this meal yourself: {dish} is a suggestion (₹{decision['cost']:.0f} in groceries).")
+            return r
         if decision.get("budget_cook"):
             r.append(f"Tight Week: a ₹{decision['cost']:.0f} home-cook ({dish}) instead of skipping this meal.")
             return r
