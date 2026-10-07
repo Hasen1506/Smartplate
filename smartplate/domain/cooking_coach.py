@@ -14,9 +14,12 @@ offending ingredient has a safe replacement.
 from . import epicure, ingredients, reverse_mode
 
 
-def coach(cook_decisions: list[dict], user: dict | None = None, swaps: dict | None = None) -> dict:
-    """cook_decisions: decisions with chosen_kind == 'cook' carrying a recipe key.
-    swaps: {token: {"swap_token", "reason"}} chosen for this plan."""
+def coach(cook_decisions: list[dict], user: dict | None = None, swaps: dict | None = None, have=()) -> dict:
+    """cook_decisions: decisions with chosen_kind == 'cook' carrying a recipe key, each
+    with how many people eat it (`servings`) and whether it is still ahead (`upcoming`).
+    The grocery list covers the upcoming cook meals only, scaled to who eats them.
+    swaps: {token: {"swap_token", "reason"}} chosen for this plan.
+    have: grocery line names the cook already has at home (listed, cost nothing)."""
     people = ingredients.people_of(user) if user else []
     # a stored swap that is no longer safe (someone's allergies changed) is dropped
     live = {t: s for t, s in (swaps or {}).items() if not people or ingredients.unsafe_for(people, s["swap_token"]) is None}
@@ -26,7 +29,6 @@ def coach(cook_decisions: list[dict], user: dict | None = None, swaps: dict | No
         s = live.get(token) if token else None
         return {"token": s["swap_token"], "name": ingredients.name(s["swap_token"]), "reason": s["reason"]} if s else None
 
-    keys = [d["recipe_key"] for d in cook_decisions if d.get("recipe_key")]
     recipes = []
     for d in cook_decisions:
         r = reverse_mode.recipe(d.get("recipe_key", ""))
@@ -37,13 +39,17 @@ def coach(cook_decisions: list[dict], user: dict | None = None, swaps: dict | No
                 "name": r["name"],
                 "steps": r["steps"],
                 "cost": r["cost"],
+                "servings": d.get("servings", 1),
                 "ingredients": [{**i, "swap": swapped(i["token"]),
                                  "swappable": can_swap and i["token"] in ingredients.PANTRY} for i in r.get("ingredients", [])],
             })
-    basket = reverse_mode.basket_for_recipes(keys)
+    ahead = [{"recipe_key": d["recipe_key"], "servings": d.get("servings", 1)}
+             for d in cook_decisions if d.get("recipe_key") and d.get("upcoming", True)]
+    basket = reverse_mode.basket_for_meals(ahead, have)
     for item in basket["items"]:
         item["swap"] = swapped(item.get("token"))
         item["swappable"] = can_swap and bool(item.get("token"))
+    left = len(ahead)
     safe_with_swap = []
     if can_swap:
         for r in reverse_mode.RECIPES:
@@ -58,5 +64,6 @@ def coach(cook_decisions: list[dict], user: dict | None = None, swaps: dict | No
         "basket": basket,
         "swaps_available": can_swap,
         "safe_with_swap": safe_with_swap,
-        "headline": f"{len(recipes)} cook sessions this week — grocery run ≈ ₹{basket['total']:.0f}",
+        "headline": (f"{left} cook meal{'s' if left != 1 else ''} still to cook this week — grocery run ≈ ₹{basket['total']:.0f}"
+                     if left else ("No cook meals left this week" if recipes else "No cook meals this week")),
     }
