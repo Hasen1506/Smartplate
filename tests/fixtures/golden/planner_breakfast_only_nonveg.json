@@ -18,20 +18,20 @@
   "Fri 2026-11-06": {
    "breakfast": {
     "cost": 115.0,
-    "item": "Mini Tiffin",
+    "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    }
   },
   "Mon 2026-11-02": {
    "breakfast": {
     "cost": 115.0,
-    "item": "Masala Dosa",
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    }
   },
@@ -78,10 +78,10 @@
   "Wed 2026-11-04": {
    "breakfast": {
     "cost": 117.07,
-    "item": "Idli Sambar (4 pc)",
+    "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    }
   }
