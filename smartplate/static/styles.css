@@ -425,6 +425,11 @@ details summary{cursor:pointer;font-weight:600;font-size:14px;padding:8px 0}
 .cartnote .btn{justify-self:start}
 .signin .inline-err{margin:0;padding:8px 12px;border-radius:8px;background:var(--red-bg);color:var(--red);font-size:14px}
 
+/* rating reasons + learned chips */
+.reasons,.learned{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.chip{border:1px solid var(--line, #ddd);border-radius:999px;padding:3px 10px;font-size:12px;background:transparent}
+.chip.on{border-color:var(--accent, #333);font-weight:600}
+.learned .chip .x{border:none;background:none;cursor:pointer;margin-left:4px}
 /* order this week */
 .oq fieldset{border:none;padding:0;margin:6px 0}
 .oq-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line, #eee)}

@@ -48,3 +48,17 @@ them is built. Grouped by the PR that surfaced it.
   tap opening the queue row.
 - **Budget guard at cart check**: if the checked total pushes the week over budget, offer to
   re-plan the remaining meals before approving.
+
+## From PR D (learning loop)
+
+- **Decay**: reason taps never fade today (bounded at 3 taps each). Fade a "late" after a few
+  on-time deliveries from the same place, like the 45-day dislike window.
+- **"Late" from data, not taps**: compare Swiggy's delivered time (order status) with the
+  promised ETA and learn reliability without asking.
+- **Spice as a profile trait**: three "too spicy" taps across different dishes could set a
+  "mild" preference that tilts every curry, not just the tapped dishes (needs spice tags
+  on live dishes).
+- **Portion learning per restaurant**: "small" on two dishes from one place probably means
+  the place serves small portions; scale its other dishes too, with the user's consent.
+- **Show the learned effect in the plan** ("planned less: Chennai Mess — you said late twice")
+  as a reason line on the decision, not only as a chip.

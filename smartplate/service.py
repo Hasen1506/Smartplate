@@ -9,7 +9,8 @@ import datetime as dt
 import math
 
 from . import config, db
-from .domain import (carbon, checkout, community, festivals, health, household, intake, live_catalog,
+from .domain import (carbon, checkout, community, festivals, health, household, intake, learning,
+                     live_catalog,
                      ledger, models, nutrition, profile, receipts, reverse_mode, taste, timing, weather)
 from .kernel import (agent_brain, budget, explainability, optimizer, recommender,
                      scheduler, variance)
@@ -228,6 +229,7 @@ def plan_view(plan_id: int) -> dict:
     from . import everyday
     view["next_up"] = everyday.next_up(view, at)
     view["heads_up"] = everyday.heads_up(view, user, plan, decisions, at)
+    view["learned"] = learning.chips(user["id"])
     view["source"] = live_catalog.source_for(user["id"])
     return view
 
@@ -286,11 +288,14 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
     if plan:
         for i in range(7):
             grid[i]["date"] = models.session_date(plan, i)
-    ratings = {}
+    ratings, reasons = {}, {}
     if user:
         with db.cursor() as cur:
             ratings = {r["session_id"]: r["score"] for r in cur.execute(
                 "SELECT session_id, score FROM ratings WHERE user_id=?", (user["id"],))}
+            reasons = {}
+            for r in cur.execute("SELECT session_id, reason FROM rating_reasons WHERE user_id=?", (user["id"],)):
+                reasons.setdefault(r["session_id"], []).append(r["reason"])
     etas = {}
     with db.cursor() as cur:
         etas = {r["id"]: r["eta_min"] for r in cur.execute("SELECT id, eta_min FROM restaurants")}
@@ -301,6 +306,7 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
             extra = {"status": status, "pinned": bool(d.get("pinned")), "restaurant_id": d.get("restaurant_id"),
                      "item_id": d.get("item_id"), "recipe_key": d.get("recipe_key"),
                      "rating_given": ratings.get(d["session_id"]),
+                     "reasons_given": reasons.get(d["session_id"], []),
                      "usual": bool(sig and d.get("restaurant_id") in sig["favourites"])}
             if d["chosen_kind"] == "delivery":
                 cond = (wx or {}).get(d["day"], {}).get("condition", "clear")

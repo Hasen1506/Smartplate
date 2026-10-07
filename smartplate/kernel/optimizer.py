@@ -18,7 +18,7 @@ import math
 import pulp
 
 from .. import clock, config, db
-from ..domain import (allergens, carbon, fatigue, festivals, health, leftovers,
+from ..domain import (allergens, carbon, fatigue, festivals, health, learning, leftovers,
                       models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
 from ..integrations import calendar_sync
 from . import explainability, scheduler
@@ -129,12 +129,17 @@ def week_cap(user: dict, plan: dict) -> float:
 
 def build_context(user: dict, plan: dict) -> dict:
     sig = taste.signals(user["id"])
+    learned = learning.weights(user["id"])
+    weights = config.MODE_WEIGHTS.get(plan["mode"], config.MODE_WEIGHTS["balanced"])
+    if learned["cost_mult"] != 1:                 # "too pricey" taps: cheaper picks weigh more
+        weights = {**weights, "cost": round(weights["cost"] * learned["cost_mult"], 4)}
     menu = models.menu_for_user(user)
     if any(it.get("source") == "live" for it in menu):
         # The live catalogue is the user's own places (their live favourites, or what they
         # searched): every one is a usual place, none a "new" discovery.
         sig = {**sig, "favourites": {it["restaurant_id"] for it in menu}}
     return {
+        "learned": learned,
         "menu": menu,
         "festivals": festivals.for_week(plan["week_start"]),
         "festivals_all": festivals.for_week_all(plan["week_start"]),
@@ -142,7 +147,7 @@ def build_context(user: dict, plan: dict) -> dict:
         "taste": sig,
         "leftovers": leftovers.for_user(user["id"]),
         "calendar": calendar_sync.events_for(user["id"]),
-        "weights": config.MODE_WEIGHTS.get(plan["mode"], config.MODE_WEIGHTS["balanced"]),
+        "weights": weights,
         # how far calories may drift before the nutrition term bites — the mode's
         # "what's allowed to give" knob (config.MODE_META).
         "nutri_tol": config.mode_meta(plan["mode"])["nutri_tol"],
@@ -168,6 +173,7 @@ def _taste(user: dict, item: dict) -> tuple[float, dict]:
 
 def _delivery_candidate(user, plan, session, item, ctx):
     day, meal = session["day"], session["meal"]
+    item, learned_pen = learning.adjust(item, ctx.get("learned"))
     cond = _wx(ctx, day)["condition"]
     base_cost = item["price"] + item["delivery_fee"]
 
@@ -213,6 +219,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
                      + (round(config.USUAL_FIRST_W * novel, 4) if config.USUAL_FIRST == "on" else 0.0),
         "novelty_bonus": round(config.VARIETY_NUDGE_W * novel * ctx.get("variety_frac", 0.0), 4),
         "taste": taste_score, "sentiment": senti, "nutri": nutri, "health": hp, "carbon_pen": cpen,
+        "learned_pen": learned_pen,
         "carbon_kg": carbon.estimate(item), "weather_cond": cond,
         "weather_bias": weather.taste_bias(cond, item),
         "festival_bias": festivals.taste_bias(ctx["festivals"].get(day), item),
@@ -344,6 +351,7 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
         + w["surge"] * surge_premium
         + effort
         + cand.get("rating_pen", 0.0)
+        + cand.get("learned_pen", 0.0)          # rating reasons: late / spicy / pricey (+), great (−)
         + cand.get("usual_pen", 0.0)             # ↑ objective for novel ⇒ usual picks preferred (when usual-first on)
         - cand.get("novelty_bonus", 0.0)         # ↓ objective ⇒ novel picks preferred (when nudge on)
         + cand["weather_bias"] + cand["festival_bias"],

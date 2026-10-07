@@ -14,7 +14,7 @@ the hard rules inconsistent.
 import datetime as dt
 
 from . import access, db, service
-from .domain import allergens, festivals, intake, models, profile, reverse_mode, taste
+from .domain import allergens, festivals, intake, learning, models, profile, reverse_mode, taste
 from .kernel import optimizer, recommender, scheduler
 
 CITY = "Chennai"                 # the sample catalogue covers Chennai only (honest limit)
@@ -400,11 +400,21 @@ def confirm(session_id: int) -> dict:
     return service.plan_view(plan["id"])
 
 
-def rate(session_id: int, score: int) -> dict:
+def rate(session_id: int, score, reasons: list | None = None) -> dict:
     session, plan, user = _session_bundle(session_id)
     decision = next((d for d in models.decisions_for_plan(plan["id"]) if d["session_id"] == session_id), None)
     if not decision or decision["chosen_kind"] not in ("delivery", "cook"):
         raise ValueError("Only planned dishes can be rated")
+    if reasons is not None:
+        if not isinstance(reasons, list):
+            raise ValueError("Reasons must be a list")
+        learning.record(user["id"], session_id, reasons, item_id=decision.get("item_id"),
+                        restaurant_id=decision.get("restaurant_id"))
+        if score is None:                  # a reason alone: "great" is a 👍, the others adjust only
+            score = 1 if "great" in reasons else None
+    if score is None and reasons:
+        optimizer.optimize(plan["id"])
+        return {"plan": service.plan_view(plan["id"]), "suggest_favourite": None}
     if isinstance(score, bool) or score not in (1, -1):
         raise ValueError("Rate with 1 (liked) or -1 (not again)")
     taste.rate(user["id"], session_id=session_id, score=score, item_id=decision.get("item_id"),
