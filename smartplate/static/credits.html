@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Credits and licences · SmartPlate</title>
+<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<main class="wrap credits">
+  <p><a href="/">← Back to SmartPlate</a></p>
+  <h1 class="greet">Credits and licences</h1>
+
+  <section class="card" id="epicure">
+    <h2 class="sec">Epicure ingredient embeddings</h2>
+    <p>Ingredient swaps, “more like this” and the cuisine lean use
+      <a href="https://huggingface.co/Kaikaku/epicure-core/tree/d31ebb5af8e92bbaf5cb67381d5006d4ea8368b7" rel="noopener">Epicure-Core</a>
+      by Jakub Radzikowski and Josef Chen (KAIKAKU.AI), © 2026, licensed under
+      <a href="https://creativecommons.org/licenses/by/4.0/" rel="license noopener">Creative Commons Attribution 4.0 International (CC BY 4.0)</a>.</p>
+    <p>Paper: Radzikowski, J. and Chen, J. (2026). <a href="https://arxiv.org/abs/2605.22391" rel="noopener">Epicure: Navigating the
+      Emergent Geometry of Food Ingredient Embeddings</a>. arXiv:2605.22391.</p>
+    <p><b>Version used:</b> revision <code>d31ebb5af8e92bbaf5cb67381d5006d4ea8368b7</code>
+      (files: embeddings.safetensors, vocab.json, itos.json, modes.json, factor_poles.npy, cuisine_pole_provenance.json).</p>
+    <p><b>Changes made:</b> SmartPlate does not modify the files. It normalises the vectors for cosine similarity,
+      averages them into dish and cuisine directions, and ranks a hand-labelled list of everyday Indian pantry ingredients with them.
+      Allergen and diet safety comes from SmartPlate’s own labels, not from the embeddings.
+      The test suite ships a small subset of the vectors (some ingredients only) under the same licence.</p>
+    <p>The authors do not endorse SmartPlate.</p>
+  </section>
+</main>
+</body>
+</html>
