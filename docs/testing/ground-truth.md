@@ -45,15 +45,31 @@ app code, then every plan, re-plan and checkout is checked against it:
   Swiggy's refusal instead. The recording was made from the documented-contract fake in
   `tests/test_swiggy_live.py` — no real Swiggy account, cart or order is ever used.
 - **LLM:** none in the default path (`AgentBrain` is the deterministic brain).
-- **Hypothesis:** profile `ci` (default) is derandomized with no example database;
-  `HYPOTHESIS_PROFILE=deep` runs ~400 examples per property for a local soak.
+- **Hypothesis:** profile `ci` (default) is derandomized with no example database, and each
+  property has an example budget sized to its cost (8 for pin survival, which re-plans a whole
+  week up to five times, up to 60 for the API fuzzer), so unit + property tests run in about a
+  minute; `HYPOTHESIS_PROFILE=deep` ignores the budgets and runs ~400 examples per property.
+- **Solver (same week on every machine):** the x86 CI runner and an ARM laptop ship different
+  CBC builds, and on CI 5 goldens drifted between them. Three changes make the plan a property
+  of the profile, not of the machine:
+  1. a fixed, content-derived tie-break (< 1e-4, below any real preference) makes the optimum
+     unique, so the build can't choose between equal weeks;
+  2. tests solve to a proven optimum (gap 0) and stop only on the deterministic branch-and-bound
+     node cap (`SOLVER_MAX_NODES`: 20,000 in production, 3,000 in tests), never on the wall clock;
+     production keeps a 10 s time limit as a backstop only;
+  3. valid delivery-count cuts (money left ÷ cheapest delivery, per week and per day) tighten the
+     relaxation. One known hard solve remains: the daily-capped Dev profile's first (balanced)
+     week stops at the node cap without a proof (~2.4 s locally); its golden is taken after the
+     switch to Tight Week, which re-plans from scratch (`stable=False`) and is proven optimal.
+  Every golden plan asserts `proven_optimal`; a week that only reaches the node cap is covered by
+  the property tests, which check rules rather than exact dishes.
 - Goldens are stable across `PYTHONHASHSEED` values; CI also pins `PYTHONHASHSEED=0`.
 
 ## Commands
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q -n auto                                   # unit + property + golden + differential
+pytest -q -n auto                                   # unit + property + golden + differential (~60 s on 2 cores)
 pip install playwright==1.63.0 && playwright install chromium
 pytest -q tests/browser_journey.py tests/browser_smoke.py   # browser E2E
 # PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium to use a system Chromium
