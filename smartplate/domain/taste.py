@@ -58,9 +58,9 @@ def rate(user_id: int, *, session_id: int, score: int, item_id=None, restaurant_
         cur.execute("DELETE FROM ratings WHERE user_id=? AND session_id=?", (user_id, session_id))
         cur.execute(
             "INSERT INTO ratings(user_id, session_id, item_id, restaurant_id, recipe_key, score, "
-            "iso_date, created_ts) VALUES (?,?,?,?,?,?,?,datetime('now'))",
+            "iso_date, created_ts) VALUES (?,?,?,?,?,?,?,?)",
             (user_id, session_id, item_id, restaurant_id, recipe_key, score,
-             iso_date or clock.today().isoformat()))
+             iso_date or clock.today().isoformat(), clock.now().isoformat(timespec="seconds")))
         return cur.lastrowid
 
 
