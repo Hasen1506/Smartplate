@@ -268,7 +268,14 @@ test('onboarding uses four steps without sample restaurant choices or sample bud
   vm.runInContext("onboardChip('allergens', 'peanut', true); onboardChip('diet', 'veg', false)", context);
   assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(S.onboard.d.allergens)', context)), ['peanut']);
   assert.equal(vm.runInContext('S.onboard.d.diet', context), 'veg');
-  vm.runInContext("S.onboard.step = 1; onboardChip('meals', 'lunch', true); onboardChip('meals', 'dinner', true)", context);
+  vm.runInContext("S.onboard.step = 1", context);
+  const rhythm = vm.runInContext('onboardingScreen()', context);
+  assert.match(rhythm, /How do you eat on a normal day/);
+  for (const m of ['breakfast', 'lunch', 'dinner']) for (const k of ['order', 'cook', 'skip'])
+    assert.match(rhythm, new RegExp(`data-ob="rh_${m}" data-val="${k}"`));
+  vm.runInContext("onboardChip('rh_breakfast', 'cook', false)", context);
+  assert.equal(vm.runInContext('S.onboard.d.rhythm.breakfast', context), 'cook');
+  vm.runInContext("onboardChip('rh_breakfast', 'skip', false); onboardChip('rh_lunch', 'skip', false); onboardChip('rh_dinner', 'skip', false)", context);
   await assert.rejects(vm.runInContext("onboardNav('next')", context), /at least one meal/);
   vm.runInContext('S.onboard.step = 2', context);
   const budget = vm.runInContext('onboardingScreen()', context);
@@ -424,6 +431,18 @@ test('blocked storage cannot silently discard access during recovery rotation', 
   const before = calls.length;
   await assert.rejects(vm.runInContext('rotateRecoveryCode()', context), /Enable browser storage/);
   assert.equal(calls.length, before);
+});
+
+test('settings: rhythm, calorie split, targets and variety cap are editable', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.view.user.prefs = { rhythm: { breakfast: 'cook', lunch: 'order', dinner: 'skip' } };
+    S.view.user.nutrition_targets = { meal_share: { breakfast: 0.2, lunch: 0.5, dinner: 0.3 }, kcal: 2100 };
+    S.view.user.health_targets = { max_item_repeat: 5 }`, context);
+  const html = vm.runInContext('tuningForm()', context);
+  assert.match(html, /name="rh_breakfast"[^]*value="cook" selected/);
+  assert.match(html, /name="sh_lunch" type="number" min="10" max="70" value="50"/);
+  assert.match(html, /name="kcal" type="number" min="1000" max="4500" value="2100"/);
+  assert.match(html, /name="max_repeat" type="number" min="1" max="7" value="5"/);
 });
 
 test('rating reasons are one tap each, and what was learned shows with an undo', async () => {
