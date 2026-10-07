@@ -102,3 +102,23 @@ them is built. Grouped by the PR that surfaced it.
   coconut-dessert mode, so it is not offered).
 - **"Use it up" suggestions**: leftover paneer or half a pack of dal → recipes and dishes
   nearest to it.
+
+## From PR E (household, weekly recap, grocery list from cook meals)
+
+- **Invite a real profile into the household** with a one-time code, so a partner keeps their
+  own phone and history; today the owner adds people without profiles, and only seeded
+  sample profiles share a household as full profiles.
+- **Portions per person**: a child eats half a serving. The grocery list and the split could
+  weigh each person, not just count heads.
+- **Relax a rule when its person isn't eating**: shared meals always meet everyone's rules
+  (one kitchen, cross-contact). A "Dev is away this week" switch could plan without Dev's
+  rules, with a clear warning.
+- **Per-person nutrition targets** for the household recap (today the recap uses the owner's
+  targets and the owner's intake log).
+- **Settle up**: turn "who owes what" into a UPI request or a running balance across weeks.
+- **Sunday recap push**: one push notification with the week's recap and next week's
+  plan, using the existing web push.
+- **Pantry memory**: remember "have it" across weeks for staples (rice, oil, spices) until the
+  user says they ran out.
+- **Order the grocery list** on Instamart when a cart tool exists, with the same review step
+  as food orders.
