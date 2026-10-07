@@ -100,6 +100,7 @@ No build step, no Node, no API keys. The database is created and seeded with a
 demo Chennai catalog, three users, and a sample week on first run.
 
 ```bash
+pip install -r requirements-dev.txt   # test + audit tools (not needed in production)
 python -m pytest -q                 # current backend regression suite
 ```
 
@@ -156,7 +157,9 @@ instead of silently ordered.
 | `SMARTPLATE_SOLVER_GAP` | `0.001` | Relative optimality gap for the weekly MILP |
 | `SMARTPLATE_SOLVER_TIME_LIMIT` | `10` | Seconds per solve before returning the best plan found |
 | `SMARTPLATE_SWIGGY_MCP` | `https://mcp.swiggy.com` | Swiggy MCP base for sign-in + read-only tool discovery |
-| `SMARTPLATE_PUBLIC_URL` | derived | Public base URL for the Swiggy OAuth redirect when a proxy hides it |
+| `SMARTPLATE_PUBLIC_URL` | derived | Public base URL for the Swiggy OAuth redirect. Required for Swiggy sign-in on any host other than localhost (Render sets `RENDER_EXTERNAL_URL`, which is used automatically) |
+| `SMARTPLATE_ALLOWED_HOSTS` | empty | Extra comma-separated hosts allowed in the Swiggy OAuth redirect besides `PUBLIC_URL`'s host and localhost. `Host`/`X-Forwarded-Host` headers alone are never trusted for it |
+| `SMARTPLATE_SWIGGY_MAX_CLIENTS` | 3 | Maximum Swiggy OAuth clients the server registers dynamically (one per redirect URI) |
 | `SMARTPLATE_TZ` | `Asia/Kolkata` | Timezone for meal times, "today" and past meals (servers often run in UTC) |
 | `SMARTPLATE_STABILITY` | `0.3` | Bonus for keeping a meal's current pick on re-plans (0 disables) |
 | `SMARTPLATE_SECRET` | generated | Key for encrypting stored Swiggy tokens. Set it in production (render.yaml generates one); without it a key is kept in the database |
