@@ -433,6 +433,101 @@ test('blocked storage cannot silently discard access during recovery rotation', 
   assert.equal(calls.length, before);
 });
 
+/* ---- Roadmap E: household, weekly recap, grocery list from cook meals ---- */
+const HOUSEHOLD = { name: 'Home', members: ['Meera', 'Dev'], merged_allergens: ['dairy', 'peanut'], split_method: 'by_consumption',
+  people: [{ id: 2, name: 'Meera', diet: 'vegan', allergens: ['dairy'], medical: [], you: true, managed: false, meals: ['lunch', 'dinner'] },
+    { id: 7, name: 'Dev', diet: 'veg', allergens: ['peanut'], medical: [], you: false, managed: true, meals: ['dinner'] }],
+  rules: { allergens: [{ rule: 'dairy', who: ['Meera'] }, { rule: 'peanut', who: ['Dev'] }], medical: [], diet: { rule: 'vegan', who: ['Meera'] } },
+  split: [{ member_id: 2, member: 'Meera', share: 600 }, { member_id: 7, member: 'Dev', share: 400 }] };
+
+test('household panel: create form for a private profile, sample profiles are sent to set-up', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext('keys.get = () => null', context);
+  assert.match(vm.runInContext('householdPanel()', context), /Sample profiles are shared by every visitor/);
+  vm.runInContext("keys.get = () => 'k'", context);
+  const html = vm.runInContext('householdPanel()', context);
+  assert.match(html, /<form id="hh-create"/);
+  assert.match(html, /Every shared meal will meet all their allergies and diets/);
+});
+
+test('household panel: everyone\'s rules with who they are for, people, and the split', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  context.HH = HOUSEHOLD;
+  vm.runInContext('S.view.household = HH; S.view.user.meals = ["lunch", "dinner"]', context);
+  const html = vm.runInContext('householdPanel()', context);
+  assert.match(html, /No dairy · Meera/);
+  assert.match(html, /No peanut · Dev/);
+  assert.match(html, /Vegan · Meera/);
+  assert.match(html, /<b>Meera<\/b> <small>\(you\)<\/small>/);
+  assert.match(html, /data-hh-edit="7"/);
+  assert.ok(!html.includes('data-hh-edit="2"'));                                // your own row goes to settings
+  assert.match(html, /eats dinner/);
+  assert.match(html, /<option value="by_consumption" selected>By who eats each meal<\/option>/);
+  assert.match(html, /<td>Dev<\/td><td class="mono">₹400<\/td>/);
+  vm.runInContext('S.hhEdit = 7', context);
+  const edit = vm.runInContext('householdPanel()', context);
+  assert.match(edit, /<form id="hh-edit"/);
+  assert.match(edit, /value="Dev"/);
+  assert.match(edit, /name="allergens" value="peanut" checked/);
+  assert.match(edit, /name="meals" value="dinner" checked/);
+  assert.ok(!/name="meals" value="lunch" checked/.test(edit));
+});
+
+test('meal sheet: who is eating, toggled per person and sent to the server', async () => {
+  const { context, calls } = fixture({ '/api/session/9/eaters': { plan: { id: 42 }, user: { id: 2 }, grid: [], budget: {} } });
+  await context.bootPromise;
+  context.HH = HOUSEHOLD;
+  vm.runInContext(`S.view.household = HH; S.view.grid = [{ day: 'Fri', meals: { lunch: { session_id: 9, eaters: [2] } } }];
+    S.sheet = { sid: 9, data: { session: { id: 9, day: 'Fri', date: '2026-09-25', meal: 'lunch' }, limits: { left_week: 400, left_day: null },
+      has_favourites: false, usual_more: 0, timing_tip: null, current: null, usual: [], new: [], cook: [], hidden: {} } }`, context);
+  const html = vm.runInContext('sheetDialog()', context);
+  assert.match(html, /Who's eating/);
+  assert.match(html, /class="on" aria-pressed="true" data-eater="9:2">Meera/);
+  assert.match(html, /class="" aria-pressed="false" data-eater="9:7">Dev/);
+  await vm.runInContext('toggleEater(9, 7)', context);
+  assert.deepEqual(JSON.parse(calls.find(c => c.url === '/api/session/9/eaters').options.body), { eaters: [2, 7] });
+  const before = calls.length;
+  vm.runInContext('S.view.grid = [{ day: "Fri", meals: { lunch: { session_id: 9, eaters: [2] } } }]', context);
+  await vm.runInContext('toggleEater(9, 2)', context);                          // nobody left: refused locally
+  assert.equal(calls.length, before);
+});
+
+test('weekly recap: spent vs planned, unmarked meals, nutrition and who owes what', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.recap = { week_start: '2026-11-02', spend: { budget: 3000, spent: 450, planned: 1800, left: 750, delivery: 300, cooked: 150, last_week: 2100 },
+    meals: { had: 3, ordered: 2, cooked: 1, ahead: 9, skipped: 1, unmarked: 2 }, top_place: { name: 'Sangeetha Veg', times: 2 },
+    nutrition: { days_logged: 2, avg: { kcal: 1500, protein_g: 48 }, target: { kcal: 2000, protein_g: 60 }, protein_days: 0 },
+    household: { name: 'Home', split_method: 'by_consumption', split: [{ member: 'Meera', share: 300 }, { member: 'Dev', share: 150 }] } }`, context);
+  const html = vm.runInContext('recapPanel()', context);
+  assert.match(html, /₹450<small>\/₹3,000<\/small>/);
+  assert.match(html, /3 had \(2 ordered, 1 cooked\) · 9 still ahead · 1 skipped/);
+  assert.match(html, /2 past meals aren't marked/);
+  assert.match(html, /Most ordered from: Sangeetha Veg \(2×\)/);
+  assert.match(html, /1500 \/ 2000/);
+  assert.match(html, /on the 2 days you logged meals/);
+  assert.match(html, /Last week you spent ₹2,100/);
+  assert.match(html, /By who ate each meal you marked as had/);
+  vm.runInContext('S.recap.nutrition = { days_logged: 0, avg: null, target: { kcal: 2000, protein_g: 60 }, protein_days: 0 }', context);
+  assert.match(vm.runInContext('recapPanel()', context), /No meals logged yet this week/);
+});
+
+test('grocery list: packs, need, servings and have-it ticks', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.view.coach = { headline: '3 cook meals still to cook this week — grocery run ≈ ₹250', recipes: [],
+    basket: { total: 250, items: [
+      { name: 'Toor dal 500g', qty: 2, price: 180, need: 480, unit: 'g', servings: 8, recipe: 'Dal + rice', have: false },
+      { name: 'Rice 1kg', qty: 1, price: 70, need: 1440, unit: 'g', servings: 8, recipe: 'Dal + rice', have: true },
+      { name: 'Eggs (6)', qty: 1, price: 60, need: 4, unit: 'eggs', servings: 2, recipe: 'Egg curry', have: false }] } }`, context);
+  const html = vm.runInContext('cookingPanel()', context);
+  assert.match(html, /2 × Toor dal 500g/);
+  assert.match(html, /needs 480 g for 8 servings/);
+  assert.match(html, /<s>Rice 1kg<\/s>/);
+  assert.match(html, /needs 1\.4 kg for 8 servings/);
+  assert.match(html, /needs 4 eggs for 2 servings/);
+  assert.match(html, /data-have="Rice 1kg" checked/);
+  assert.match(html, /rounded up to whole packs/);
+});
+
 /* ---- Roadmap G: Epicure swaps, "more like this", cuisine lean, credits ---- */
 const COACH = { headline: '1 cook sessions this week — grocery run ≈ ₹200', swaps_available: true,
   recipes: [{ session: 'Fri lunch', key: 'dal_rice', name: 'Dal + rice', cost: 45, steps: ['Cook'],
@@ -588,4 +683,21 @@ test('an unconnected Swiggy offers Connect, not Retry (409 swiggy_not_connected)
   // a real upstream failure keeps Retry
   vm.runInContext("S.error = 'Swiggy returned an error'; S.errorCode = 'swiggy_error'", context);
   assert.match(vm.runInContext('errbar()', context), /data-act="reload"/);
+});
+
+test('merge E+G: one grocery line shows its pack count, who it serves, a have-it tick and its swap', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.view.coach = { headline: '3 cook meals still to cook this week', swaps_available: true, recipes: [], safe_with_swap: [],
+    basket: { total: 180, items: [
+      { name: 'Toor dal 500g', qty: 2, price: 180, need: 360, unit: 'g', servings: 6, recipe: 'Dal + rice', have: false, token: 'toor_dal',
+        swappable: true, swap: { token: 'masoor_dal', name: 'Masoor dal', reason: 'out_of_stock' } },
+      { name: 'Rice 1kg', qty: 1, price: 70, need: 540, unit: 'g', servings: 6, recipe: 'Dal + rice', have: true, token: 'rice', swappable: true, swap: null }] } }`, context);
+  const html = vm.runInContext('cookingPanel()', context);
+  assert.match(html, /2 × <s>Toor dal 500g<\/s> → <b>Masoor dal<\/b> <small>\(out of stock\)<\/small>/);
+  assert.match(html, /needs 360 g for 6 servings/);
+  assert.match(html, /data-have="Toor dal 500g" >/);
+  assert.match(html, /data-unswap="toor_dal"/);
+  assert.match(html, /data-have="Rice 1kg" checked/);
+  assert.ok(!html.includes('data-oos="rice"'));            // already have it: nothing to report out of stock
+  assert.match(html, /Prices are for the original items/);
 });
