@@ -426,6 +426,16 @@ test('blocked storage cannot silently discard access during recovery rotation', 
   assert.equal(calls.length, before);
 });
 
+test('rating reasons are one tap each, and what was learned shows with an undo', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  const row = vm.runInContext(`rateRow({ session_id: 5, rating_given: null, reasons_given: ['late'] })`, context);
+  for (const k of ['late', 'small', 'spicy', 'pricey', 'great']) assert.match(row, new RegExp(`data-reason="5:${k}"`));
+  assert.match(row, /class="chip on" data-reason="5:late"/);
+  vm.runInContext(`S.view.learned = [{ key: 'late:3', reason: 'late', text: 'Chennai Mess often arrives late — planned less', taps: 2 }]`, context);
+  const line = vm.runInContext('learningLine()', context);
+  assert.match(line, /often arrives late/); assert.match(line, /data-unlearn="late:3"/);
+});
+
 test('order this week: any slot and day, the real bill, and tap-to-place without an order API', async () => {
   const { context } = fixture(); await context.bootPromise;
   vm.runInContext(`S.orderQueue = { plan_id: 42, order_enabled: false, queued: 2, planned_total: 400, confirmed_total: 262.5,
