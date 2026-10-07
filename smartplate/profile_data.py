@@ -33,11 +33,16 @@ def export(user_id):
         plan_scope = "SELECT id FROM plans WHERE user_id=?"
         decision_scope = f"SELECT id FROM decisions WHERE plan_id IN ({plan_scope})"
         subscription_scope = "SELECT id FROM push_subscriptions WHERE user_id=?"
-        for table in ("plans", "sessions", "decisions", "grocery_baskets", "grocery_swaps"):
+        for table in ("plans", "sessions", "decisions", "grocery_baskets", "grocery_have", "grocery_swaps"):
             scope = "user_id=?" if table == "plans" else f"plan_id IN ({plan_scope})"
             data[table] = _clean(cur.execute(f"SELECT * FROM {table} WHERE {scope}", (user_id,)).fetchall())
         data["orders"] = _clean(cur.execute(f"SELECT * FROM orders WHERE decision_id IN ({decision_scope})", (user_id,)).fetchall())
         data["push_sent"] = _clean(cur.execute(f"SELECT * FROM push_sent WHERE subscription_id IN ({subscription_scope})", (user_id,)).fetchall())
+        hid = user["household_id"]
+        data["household"] = _clean(cur.execute("SELECT * FROM households WHERE id=?", (hid,)).fetchall()) if hid else []
+        data["household_people"] = _clean(cur.execute(
+            "SELECT id, name, diet, allergens, medical, prefs FROM users WHERE household_id=? AND id<>? "
+            "AND json_extract(prefs, '$.household_member')=1", (hid, user_id)).fetchall()) if hid else []
         data["community_templates"] = _clean(cur.execute("SELECT * FROM community_templates WHERE author_user_id=?", (user_id,)).fetchall())
     return {"format_version": 1, "exported_at": clock.now().isoformat(), "data": data,
             "notes": ["Authentication secrets are excluded.", "Demo weekly plans and Swiggy order attempts are separate records.",
@@ -55,11 +60,18 @@ def delete(user_id, confirmation):
         subscription_scope = "SELECT id FROM push_subscriptions WHERE user_id=?"
         cur.execute(f"DELETE FROM orders WHERE decision_id IN ({decision_scope})", (user_id,))
         cur.execute(f"DELETE FROM push_sent WHERE subscription_id IN ({subscription_scope})", (user_id,))
-        for table in ("grocery_baskets", "grocery_swaps", "decisions", "sessions"):
+        for table in ("grocery_baskets", "grocery_have", "grocery_swaps", "decisions", "sessions"):
             cur.execute(f"DELETE FROM {table} WHERE plan_id IN ({plan_scope})", (user_id,))
         cur.execute("DELETE FROM community_templates WHERE author_user_id=?", (user_id,))
         for table in USER_TABLES:
             cur.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM plans WHERE user_id=?", (user_id,))
+        # the people this profile cooked for (no profile of their own) go with it
+        hid = cur.execute("SELECT household_id FROM users WHERE id=?", (user_id,)).fetchone()["household_id"]
+        if hid:
+            cur.execute("DELETE FROM users WHERE household_id=? AND id<>? "
+                        "AND json_extract(prefs, '$.household_member')=1", (hid, user_id))
         cur.execute("DELETE FROM users WHERE id=?", (user_id,))
+        if hid and not cur.execute("SELECT 1 FROM users WHERE household_id=?", (hid,)).fetchone():
+            cur.execute("DELETE FROM households WHERE id=?", (hid,))
     return {"deleted": True}
