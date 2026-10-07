@@ -22,7 +22,7 @@ import json
 import math
 
 import pytest
-from hypothesis import assume, given, note, settings
+from hypothesis import assume, example, given, note, settings
 from hypothesis import strategies as st
 
 from gt_support import (MONDAY_8AM, NAVRATRI_MONDAY, check_plan, connect_swiggy, item_violation,
@@ -314,9 +314,20 @@ LIVE_BODIES = st.fixed_dictionaries({}, optional={
 })
 
 
+_VALID = {"restaurant_id": "r-1", "restaurant_name": "Hotel Saravana Bhavan (Adyar)", "item_id": "m0",
+          "item_name": "Mini Tiffin"}
+
+
 @settings(max_examples=40)
 @given(steps=st.lists(st.tuples(st.sampled_from(["preview", "fill", "checkout_preview", "checkout"]), LIVE_BODIES),
                       min_size=1, max_size=6))
+@example(steps=[("preview", _VALID), ("fill", {**_VALID, "expected_fingerprint": "CART_FP"}),
+                ("checkout_preview", {}), ("checkout", {"expected_fingerprint": "QUOTE"}),
+                ("checkout", {"expected_fingerprint": "QUOTE"})])          # the approved path, and no replay of it
+@example(steps=[("preview", _VALID), ("fill", {**_VALID, "expected_fingerprint": "CART_FP"}),
+                ("checkout", {"expected_fingerprint": "CART_FP"}), ("checkout", {})])   # cart ≠ approval
+@example(steps=[("fill", {**_VALID, "expected_fingerprint": "guess"}), ("checkout_preview", {}),
+                ("checkout", {"expected_fingerprint": "QUOTE"})])
 def test_live_swiggy_never_carts_or_orders_without_approval(gt, monkeypatch, swiggy_replay, steps):
     """A real Swiggy cart change needs the exact reviewed item's fingerprint, and a real
     order needs a fresh checkout approval token for the exact cart. Random sequences
@@ -327,6 +338,7 @@ def test_live_swiggy_never_carts_or_orders_without_approval(gt, monkeypatch, swi
     ratelimit.reset()
     fake = swiggy_replay
     fake.reset()
+    fake.strict = False               # random requests: unrecorded ones get Swiggy's refusal
     app = create_app()
     client = app.test_client()
     created = client.post("/api/profiles", json={"name": "Live", "diet": "veg", "weekly_budget": 2000,
@@ -334,7 +346,7 @@ def test_live_swiggy_never_carts_or_orders_without_approval(gt, monkeypatch, swi
     uid, key = created["user"]["id"], created["access_key"]
     h = {"X-SmartPlate-Key": key}
     connect_swiggy(client, fake, uid, key)
-    reviewed, quote = {}, None
+    reviewed, quote, placed = {}, None, []
     for step, body in steps:
         body = dict(body)
         if body.get("expected_fingerprint") == "CART_FP":
@@ -362,8 +374,12 @@ def test_live_swiggy_never_carts_or_orders_without_approval(gt, monkeypatch, swi
             r = client.post(f"/api/user/{uid}/swiggy/checkout", json=body, headers=h)
             if fake.tool_calls().count("place_food_order") > orders_before:
                 assert quote and body.get("expected_fingerprint") == quote, body
-                quote = None
+                assert fake.tool_calls().count("place_food_order") == orders_before + 1
+                placed.append(r.get_json())
+            quote = None if body.get("expected_fingerprint") == quote else quote
         assert r.status_code != 500, (step, body, r.get_json())
+    if steps and steps[-2:] == [("checkout", {"expected_fingerprint": "QUOTE"})] * 2 and steps[0][0] == "preview":
+        assert len(placed) == 1 and placed[0]["order_id"] == "real-order-17"     # approved once, never replayed
 
 
 # --------------------------------------------------------------------------- #
