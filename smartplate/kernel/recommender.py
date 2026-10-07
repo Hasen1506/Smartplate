@@ -66,7 +66,7 @@ def _per_meal_costs(eligible: list[dict], meal: str, user: dict, history) -> dic
 def recommend(user: dict, meals: list[str], *, history: dict | None = None,
               menu: list[dict] | None = None) -> dict:
     """Recommend a budget band for the given session meals (one entry per session)."""
-    menu = menu if menu is not None else models.menu_for_city(user["city"])
+    menu = menu if menu is not None else models.menu_for_user(user)
     safe = allergens.safe_items(user, menu)
     user_floor = float(user.get("rating_floor", 4.0))
     level = fatigue.variety_pref(user)
