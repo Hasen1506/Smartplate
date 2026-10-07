@@ -8,6 +8,11 @@ medical profiles are covered. The planner plans breakfast, lunch and dinner; sna
 are logged, not planned, so the snack golden pins the after-meal snack log and the
 nutrition ledger it feeds.
 
+Each golden plan must be a proven optimum (asserted): with the planner's tie-break the
+optimum is unique, so x86 and ARM builds of CBC return the same week. A week that only
+reaches the node cap is checked by the property tests instead (its exact dishes depend on
+the solver build).
+
 Regenerate deliberately: SMARTPLATE_UPDATE_GOLDEN=1 pytest tests/test_gt_golden_planner.py,
 then review the JSON diff like any other code change.
 """
@@ -17,13 +22,14 @@ import pytest
 
 from gt_support import MONDAY_8AM, NAVRATRI_MONDAY, assert_golden, check_plan, plan_snapshot
 from smartplate import everyday, service
+from smartplate.kernel import optimizer
 
 PROFILES = {
     "veg_peanut_three_meals": ({"name": "Asha", "diet": "veg", "allergens": ["peanut"], "weekly_budget": 2500,
                                 "meals": ["breakfast", "lunch", "dinner"], "cook": "sometimes"}, MONDAY_8AM, None),
     "breakfast_only_nonveg": ({"name": "Ravi", "diet": "nonveg", "weekly_budget": 900, "meals": ["breakfast"],
                                "cook": "never"}, MONDAY_8AM, None),
-    "vegan_lunch_dinner_usuals": ({"name": "Meera", "diet": "vegan", "allergens": ["dairy"], "weekly_budget": 2000,
+    "vegan_lunch_dinner_usuals": ({"name": "Meera", "diet": "vegan", "allergens": ["dairy"], "weekly_budget": 2600,
                                    "meals": ["lunch", "dinner"], "favourites": [5, 8, 11], "variety": "usual",
                                    "cook": "sometimes"}, MONDAY_8AM, None),
     "celiac_diabetic_cook_often": ({"name": "Kiran", "diet": "nonveg", "medical": ["celiac", "diabetes"],
@@ -49,6 +55,9 @@ def test_planner_golden(gt, name):
         service.reoptimize(pid, mode)
         view = service.plan_view(pid)
     assert not check_plan(pid)
+    # A golden is only machine-independent if the solver proved the plan optimal (the
+    # tie-break makes that optimum unique); a node-capped incumbent depends on the CBC build.
+    assert optimizer.LAST_SOLVE["proven_optimal"], "golden profile must solve to proven optimality"
     rec = view["recommendation"]
     snap = plan_snapshot(view)
     snap["recommendation"] = ({k: rec[k]["total"] for k in ("floor", "usual", "variety")}
