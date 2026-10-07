@@ -1,0 +1,252 @@
+{
+  "cuisine:East_Asian": [
+    {
+      "mode_id": "nova_level/M1",
+      "label": "East Asian fermented sauces and processed staples"
+    },
+    {
+      "mode_id": "nova_level/M3",
+      "label": "East-Asian processed sweets and beverages"
+    },
+    {
+      "mode_id": "cf_sweet/M3",
+      "label": "East Asian pungent spices and vinegars"
+    },
+    {
+      "mode_id": "cf_sweet/M4",
+      "label": "East Asian vegetables and mild sweet botanicals"
+    },
+    {
+      "mode_id": "cf_savory/M1",
+      "label": "East Asian sweet grains and seeds"
+    },
+    {
+      "mode_id": "cf_savory/M2",
+      "label": "East Asian savory vegetables and mushrooms"
+    },
+    {
+      "mode_id": "cf_savory/M4",
+      "label": "East Asian savory pantry staples"
+    },
+    {
+      "mode_id": "cf_meaty/M0",
+      "label": "East Asian umami seafood and sauces"
+    },
+    {
+      "mode_id": "cf_balsamic/M0",
+      "label": "East Asian fermented sauces and aromatics"
+    },
+    {
+      "mode_id": "cf_citrus/M0",
+      "label": "Southeast & East Asian fish and aromatics"
+    },
+    {
+      "mode_id": "cf_minty/M4",
+      "label": "East Asian herbal vegetables and tonics"
+    },
+    {
+      "mode_id": "cf_earthy/M0",
+      "label": "East Asian fish and umami staples"
+    },
+    {
+      "mode_id": "sweet_score/M0",
+      "label": "East Asian chili peppers and aromatics"
+    },
+    {
+      "mode_id": "sweet_score/M3",
+      "label": "Southeast Asian sweet coconut dessert ingredients"
+    },
+    {
+      "mode_id": "sour_score/M0",
+      "label": "East Asian vegetables and mushrooms"
+    },
+    {
+      "mode_id": "bitter_score/M3",
+      "label": "East Asian pungent aromatics and mushrooms"
+    },
+    {
+      "mode_id": "umami_score/M0",
+      "label": "East Asian umami fish and mushrooms"
+    },
+    {
+      "mode_id": "pungent_score/M1",
+      "label": "East-Asian pungent vegetables and aromatics"
+    },
+    {
+      "mode_id": "pungent_score/M3",
+      "label": "East Asian sweet grains and starchy seeds"
+    },
+    {
+      "mode_id": "fatty_score/M0",
+      "label": "Southeast & East Asian aromatics and mushrooms"
+    },
+    {
+      "mode_id": "usda_fiber_g/M2",
+      "label": "East-Asian whole grains and fiber-rich seeds"
+    },
+    {
+      "mode_id": "usda_fiber_g/M4",
+      "label": "East Asian soy and spice staples"
+    },
+    {
+      "mode_id": "usda_caloric_density/M1",
+      "label": "East Asian oils fats and rich proteins"
+    },
+    {
+      "mode_id": "fg_Pantry/M1",
+      "label": "East Asian savory sauces and condiments"
+    },
+    {
+      "mode_id": "fg_Vegetable/M0",
+      "label": "East Asian medicinal root vegetables"
+    },
+    {
+      "mode_id": "fg_Vegetable/M1",
+      "label": "East-Asian stir-fry vegetables"
+    },
+    {
+      "mode_id": "fg_Vegetable/M3",
+      "label": "East Asian vegetables and mushrooms"
+    }
+  ],
+  "cuisine:Southeast_Asian": [
+    {
+      "mode_id": "sweet_score/M3",
+      "label": "Southeast Asian sweet coconut dessert ingredients"
+    }
+  ],
+  "cuisine:South_Asian": [
+    {
+      "mode_id": "cf_savory/M6",
+      "label": "Latin American and Indian spiced savory staples"
+    },
+    {
+      "mode_id": "cf_minty/M2",
+      "label": "South Asian aromatic spice blend"
+    },
+    {
+      "mode_id": "fg_Spice/M0",
+      "label": "South Asian spice blends and seeds"
+    }
+  ],
+  "cuisine:Mediterranean": [
+    {
+      "mode_id": "nova_level/M4",
+      "label": "Italian-Mediterranean deli and cheese staples"
+    },
+    {
+      "mode_id": "cf_sweet/M0",
+      "label": "Mediterranean vinegars and savory spices"
+    },
+    {
+      "mode_id": "cf_savory/M0",
+      "label": "Mediterranean savory pantry staples"
+    },
+    {
+      "mode_id": "cf_savory/M5",
+      "label": "Mediterranean savory vegetables and grains"
+    },
+    {
+      "mode_id": "cf_meaty/M2",
+      "label": "Mediterranean cheeses and aged spirits"
+    },
+    {
+      "mode_id": "cf_balsamic/M3",
+      "label": "Mediterranean vinaigrette spices and oils"
+    },
+    {
+      "mode_id": "cf_citrus/M1",
+      "label": "Mediterranean aromatic herbs and spices"
+    },
+    {
+      "mode_id": "cf_minty/M5",
+      "label": "Mediterranean herbs and peppers"
+    },
+    {
+      "mode_id": "sour_score/M3",
+      "label": "Mediterranean vegetables and savory pantry staples"
+    },
+    {
+      "mode_id": "bitter_score/M1",
+      "label": "Mediterranean aged cheeses and mushrooms"
+    },
+    {
+      "mode_id": "umami_score/M1",
+      "label": "Mediterranean aged cheeses and umami staples"
+    },
+    {
+      "mode_id": "pungent_score/M2",
+      "label": "Pungent Mediterranean vegetables and aromatics"
+    },
+    {
+      "mode_id": "fatty_score/M1",
+      "label": "Mediterranean cheeses and savory aromatics"
+    },
+    {
+      "mode_id": "usda_protein_g/M2",
+      "label": "Italian cheeses and cured meats"
+    },
+    {
+      "mode_id": "usda_fiber_g/M0",
+      "label": "Mediterranean herbs, greens and grains"
+    },
+    {
+      "mode_id": "usda_caloric_density/M0",
+      "label": "Rich Mediterranean cheeses and cured meats"
+    }
+  ],
+  "cuisine:Western_Atlantic": [
+    {
+      "mode_id": "nova_level/M5",
+      "label": "Processed condiments and Tex-Mex pantry staples"
+    },
+    {
+      "mode_id": "cf_savory/M6",
+      "label": "Latin American and Indian spiced savory staples"
+    },
+    {
+      "mode_id": "sour_score/M1",
+      "label": "Latin American chiles and aromatics"
+    },
+    {
+      "mode_id": "fg_Spice/M3",
+      "label": "Latin American dried chiles"
+    }
+  ],
+  "cuisine:Eastern_European": [
+    {
+      "mode_id": "fg_Dairy/M0",
+      "label": "Eastern European tangy aged cheeses and fermented dairy"
+    }
+  ],
+  "cuisine:Latin_American": [
+    {
+      "mode_id": "cf_savory/M6",
+      "label": "Latin American and Indian spiced savory staples"
+    },
+    {
+      "mode_id": "cf_citrus/M3",
+      "label": "Mexican melting cheeses and dried chiles"
+    },
+    {
+      "mode_id": "cf_minty/M3",
+      "label": "Mexican dried and fresh chiles"
+    },
+    {
+      "mode_id": "sour_score/M1",
+      "label": "Latin American chiles and aromatics"
+    },
+    {
+      "mode_id": "bitter_score/M4",
+      "label": "Mexican chiles and cheeses"
+    },
+    {
+      "mode_id": "fatty_score/M4",
+      "label": "Mexican peppers beans and cheeses"
+    },
+    {
+      "mode_id": "fg_Spice/M3",
+      "label": "Latin American dried chiles"
+    }
+  ]
+}

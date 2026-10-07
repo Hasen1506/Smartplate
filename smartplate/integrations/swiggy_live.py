@@ -1065,7 +1065,9 @@ def live_checkout_preview(user_id: int) -> dict:
 
 
 def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
-    if not expected_fingerprint:
+    # the approval is the opaque string checkout_preview returned; anything else (a number
+    # too big for SQLite, a list) is simply not that approval, never a server error
+    if not isinstance(expected_fingerprint, str) or not expected_fingerprint:
         raise CartChanged("Review the current Swiggy cart, address, total and payment method first.")
     with db.cursor() as cur:
         quote = cur.execute("SELECT cart_fingerprint, created_ts FROM swiggy_checkout_quotes "

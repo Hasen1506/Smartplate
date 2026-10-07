@@ -13,8 +13,9 @@ the hard rules inconsistent.
 """
 import datetime as dt
 
-from . import access, db, service
-from .domain import allergens, festivals, intake, learning, models, profile, reverse_mode, taste
+from . import access, clock, db, service
+from .domain import (allergens, epicure, festivals, flavour, intake, learning, models, profile,
+                     reverse_mode, taste)
 from .kernel import optimizer, recommender, scheduler
 
 CITY = "Chennai"                 # the sample catalogue covers Chennai only (honest limit)
@@ -171,7 +172,7 @@ def update_setup(user_id: int, body: dict) -> dict:
     for key in ("allergens", "medical", "observances"):
         if key in data:
             updates[key] = db.jd(data[key])
-    for key in ("meals", "daily_cap", "area"):
+    for key in ("meals", "daily_cap", "area", "cuisine_tilt"):
         if key in data:
             prefs[key] = data[key]
     ht = dict(user["health_targets"])
@@ -518,6 +519,50 @@ def rate(session_id: int, score, reasons: list | None = None) -> dict:
     if score > 0 and rid and rid not in taste.favourites(user["id"]):
         suggest = {"restaurant_id": rid, "restaurant": decision.get("restaurant_name")}
     return {"plan": service.plan_view(plan["id"]), "suggest_favourite": suggest}
+
+
+def more_like(session_id: int) -> dict:
+    """"More like this" on a planned dish: remember it (the last few), re-plan the open
+    meals with the similarity nudge, and offer the closest safe dishes to pick now."""
+    session, plan, user = _session_bundle(session_id)
+    decision = next((d for d in models.decisions_for_plan(plan["id"]) if d["session_id"] == session_id), None)
+    if not decision or decision["chosen_kind"] != "delivery":
+        raise ValueError("“More like this” works on a restaurant dish")
+    if epicure.get() is None:
+        raise ValueError("Dish similarity isn't available right now")
+    dish = decision["item_name"]
+    if flavour.dish_vector(dish) is None:
+        raise ValueError(f"SmartPlate can't tell yet what {dish} is made of, so it can't find similar dishes")
+    prefs = dict(user["prefs"])
+    entries = [m for m in prefs.get("more_like", []) if m.get("name") != dish]
+    entries.append({"name": dish, "item_id": decision.get("item_id"), "iso_date": clock.today().isoformat()})
+    prefs["more_like"] = entries[-flavour.MORE_LIKE_MAX:]
+    with db.cursor() as cur:
+        cur.execute("UPDATE users SET prefs=? WHERE id=?", (db.jd(prefs), user["id"]))
+    optimizer.optimize(plan["id"])
+    user = models.get_user(user["id"])
+    menu = [it for it in allergens.safe_items(user, models.menu_for_city(user["city"]))
+            if optimizer.meal_suitable(it, session["meal"]) and it["restaurant_rating"] >= float(user["rating_floor"])]
+    similar = [{"item_id": it["id"], "name": it["name"], "restaurant": it["restaurant_name"], "price": it["price"],
+                "similarity": it["similarity"]}
+               for it in flavour.similar_items(dish, menu, k=3, exclude_ids={decision.get("item_id")})]
+    return {"plan": service.plan_view(plan["id"]), "recorded": dish, "similar": similar}
+
+
+def forget_more_like(user_id: int, name: str) -> dict:
+    user = models.get_user(user_id)
+    if not user:
+        raise KeyError("Profile not found")
+    prefs = dict(user["prefs"])
+    before = prefs.get("more_like", [])
+    prefs["more_like"] = [m for m in before if m.get("name") != name]
+    if len(prefs["more_like"]) == len(before):
+        raise ValueError("That dish isn't on your “more like this” list")
+    with db.cursor() as cur:
+        cur.execute("UPDATE users SET prefs=? WHERE id=?", (db.jd(prefs), user_id))
+    view = service.current_plan(user_id)
+    optimizer.optimize(view["plan"]["id"])
+    return service.plan_view(view["plan"]["id"])
 
 
 def upcoming_calendar(user_id: int, days: int = 60) -> list[dict]:

@@ -424,6 +424,13 @@ details summary{cursor:pointer;font-weight:600;font-size:14px;padding:8px 0}
 .cartnote{display:grid;gap:8px}
 .cartnote .btn{justify-self:start}
 .signin .inline-err{margin:0;padding:8px 12px;border-radius:8px;background:var(--red-bg);color:var(--red);font-size:14px}
+/* Epicure swaps (cooking panel) */
+.ingredients .tag{cursor:default}
+.ingredients button.tag{cursor:pointer}
+.tag.swapped{background:var(--green-bg);color:var(--green);border-color:transparent}
+.tag .x{background:none;border:none;cursor:pointer;color:inherit;font-weight:700;padding:0 0 0 4px}
+.swap-pick{border-color:var(--accent)}
+.credits{max-width:760px;margin:24px auto;padding:0 16px}
 
 /* rating reasons + learned chips */
 .reasons,.learned{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}

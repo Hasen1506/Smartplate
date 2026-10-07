@@ -37,9 +37,9 @@ jobs:
       - run: node --test tests/frontend.test.cjs
       - run: python -m pip install playwright==1.63.0
       - run: python -m playwright install --with-deps chromium
-      - name: Browser E2E (golden first-week journey + smoke)
+      - name: Browser E2E (golden first-week journey, smoke, Epicure swaps)
         timeout-minutes: 5
-        run: python -m pytest -q tests/browser_journey.py tests/browser_smoke.py --durations=10
+        run: python -m pytest -q tests/browser_journey.py tests/browser_smoke.py tests/browser_epicure.py --durations=10
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

@@ -13,7 +13,7 @@ const S = {
   busy: false, error: null, hideCold: false, orderReview: null, cartReview: null,
   liveResults: null, liveFavourites: null, liveBrowseMenu: null, liveOrderReview: null, liveCart: null,
   checkoutReview: null, placedOrder: null, liveOrderStatus: null, liveOrderHistory: null, liveCartError: null,
-  sheet: null, moving: null, onboard: null, places: null, calendar: null, welcome: false, signin: false, account: null,
+  sheet: null, swapPick: null, moving: null, onboard: null, places: null, calendar: null, welcome: false, signin: false, account: null,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
 const MEAL_ICON = { breakfast: "☀", lunch: "◐", dinner: "☾" };
@@ -254,6 +254,30 @@ async function openSheet(sid) {
 async function choose(sid, body, msg) {
   adoptView(await api(`/api/session/${sid}/choose`, "POST", body));
   S.sheet = null; toast(msg || "Done — the rest of the week re-balanced"); render();
+}
+/* Epicure: "more like this" on the planned dish, ingredient swaps for cook days. */
+const epicureOn = () => !!S.meta?.epicure?.available;
+async function moreLikeThis(sid) {
+  const r = await api(`/api/session/${sid}/more-like`, "POST", {});
+  adoptView(r.plan);
+  // the re-plan may have changed this very meal: show the sheet as it is now
+  const data = await api(`/api/session/${sid}/options`);
+  S.sheet = { ...S.sheet, data, similar: { dish: r.recorded, items: r.similar } };
+  toast(`Got it: more like ${r.recorded}. Your open meals were re-planned.`); render();
+}
+async function forgetMoreLike(name) {
+  adoptView(await api(`/api/user/${S.userId}/more-like/forget`, "POST", { name }));
+  toast(`Removed ${name} from “more like this”.`); render();
+}
+async function openSwap(token, reason) {
+  S.swapPick = { token, reason, data: null }; render();
+  S.swapPick.data = await api(`/api/plan/${S.planId}/swaps?token=${encodeURIComponent(token)}`); render();
+  // the picker sits above the recipes; on a phone the tapped grocery line is far below it
+  document.querySelector(".swap-pick")?.scrollIntoView?.({ block: "center" });
+}
+async function setSwap(token, swapToken, reason) {
+  adoptView(await api(`/api/plan/${S.planId}/grocery-swap`, "POST", { token, swap_token: swapToken, reason }));
+  S.swapPick = null; toast(swapToken ? "Swap saved. Your recipe and grocery list show it." : "Back to the original ingredient."); render();
 }
 async function confirmMeal(sid) {
   adoptView(await api(`/api/session/${sid}/confirm`, "POST", {}));
@@ -640,6 +664,7 @@ function sheetDialog() {
     <p class="eyebrow">${esc(s.day)} ${esc(fmtDate(s.date))} · ${rupee0(left)} left${L.left_day != null ? " today" : " this week"}</p>
     <h2 id="sheet-title">${esc(cap1(s.meal))}${d.current ? `: <span class="muted">${esc(d.current.item)}</span>` : ""}</h2>
     ${d.timing_tip ? `<p class="fine">⏱ ${esc(d.timing_tip)}</p>` : ""}
+    ${moreLikeBlock(d, s)}
     <h3 class="k">${d.has_favourites ? "Your usual places" : "Good picks nearby"}</h3>
     ${usual || `<p class="fine">None of your usual places has a dish that fits. Try something new, or cook.</p>`}
     ${d.usual_more ? `<p class="fine">+${d.usual_more} more usual places. <a href="#" data-tab="places">Edit your list</a></p>` : ""}
@@ -652,6 +677,17 @@ function sheetDialog() {
     </div>
     ${hidden ? `<p class="fine">Hidden: ${esc(hidden)}.</p>` : ""}
   </section></div>`;
+}
+
+function moreLikeBlock(d, s) {
+  if (!epicureOn() || d.current?.kind !== "delivery") return "";
+  const sim = S.sheet.similar;
+  if (!sim) return `<div class="row"><button class="ghost small" data-more-like="${s.id}">More like ${esc(d.current.item)}</button>
+    <span class="fine">SmartPlate will favour similar dishes in the meals you haven't had yet.</span></div>`;
+  return `<h3 class="k">Like ${esc(sim.dish)}</h3>${sim.items.length ? sim.items.map(x => `<button class="dish" data-pick="${x.item_id}" data-pick-name="${esc(x.name)}">
+      <span class="dn">${esc(x.name)}<small>${esc(x.restaurant)}</small></span><span class="dp">${rupee0(x.price)}</span>
+      <span class="dw">similar flavours</span></button>`).join("")
+    : `<p class="fine">No other dish nearby that fits your rules is close enough in flavour.</p>`}`;
 }
 
 /* ================================================================ PLACES */
@@ -906,9 +942,10 @@ function moreScreen() {
     ["cooking", "Cooking & groceries", "Recipes and one grocery list for cook days"], ["receipts", "Expenses", "What you spent; CSV export"],
     ["community", "Community weeks", "Plans others shared"], ["connection", "Swiggy connection", "What's live and what's not"],
     ["profiles", "Profiles", "Switch or add a profile"]];
+  const credits = `<a class="mitem" href="/credits"><b>Credits &amp; licences</b><span>Data and models SmartPlate uses</span></a>`;
   if (!S.more) {
     return `<h1 class="greet">More</h1><div class="mlist">${items.map(([k, t, d]) =>
-      `<button class="mitem" data-go="more:${k}"><b>${t}</b><span>${d}</span></button>`).join("")}</div>`;
+      `<button class="mitem" data-go="more:${k}"><b>${t}</b><span>${d}</span></button>`).join("")}${credits}</div>`;
   }
   const back = `<button class="ghost small back" data-go="more:">← More</button>`;
   const body = { settings: settingsPanel, calendar: calendarPanel, insights, orders: ordersPanel, cooking: cookingPanel,
@@ -1162,15 +1199,39 @@ function ordersPanelBody() {
 /* ---- cooking coach ---- */
 function cookingPanel() {
   const c = S.view.coach;
+  const ing = (i) => i.swap
+    ? `<span class="tag swapped">${esc(i.swap.name)} <small>for ${esc(i.name)}</small> <button class="x" data-unswap="${esc(i.token)}" aria-label="Use ${esc(i.name)} again">✕</button></span>`
+    : (i.swappable ? `<button class="tag" data-swap-ing="${esc(i.token)}" title="Swap ${esc(i.name)}">${esc(i.name)} ⇄</button>` : `<span class="tag">${esc(i.name)}</span>`);
   const recipes = c.recipes.map(r => `<div class="card"><h3 class="k">${esc(r.session)} · ${rupee(r.cost)}</h3>
     <div style="font-weight:600;margin-bottom:6px">${esc(r.name)}</div>
+    ${r.ingredients?.length ? `<div class="kv ingredients">${r.ingredients.map(ing).join("")}</div>` : ""}
     <ol style="margin-left:18px">${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol></div>`).join("") || `<div class="card empty">No cook days this week. Set how often you cook in Settings.</div>`;
-  const basket = c.basket.items.map(b => `<tr><td>${esc(b.name)}</td><td>${esc(b.recipe)}</td><td>${rupee(b.price)}</td></tr>`).join("");
+  const basket = c.basket.items.map(b => `<tr><td>${b.swap ? `<s>${esc(b.name)}</s> → <b>${esc(b.swap.name)}</b>${b.swap.reason === "out_of_stock" ? " <small>(out of stock)</small>" : ""}` : esc(b.name)}</td>
+    <td>${esc(b.recipe)}</td><td>${rupee(b.price)}</td>
+    <td>${b.swap ? `<button class="ghost small" data-unswap="${esc(b.token)}">Undo</button>`
+      : (b.swappable ? `<button class="ghost small" data-oos="${esc(b.token)}">Out of stock?</button>` : "")}</td></tr>`).join("");
+  const swapped = c.basket.items.some(b => b.swap);
+  const safe = (c.safe_with_swap || []).map(f => `<li><b>${esc(f.name)}</b>: ${f.swaps.map(x => `use ${esc(x.to_name)} instead of ${esc(x.from_name)}`).join(", ")}</li>`).join("");
   return `<h2 class="sec">Cooking & groceries</h2><p class="sub">${esc(c.headline)}</p>
-    <div class="row"><div style="flex:2;min-width:280px"><div class="grid-cards">${recipes}</div></div>
+    ${S.swapPick ? swapPicker() : ""}
+    <div class="row"><div style="flex:2;min-width:280px"><div class="grid-cards">${recipes}</div>
+      ${safe ? `<div class="card"><h3 class="k">Also safe with a swap</h3><ul class="fine">${safe}</ul>
+        <p class="fine">These recipes are left out of your plan as written. With these swaps nobody's allergies or diet are broken.</p></div>` : ""}</div>
       <div style="flex:1;min-width:240px"><div class="card"><h3 class="k">Grocery list · ${rupee(c.basket.total)}</h3>
-        <table><tr><th>item</th><th>for</th><th>₹</th></tr>${basket || `<tr><td class="empty">—</td></tr>`}</table></div></div>
+        <table><tr><th>item</th><th>for</th><th>₹</th><th></th></tr>${basket || `<tr><td class="empty">—</td></tr>`}</table>
+        ${swapped ? `<p class="fine">Prices are for the original items. Check the swap's price in the shop.</p>` : ""}</div></div>
     </div>`;
+}
+function swapPicker() {
+  const p = S.swapPick, d = p.data;
+  const what = d?.name || p.token.replace(/_/g, " ");
+  const head = p.reason === "out_of_stock" ? `${esc(what)} is out of stock. Use instead:` : `Instead of ${esc(what)}, use:`;
+  if (!d) return `<div class="card"><p class="fine">Finding swaps…</p></div>`;
+  return `<div class="card swap-pick" role="group" aria-label="Swap ${esc(what)}"><h3 class="k">${head}</h3>
+    ${d.options.length ? `<div class="chips">${d.options.map(o => `<button data-swap-to="${esc(o.token)}">${esc(o.name)}</button>`).join("")}</div>`
+      : `<p class="fine">No swap that does the same job is safe for everyone eating.</p>`}
+    <p class="fine">Only ingredients that fit everyone's allergies and diet are shown${d.hidden_unsafe ? ` (${d.hidden_unsafe} left out)` : ""}. Closest in flavour first.</p>
+    <button class="ghost small" data-act="swap-cancel">Cancel</button></div>`;
 }
 
 /* ---- community ---- */
@@ -1255,6 +1316,7 @@ function settingsPanelBody() {
       <fieldset><legend>Allergies (always excluded)</legend><div class="checks">${checks('allergens', ['peanut', 'dairy', 'gluten', 'egg', 'soy', 'shellfish', 'fish', 'sesame', 'tree_nut'])}</div></fieldset>
       <fieldset><legend>Medical filters</legend><div class="checks">${checks('medical', ['diabetes', 'hypertension', 'celiac'])}</div><p class="sub">Simple menu-label rules. They can't guarantee a restaurant dish is medically suitable or free of cross-contact.</p></fieldset>
       <fieldset><legend>Fasts you keep (optional)</legend><div class="checks">${checks('observances', ['navratri', 'ramadan', 'karva_chauth'], { navratri: "Navratri", ramadan: "Ramadan", karva_chauth: "Karva Chauth" })}</div><p class="sub">On those days only dinner is planned. We never assume this from your name or area.</p></fieldset>
+      ${tasteFieldset(p)}
       <details ${body.weight_kg ? "open" : ""}><summary>Personalise nutrition (optional)</summary><div class="settings-grid">
         ${number('weight_kg', 'Weight (kg)', body.weight_kg, 30, 300, 0.1)}${number('height_cm', 'Height (cm)', body.height_cm, 120, 230)}
         ${number('age', 'Age', body.age, 18, 100)}
@@ -1267,6 +1329,16 @@ function settingsPanelBody() {
       <input type="text" id="cmd" placeholder="e.g. 'skip friday dinner'" style="flex:1;min-width:200px"><button data-act="cmd">Send</button></div>
       <div class="qbar"><span class="qchip" data-cmd="skip friday dinner">Skip Fri dinner</span><span class="qchip" data-cmd="switch to survival">Tight week</span></div></div>`;
 }
+function tasteFieldset(p) {
+  if (!epicureOn()) return "";
+  const t = p.cuisine_tilt || {};
+  const cuisines = Object.entries(S.meta.epicure.cuisines || {});
+  const likes = (p.more_like || []).map(m => `<span class="tag">${esc(m.name)} <button type="button" class="x" data-forget-like="${esc(m.name)}" aria-label="Stop favouring dishes like ${esc(m.name)}">✕</button></span>`).join("");
+  return `<fieldset><legend>Taste</legend><div class="settings-grid">
+      <label>Lean toward a cuisine<select name="tilt_cuisine"><option value="">No lean</option>${cuisines.map(([k, v]) => `<option value="${k}" ${t.cuisine === k ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>
+      <label>How much<select name="tilt_strength"><option value="light" ${t.strength !== "strong" ? "selected" : ""}>A little</option><option value="strong" ${t.strength === "strong" ? "selected" : ""}>A lot</option></select></label></div>
+      <p class="sub">${likes ? `More like: ${likes}` : "Tap “More like …” on a planned dish to get more dishes like it."}</p></fieldset>`;
+}
 function readSettings(form) {
   const f = new FormData(form);
   const body = { name: f.get("name"), diet: f.get("diet"), weekly_budget: Number(f.get("weekly_budget")),
@@ -1274,6 +1346,7 @@ function readSettings(form) {
     meals: f.getAll("meals"), allergens: f.getAll("allergens"), medical: f.getAll("medical"), observances: f.getAll("observances") };
   const cap = Number(f.get("daily_cap"));
   body.daily_cap = cap > 0 ? cap : null;
+  if (f.has("tilt_cuisine")) body.cuisine_tilt = f.get("tilt_cuisine") ? { cuisine: f.get("tilt_cuisine"), strength: f.get("tilt_strength") || "light" } : null;
   const w = f.get("weight_kg"), h = f.get("height_cm"), a = f.get("age");
   if (w && h && a) body.body = { weight_kg: Number(w), height_cm: Number(h), age: Number(a), sex: f.get("sex"), activity: f.get("activity") };
   return body;
@@ -1476,6 +1549,12 @@ function wire() {
   on("[data-close-live-review]", "click", (e) => { if (e.target.dataset.closeLiveReview) { S.liveOrderReview = null; render(); } });
   on("[data-close-checkout-review]", "click", (e) => { if (e.target.dataset.closeCheckoutReview) { S.checkoutReview = null; render(); } });
   on("[data-cmd]", "click", (e) => guard(() => quickCmd(e.currentTarget.dataset.cmd)));
+  on("[data-more-like]", "click", (e) => guard(() => moreLikeThis(e.currentTarget.dataset.moreLike)));
+  on("[data-forget-like]", "click", (e) => { e.preventDefault(); guard(() => forgetMoreLike(e.currentTarget.dataset.forgetLike)); });
+  on("[data-swap-ing]", "click", (e) => guard(() => openSwap(e.currentTarget.dataset.swapIng, "swap")));
+  on("[data-oos]", "click", (e) => guard(() => openSwap(e.currentTarget.dataset.oos, "out_of_stock")));
+  on("[data-swap-to]", "click", (e) => guard(() => setSwap(S.swapPick.token, e.currentTarget.dataset.swapTo, S.swapPick.reason)));
+  on("[data-unswap]", "click", (e) => guard(() => setSwap(e.currentTarget.dataset.unswap, null, "swap")));
   on("[data-adopt]", "click", (e) => guard(() => adopt(e.currentTarget.dataset.adopt)));
   on("[data-sess]", "click", (e) => { e.stopPropagation(); const [id, st] = e.currentTarget.dataset.sess.split(":"); guard(() => setSession(id, st)); });
   on("[data-ob]", "click", (e) => { e.preventDefault(); const t = e.currentTarget; onboardChip(t.dataset.ob, t.dataset.val, t.dataset.multi === "1"); });
@@ -1513,6 +1592,7 @@ function wire() {
     "sign-out": signOut,
     "rotate-recovery": rotateRecoveryCode,
     "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); }, "cancel-move": async () => { S.moving = null; render(); },
+    "swap-cancel": async () => { S.swapPick = null; render(); },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
   const deleteForm = document.getElementById("delete-profile");

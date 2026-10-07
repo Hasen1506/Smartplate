@@ -129,7 +129,7 @@ def validate_setup(body: dict) -> dict:
     """Normalise an onboarding / settings payload. Every field is optional except
     what a first-time profile needs; unknown keys are rejected."""
     allowed = {"name", "area", "diet", "allergens", "medical", "observances", "weekly_budget",
-               "daily_cap", "meals", "goal", "body", "favourites", "variety", "rating_floor"}
+               "daily_cap", "meals", "goal", "body", "favourites", "variety", "rating_floor", "cuisine_tilt"}
     if not isinstance(body, dict):
         raise ValueError("Send a JSON object")
     extra = set(body) - allowed
@@ -180,9 +180,25 @@ def validate_setup(body: dict) -> dict:
         if len(favs) > 12:
             raise ValueError("Pick up to 12 usual places")
         out["favourites"] = sorted(set(favs))
+    if "cuisine_tilt" in body:
+        out["cuisine_tilt"] = validate_tilt(body["cuisine_tilt"])
     if out.get("daily_cap") and out.get("weekly_budget"):
         check_caps(out["weekly_budget"], out["daily_cap"])
     return out
+
+
+def validate_tilt(value) -> dict | None:
+    """A cuisine to lean toward (an Epicure cuisine pole) and how much, or None for no lean."""
+    from . import flavour
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) - {"cuisine", "strength"}:
+        raise ValueError("Choose a cuisine to lean toward and how much")
+    if value.get("cuisine") not in flavour.CUISINES:
+        raise ValueError("Unknown cuisine")
+    if value.get("strength", "light") not in flavour.TILT_DEGREES:
+        raise ValueError("Lean a little or a lot")
+    return {"cuisine": value["cuisine"], "strength": value.get("strength", "light")}
 
 
 def weekly_budget(value) -> float:

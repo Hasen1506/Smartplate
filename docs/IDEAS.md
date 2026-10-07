@@ -75,3 +75,30 @@ them is built. Grouped by the PR that surfaced it.
   higher cap; suggest it instead of making them find the setting.
 - **Home-cooked meal without a recipe**: when no suggested recipe fits the user's rules, let
   them log what they actually cooked so nutrition still adds up.
+
+## From PR G (Epicure ingredient embeddings)
+
+- **Coconut for tree-nut allergies, by choice.** Coconut is treated as a tree nut (the
+  conservative reading); US FDA guidance no longer lists it as one. Let a tree-nut-allergic
+  user say "coconut is fine for me" instead of losing every coconut swap.
+- **Plan the "safe with a swap" recipes.** They are shown in Cooking & groceries but the
+  planner still excludes them as written; a recipe variant with the swap applied could be a
+  planned cook option.
+- **Real stock and prices for swaps** once an Instamart tool exists: mark lines out of stock
+  automatically and price the replacement instead of keeping the original's estimate.
+- **Grow the dish lexicon from live menus**: log dish names with no recognised words (no
+  flavour vector today) and review them, so "more like this" works on more real dishes.
+- **Fade "more like this"** after a few weeks, or when the user swaps away from the similar
+  dishes it brought in; today the last five taps stay until removed in Settings.
+- **Learn "more like this" from 👍** on dishes with a flavour vector, with the user's consent,
+  instead of only from the explicit tap.
+- **Cuisine lean per meal** ("Indian lunches, East Asian dinners") and a lean that applies to
+  cook-day recipes once there are more than four.
+- **Explain similarity in words.** Epicure's factor modes (factor_poles.npy) are loaded and
+  checked but not shown: their machine-written labels ("East-Asian roots…" for curd rice)
+  read wrongly on Indian dishes. A small hand-written label set could make "similar because…"
+  lines trustworthy.
+- **Southeast Asian lean** when the pole has more than one mode behind it (today it is a single
+  coconut-dessert mode, so it is not offered).
+- **"Use it up" suggestions**: leftover paneer or half a pack of dal → recipes and dishes
+  nearest to it.

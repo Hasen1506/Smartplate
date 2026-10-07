@@ -7,7 +7,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
-from .domain import learning, live_catalog, models, sentiment, week_orders
+from .domain import epicure, flavour, learning, live_catalog, models, sentiment, week_orders
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp
 from .kernel import agent_brain
@@ -181,6 +181,8 @@ def create_app() -> Flask:
             "weather_provider": config.WEATHER_PROVIDER,
             "catalog_city": everyday.CITY,
             "features": _FEATURE_MAP,
+            # Epicure ingredient embeddings: swaps, "more like this", cuisine tilt
+            "epicure": {"available": epicure.get() is not None, "cuisines": flavour.CUISINES},
         })
 
     # ---- users / plans ---- #
@@ -702,6 +704,29 @@ def create_app() -> Flask:
         if not all(isinstance(v, int) and not isinstance(v, bool) for v in (a, b)):
             raise ValueError("Send the two meal ids to swap as a and b")
         return jsonify(everyday.swap(plan_id, a, b))
+
+    @app.get("/api/plan/<int:plan_id>/swaps")
+    def swap_options(plan_id):
+        return jsonify(service.swap_options(plan_id, request.args.get("token", "")))
+
+    @app.post("/api/plan/<int:plan_id>/grocery-swap")
+    def grocery_swap(plan_id):
+        return jsonify(service.set_grocery_swap(plan_id, request.get_json()))
+
+    @app.post("/api/session/<int:session_id>/more-like")
+    def session_more_like(session_id):
+        return jsonify(everyday.more_like(session_id))
+
+    @app.post("/api/user/<int:user_id>/more-like/forget")
+    def forget_more_like(user_id):
+        name = request.get_json().get("name")
+        if not isinstance(name, str):
+            raise ValueError("Send the dish name to forget")
+        return jsonify(everyday.forget_more_like(user_id, name))
+
+    @app.get("/credits")
+    def credits():
+        return send_from_directory(STATIC_DIR, "credits.html")
 
     @app.get("/api/health")
     def health():

@@ -17,7 +17,7 @@ def demo_week_start() -> str:
 def _clear():
     tables = ["users", "households", "restaurants", "menu_items", "plans", "sessions",
               "decisions", "orders", "calendar_events", "leftovers", "weather",
-              "surge_history", "festivals", "community_templates", "receipts", "grocery_baskets",
+              "surge_history", "festivals", "community_templates", "receipts", "grocery_baskets", "grocery_swaps",
               "intake_log", "favourites", "ratings", "weather_cache", "logins", "devices",
               "push_subscriptions", "push_sent"]
     with db.cursor() as cur:

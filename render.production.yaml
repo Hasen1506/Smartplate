@@ -7,7 +7,7 @@ services:
     runtime: python
     plan: 0.5c-512mb
     region: singapore
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && python scripts/fetch_epicure.py
     startCommand: gunicorn wsgi:app --workers 1 --threads 8 --timeout 60 --bind 0.0.0.0:$PORT
     healthCheckPath: /readyz
     autoDeployTrigger: checksPass

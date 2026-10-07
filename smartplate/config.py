@@ -131,3 +131,10 @@ PROTEIN_EVEN_W = float(os.environ.get("SMARTPLATE_PROTEIN_EVEN", "0.25"))
 # and the variety nudge already cover the explore side.
 USUAL_FIRST = os.environ.get("SMARTPLATE_USUAL_FIRST", "off")
 USUAL_FIRST_W = float(os.environ.get("SMARTPLATE_USUAL_FIRST_W", "0.5"))
+
+# Epicure ingredient embeddings (domain/epicure.py): downloaded at build/setup time by
+# scripts/fetch_epicure.py. "pinned" checks every file against the SHA-256 sums in the
+# code; tests point both settings at the small offline fixture in tests/fixtures/epicure.
+EPICURE_DIR = os.environ.get("SMARTPLATE_EPICURE_DIR",
+                             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "epicure"))
+EPICURE_CHECKSUMS = os.environ.get("SMARTPLATE_EPICURE_CHECKSUMS", "pinned")

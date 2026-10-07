@@ -8,7 +8,7 @@ the 17 features produce.
 import datetime as dt
 import math
 
-from . import config, db
+from . import clock, config, db
 from .domain import (carbon, checkout, community, festivals, health, household, intake, learning,
                      live_catalog,
                      ledger, models, nutrition, profile, receipts, reverse_mode, taste, timing, weather)
@@ -195,7 +195,7 @@ def plan_view(plan_id: int) -> dict:
     carbon_total = round(sum(d.get("carbon_kg", 0) for d in spend_rows), 2)
     counts = _counts(decisions)
 
-    coach = _coach(decisions)
+    coach = _coach(decisions, user=user, plan_id=plan["id"])
     fests = festivals.for_week(plan["week_start"])
     wx = weather.week(user["city"], plan["week_start"])
     sig = taste.signals(user["id"])
@@ -326,11 +326,62 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
     return [grid[i] for i in range(7)]
 
 
-def _coach(decisions):
+def _coach(decisions, user=None, plan_id=None):
     cook = [{"recipe_key": d.get("recipe_key"), "label": f"{models.DAYS[d['day']]} {d['meal']}"}
             for d in decisions if d["chosen_kind"] == "cook" and d.get("recipe_key")]
     from .domain import cooking_coach
-    return cooking_coach.coach(cook)
+    return cooking_coach.coach(cook, user=user, swaps=grocery_swaps(plan_id) if plan_id else None)
+
+
+def grocery_swaps(plan_id: int) -> dict:
+    with db.cursor() as cur:
+        rows = cur.execute("SELECT token, swap_token, reason FROM grocery_swaps WHERE plan_id=?", (plan_id,)).fetchall()
+    return {r["token"]: {"swap_token": r["swap_token"], "reason": r["reason"]} for r in rows}
+
+
+def _plan_ingredients(plan_id: int) -> set[str]:
+    """Ingredients of this week's cook meals (recipe ingredients and grocery lines)."""
+    out = set()
+    for d in models.decisions_for_plan(plan_id):
+        r = reverse_mode.recipe(d.get("recipe_key") or "") if d["chosen_kind"] == "cook" else None
+        if r:
+            out |= {i["token"] for i in r.get("ingredients", [])}
+            out |= {b["token"] for b in r["basket"] if b.get("token")}
+    return out
+
+
+def swap_options(plan_id: int, token: str) -> dict:
+    """Safe swaps for one ingredient of this week's cooking, for everyone at the table."""
+    from .domain import ingredients
+    plan = models.get_plan(plan_id)
+    user = models.get_user(plan["user_id"])
+    if token not in _plan_ingredients(plan_id):
+        raise ValueError("That ingredient isn't in this week's cooking")
+    return ingredients.substitutes(token, ingredients.people_of(user))
+
+
+def set_grocery_swap(plan_id: int, body: dict) -> dict:
+    """Use `swap_token` instead of `token` this week (or undo with swap_token null)."""
+    from .domain import epicure, ingredients
+    token, swap_token, reason = body.get("token"), body.get("swap_token"), body.get("reason", "swap")
+    if not isinstance(token, str) or token not in _plan_ingredients(plan_id):
+        raise ValueError("That ingredient isn't in this week's cooking")
+    if reason not in ("swap", "out_of_stock"):
+        raise ValueError("Reason must be swap or out_of_stock")
+    with db.cursor() as cur:
+        cur.execute("DELETE FROM grocery_swaps WHERE plan_id=? AND token=?", (plan_id, token))
+    if swap_token is not None:
+        if epicure.get() is None:
+            raise ValueError("Ingredient swaps aren't available right now")
+        user = models.get_user(models.get_plan(plan_id)["user_id"])
+        allowed = {o["token"] for o in ingredients.substitutes(token, ingredients.people_of(user),
+                                                               k=len(ingredients.PANTRY))["options"]}
+        if swap_token not in allowed:
+            raise ValueError("That swap isn't safe for everyone eating, or doesn't do the same job in the dish")
+        with db.cursor() as cur:
+            cur.execute("INSERT INTO grocery_swaps(plan_id, token, swap_token, reason, created_ts) VALUES (?,?,?,?,?)",
+                        (plan_id, token, swap_token, reason, clock.now().isoformat(timespec="seconds")))
+    return plan_view(plan_id)
 
 
 def _household_view(user, spend):

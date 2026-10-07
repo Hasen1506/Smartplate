@@ -93,8 +93,13 @@ Swiggy ordering is a hand-off to Swiggy's own search (see
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+python scripts/fetch_epicure.py     # Epicure ingredient embeddings (~3.8 MB, pinned + checksummed)
 python run.py                       # → http://localhost:5057
 ```
+
+Without the Epicure files the app still runs; ingredient swaps, “more like this” and the
+cuisine lean are simply hidden. Epicure-Core is © 2026 Jakub Radzikowski and Josef Chen
+(KAIKAKU.AI), CC BY 4.0 — see `/credits` in the app.
 
 No build step, no Node, no API keys. The database is created and seeded with a
 demo Chennai catalog, three users, and a sample week on first run.
@@ -167,6 +172,8 @@ instead of silently ordered.
 | `SMARTPLATE_VAPID_PRIVATE` | generated | Web Push signing key (base64url P-256). Keep it stable or browsers must re-subscribe |
 | `SMARTPLATE_PUSH_CONTACT` | `mailto:smartplate@example.invalid` | Contact the push services see; use a real address in production |
 | `SMARTPLATE_BEHIND_PROXY` | `1` on Render | Trust one proxy hop's `X-Forwarded-*` headers (rate limits, redirect URLs) |
+| `SMARTPLATE_EPICURE_DIR` | `data/epicure` | Where `scripts/fetch_epicure.py` puts the Epicure files and the app reads them |
+| `SMARTPLATE_EPICURE_CHECKSUMS` | `pinned` | `pinned` checks every Epicure file against the SHA-256 sums in `domain/epicure.py`; a path to a `SHA256SUMS` file is for tests |
 
 ## Live integration status
 

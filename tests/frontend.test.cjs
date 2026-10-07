@@ -433,6 +433,95 @@ test('blocked storage cannot silently discard access during recovery rotation', 
   assert.equal(calls.length, before);
 });
 
+/* ---- Roadmap G: Epicure swaps, "more like this", cuisine lean, credits ---- */
+const COACH = { headline: '1 cook sessions this week — grocery run ≈ ₹200', swaps_available: true,
+  recipes: [{ session: 'Fri lunch', key: 'dal_rice', name: 'Dal + rice', cost: 45, steps: ['Cook'],
+    ingredients: [{ token: 'toor_dal', name: 'Toor dal', swappable: true, swap: { token: 'masoor_dal', name: 'Masoor dal', reason: 'out_of_stock' } },
+      { token: 'rice', name: 'Rice', swappable: true, swap: null }, { token: 'onion', name: 'Onion', swappable: false, swap: null }] }],
+  basket: { total: 200, items: [
+    { name: 'Toor dal 500g', recipe: 'Dal + rice', price: 90, token: 'toor_dal', swappable: true, swap: { token: 'masoor_dal', name: 'Masoor dal', reason: 'out_of_stock' } },
+    { name: 'Rice 1kg', recipe: 'Dal + rice', price: 70, token: 'rice', swappable: true, swap: null },
+    { name: 'Onion/tomato', recipe: 'Dal + rice', price: 40, token: null, swappable: false, swap: null }] },
+  safe_with_swap: [{ key: 'egg_curry', name: 'Egg curry + roti', swaps: [{ from: 'egg', from_name: 'Eggs', to: 'paneer', to_name: 'Paneer' }] }] };
+
+test('cooking panel: ingredient swaps, out-of-stock grocery lines and safe-with-a-swap recipes', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  context.COACH = COACH;
+  vm.runInContext('S.view.coach = COACH', context);
+  const html = vm.runInContext('cookingPanel()', context);
+  assert.match(html, /Masoor dal <small>for Toor dal<\/small>/);              // recipe shows the swap
+  assert.match(html, /data-swap-ing="rice"/);                                   // swappable ingredient
+  assert.ok(!html.includes('data-swap-ing="onion"'));                           // not in the pantry: no button
+  assert.match(html, /<s>Toor dal 500g<\/s> → <b>Masoor dal<\/b> <small>\(out of stock\)<\/small>/);
+  assert.match(html, /data-oos="rice"/);
+  assert.ok(!html.includes('data-oos="null"'));
+  assert.match(html, /Prices are for the original items/);
+  assert.match(html, /Egg curry \+ roti<\/b>: use Paneer instead of Eggs/);
+});
+
+test('swap picker asks for the replacement, then saves it with the reason', async () => {
+  const { context, calls } = fixture({
+    '/api/plan/42/swaps?token=rice': { available: true, ingredient: 'rice', name: 'Rice', hidden_unsafe: 2,
+      options: [{ token: 'brown_rice', name: 'Brown rice', similarity: 0.6 }] },
+    '/api/plan/42/grocery-swap': { plan: { id: 42 }, user: { id: 2, prefs: {} }, grid: [], coach: COACH, budget: {} } });
+  await context.bootPromise;
+  context.COACH = COACH;
+  vm.runInContext('S.view.coach = COACH', context);
+  await vm.runInContext("openSwap('rice', 'out_of_stock')", context);
+  const html = vm.runInContext('cookingPanel()', context);
+  assert.match(html, /Rice is out of stock\. Use instead:/);
+  assert.match(html, /data-swap-to="brown_rice"/);
+  assert.match(html, /\(2 left out\)/);
+  await vm.runInContext("setSwap('rice', 'brown_rice', 'out_of_stock')", context);
+  const call = calls.find(c => c.url === '/api/plan/42/grocery-swap');
+  assert.deepEqual(JSON.parse(call.options.body), { token: 'rice', swap_token: 'brown_rice', reason: 'out_of_stock' });
+  assert.equal(vm.runInContext('S.swapPick', context), null);
+});
+
+test('more like this appears only for a planned restaurant dish when Epicure is installed', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  const sheet = `S.sheet = { sid: 9, data: { session: { id: 9, day: 'Fri', date: '2026-09-25', meal: 'lunch' },
+    limits: { left_week: 400, left_day: null }, has_favourites: false, usual_more: 0, timing_tip: null,
+    current: { item: 'Chicken Biryani', kind: 'delivery', cost: 290 }, usual: [], new: [], cook: [], hidden: {} } }`;
+  vm.runInContext(sheet, context);
+  assert.ok(!vm.runInContext('sheetDialog()', context).includes('data-more-like'));   // no Epicure: no button
+  vm.runInContext("S.meta.epicure = { available: true, cuisines: { Mediterranean: 'Mediterranean' } }", context);
+  assert.match(vm.runInContext('sheetDialog()', context), /data-more-like="9">More like Chicken Biryani/);
+  vm.runInContext("S.sheet.similar = { dish: 'Chicken Biryani', items: [{ item_id: 5, name: 'Mutton Biryani', restaurant: 'JK', price: 320 }] }", context);
+  const html = vm.runInContext('sheetDialog()', context);
+  assert.match(html, /Like Chicken Biryani/);
+  assert.match(html, /data-pick="5"/);
+  vm.runInContext("S.sheet.data.current.kind = 'cook'; S.sheet.similar = null", context);
+  assert.ok(!vm.runInContext('sheetDialog()', context).includes('data-more-like'));
+});
+
+test('settings: cuisine lean and the "more like" list, sent as cuisine_tilt', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  assert.ok(!vm.runInContext('settingsPanel()', context).includes('tilt_cuisine'));     // hidden without Epicure
+  vm.runInContext(`S.meta.epicure = { available: true, cuisines: { South_Asian: 'Indian', Mediterranean: 'Mediterranean' } };
+    S.view.user.prefs = { cuisine_tilt: { cuisine: 'Mediterranean', strength: 'strong' }, more_like: [{ name: 'Masala Dosa' }] }`, context);
+  const html = vm.runInContext('settingsPanel()', context);
+  assert.match(html, /<option value="Mediterranean" selected>Mediterranean<\/option>/);
+  assert.match(html, /<option value="strong" selected>A lot<\/option>/);
+  assert.match(html, /data-forget-like="Masala Dosa"/);
+  const form = (entries) => { const m = new Map(Object.entries(entries));
+    return { get: k => m.has(k) ? m.get(k) : null, getAll: () => [], has: k => m.has(k) }; };
+  context.FormData = function (f) { return f; };
+  const base = { name: 'Meera', diet: 'veg', weekly_budget: '1500', rating_floor: '4', cook: 'never', variety: 'light', goal: 'none', daily_cap: '' };
+  context.F1 = form({ ...base, tilt_cuisine: 'South_Asian', tilt_strength: 'light' });
+  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(readSettings(F1).cuisine_tilt)', context)), { cuisine: 'South_Asian', strength: 'light' });
+  context.F2 = form({ ...base, tilt_cuisine: '', tilt_strength: 'light' });
+  assert.equal(vm.runInContext('readSettings(F2).cuisine_tilt', context), null);
+  context.F3 = form(base);
+  assert.equal(vm.runInContext('"cuisine_tilt" in readSettings(F3)', context), false);
+});
+
+test('More lists Credits & licences, linking to the credits page', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext('S.more = null', context);
+  assert.match(vm.runInContext('moreScreen()', context), /<a class="mitem" href="\/credits"><b>Credits &amp; licences<\/b>/);
+});
+
 test('settings: rhythm, calorie split, targets and variety cap are editable', async () => {
   const { context } = fixture(); await context.bootPromise;
   vm.runInContext(`S.view.user.prefs = { rhythm: { breakfast: 'cook', lunch: 'order', dinner: 'skip' } };
