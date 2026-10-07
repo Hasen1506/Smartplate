@@ -68,6 +68,13 @@ CREATE TABLE IF NOT EXISTS menu_items (
     reviews TEXT NOT NULL DEFAULT '[]'             -- short snippets for local sentiment (§3.1)
 );
 
+CREATE TABLE IF NOT EXISTS live_catalog_state (   -- the user's live Swiggy catalogue (domain/live_catalog)
+    user_id INTEGER PRIMARY KEY,
+    fetched_ts TEXT NOT NULL,
+    restaurants INTEGER NOT NULL DEFAULT 0,
+    dishes INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS plans (
     id INTEGER PRIMARY KEY,
     user_id INTEGER NOT NULL,
@@ -282,6 +289,11 @@ CREATE TABLE IF NOT EXISTS app_secrets (         -- generated keys when no env s
 # Columns added after the first trial shipped. CREATE TABLE IF NOT EXISTS does not
 # alter an existing table, so a saved Codespace database is upgraded in place.
 MIGRATIONS = [
+    ("restaurants", "source", "TEXT NOT NULL DEFAULT 'sample'"),       # sample | live
+    ("restaurants", "provider_id", "TEXT"),                             # Swiggy restaurant id (live rows)
+    ("menu_items", "source", "TEXT NOT NULL DEFAULT 'sample'"),
+    ("menu_items", "provider_item_id", "TEXT"),                         # Swiggy menu item id (live rows)
+    ("menu_items", "nutrition_estimated", "INTEGER NOT NULL DEFAULT 0"),
     ("community_templates", "author_user_id", "INTEGER"),
     ("users", "observances", "TEXT NOT NULL DEFAULT '[]'"),
     ("users", "prefs", "TEXT NOT NULL DEFAULT '{}'"),
