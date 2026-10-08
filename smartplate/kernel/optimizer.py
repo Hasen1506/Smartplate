@@ -235,6 +235,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "restaurant_id": item["restaurant_id"], "restaurant_name": item["restaurant_name"],
         "item_id": item["id"], "item_name": item["name"], "rating": item["restaurant_rating"],
         "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3),
+        "delivery_fee": item["delivery_fee"], "delivery_fee_estimated": item.get("delivery_fee_estimated"),
         "time_shift": time_shift, "flaky": item.get("flaky", 0), "rating_pen": _rating_pen(user, item),
         "is_usual": (not discovery) if ctx["taste"]["favourites"] else not fatigue.is_novel(item, history),
         "familiarity": round(1.0 - novel, 4), "discovery": discovery,
@@ -430,6 +431,30 @@ def pinned_candidate(user, plan, session, ctx) -> dict | None:
     return cand
 
 
+def carted_candidate(user, session, real, ctx) -> dict | None:
+    """A meal already in a checked Swiggy cart is fixed spend at the bill's real total: the
+    re-plan keeps it and balances the open meals around it. None when the dish no longer
+    fits the user's rules (then the cart has to be checked again)."""
+    with db.cursor() as cur:
+        row = cur.execute("SELECT * FROM decisions WHERE session_id=? ORDER BY id DESC LIMIT 1",
+                          (session["id"],)).fetchone()
+    if not row or row["chosen_kind"] != "delivery":
+        return None
+    d = db.row_to_dict(row)
+    item = next((it for it in ctx["menu"] if it["id"] == d["item_id"]), None) or next(
+        (it for it in ctx["menu"] if it["name"] == d["item_name"] and it["restaurant_name"] == d["restaurant_name"]),
+        None)
+    if item is not None and (allergens.violates(user, item) or not meal_suitable(item, session["meal"])):
+        return None
+    nut = db.jl(d["nutrition"], {})
+    return {"kind": "delivery", "restaurant_id": d["restaurant_id"], "restaurant_name": d["restaurant_name"],
+            "item_id": d["item_id"], "item_name": d["item_name"], "rating": d["rating"] or 0,
+            "cost": round(float(real["to_pay"]), 2), "base_cost": round(float(real["to_pay"]), 2),
+            "surge_mult": 1.0, "time_shift": None, "nutrition": nut, "carbon_kg": d["carbon_kg"] or 0,
+            "tags": (item or {}).get("tags", []), "carted": True, "usual_pen": 0.0,
+            "is_usual": True, "discovery": False}
+
+
 def optimize(plan_id: int, *, stable: bool = True) -> dict:
     """Re-plan the open meals. `stable=False` (a mode switch) lets every unpinned meal
     move freely; otherwise current picks are kept unless changing them buys something."""
@@ -441,10 +466,18 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     sessions = [s for s in models.sessions_for_plan(plan_id)]
     open_sessions = [s for s in sessions if s["status"] == "active" and not _is_past(s, at)]
 
-    # The user's own picks are fixed spend, not choices for the solver.
+    # The user's own picks, and meals already in a checked Swiggy cart (at the bill's real
+    # total), are fixed spend, not choices for the solver.
+    from ..domain import week_orders
+    carted = week_orders.real_totals(plan_id)
     pinned = {}
     for s in open_sessions:
-        cand = pinned_candidate(user, plan, s, ctx)
+        cand = None
+        if s["id"] in carted:
+            cand = carted_candidate(user, s, carted[s["id"]], ctx)
+            if cand is None:
+                week_orders.release(s["id"])
+        cand = cand or pinned_candidate(user, plan, s, ctx)
         if cand:
             pinned[s["id"]] = cand
         elif s.get("pinned"):
@@ -773,6 +806,9 @@ def _decision_context(user, session, chosen, ctx):
         "nutrition_flag": nflag,
         "carbon_band": carbon.band(chosen.get("carbon_kg", 0)) if chosen["kind"] == "delivery" else None,
         "pinned": chosen.get("pinned", False),
+        "carted": chosen.get("carted", False),
+        "fee": ({"amount": chosen["delivery_fee"], "estimated": chosen["delivery_fee_estimated"]}
+                if chosen.get("delivery_fee_estimated") is not None else None),
         "discovery": chosen.get("discovery", False),
         "liked": chosen.get("item_id") in ctx["taste"]["liked"],
         "flavour": chosen.get("flavour_why") or [],
@@ -781,6 +817,7 @@ def _decision_context(user, session, chosen, ctx):
 
 def _write_decision(plan, user, session, chosen, ctx):
     dctx = _decision_context(user, session, chosen, ctx)
+    fee = dctx["fee"] if chosen["kind"] == "delivery" and not chosen.get("carted") else None
     reasons = explainability.reasons_for(
         {**chosen, "chosen_kind": chosen["kind"], "day": session["day"]}, dctx)
     row = {
@@ -795,13 +832,15 @@ def _write_decision(plan, user, session, chosen, ctx):
         cur.execute(
             "INSERT INTO decisions(session_id, plan_id, chosen_kind, restaurant_id, item_id, "
             "item_name, cost, surge_mult, substituted, reasons, nutrition, carbon_kg, "
-            "recipe_key, time_shift, restaurant_name, rating, idempotency_key, created_ts) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "recipe_key, time_shift, restaurant_name, rating, idempotency_key, created_ts, "
+            "delivery_fee, fee_estimated) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (row["session_id"], row["plan_id"], row["chosen_kind"], row["restaurant_id"],
              row["item_id"], row["item_name"], row["cost"], row["surge_mult"], 0,
              row["reasons"], row["nutrition"], row["carbon_kg"],
              chosen.get("recipe_key"), db.jd(chosen["time_shift"]) if chosen.get("time_shift") else None,
-             chosen.get("restaurant_name"), chosen.get("rating", 0), None, now().isoformat(timespec="seconds")),
+             chosen.get("restaurant_name"), chosen.get("rating", 0), None, now().isoformat(timespec="seconds"),
+             fee["amount"] if fee else None, (1 if fee["estimated"] else 0) if fee else None),
         )
         row["id"] = cur.lastrowid
     return {**row, "day": session["day"], "meal": session["meal"],
