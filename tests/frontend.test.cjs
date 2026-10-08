@@ -18,7 +18,7 @@ function fixture(overrides = {}, env = {}) {
     nutrition: { daily_target: { kcal: 1800, protein_g: 55 } },
   };
   const replies = {
-    '/api/meta': { modes: { balanced: 'Balanced' }, mode_outcomes: {}, version: '1.1.0', swiggy_provider: 'simulated' },
+    '/api/meta': { modes: { balanced: 'Balanced' }, mode_outcomes: {}, version: '1.1.0', swiggy_provider: 'simulated', fixture_data: true },
     '/api/users': [{ id: 1, name: 'Sample profile' }, { id: 2, name: 'Meera' }],
     '/api/user/2/plan': view,
     '/api/plan/42/orders': { attempted: 1, placed: 1, substituted: 0, failed: 0,
@@ -148,13 +148,58 @@ test('today shows the next meal with order-by time, hand-off and escaped names',
   assert.ok(!html.includes('<b>Meals</b>'));
 });
 
-test('sample banner describes demo data without inventing an allergy', async () => {
+test('Today never shows a sample or demo banner; without live menus it says how to get real dishes', async () => {
   const { context } = fixture(); await context.bootPromise;
   richView(context);
-  vm.runInContext("S.view.user.prefs = { sample: true }; S.view.user.allergens = []", context);
+  vm.runInContext("S.meta.swiggy_redirect_approved = true; S.view.source = { kind: 'none', connected: false, needs: 'connect', note: 'n' }", context);
   const html = vm.runInContext('todayScreen()', context);
-  assert.match(html, /demonstration preferences and sample menu data/);
-  assert.ok(!html.includes('fictional allergies'));
+  assert.doesNotMatch(html, /demonstration|Demo plan|sample/i);
+  assert.match(html, /Connect Swiggy and pick an address to see real dishes/);
+  assert.match(html, /data-act="swiggy-connect"/);
+  vm.runInContext("S.view.source = { kind: 'none', connected: true, needs: 'address' }", context);
+  assert.match(vm.runInContext('todayScreen()', context), /data-act="addr-open"[^>]*>Choose delivery address/);
+});
+
+test('connected with an address: Today shows a skeleton and reads real dishes by itself, once', async () => {
+  const live = { plan: { id: 42, mode: 'balanced', week_start: '2026-09-14' }, user: { id: 2, name: 'Meera', allergens: [], medical: [] },
+    budget: { spend: 0, budget: 1500 }, grid: [], week_context: [], source: { kind: 'live', label: 'Live Swiggy menus', note: '' } };
+  const { context, calls } = fixture({ '/api/plan/42/live-menus': live }); await context.bootPromise;
+  vm.runInContext("S.swiggy = { connected: true, address: { id: 'addr-home', label: 'Home' } }; S.view.source = { kind: 'none', connected: true, needs: 'sync' }", context);
+  assert.match(vm.runInContext('realDishesState()', context), /Finding real dishes near you/);
+  await vm.runInContext('autoSyncLive()', context);
+  assert.equal(vm.runInContext('S.view.source.kind', context), 'live');
+  vm.runInContext("S.view.source = { kind: 'none', connected: true, needs: 'sync' }", context);
+  await vm.runInContext('autoSyncLive()', context);                 // never loops for the same address
+  assert.equal(calls.filter(c => c.url === '/api/plan/42/live-menus').length, 1);
+});
+
+test('a failed live sync says why and offers Try again and search, never a fake dish', async () => {
+  const { context } = fixture({ '/api/plan/42/live-menus': { __status: 502, error: "Swiggy's menus had no dishes SmartPlate can plan with yet." } });
+  await context.bootPromise;
+  vm.runInContext("S.swiggy = { connected: true, address: { id: 'addr-w', label: 'Work' } }; S.view.source = { kind: 'none', connected: true, needs: 'sync' }", context);
+  await vm.runInContext('autoSyncLive()', context);
+  const html = vm.runInContext('realDishesState()', context);
+  assert.match(html, /no dishes SmartPlate can plan with yet/);
+  assert.match(html, /data-act="live-menus"/);
+  assert.match(html, /search Swiggy/);
+});
+
+test('Retry re-runs a click handler after the event finished (no null currentTarget crash)', async () => {
+  const { context } = fixture({ '/api/session/9/swiggy-cart/preview': { __status: 502, error: "Couldn't reach Swiggy", code: 'swiggy_error' } });
+  await context.bootPromise;
+  richView(context);
+  // a real DOM event: currentTarget is reset to null once dispatch ends
+  const el = { dataset: { cart: '9' }, listeners: {}, addEventListener(ev, fn) { this.listeners[ev] = fn; } };
+  vm.runInContext('document', context).querySelectorAll = (sel) => sel === '[data-cart]' ? [el] : [];
+  vm.runInContext('wire()', context);
+  const event = { _ct: el, get currentTarget() { return this._ct; }, preventDefault() {}, stopPropagation() {} };
+  el.listeners.click(event);
+  await new Promise(r => setImmediate(r));
+  event._ct = null;                                                   // dispatch over
+  assert.match(vm.runInContext('S.error', context), /Couldn't reach Swiggy/);
+  await vm.runInContext('guard(retryLast)', context);                // the Retry button
+  assert.match(vm.runInContext('S.error', context), /Couldn't reach Swiggy/);
+  assert.doesNotMatch(vm.runInContext('S.error', context), /dataset/);
 });
 
 test('connected profiles with ingredient rules keep the direct Swiggy hand-off', async () => {
@@ -179,7 +224,7 @@ test('eligible profiles review and escape the exact live item before a cart upda
       address: 'Home', planned_cost: 150, menu_price: null, fingerprint: 'fingerprint' };`, context);
   assert.match(vm.runInContext('nextUpCard(S.view.next_up)', context), /data-cart="9"/);
   const dialog = vm.runInContext('cartReviewDialog()', context);
-  assert.match(dialog, /Price to verify/);
+  assert.match(dialog, /Price in cart/);
   assert.match(dialog, /Add to Swiggy cart/);
   assert.ok(!dialog.includes('<img src=x>') && !dialog.includes('<b>Kitchen</b>'));
 });
@@ -228,14 +273,14 @@ test('recent provider orders and uncertain attempts are visible without raw mark
 test('live configuration routes orders to real Places instead of a dead simulator', async () => {
   const { context } = fixture(); await context.bootPromise;
   vm.runInContext(`S.meta.swiggy_provider = 'live';`, context);
-  assert.match(vm.runInContext('ordersPanel()', context), /Open live Places/);
+  assert.match(vm.runInContext('ordersPanel()', context), /Real Swiggy orders/);
   assert.ok(!vm.runInContext('ordersPanel()', context).includes('data-act="exec"'));
   assert.ok(!vm.runInContext('weekScreen()', context).includes('data-act="exec"'));
-  vm.runInContext(`S.view.source = { kind: 'sample', connected: false, label: 'Sample dishes (not real restaurants)', note: 'Connect Swiggy to plan from real restaurants near you.' };`, context);
-  assert.match(vm.runInContext('weekScreen()', context), /Sample dishes \(not real restaurants\)/);
+  vm.runInContext(`S.view.source = { kind: 'sample', connected: false, label: 'Sample dishes (test data)', note: 'x' };`, context);
+  assert.match(vm.runInContext('weekScreen()', context), /Sample dishes \(test data\)/);
   const budget = vm.runInContext('budgetCard()', context);
-  assert.match(budget, /Sample plan estimate/);
-  assert.match(budget, /actual purchases are reviewed separately/);
+  assert.match(budget, /Plan estimate/);
+  assert.doesNotMatch(budget, /[Ss]ample/);
   assert.ok(!budget.includes('Prices include delivery and expected surge'));
 });
 
@@ -284,7 +329,7 @@ test('onboarding uses four steps without sample restaurant choices or sample bud
   await assert.rejects(vm.runInContext("onboardNav('next')", context), /at least one meal/);
   vm.runInContext('S.onboard.step = 2', context);
   const budget = vm.runInContext('onboardingScreen()', context);
-  assert.match(budget, /Enter your own limit/);
+  assert.match(budget, /Your own limit/);
   assert.ok(!budget.includes('Usual · ₹2,000'));
   assert.equal(vm.runInContext('OB_STEPS.length', context), 4);
   assert.ok(!calls.some(c => c.url.includes('/api/suggest-budget')));
@@ -660,19 +705,19 @@ test('order this week: any slot and day, the real bill, and tap-to-place without
   assert.match(html, /Cart ready — tap to place in Swiggy/);
   assert.doesNotMatch(html, /Approve/);
   vm.runInContext(`S.orderQueue.order_enabled = true`, context);
-  assert.match(vm.runInContext('ordersPanel()', context), /Approve ₹262.5 and place/);
+  assert.match(vm.runInContext('ordersPanel()', context), /Approve ₹262.50 and place/);
 });
 
 test('the week says what it is planned from and offers the next step', async () => {
   const { context } = fixture(); await context.bootPromise;
   vm.runInContext(`S.view.source = { kind: 'sample', connected: true, label: 'Sample dishes (not real restaurants)', note: 'x' };`, context);
   assert.match(vm.runInContext('weekScreen()', context), /data-act="live-menus"/);
-  vm.runInContext(`S.view.source = { kind: 'sample', connected: false, label: 'Sample dishes (not real restaurants)', note: 'x' };`, context);
+  vm.runInContext(`S.meta.swiggy_redirect_approved = true; S.view.source = { kind: 'sample', connected: false, label: 'Sample dishes (not real restaurants)', note: 'x' };`, context);
   assert.match(vm.runInContext('weekScreen()', context), /data-act="swiggy-connect"/);
   vm.runInContext(`S.view.source = { kind: 'live', label: 'Live Swiggy menus · 1 restaurant, 3 dishes', note: 'Nutrition is estimated', fetched: '2026-11-02T08:00' };`, context);
   const html = vm.runInContext('weekScreen()', context);
   assert.match(html, /Live Swiggy menus/); assert.match(html, /Nutrition is estimated/);
-  assert.match(vm.runInContext('budgetCard()', context), /live Swiggy prices/);
+  assert.match(vm.runInContext('budgetCard()', context), /Plan estimate/);
 });
 
 test('an unconnected Swiggy offers Connect, not Retry (409 swiggy_not_connected)', async () => {
@@ -746,6 +791,7 @@ test('every live surface without a Swiggy connection shows the same Connect prom
   }
   await vm.runInContext('refreshLiveCart(false)', context);                         // the live cart panel
   assertConnectPrompt(vm.runInContext('liveError(S.liveCartError, S.liveCartErrorCode)', context), 'live cart');
+  vm.runInContext('S.meta.swiggy_redirect_approved = true', context);
   assertConnectPrompt(vm.runInContext("sourceLine({ kind: 'sample', connected: false, label: 'Sample dishes', note: '' })", context), 'plan source');
   // an ordinary failure still offers Retry, and is not mistaken for a connection problem
   vm.runInContext(`S.error = "Swiggy is busy"; S.errorCode = "swiggy_rate_limited";`, context);
@@ -836,8 +882,8 @@ test('welcome on the simulated, unapproved server never promises real Swiggy res
   vm.runInContext("localStorage.getItem = () => null", context);
   await vm.runInContext('boot()', context);
   const html = element.innerHTML;
-  assert.match(html, /sample Chennai dishes and prices, not live Swiggy menus/);
-  assert.match(html, /waiting for Swiggy to approve/);
+  assert.doesNotMatch(html, /sample|demo/i);
+  assert.match(html, /once Swiggy approves connecting/);
   assert.doesNotMatch(html, /connect Swiggy to find real restaurants/i);
   assert.doesNotMatch(html, /browse their current Swiggy menus/);
 });
@@ -848,9 +894,8 @@ test('welcome promises real restaurants only once Swiggy approved sign-in', asyn
   vm.runInContext("localStorage.getItem = () => null", context);
   await vm.runInContext('boot()', context);
   const lede = element.innerHTML.match(/<p class="lede">([^<]*)<\/p>/)[1];
-  assert.match(lede, /Connect Swiggy to find real restaurants/);
-  assert.match(lede, /Until a Swiggy account is connected, the weekly planner uses sample Chennai dishes/);
-  assert.doesNotMatch(lede, /waiting for Swiggy/);
+  assert.match(lede, /Real dishes from Swiggy near your address/);
+  assert.doesNotMatch(lede, /sample|approves/i);
 });
 
 test('a temporary-disk server shows the data-erasure banner on every screen', async () => {
@@ -881,15 +926,16 @@ test('a free server with Postgres (DATABASE_URL) shows no erasure banner', async
   assert.doesNotMatch(element.innerHTML, /storage-warning/);
 });
 
-test('the demo plan banner offers Connect Swiggy only when sign-in is approved', async () => {
+test('the no-dishes state offers Connect Swiggy only when sign-in is approved', async () => {
   const { context } = fixture({ '/api/meta': SIMULATED_FREE }); await context.bootPromise;
   richView(context);
+  vm.runInContext("S.view.source = { kind: 'none', connected: false, needs: 'connect', note: 'Connecting Swiggy from SmartPlate is waiting for Swiggy\\'s approval.' }", context);
   let html = vm.runInContext('todayScreen()', context);
-  assert.doesNotMatch(html, /to order from real restaurants/);
-  assert.match(html, /Order in the Swiggy app for now/);
+  assert.doesNotMatch(html, /data-act="swiggy-connect"/);
+  assert.match(html, /waiting for Swiggy&#39;s approval/);
   vm.runInContext('S.meta.swiggy_redirect_approved = true', context);
   html = vm.runInContext('todayScreen()', context);
-  assert.match(html, /Connect Swiggy<\/a> to order from real restaurants/);
+  assert.match(html, /data-act="swiggy-connect"/);
 });
 
 test('address list says how to add a missing address and marks the one SmartPlate uses', async () => {
@@ -1010,7 +1056,7 @@ test('the pick explains itself in plain words, never with a score, and its price
   assert.match(html, /Peanut filtered out/);                         // sample catalogue
   assert.match(html, /Your pick/);
   assert.doesNotMatch(html, /\bFit\b|score/i);
-  assert.match(html, /<span class="est" title="Estimate">₹150<i>est\.<\/i><\/span>/);
+  assert.match(html, /<span class="est" title="Estimate">≈₹150<i>est\.<\/i><\/span>/);
   vm.runInContext("S.view.source = { kind: 'live' }", context);    // live menus: only what the name says
   assert.match(vm.runInContext('nextUpCard(S.view.next_up)', context), /No peanut by dish name/);
   // one tap each: order ↔ cook, pin, skip
@@ -1028,12 +1074,18 @@ test('a checked cart shows Swiggy\'s real bill, the estimate it replaced, and pa
       checkout_url: 'https://www.swiggy.com/checkout', budget: { over: false },
       bill: { to_pay: 215, lines: [{ label: 'Item total', amount: 180 }, { label: 'Delivery fee', amount: 35 }] } } }`, context);
   const html = vm.runInContext('nextUpCard(S.view.next_up)', context);
-  assert.match(html, /Swiggy's bill · real/);
-  assert.match(html, /<td class="num real">₹180<\/td>/);
-  assert.match(html, /Your plan estimated <span class="est"[^>]*>₹150<i>est\.<\/i><\/span> · ₹65 more than planned/);
+  assert.match(html, /Added to your Swiggy cart/);
+  assert.match(html, /Swiggy's bill/);
+  assert.match(html, /<td class="num"><span class="real"[^>]*>₹180<\/span><\/td>/);
+  assert.match(html, /Plan estimate <span class="est"[^>]*>≈₹150<i>est\.<\/i><\/span> · ₹65 more/);
   assert.doesNotMatch(html, /data-cart="9"/);                       // already reviewed: no second "Review"
-  assert.match(html, /class="btn primary"[^>]*data-handoff="9">Open Swiggy to review and pay/);
+  assert.match(html, /href="https:\/\/www\.swiggy\.com\/checkout"[^>]*data-handoff="9">Open Swiggy checkout/);
+  assert.match(html, /Swiggy(&#39;|')s cancellation policy applies\./);  // Swiggy sent no cancellation note
   assert.match(html, /SmartPlate never pays for you/);
+  vm.runInContext("S.carts[9].cancellation_note = '100% cancellation fee if cancelled after 60 seconds'", context);
+  const withNote = vm.runInContext('nextUpCard(S.view.next_up)', context);
+  assert.match(withNote, /100% cancellation fee if cancelled after 60 seconds/);
+  assert.doesNotMatch(withNote, /cancellation policy applies/);
 });
 
 test('week rows: one-tap On/Off, Order/Cook and Pin; weather only when it is real', async () => {
@@ -1141,8 +1193,8 @@ test('expenses say which amounts are real Swiggy bills', async () => {
     { iso_date: '2026-11-02', note: 'Veg Meals', category: 'personal', amount: 245, real: true },
     { iso_date: '2026-11-03', note: 'Dosa', category: 'personal', amount: 150, real: false }] }`, context);
   const html = vm.runInContext('receiptsPanel()', context);
-  assert.match(html, /<span class="real">₹245<\/span> <span class="tag good">real bill<\/span>/);
-  assert.match(html, /<span class="est" title="Estimate">₹150<i>est\.<\/i><\/span>/);
+  assert.match(html, /<span class="real"[^>]*>₹245<\/span> <span class="tag good">real bill<\/span>/);
+  assert.match(html, /<span class="est" title="Estimate">≈₹150<i>est\.<\/i><\/span>/);
   assert.match(html, /From real Swiggy bills<\/div><div class="val">₹245</);
 });
 
@@ -1172,4 +1224,40 @@ test('boot treats a generic 500 as a server problem, not a silent hang', async (
   await context.bootPromise;
   assert.match(element.innerHTML, /start right now/);
   assert.match(element.innerHTML, /retry-boot/);
+});
+
+test('money looks the same everywhere: menu and plan prices are ≈ est., only cart numbers are real and exact', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  assert.equal(vm.runInContext('rupee(21.58)', context), '₹21.58');
+  assert.equal(vm.runInContext('rupee(21.5)', context), '₹21.50');
+  assert.equal(vm.runInContext('rupee(160)', context), '₹160');
+  assert.match(vm.runInContext('livePrice(180)', context), /class="est"[^>]*>≈₹180<i>est\.<\/i>/);
+  assert.match(vm.runInContext('livePrice(180, false)', context), /class="est"/);   // a menu price is never "real"
+  const bill = vm.runInContext(`billLines({ to_pay: 188, rounding: 0.42, itemised: true, lines: [
+    { label: 'Item Total', amount: 160 }, { label: 'Delivery Fee', amount: 6 }, { label: 'GST & Other Charges', amount: 21.58 }] })`, context);
+  assert.match(bill, /GST &amp; Other Charges<\/td><td class="num"><span class="real"[^>]*>₹21\.58<\/span>/);
+  assert.doesNotMatch(bill, /₹22|as Swiggy shows them/);
+  assert.match(bill, /Swiggy rounds the total to the rupee/);
+  const unitemised = vm.runInContext(`billLines({ to_pay: 262.5, unitemised: 17.5, itemised: false, lines: [{ label: 'Item Total', amount: 210 }] })`, context);
+  assert.match(unitemised, /includes <span class="real"[^>]*>₹17\.50<\/span> it didn't itemise/);
+});
+
+test('Review shows a skeleton while Swiggy loads and "Adding…" while the cart updates', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  richView(context);
+  vm.runInContext("S.cartReview = { loading: true, item: 'Veg Meals', restaurant: 'Saravana' }", context);
+  assert.match(vm.runInContext('cartReviewDialog()', context), /aria-busy="true"[\s\S]*class="skeleton"/);
+  vm.runInContext("S.cartReview = { session_id: 9, item: 'Veg Meals', restaurant: 'Saravana', address: 'Home', menu_price: 180, adding: true }", context);
+  const adding = vm.runInContext('cartReviewDialog()', context);
+  assert.match(adding, />Adding…<\/button>/);
+  assert.match(adding, /≈₹180<i>est\.<\/i>/);
+});
+
+test('the setup wizard saves a sign-in so the profile opens on another device', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext('startOnboard(); S.onboard.step = 3', context);
+  const html = vm.runInContext('onboardingScreen()', context);
+  assert.match(html, /id="ob-login"/); assert.match(html, /id="ob-pw" type="password"/);
+  assert.match(html, /You'll need this to sign in on another device/);
+  await assert.rejects(vm.runInContext("onboardNav('next')", context), /sign-in name/);
 });

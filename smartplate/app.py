@@ -272,6 +272,7 @@ def create_app() -> Flask:
             "note": "v1.1 plans with a MILP solver — no per-decision LLM cost (see FEASIBILITY.md).",
             "weather_provider": config.WEATHER_PROVIDER,
             "catalog_city": everyday.CITY,
+            "fixture_data": config.FIXTURE_DATA,
             "features": _FEATURE_MAP,
             # Epicure ingredient embeddings: swaps, "more like this", cuisine tilt
             "epicure": {"available": epicure.get() is not None, "cuisines": flavour.CUISINES},
@@ -366,7 +367,9 @@ def create_app() -> Flask:
 
     @app.post("/api/plan/<int:plan_id>/sample-menus")
     def plan_from_sample_menus(plan_id):
-        """Go back to the sample catalogue (clears the user's live catalogue)."""
+        """Test runs only: go back to the sample catalogue (clears the user's live catalogue)."""
+        if not config.FIXTURE_DATA:
+            return jsonify(error="Not available."), 404
         plan = models.get_plan(plan_id)
         if not plan:
             raise ValueError("Plan not found")
@@ -415,6 +418,8 @@ def create_app() -> Flask:
     @app.post("/api/plan/<int:plan_id>/execute")
     def execute(plan_id):
         body = request.get_json(silent=True) or {}
+        if not config.FIXTURE_DATA:
+            return jsonify(error='Simulated ordering exists only in test runs. Add a meal to your Swiggy cart from Today.'), 404
         if config.SWIGGY_PROVIDER != 'simulated':
             return jsonify(error='Live Swiggy checkout is not connected. The demo catalog cannot be ordered on Swiggy.'), 503
         if body.get('expected_fingerprint') is None or body.get('max_total') is None:
@@ -499,6 +504,8 @@ def create_app() -> Flask:
     # ---- idempotency demo: place the same order twice ---- #
     @app.post("/api/demo/idempotency")
     def idempotency_demo():
+        if not config.FIXTURE_DATA:                # a demo with an invented "Demo Diner": tests only
+            return jsonify(error="Not available."), 404
         prov = swiggy_mcp.SimulatedSwiggyProvider(seed=1)
         decision = {"id": -1, "cost": 199.0}
         restaurant = {"id": 1, "name": "Demo Diner", "flaky": 0}
