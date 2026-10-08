@@ -6,8 +6,9 @@ search) and stores them as the user's own catalogue (restaurants.city = "live:<i
 source = "live"). The planner then plans only from those dishes, never mixing in the
 sample ones. Prices come from Swiggy. Nutrition is ESTIMATED from the dish name
 (`estimate`), and every live dish carries `nutrition_estimated = 1` so the UI and the
-plan say so. The delivery fee is an estimate until the cart is checked (PR C reads the
-real bill).
+plan say so. The delivery fee is LIVE_DELIVERY_FEE_ESTIMATE until a real cart bill from
+that restaurant has been seen; from then on the planner uses the fee Swiggy billed
+(`record_fee`, `with_learned_fees`) and says so.
 
 Without a connection the planner keeps the sample catalogue, and the plan view says
 plainly that it is sample data (`source_for`).
@@ -170,6 +171,60 @@ def refresh(user_id: int) -> dict:
         cur.execute("INSERT INTO live_catalog_state(user_id, fetched_ts, restaurants, dishes) VALUES (?,?,?,?)",
                     (user_id, clock.now().isoformat(timespec="minutes"), len(rows), n_dishes))
     return {**source_for(user_id), "skipped": skipped}
+
+
+# --------------------------------------------------------------------------- #
+# Delivery fees learned from real cart bills
+# --------------------------------------------------------------------------- #
+def record_fee(user_id: int, address_id: str, provider_id: str, restaurant_name: str,
+               fee: float | None) -> None:
+    """Remember the delivery fee Swiggy billed for this restaurant and address. A bill
+    without a delivery line (fee None) teaches nothing."""
+    if fee is None or not provider_id or not address_id:
+        return
+    with db.cursor() as cur:
+        cur.execute("INSERT OR REPLACE INTO swiggy_delivery_fees(user_id, address_id, provider_id, restaurant_name, "
+                    "delivery_fee, seen_ts) VALUES (?,?,?,?,?,?)",
+                    (user_id, str(address_id), str(provider_id), restaurant_name or "", round(float(fee), 2),
+                     clock.now().isoformat(timespec="minutes")))
+
+
+def _address_id(user_id: int) -> str | None:
+    with db.cursor() as cur:
+        try:
+            row = cur.execute("SELECT address_id FROM swiggy_connections WHERE user_id=?", (user_id,)).fetchone()
+        except Exception:                      # the Swiggy tables don't exist until first connect
+            return None
+    return row["address_id"] if row else None
+
+
+def learned_fees(user_id: int) -> dict:
+    """{Swiggy restaurant id: {"fee", "seen"}} for the user's current delivery address."""
+    address_id = _address_id(user_id)
+    if not address_id:
+        return {}
+    with db.cursor() as cur:
+        rows = cur.execute("SELECT provider_id, delivery_fee, seen_ts FROM swiggy_delivery_fees "
+                           "WHERE user_id=? AND address_id=?", (user_id, address_id)).fetchall()
+    return {r["provider_id"]: {"fee": r["delivery_fee"], "seen": r["seen_ts"]} for r in rows}
+
+
+def fee_view(provider_id, fallback: float, fees: dict) -> dict:
+    """What the plan says about one live restaurant's delivery fee."""
+    known = fees.get(str(provider_id)) if provider_id else None
+    if known:
+        return {"amount": known["fee"], "estimated": False, "seen": known["seen"]}
+    return {"amount": fallback, "estimated": True}
+
+
+def with_learned_fees(user_id: int, items: list[dict]) -> list[dict]:
+    """Live menu rows with each restaurant's billed delivery fee in place of the estimate."""
+    fees = learned_fees(user_id)
+    out = []
+    for it in items:
+        view = fee_view(it.get("provider_id") or it.get("restaurant_provider_id"), it["delivery_fee"], fees)
+        out.append({**it, "delivery_fee": view["amount"], "delivery_fee_estimated": view["estimated"]})
+    return out
 
 
 def source_for(user_id: int, connected: bool | None = None) -> dict:
