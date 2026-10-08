@@ -423,9 +423,12 @@ def test_live_cart_reply_shapes(reply, items, verified):
     assert len(cart["items"]) == items and cart["address_verified"] is verified
 
 
-def test_live_cart_for_another_address_is_refused():
-    with pytest.raises(swiggy_connect.SwiggyError, match="different delivery address"):
-        swiggy_live._cart_view({"success": True, "data": {"addressId": "addr-work", "data": {"items": []}}}, "addr-home")
+def test_live_cart_for_another_address_is_never_verified_for_the_chosen_one():
+    # Oct 8, 2026: a cart for another address is reported (cart_address_id), not raised;
+    # it is still never verified for the chosen address (tests/test_delivery_address.py).
+    cart = swiggy_live._cart_view({"success": True, "data": {"addressId": "addr-work", "data": {"items": []}}},
+                                  "addr-home")
+    assert cart["address_verified"] is False and cart["cart_address_id"] == "addr-work"
 
 
 def test_live_empty_cart_is_reported_not_unverified(client, swiggy, monkeypatch):

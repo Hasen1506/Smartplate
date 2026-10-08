@@ -830,7 +830,8 @@ function livePlacesScreen() {
     ${S.liveCart ? `<div class="consent cartnote"><b>In your Swiggy cart:</b> ${esc(S.liveCart.item)} · ${esc(S.liveCart.restaurant)}.
       ${S.liveCart.to_pay == null ? "Check the final total in Swiggy." : `Current total ${rupee(S.liveCart.to_pay)}.`}
       ${S.swiggy.order_enabled && S.liveCart.orderable !== false ? `<button class="small primary" data-act="review-live-checkout">Review and place order</button>` : ""}
-      ${S.liveCart.orderable === false ? `<p class="fine">This cart differs from the item reviewed here. Check or clear it in Swiggy before selecting another item.</p>` : ""}
+      ${S.liveCart.other_address ? `<p class="fine">This cart is for ${esc(S.liveCart.other_address.label)}, not ${esc(S.swiggy.address.label)}.${S.liveCart.other_address.id ? ` <button class="small" data-swaddr="${esc(S.liveCart.other_address.id)}">Deliver there instead</button>` : ""} Or clear the cart in Swiggy.</p>`
+        : S.liveCart.orderable === false ? `<p class="fine">This cart differs from the item reviewed here. Check or clear it in Swiggy before selecting another item.</p>` : ""}
       <a class="btn small" href="${esc(S.liveCart.checkout_url)}" target="_blank" rel="noopener">Open Swiggy checkout ↗</a></div>` : ""}
     <h3 class="k">Your live favourites</h3><div class="plist">${fav.length ? fav.map(place).join("") : `<p class="fine">Search and star real restaurants for this address.</p>`}</div>
     ${S.liveResults ? `<h3 class="k">Swiggy results for ${esc(S.liveResults.query)}</h3><div class="plist">${results.length ? results.map(place).join("") : `<p class="fine">No live restaurants returned for this address and search.</p>`}</div>` : ""}
@@ -843,6 +844,22 @@ function livePlacesScreen() {
     <details><summary>Sample planner (demo data)</summary><p class="fine">The weekly plan and sample Chennai list currently use seeded data. They do not determine which live Swiggy items are orderable.</p></details>`;
 }
 
+// Everything read for one delivery address; dropped whenever the address changes.
+function forgetAddressState() {
+  S.swAddrs = null; S.liveMenu = null; S.liveResults = null; S.liveBrowseMenu = null; S.liveCart = null;
+  S.liveCartEmpty = null; S.liveCartError = null; S.liveCartErrorCode = null; S.checkoutReview = null;
+  S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null; S.liveOrderReview = null;
+}
+async function refreshSwiggyAddresses() {
+  const r = await api(`/api/user/${S.userId}/swiggy/addresses/refresh`, "POST", {});
+  S.swiggy = { ...S.swiggy, ...r.status };
+  if (r.dropped) {
+    forgetAddressState();
+    toast(`${r.dropped} is no longer in your Swiggy account. Choose a delivery address.`);
+  } else toast("Addresses refreshed from Swiggy");
+  S.swAddrs = r.addresses;
+  render();
+}
 async function searchLivePlaces(query) {
   S.liveResults = await api(`/api/user/${S.userId}/swiggy/restaurants?query=${encodeURIComponent(query)}`);
   S.liveBrowseMenu = null; render();
@@ -1576,9 +1593,10 @@ function readSettings(form) {
 
 function connectionPanel() {
   const sw = S.swiggy;
-  const addr = sw && sw.connected ? (S.swAddrs ? `<div class="mlist">${S.swAddrs.map(a => `<button class="mitem ${sw.address?.id === a.id ? "on" : ""}" data-swaddr="${esc(a.id)}"><b>${esc(a.label)}</b><span>${esc(a.text)}</span></button>`).join("")}</div>`
-      : sw.address ? `<p>Delivering to <b>${esc(sw.address.label)}</b> <button class="small ghost" data-act="swiggy-addresses">Change</button></p>`
-      : `<p><button class="primary" data-act="swiggy-addresses">Choose delivery address</button></p><p class="fine">Needed for live menus and your cart.</p>`) : "";
+  const notListed = `<p class="fine" data-address-help>Address not listed? Add it in the Swiggy app (Account → Addresses), then <button class="small ghost" data-act="swiggy-refresh-addresses">Refresh addresses</button></p>`;
+  const addr = sw && sw.connected ? (S.swAddrs ? `<p class="fine">Choose the address SmartPlate uses for your cart, live menus and plans.</p><div class="mlist">${S.swAddrs.map(a => `<button class="mitem ${sw.address?.id === a.id ? "on" : ""}" data-swaddr="${esc(a.id)}"><b>${esc(a.label)}</b><span>${esc(a.text)}</span>${sw.address?.id === a.id ? `<span class="tag good">SmartPlate delivers here</span>` : ""}</button>`).join("")}</div>${notListed}`
+      : sw.address ? `<p>Delivering to <b>${esc(sw.address.label)}</b> <button class="small ghost" data-act="swiggy-addresses">Change</button></p>${notListed}`
+      : `<p><button class="primary" data-act="swiggy-addresses">Choose delivery address</button></p><p class="fine">Needed for live menus and your cart.</p>${notListed}`) : "";
   const live = !sw ? `<p class="fine">Checking Swiggy connection…</p>` : sw.connected ? `
     <div class="card"><span class="tag good">Connected</span>
       <h3>Signed in to Swiggy${sw.server?.name ? ` · ${esc(sw.server.name)}` : ""}</h3>
@@ -1812,6 +1830,7 @@ function wire() {
     "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); rememberResume(); location.href = r.authorize_url; },
     "swiggy-discover": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/discover`, "POST", {}); toast("Tool list refreshed"); render(); },
     "swiggy-addresses": async () => { S.swAddrs = await api(`/api/user/${S.userId}/swiggy/addresses`); render(); },
+    "swiggy-refresh-addresses": refreshSwiggyAddresses,
     "close-live-menu": async () => { S.liveMenu = null; render(); },
     "close-live-browse": async () => { S.liveBrowseMenu = null; render(); },
     "swiggy-disconnect": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/disconnect`, "POST", {}); S.liveMenu = null; S.carts = null; S.swAddrs = null; S.liveResults = null; S.liveFavourites = null; S.liveBrowseMenu = null; S.liveCart = null; S.liveCartEmpty = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null; S.liveCartError = null; toast("Disconnected from Swiggy"); render(); },
@@ -1831,7 +1850,7 @@ function wire() {
   if (S.sheet?.data) document.querySelector(".sheet .close")?.focus();
   on("[data-swaddr]", "click", (e) => guard(async () => {
     S.swiggy = await api(`/api/user/${S.userId}/swiggy/address`, "POST", { address_id: e.currentTarget.dataset.swaddr });
-    S.swAddrs = null; S.liveMenu = null; S.liveResults = null; S.liveBrowseMenu = null; S.liveCart = null; S.liveCartError = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null;
+    forgetAddressState();
     S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
     await refreshLiveCart(false);
     toast("Delivery address saved"); render();

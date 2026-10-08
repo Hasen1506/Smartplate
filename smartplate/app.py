@@ -108,6 +108,8 @@ def create_app() -> Flask:
         response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after)
         if error.retry_after is not None:
             response.headers['Retry-After'] = str(error.retry_after)
+        if error.code == 'swiggy_cart_other_address':
+            return response, 409        # the user's cart is for another of their addresses: their choice, not an outage
         return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
     @app.errorhandler(HTTPException)
@@ -552,6 +554,11 @@ def create_app() -> Flask:
     @app.get("/api/user/<int:user_id>/swiggy/addresses")
     def swiggy_addresses(user_id):
         return jsonify(swiggy_live.addresses(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/addresses/refresh")
+    def swiggy_refresh_addresses(user_id):
+        # After the user adds an address in Swiggy: a fresh list, and no stale default.
+        return jsonify(swiggy_live.refresh_addresses(user_id))
 
     @app.post("/api/user/<int:user_id>/swiggy/address")
     def swiggy_choose_address(user_id):

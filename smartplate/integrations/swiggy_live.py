@@ -523,17 +523,71 @@ def addresses(user_id: int, *, fresh: bool = False) -> list[dict]:
     return out
 
 
+def _address_label(address: dict) -> str:
+    return f"{address['label']} · {address['text']}"[:120]
+
+
+def _forget_address_state(cur, user_id: int) -> None:
+    """Everything SmartPlate read for one delivery address: menus, quotes, the prepared cart."""
+    cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (user_id,))
+    cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
+    cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
+
+
 def choose_address(user_id: int, address_id: str) -> dict:
+    """Make one of the user's Swiggy addresses the one SmartPlate delivers to. Cart,
+    live menus and planning all read this one address, so changing it drops what was
+    read for the old one (including the live catalogue the planner uses)."""
     match = next((a for a in addresses(user_id, fresh=True) if a["id"] == str(address_id)), None)
     if not match:
-        raise ValueError("That address isn't on your Swiggy account")
+        raise ValueError("That address isn't on your Swiggy account. Refresh addresses and choose again.")
+    previous = _conn(user_id).get("address_id")
     with db.cursor() as cur:
         cur.execute("UPDATE swiggy_connections SET address_id=?, address_label=? WHERE user_id=?",
-                    (match["id"], f"{match['label']} · {match['text']}"[:120], user_id))
-        cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (user_id,))     # menus depend on the address
-        cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
-        cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
+                    (match["id"], _address_label(match), user_id))
+        _forget_address_state(cur, user_id)                                     # menus depend on the address
+    if previous != match["id"]:
+        from ..domain import live_catalog
+        live_catalog.clear(user_id)          # never plan from another address's menus and prices
     return sc.status(user_id)
+
+
+def refresh_addresses(user_id: int) -> dict:
+    """Read Swiggy's saved addresses fresh (after the user added one in Swiggy).
+
+    The chosen address is checked against the fresh list: if Swiggy no longer has it,
+    SmartPlate forgets it instead of using a stale default; if its text changed, the
+    label is updated."""
+    rows = addresses(user_id, fresh=True)
+    conn = _conn(user_id)
+    chosen, dropped = conn.get("address_id"), None
+    match = next((a for a in rows if a["id"] == str(chosen)), None) if chosen else None
+    with db.cursor() as cur:
+        if chosen and not match:
+            dropped = conn.get("address_label") or str(chosen)
+            cur.execute("UPDATE swiggy_connections SET address_id=NULL, address_label=NULL WHERE user_id=?",
+                        (user_id,))
+            _forget_address_state(cur, user_id)
+        elif match and _address_label(match) != conn.get("address_label"):
+            cur.execute("UPDATE swiggy_connections SET address_label=? WHERE user_id=?",
+                        (_address_label(match), user_id))
+    if dropped:
+        from ..domain import live_catalog
+        live_catalog.clear(user_id)
+    current = None if dropped else chosen
+    return {"addresses": [{**a, "chosen": a["id"] == str(current)} for a in rows],
+            "dropped": dropped, "status": sc.status(user_id)}
+
+
+def _known_address(user_id: int, address_id: str | None) -> str | None:
+    """The user's own words for an address id Swiggy echoed, if it is one of theirs."""
+    if not address_id:
+        return None
+    try:
+        match = next((a for a in addresses(user_id) if a["id"] == str(address_id)), None)
+    except SwiggyError:
+        return None
+    return _address_label(match) if match else None
 
 
 def _address(conn: dict) -> str:
@@ -899,7 +953,7 @@ def _cart_view(data: object, address_id: str) -> dict:
     if isinstance(body, dict) and set(body) == {"text"}:
         text = str(body["text"]).lower()
         if "empty" in text:
-            return {"items": [], "address_verified": False}
+            return {"items": [], "address_verified": False, "cart_address_id": None, "empty_confirmed": False}
         raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
     if not isinstance(body, dict):
         raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
@@ -909,11 +963,15 @@ def _cart_view(data: object, address_id: str) -> dict:
     echoed = body.get("addressId")
     if echoed is None and isinstance(inner, dict):
         echoed = inner.get("addressId") or inner.get("address_id")
-    if echoed is not None and str(echoed) != str(address_id):
-        raise SwiggyError("Swiggy returned the cart for a different delivery address. Choose your address again.")
-    verified = echoed is not None
+    # Swiggy keeps one cart per account and echoes the address that cart is for. A cart
+    # for another address is reported as such (`cart_address_id`), never as an error and
+    # never as verified for the chosen address.
+    other = echoed is not None and str(echoed) != str(address_id)
+    verified = echoed is not None and not other
+    where = {"address_verified": verified, "cart_address_id": str(echoed) if other else None,
+             "empty_confirmed": False}
     if inner is None or inner == {}:
-        return {"items": [], "address_verified": verified}
+        return {"items": [], **where, "empty_confirmed": echoed is not None}
     if not isinstance(inner, dict):
         raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
     items = inner.get("items")
@@ -923,7 +981,15 @@ def _cart_view(data: object, address_id: str) -> dict:
         items = []
     if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
         raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
-    return {**inner, "items": items, "address_verified": verified}
+    return {**inner, "items": items, **where, "empty_confirmed": echoed is not None and not items}
+
+
+def _other_address_error(user_id: int, cart: dict, conn: dict, what: str) -> SwiggyError:
+    known = _known_address(user_id, cart.get("cart_address_id"))
+    chosen = conn.get("address_label") or "your chosen address"
+    where = f"your {known} address" if known else "an address that isn't in your Swiggy list"
+    return SwiggyError(f"{what} is for {where}, not {chosen}. Choose that address here, or clear the cart in Swiggy.",
+                       code="swiggy_cart_other_address")
 
 
 def _intent(user_id: int) -> dict | None:
@@ -939,6 +1005,8 @@ def _prepared_cart(user_id: int) -> tuple[dict, dict, dict]:
     data = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
                 {"address": address_id, "restaurant_name": intent["restaurant_name"] if intent else None}))
     cart = _cart_view(data, address_id)
+    if cart["cart_address_id"]:
+        raise _other_address_error(user_id, cart, conn, "Your Swiggy cart")
     restaurant = cart.get("restaurant") or {}
     items = cart["items"]
     if (not intent or intent["address_id"] != address_id or len(items) != 1
@@ -958,12 +1026,20 @@ def current_live_cart(user_id: int) -> dict:
                 {"address": address_id, "restaurant_name": intent["restaurant_name"] if intent else None}))
     cart = _cart_view(data, address_id)
     if not cart["items"]:
-        # An empty cart is an answer, not an error: say so instead of a stale warning.
-        return {"cart": None, "empty": True, "address_verified": cart["address_verified"],
+        # An empty cart is an answer, not an error: say so instead of a stale warning. An
+        # empty cart Swiggy last tied to another address is still empty; adding an item
+        # here sends the chosen address.
+        return {"cart": None, "empty": True,
+                "address_verified": cart["address_verified"] or cart["empty_confirmed"],
                 "address": conn.get("address_label") or address_id}
+    other = None
+    if cart["cart_address_id"]:
+        known = _known_address(user_id, cart["cart_address_id"])
+        other = {"id": cart["cart_address_id"] if known else None,
+                 "label": known or "an address that isn't in your Swiggy list"}
     restaurant = cart.get("restaurant") or {}
     rid = str(restaurant.get("id")) if isinstance(restaurant, dict) else ""
-    prepared = bool(intent and intent["address_id"] == address_id and rid == intent["restaurant_id"]
+    prepared = bool(not other and intent and intent["address_id"] == address_id and rid == intent["restaurant_id"]
                     and len(cart["items"]) == 1 and cart["items"][0].get("quantity") == 1
                     and str(_get(cart["items"][0], "menu_item_id")) == intent["item_id"])
     name = restaurant.get("name") if isinstance(restaurant, dict) else None
@@ -971,7 +1047,9 @@ def current_live_cart(user_id: int) -> dict:
                      "restaurant": name or (intent["restaurant_name"] if prepared else "Check restaurant in Swiggy"),
                      "to_pay": cart_total(cart, intent.get("menu_price") if prepared and intent else None),
                      "orderable": prepared,
-                     "checkout_url": CHECKOUT_URL}}
+                     "checkout_url": CHECKOUT_URL,
+                     "other_address": other},
+            "address": conn.get("address_label") or address_id}
 
 
 def fill_live_cart(user_id: int, restaurant_id: str, restaurant_name: str,
@@ -994,8 +1072,13 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
                                                        {"address": preview["address_id"]}))
     before = _cart_view(current, preview["address_id"])
     if before["items"]:
+        if before["cart_address_id"]:
+            raise _other_address_error(user_id, before, conn, "Your Swiggy cart already has items and")
         raise SwiggyError("Your Swiggy cart already has items. Review or clear it in Swiggy before starting a new order.")
-    if not before["address_verified"]:          # an unconfirmed "empty" reply is never a safe base to add to
+    # An unconfirmed "empty" reply is never a safe base to add to. A structured empty
+    # cart is, whichever address Swiggy last tied it to: the update below sends the
+    # chosen address, and the bill is accepted only if Swiggy echoes that address back.
+    if not (before["address_verified"] or before["empty_confirmed"]):
         raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
     tool = _tool(conn, "update_food_cart")
     call(user_id, "update_food_cart", build_args(tool, {
@@ -1004,6 +1087,8 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     cart = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
                          {"address": preview["address_id"], "restaurant_name": preview["restaurant"]}))
     view = _cart_view(cart, preview["address_id"])
+    if view["cart_address_id"]:
+        raise _other_address_error(user_id, view, conn, "Swiggy added the item, but the cart")
     restaurant = view.get("restaurant") or {}
     if (len(view["items"]) != 1 or str(_get(view["items"][0], "menu_item_id")) != preview["item_id"]
             or view["items"][0].get("quantity") != 1 or not isinstance(restaurant, dict)
