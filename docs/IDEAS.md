@@ -168,3 +168,39 @@ Ideas met while building these (not built):
   the fee per restaurant and slot once a user has bills for more than one slot.
 - **Fee age.** A fee learned months ago may be stale. Show its date and fall back to
   "estimated" after a few weeks without a new bill.
+
+## Delivery address: one chosen address for cart, planning and live menus (Oct 8, 2026)
+
+Asked for by the user on Oct 8, 2026 ("do whatever is needed for accuracy"): their current
+address was missing from SmartPlate, there was no way to add or refresh it, and "Refresh
+Swiggy cart" kept saying the cart was for a different delivery address.
+
+Where addresses come from: only Swiggy's saved addresses, read with `get_addresses` through
+the Swiggy connection. SmartPlate stores one chosen `addressId` on the connection and passes
+it to every menu, cart and checkout call.
+
+- **Address not listed? Add it in Swiggy, then Refresh addresses.** Swiggy's public Food
+  reference now lists `create_address` and `delete_address`, but SmartPlate's code and its
+  recorded Swiggy replies have never exercised them, so SmartPlate does not create addresses
+  yet. The address list says where to add one and has a Refresh button that reads Swiggy
+  fresh (no 60-second cache). The chosen address is marked "SmartPlate delivers here".
+- **A stale default never survives a refresh.** If the chosen address is no longer in Swiggy,
+  SmartPlate forgets it (and its cached menus, cart intent and live catalogue) and asks the
+  user to choose again. If Swiggy changed its text, the label updates.
+- **The cart follows the chosen address.** An empty Swiggy cart that Swiggy last tied to
+  another address is still empty: adding an item sends the chosen `addressId`, and the bill
+  is accepted only when Swiggy echoes that address back. A cart with items for another
+  address is shown with the address it is for and a "Deliver there instead" choice, never as
+  a bare error.
+- **Planning follows the chosen address.** Changing the address drops the live catalogue that
+  was read for the old one, so the planner never plans from another area's menus or prices.
+  The plan's source line names the address its live menus were read for.
+
+Ideas met while building this (not built):
+
+- **Add a delivery address inside SmartPlate** with Swiggy's `create_address`, once a real
+  sign-in has recorded its `inputSchema` and reply (the reference needs map coordinates;
+  SmartPlate must not guess them).
+- **Say which profile is gone.** When the trial server erases its database, live actions on a
+  still-open profile answer a bare "not found". Say the profile no longer exists on this
+  server and how to recreate it.
