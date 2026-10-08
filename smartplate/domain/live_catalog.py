@@ -92,8 +92,17 @@ def city_key(user_id: int) -> str:
 
 
 def has_live(user_id: int) -> bool:
+    """True only when the live catalogue was read for the user's chosen delivery address."""
     with db.cursor() as cur:
-        return cur.execute("SELECT 1 FROM restaurants WHERE city=? LIMIT 1", (city_key(user_id),)).fetchone() is not None
+        if cur.execute("SELECT 1 FROM restaurants WHERE city=? LIMIT 1", (city_key(user_id),)).fetchone() is None:
+            return False
+        state = cur.execute("SELECT address_id FROM live_catalog_state WHERE user_id=?", (user_id,)).fetchone()
+    return bool(state) and _for_current_address(user_id, state["address_id"])
+
+
+def _for_current_address(user_id: int, read_for: str | None) -> bool:
+    current = _address_id(user_id)
+    return bool(current) and str(read_for or "") == str(current)
 
 
 def clear(user_id: int) -> None:
@@ -122,6 +131,7 @@ def refresh(user_id: int) -> dict:
     (409 when not connected) and keeps the previous catalogue when Swiggy fails."""
     from ..integrations import swiggy_live
     from ..integrations.swiggy_connect import SwiggyError
+    address_id = _address_id(user_id)
     places = _places(user_id)
     menus, skipped = [], []
     for place in places:
@@ -168,8 +178,9 @@ def refresh(user_id: int) -> dict:
                              d["fat_g"], d["sugar_g"], d["veg"], db.jd(d["allergens"]), db.jd(d["tags"]),
                              1.0, rating, 0.5, d["provider_item_id"]))
                 n_dishes += 1
-        cur.execute("INSERT INTO live_catalog_state(user_id, fetched_ts, restaurants, dishes) VALUES (?,?,?,?)",
-                    (user_id, clock.now().isoformat(timespec="minutes"), len(rows), n_dishes))
+        cur.execute("INSERT INTO live_catalog_state(user_id, fetched_ts, restaurants, dishes, address_id) "
+                    "VALUES (?,?,?,?,?)",
+                    (user_id, clock.now().isoformat(timespec="minutes"), len(rows), n_dishes, address_id))
     return {**source_for(user_id), "skipped": skipped}
 
 
@@ -231,6 +242,11 @@ def source_for(user_id: int, connected: bool | None = None) -> dict:
     """What the plan is built from, in words the user can act on."""
     with db.cursor() as cur:
         row = cur.execute("SELECT * FROM live_catalog_state WHERE user_id=?", (user_id,)).fetchone()
+    if row and not _for_current_address(user_id, row["address_id"]):
+        return {"kind": "sample", "connected": True, "stale_address": True,
+                "label": "Sample dishes (not real restaurants)",
+                "note": "Your live menus were read for another delivery address. "
+                        "Plan from your Swiggy restaurants again for the address you chose."}
     if row:
         return {"kind": "live", "fetched": row["fetched_ts"], "restaurants": row["restaurants"],
                 "dishes": row["dishes"],

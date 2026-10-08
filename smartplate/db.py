@@ -102,7 +102,8 @@ CREATE TABLE IF NOT EXISTS live_catalog_state (   -- the user's live Swiggy cata
     user_id INTEGER PRIMARY KEY,
     fetched_ts TEXT NOT NULL,
     restaurants INTEGER NOT NULL DEFAULT 0,
-    dishes INTEGER NOT NULL DEFAULT 0
+    dishes INTEGER NOT NULL DEFAULT 0,
+    address_id TEXT                                -- the Swiggy delivery address the menus were read for
 );
 
 CREATE TABLE IF NOT EXISTS plans (
@@ -337,6 +338,7 @@ CREATE TABLE IF NOT EXISTS app_secrets (         -- generated keys when no env s
 MIGRATIONS = [
     ("restaurants", "source", "TEXT NOT NULL DEFAULT 'sample'"),       # sample | live
     ("restaurants", "provider_id", "TEXT"),                             # Swiggy restaurant id (live rows)
+    ("live_catalog_state", "address_id", "TEXT"),                       # address the live menus were read for
     ("menu_items", "source", "TEXT NOT NULL DEFAULT 'sample'"),
     ("menu_items", "provider_item_id", "TEXT"),                         # Swiggy menu item id (live rows)
     ("menu_items", "nutrition_estimated", "INTEGER NOT NULL DEFAULT 0"),

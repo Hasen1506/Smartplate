@@ -395,7 +395,8 @@ def _prepared_checkout(client, swiggy, monkeypatch):
 
 
 @pytest.mark.parametrize("change,expected", [
-    ("price", 409), ("item", 502), ("restaurant", 502), ("address", 502),
+    ("price", 409), ("item", 502), ("restaurant", 502),
+    ("address", 409),            # the cart moved to another address: the user's choice to make (Oct 8, 2026)
     ("quantity", 502), ("nonveg", 502), ("variants", 502), ("addons", 502),
     ("stock", 502), ("nan", 502), ("over_limit", 502), ("payment", 502),
 ])

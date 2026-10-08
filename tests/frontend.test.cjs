@@ -877,3 +877,44 @@ test('the demo plan banner offers Connect Swiggy only when sign-in is approved',
   html = vm.runInContext('todayScreen()', context);
   assert.match(html, /Connect Swiggy<\/a> to order from real restaurants/);
 });
+
+test('address list says how to add a missing address and marks the one SmartPlate uses', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, tools: [], address: { id: 'addr-home', label: 'Home · Adyar' } };
+    S.swAddrs = [{ id: 'addr-home', label: 'Home', text: 'Adyar' }, { id: 'addr-work', label: 'Work', text: '<OMR>' }];`, context);
+  const html = vm.runInContext('connectionPanel()', context);
+  assert.match(html, /Address not listed\? Add it in the Swiggy app/);
+  assert.match(html, /data-act="swiggy-refresh-addresses"/);
+  assert.equal((html.match(/SmartPlate delivers here/g) || []).length, 1);
+  assert.ok(!html.includes('<OMR>'));
+  vm.runInContext('S.swAddrs = null', context);
+  assert.match(vm.runInContext('connectionPanel()', context), /data-act="swiggy-refresh-addresses"/);
+});
+
+test('Refresh addresses reads Swiggy fresh and drops a default that is gone', async () => {
+  const { context, calls } = fixture({
+    '/api/user/2/swiggy/addresses/refresh': { dropped: 'Home · Adyar', status: { connected: true, address: null },
+      addresses: [{ id: 'addr-minjur', label: 'Other', text: 'Minjur', chosen: false }] },
+  });
+  await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, tools: [], address: { id: 'addr-home', label: 'Home · Adyar' } };
+    S.liveCart = { item: 'Old cart' }; S.liveCartError = 'Swiggy returned the cart for a different delivery address.';`, context);
+  await vm.runInContext('refreshSwiggyAddresses()', context);
+  const call = calls.find(c => c.url.endsWith('/swiggy/addresses/refresh'));
+  assert.equal(call.options.method, 'POST');
+  assert.equal(vm.runInContext('S.swiggy.address', context), null);
+  assert.equal(vm.runInContext('S.liveCart', context), null);
+  assert.equal(vm.runInContext('S.liveCartError', context), null);
+  assert.equal(vm.runInContext('S.swAddrs[0].id', context), 'addr-minjur');
+});
+
+test('a cart for another address says which and offers to deliver there', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'addr-home', label: 'Home · Adyar' }, order_enabled: true };
+    S.liveCart = { item: 'Veg Meals', restaurant: 'Real Place', to_pay: 215, orderable: false,
+      other_address: { id: 'addr-work', label: 'Work · OMR' } };`, context);
+  const html = vm.runInContext('livePlacesScreen()', context);
+  assert.match(html, /This cart is for Work · OMR, not Home · Adyar/);
+  assert.match(html, /data-swaddr="addr-work"/);
+  assert.ok(!html.includes('data-act="review-live-checkout"'));
+});
