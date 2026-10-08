@@ -72,12 +72,14 @@ def test_a_connection_that_fails_its_check_is_closed_not_put_back(monkeypatch):
     with db.cursor() as cur:                             # make sure the pool holds a connection
         cur.execute("SELECT 1")
     db_pg._last_used.clear()                             # it has been idle: the next checkout checks it
-    poisoned = {id(c) for c in _pooled()}
+    # The connection objects themselves, not their id(): holding them keeps a closed one from
+    # being freed and its address reused by the fresh connection (a false "put back").
+    poisoned = list(_pooled())
     assert poisoned
     real_execute = db_pg.psycopg.Connection.execute
 
     def execute(self, query, *args, **kwargs):          # the pool's check runs execute("")
-        if id(self) in poisoned and query == "":
+        if any(self is c for c in poisoned) and query == "":
             raise db_pg.psycopg.OperationalError("simulated: the check fails but the socket looks fine")
         return real_execute(self, query, *args, **kwargs)
     monkeypatch.setattr(db_pg.psycopg.Connection, "execute", execute)
@@ -86,7 +88,8 @@ def test_a_connection_that_fails_its_check_is_closed_not_put_back(monkeypatch):
     with db.cursor() as cur:
         assert cur.execute("SELECT 41 + 1").fetchone()[0] == 42
     assert time.monotonic() - started < 5
-    assert not poisoned & {id(c) for c in _pooled()}
+    assert not [c for c in _pooled() if any(c is p for p in poisoned)]
+    assert all(c.closed for c in poisoned)               # closed, so the pool discarded it
 
 
 @needs_pg
