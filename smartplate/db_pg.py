@@ -15,23 +15,35 @@ JSON is stored as TEXT on both databases (db.jd / db.jl), so JSON columns need n
 translation. There are no BLOB columns.
 
 Pooling suits Neon's free tier: connections are checked before use (Neon closes them
-when its compute scales to zero), idle ones are closed after 4 minutes and none is
-kept open for its own sake (so Neon can scale to zero, inside its 5-minute idle limit), TLS is
-required (sslmode=require unless the URL sets it), and server-side prepared statements
-are off so Neon's pooled (-pooler) endpoint, which runs PgBouncer, works too.
+when its compute scales to zero) and a connection that fails its check is closed, never
+put back; idle ones are closed after a minute and none is kept open for its own sake (so
+Neon can scale to zero), TLS is required (sslmode=require unless the URL sets it), and
+server-side prepared statements are off so Neon's pooled (-pooler) endpoint, which runs
+PgBouncer, works too.
+
+No database call can hang a request (Oct 2026 incident: every DB endpoint answered a
+generic 500 after 30 s, a few minutes after each boot, with nothing in the logs but
+`PoolTimeout`). Connects time out, TCP keepalives and tcp_user_timeout end any socket
+whose peer vanished silently, a request waits at most PG_POOL_TIMEOUT for a connection,
+and a pool that cannot hand one out is logged (stats + who holds connections) and
+replaced once before the request gives up with OperationalError (503 in app.py).
 """
 from __future__ import annotations
 
 import decimal
+import logging
 import re
 import threading
+import time
+from contextlib import suppress
 
 import psycopg
 from psycopg import adapt, pq
-from psycopg_pool import ConnectionPool
+from psycopg_pool import ConnectionPool, PoolTimeout
 
 from . import config
 
+log = logging.getLogger("smartplate.db")
 WRITE_LOCK_KEY = 0x53504C54          # "SPLT": BEGIN IMMEDIATE = one writer at a time, as in SQLite
 
 # --------------------------------------------------------------------------- #
@@ -304,9 +316,19 @@ def _configure(conn: psycopg.Connection) -> None:
 # --------------------------------------------------------------------------- #
 # Connection pool
 # --------------------------------------------------------------------------- #
+# libpq settings that bound every network wait. Neon (and the NAT in front of a free
+# Render instance) can drop an idle TCP flow without telling either end; without these a
+# read on such a socket blocks until the kernel gives up, minutes later.
+NETWORK_KWARGS = {"connect_timeout": 10, "keepalives": 1, "keepalives_idle": 30,
+                  "keepalives_interval": 10, "keepalives_count": 3, "tcp_user_timeout": 30000}
+
+
 def conninfo(url: str, schema: str = "") -> tuple[str, dict]:
-    """The libpq URL and keyword arguments for one pool."""
-    kwargs: dict = {"connect_timeout": 15, "application_name": "smartplate"}
+    """The libpq URL and keyword arguments for one pool. Settings the URL names win."""
+    kwargs: dict = {"application_name": "smartplate"}
+    for key, value in NETWORK_KWARGS.items():
+        if f"{key}=" not in url:
+            kwargs[key] = value
     if "sslmode=" not in url and not re.search(r"@(localhost|127\.0\.0\.1|\[::1\])[:/]", url):
         kwargs["sslmode"] = "require"
     if schema:
@@ -316,8 +338,34 @@ def conninfo(url: str, schema: str = "") -> tuple[str, dict]:
     return url, kwargs
 
 
+def check_connection(conn: psycopg.Connection) -> None:
+    """The pool's check before it hands out a connection. One that fails is CLOSED, so the
+    pool discards it and opens a fresh one. (psycopg_pool's own check only raises: a
+    connection whose socket still looks fine is put straight back and checked again, in a
+    loop that ends in PoolTimeout with nothing but INFO lines. Fresh connections work.)"""
+    try:
+        ConnectionPool.check_connection(conn)
+    except Exception as exc:
+        log.warning("database connection failed its check (%s: %s); closing it",
+                    type(exc).__name__, str(exc).strip()[:200])
+        with suppress(Exception):
+            conn.close()
+        raise
+
+
 _pools: dict[tuple[str, str], ConnectionPool] = {}
 _pools_lock = threading.Lock()
+_held: dict[int, tuple[str, float]] = {}          # id(connection) -> (thread name, since)
+_logged_url = [False]
+
+
+def _new_pool(key: tuple[str, str]) -> ConnectionPool:
+    url, kwargs = conninfo(*key)
+    return ConnectionPool(
+        url, min_size=0, max_size=max(1, config.PG_POOL_MAX), max_idle=60, max_lifetime=600,
+        timeout=config.PG_POOL_TIMEOUT, reconnect_timeout=60, check=check_connection, configure=_configure,
+        kwargs={**kwargs, "autocommit": False, "prepare_threshold": None, "row_factory": _row_factory},
+        name="smartplate", open=True)
 
 
 def pool() -> ConnectionPool:
@@ -327,18 +375,40 @@ def pool() -> ConnectionPool:
         if found is None:
             for old_key in [k for k in _pools if k[0] == key[0] and k != key]:
                 _pools.pop(old_key).close()          # tests switch schemas; drop the old pool
+            if getattr(config, "DATABASE_URL_CLEANED", False) and not _logged_url[0]:
+                _logged_url[0] = True
+                log.warning("DATABASE_URL contained spaces or invisible characters; they were removed. "
+                            "Re-paste it in the host's settings to tidy it.")
             from . import db
             register_schema(db.SCHEMA)
             from .integrations import swiggy_connect
             register_schema(swiggy_connect.SCHEMA)
-            url, kwargs = conninfo(*key)
-            found = ConnectionPool(
-                url, min_size=0, max_size=max(1, config.PG_POOL_MAX), max_idle=240, max_lifetime=1800,
-                timeout=30, check=ConnectionPool.check_connection, configure=_configure,
-                kwargs={**kwargs, "autocommit": False, "prepare_threshold": None, "row_factory": _row_factory},
-                name="smartplate", open=True)
+            found = _new_pool(key)
             _pools[key] = found
         return found
+
+
+def replace_pool(stale: ConnectionPool) -> ConnectionPool:
+    """Swap a pool that could not hand out a connection for a new one (the state right
+    after boot, which works). Connections still out return to the old pool, which closes
+    them. Closing runs in the background so this request does not wait for it."""
+    key = (config.DATABASE_URL, config.PG_SCHEMA)
+    with _pools_lock:
+        fresh = _pools.get(key)
+        if fresh is None or fresh is stale:      # another thread may have replaced it already
+            fresh = _pools[key] = _new_pool(key)
+    if fresh is not stale:
+        threading.Thread(target=lambda: stale.close(timeout=5), name="smartplate-pool-close",
+                         daemon=True).start()
+    return fresh
+
+
+def _report_timeout(pool_: ConnectionPool) -> None:
+    now = time.monotonic()
+    holders = sorted(((name, round(now - since, 1)) for name, since in list(_held.values())),
+                     key=lambda h: -h[1])
+    log.warning("no database connection within %.0f s; pool stats %s; held by %s",
+                pool_.timeout, pool_.get_stats(), holders[:8] or "nobody")
 
 
 def close_pools() -> None:
@@ -351,8 +421,15 @@ class Connection:
     """A pooled connection with sqlite3.Connection's small surface."""
 
     def __init__(self, pool_: ConnectionPool):
+        try:
+            conn = pool_.getconn()
+        except PoolTimeout:
+            _report_timeout(pool_)
+            pool_ = replace_pool(pool_)
+            conn = pool_.getconn()           # one bounded try on a fresh pool, then PoolTimeout -> 503
         self._pool = pool_
-        self._conn = pool_.getconn()
+        self._conn = conn
+        _held[id(conn)] = (threading.current_thread().name, time.monotonic())
 
     def cursor(self) -> "Cursor":
         return Cursor(self._conn)
@@ -372,10 +449,16 @@ class Connection:
 
     def close(self):
         if self._conn is not None:
-            if not self._conn.closed and self._conn.info.transaction_status != pq.TransactionStatus.IDLE:
-                self._conn.rollback()
-            self._pool.putconn(self._conn)
-            self._conn = None
+            conn, self._conn = self._conn, None
+            _held.pop(id(conn), None)
+            try:
+                if not conn.closed and conn.info.transaction_status != pq.TransactionStatus.IDLE:
+                    conn.rollback()
+            except Exception:                # a dead connection: the pool discards it
+                with suppress(Exception):
+                    conn.close()
+            finally:
+                self._pool.putconn(conn)
 
 
 def connect() -> Connection:

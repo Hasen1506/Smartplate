@@ -1155,3 +1155,21 @@ test('offline says so and how old the plan is; the over-budget choice gives both
   assert.match(warn, /<button data-replan="9">Re-plan the remaining meals<\/button>/);
   assert.doesNotMatch(warn, /primary/);
 });
+
+test('boot shows a clear error with Try again when the database is unavailable (no endless splash)', async () => {
+  const { context, element } = fixture({
+    '/api/meta': { __status: 503, error: "SmartPlate can't reach its database right now. Your data is safe; try again in a minute.",
+      code: 'database_unavailable' } });
+  await context.bootPromise;
+  assert.match(element.innerHTML, /SmartPlate can(&#39;|')t start right now/);
+  assert.match(element.innerHTML, /reach its database/);
+  assert.match(element.innerHTML, /retry-boot/);
+  assert.doesNotMatch(element.innerHTML, /Loading SmartPlate/);
+});
+
+test('boot treats a generic 500 as a server problem, not a silent hang', async () => {
+  const { context, element } = fixture({ '/api/users': { __status: 500 } });
+  await context.bootPromise;
+  assert.match(element.innerHTML, /start right now/);
+  assert.match(element.innerHTML, /retry-boot/);
+});

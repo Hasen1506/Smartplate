@@ -10,11 +10,24 @@ import os
 # DATABASE_URL (a postgres:// URL, e.g. Neon's free tier) makes Postgres the store: data
 # then lives outside the app server and survives restarts and redeploys. Unset, the app
 # uses the SQLite file at SMARTPLATE_DB (local runs, tests, Codespaces).
-DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+def clean_database_url(raw: str) -> str:
+    """The URL without whitespace or invisible characters. A URL never contains them, but a
+    connection string copied from a web page can (an Oct 2026 paste carried four U+202F
+    narrow no-break spaces inside the Neon hostname, so DNS failed). Remove them."""
+    import unicodedata
+    return "".join(ch for ch in raw if not ch.isspace() and unicodedata.category(ch) not in ("Cf", "Zs"))
+
+
+_RAW_DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = clean_database_url(_RAW_DATABASE_URL)
+DATABASE_URL_CLEANED = DATABASE_URL != _RAW_DATABASE_URL.strip()   # logged once at startup
 # Postgres schema to use (default "public"); the test-suite gives every test its own.
 PG_SCHEMA = os.environ.get("SMARTPLATE_PG_SCHEMA", "").strip()
 # Connection pool: gunicorn runs one worker with 8 threads, so up to 8 connections.
 PG_POOL_MAX = int(os.environ.get("SMARTPLATE_PG_POOL_MAX", "8"))
+# Seconds a request waits for a pooled connection before the pool is replaced once and,
+# if that fails too, the request answers 503 "database unavailable" (never a 30 s hang).
+PG_POOL_TIMEOUT = float(os.environ.get("SMARTPLATE_PG_POOL_TIMEOUT", "10"))
 DB_PATH = os.environ.get("SMARTPLATE_DB", "smartplate.db")
 # Where a persistent disk is mounted on Render (render.production.yaml). Anything else
 # on Render lives on the instance's ephemeral disk and is erased on every spin-down,

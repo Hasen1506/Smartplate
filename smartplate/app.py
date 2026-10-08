@@ -137,6 +137,20 @@ def create_app() -> Flask:
             return response, 409        # the user's cart is for another of their addresses: their choice, not an outage
         return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
+    from . import db as _db
+    if _db.UNAVAILABLE:
+        @app.errorhandler(_db.UNAVAILABLE[0])
+        def database_unavailable(error):
+            # Postgres unreachable or no pooled connection in time: say so at once with a
+            # code the UI understands, instead of Flask's generic 500 page (Oct 2026 incident).
+            app.logger.warning("Database unavailable on %s: %s: %s", request.path,
+                               type(error).__name__, str(error).strip()[:200])
+            response = jsonify(error="SmartPlate can't reach its database right now. "
+                                     "Your data is safe; try again in a minute.",
+                               code="database_unavailable")
+            response.headers['Retry-After'] = '15'
+            return response, 503
+
     @app.errorhandler(HTTPException)
     def http_error(error):
         return jsonify(error=error.description), error.code
