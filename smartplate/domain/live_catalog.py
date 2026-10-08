@@ -15,7 +15,7 @@ plainly that it is sample data (`source_for`).
 """
 import re
 
-from .. import clock, db
+from .. import clock, config, db
 
 LIVE_DELIVERY_FEE_ESTIMATE = 35.0     # ₹; the real fee comes from the cart bill
 MAX_PLACES = 4                        # restaurants read per refresh (favourites first)
@@ -244,4 +244,5 @@ def source_for(user_id: int, connected: bool | None = None) -> dict:
     return {"kind": "sample", "connected": connected,
             "label": "Sample dishes (not real restaurants)",
             "note": ("Plan from your Swiggy restaurants to use real menus and prices." if connected else
-                     "Connect Swiggy to plan from real restaurants near you.")}
+                     "Connect Swiggy to plan from real restaurants near you." if config.SWIGGY_REDIRECT_APPROVED else
+                     "Connecting Swiggy on this server is waiting for Swiggy's approval, so plans use sample dishes.")}

@@ -454,3 +454,7 @@ tr.have td{color:var(--muted)}
 /* what the plan is built from (live Swiggy menus or labelled sample dishes) */
 .source{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border:1px solid var(--line, #ddd);border-radius:10px;padding:8px 12px;margin:8px 0}
 .source.sample{border-style:dashed}
+
+/* Trial-server data warning (temporary disk). Always visible, not dismissible. */
+.storage-warning{background:#fff4e5;border-bottom:1px solid #f0c890;color:#5c3b00;font-size:13.5px;line-height:1.45;padding:10px 16px;text-align:center}
+.storage-warning strong{color:#3d2700}

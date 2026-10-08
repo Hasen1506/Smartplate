@@ -89,7 +89,9 @@ def test_b3_declared_allergy_never_gets_the_live_allergen_dish(client, swiggy):
     assert "Peanut Chutney Dosa" not in {c["item"] for c in _cells(view)}
 
 
-def test_b4_not_connected_falls_back_clearly(client, swiggy):
+def test_b4_not_connected_falls_back_clearly(client, swiggy, monkeypatch):
+    from smartplate import config
+    monkeypatch.setattr(config, "SWIGGY_REDIRECT_APPROVED", True)   # this server's callback is allow-listed
     pid = client.get("/api/user/3/plan").get_json()["plan"]["id"]
     r = client.post(f"/api/plan/{pid}/live-menus", json={})
     body = r.get_json()                    # 409 swiggy_not_connected once PR A is in; 502 on main today

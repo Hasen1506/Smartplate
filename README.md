@@ -76,6 +76,14 @@ path if Swiggy has approved the resulting URL on a host you control. Set
 `SMARTPLATE_PUBLIC_URL` to that host's public HTTPS origin only when it actually
 routes to this app. Never point OAuth at a proposed or third-party domain. Until
 the approved URI and live contract are verified, use the manual Swiggy hand-off.
+Once Swiggy has approved this deployment's exact callback, set
+`SMARTPLATE_SWIGGY_REDIRECT_APPROVED=1`; until then the app tells visitors that
+connecting Swiggy is not available on that server yet, instead of promising real restaurants.
+
+`/healthz`, `/readyz` and `/api/meta` report whether the database survives a restart
+(`database.persistent` / `storage.persistent`). On Render it is persistent only under the
+disk mount (`/var/data`); the free Blueprint's database is not, and the app shows every
+visitor a banner saying their data can be erased.
 
 **Or use GitHub Codespaces (private to you):**
 [Open SmartPlate in GitHub Codespaces](https://codespaces.new/Hasen1506/Smartplate?quickstart=1).

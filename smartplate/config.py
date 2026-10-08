@@ -8,6 +8,13 @@ import os
 
 # Persistence
 DB_PATH = os.environ.get("SMARTPLATE_DB", "smartplate.db")
+# Where a persistent disk is mounted on Render (render.production.yaml). Anything else
+# on Render lives on the instance's ephemeral disk and is erased on every spin-down,
+# restart or redeploy (https://render.com/docs/free).
+RENDER_DISK_MOUNT = os.environ.get("SMARTPLATE_DISK_MOUNT", "/var/data")
+# Optional explicit declaration for other hosts: "1" (the DB path survives restarts)
+# or "0" (it does not). Unset off Render means "unknown".
+DB_PERSISTENT = os.environ.get("SMARTPLATE_DB_PERSISTENT", "")
 
 # Brain selection — "deterministic" (free, default) or "llm" (optional, paid).
 AGENT_BRAIN = os.environ.get("SMARTPLATE_BRAIN", "deterministic")
@@ -32,6 +39,11 @@ STABILITY_W = float(os.environ.get("SMARTPLATE_STABILITY", "0.3"))
 # offline) or "simulated" (sample feed only; used by the test-suite for determinism).
 WEATHER_PROVIDER = os.environ.get("SMARTPLATE_WEATHER", "live")
 WEATHER_TIMEOUT_S = float(os.environ.get("SMARTPLATE_WEATHER_TIMEOUT", "3"))
+
+# Swiggy only lets sign-in redirect to exact callback URLs it has allow-listed. Set to
+# "1" once Swiggy has approved THIS deployment's callback (More -> Swiggy connection
+# shows it). Until then the UI says plainly that connecting Swiggy is not yet possible.
+SWIGGY_REDIRECT_APPROVED = os.environ.get("SMARTPLATE_SWIGGY_REDIRECT_APPROVED", "0") == "1"
 
 # Swiggy sign-in + read-only discovery (docs/vendor/swiggy/README.md).
 SWIGGY_MCP_BASE = os.environ.get("SMARTPLATE_SWIGGY_MCP", "https://mcp.swiggy.com").rstrip("/")
@@ -138,3 +150,24 @@ USUAL_FIRST_W = float(os.environ.get("SMARTPLATE_USUAL_FIRST_W", "0.5"))
 EPICURE_DIR = os.environ.get("SMARTPLATE_EPICURE_DIR",
                              os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "epicure"))
 EPICURE_CHECKSUMS = os.environ.get("SMARTPLATE_EPICURE_CHECKSUMS", "pinned")
+
+
+def storage_status() -> dict:
+    """Whether the SQLite database survives a restart or redeploy, and why we think so.
+
+    persistent is True, False or None (unknown). It is decided from configuration only,
+    so the answer is deterministic and needs no disk probing."""
+    path = DB_PATH
+    if path == ":memory:" or path.startswith("file::memory:"):
+        return {"engine": "sqlite", "persistent": False, "reason": "in-memory database"}
+    if DB_PERSISTENT in ("1", "0"):
+        ok = DB_PERSISTENT == "1"
+        return {"engine": "sqlite", "persistent": ok,
+                "reason": "declared by SMARTPLATE_DB_PERSISTENT"}
+    if os.environ.get("RENDER"):
+        mount = RENDER_DISK_MOUNT.rstrip("/") + "/"
+        if os.path.abspath(path).startswith(mount):
+            return {"engine": "sqlite", "persistent": True, "reason": f"on the Render disk at {RENDER_DISK_MOUNT}"}
+        return {"engine": "sqlite", "persistent": False,
+                "reason": "on Render's temporary disk: erased on every spin-down, restart or redeploy"}
+    return {"engine": "sqlite", "persistent": None, "reason": "host not recognised; persistence unknown"}
