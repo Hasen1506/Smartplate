@@ -269,3 +269,66 @@ def test_choosing_the_same_address_again_keeps_the_live_catalogue(client, swiggy
     client.post(f"/api/plan/{pid}/live-menus", json={})
     client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
     assert live_catalog.has_live(3)
+
+
+# --------------------------------------------------------------------------- #
+# Confirming the one reviewed dish in the real cart
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def cart_shape(swiggy, monkeypatch):
+    """Edit the cart reply after an item is in it (the shape varies in real replies)."""
+    edits = {}
+    original = swiggy.tool
+
+    def edited(name, args):
+        reply = original(name, args)
+        if name == "get_food_cart" and swiggy.cart is not None:
+            cart = reply["structuredContent"]["data"]["data"]
+            for key, value in edits.items():
+                if key == "quantity":
+                    cart["items"][0]["quantity"] = value
+                elif value is None:
+                    cart.pop(key, None)
+                else:
+                    cart[key] = value
+        return reply
+    monkeypatch.setattr(swiggy, "tool", edited)
+    return edits
+
+
+def test_cart_without_its_restaurant_still_confirms_the_dish_and_learns_the_fee(client, swiggy, cart_shape):
+    """Live finding, Oct 8, 2026 (after #32): Swiggy put Veg Biryani in the Minjur cart
+    (checkout: ₹160 + delivery ₹6 + GST and charges ₹19.06 = ₹185), but SmartPlate said
+    "could not confirm the item in Swiggy's cart", so the ₹6 fee was never learned and the
+    plan kept "delivery ₹35 estimated". The get_food_cart reference says the cart does not
+    always return the restaurant; its absence must not void a confirmed dish."""
+    _home_user(client, swiggy)
+    cart_shape["restaurant"] = None
+    r = _add_item(client)
+    assert r.status_code == 200, r.get_json()                    # main: 502 "could not confirm the item"
+    assert live_catalog.learned_fees(3)["r-1"]["fee"] == 35.0
+    cart = client.get("/api/user/3/swiggy/live-cart").get_json()["cart"]
+    assert cart["orderable"] is True and cart["restaurant"] == "Hotel Saravana Bhavan (Adyar)"
+    samples = db.jl(swiggy_connect._connection(3)["samples"], {})
+    assert samples["get_food_cart.confirm"]["unconfirmed"] is None
+
+
+def test_quantity_spelled_as_text_or_float_is_one(client, swiggy, cart_shape):
+    _home_user(client, swiggy)
+    cart_shape["quantity"] = "1"
+    assert _add_item(client).status_code == 200                  # main: 502
+
+
+@pytest.mark.parametrize("edit,part", [
+    ({"restaurant": {"id": "r-other", "name": "Elsewhere"}}, "restaurant"),
+    ({"quantity": 2}, "quantity of 1"),
+])
+def test_a_cart_that_is_not_the_reviewed_dish_names_what_differs(client, swiggy, cart_shape, edit, part):
+    _home_user(client, swiggy)
+    cart_shape.update(edit)
+    r = _add_item(client)
+    assert r.status_code == 502 and f"could not confirm the {part}" in r.get_json()["error"]
+    assert "may be in your Swiggy cart" in r.get_json()["error"]
+    assert live_catalog.learned_fees(3) == {}
+    with db.cursor() as cur:
+        assert cur.execute("SELECT 1 FROM swiggy_cart_intents WHERE user_id=3").fetchone() is None
