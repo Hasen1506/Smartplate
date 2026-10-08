@@ -396,7 +396,8 @@ def _prepared_checkout(client, swiggy, monkeypatch):
 
 @pytest.mark.parametrize("change,expected", [
     ("price", 409), ("item", 502), ("restaurant", 502),
-    ("address", 409),            # the cart moved to another address: the user's choice to make (Oct 8, 2026)
+    ("address", 502),            # an echo outside the address list is unverified, never placed (Oct 8, 2026)
+    ("listed_address", 409),     # the cart moved to another of the user's addresses: their choice to make
     ("quantity", 502), ("nonveg", 502), ("variants", 502), ("addons", 502),
     ("stock", 502), ("nan", 502), ("over_limit", 502), ("payment", 502),
 ])
@@ -412,6 +413,7 @@ def test_checkout_rechecks_external_cart_changes(client, swiggy, monkeypatch, ch
             if change == "item": item["menu_item_id"] = "other-item"
             if change == "restaurant": cart["restaurant"]["id"] = "other-restaurant"
             if change == "address": envelope["addressId"] = "other-address"
+            if change == "listed_address": envelope["addressId"] = "addr-work"
             if change == "quantity": item["quantity"] = 2
             if change == "nonveg": item["is_veg"] = False
             if change == "variants": item["variants"] = [{"id": "unreviewed"}]

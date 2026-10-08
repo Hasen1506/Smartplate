@@ -12,6 +12,8 @@ the user's addresses. Addresses come back in the documented `get_addresses` shap
 (`addressLine`, `addressTag`, `pagination`). Every test failed on main before this change.
 No real account, cart or order is used.
 """
+import json
+
 import pytest
 
 from test_swiggy_live import FakeLive, _connect
@@ -133,11 +135,34 @@ def test_bill_is_refused_when_swiggy_keeps_the_cart_on_another_address(client, s
         assert cur.execute("SELECT 1 FROM swiggy_cart_intents WHERE user_id=3").fetchone() is None
 
 
-def test_cart_tied_to_an_unknown_address_is_named_as_such(client, swiggy):
+def test_echo_outside_the_address_list_is_not_another_address(client, swiggy):
+    """Live finding, Oct 8, 2026: after adding Veg Biryani for the chosen Minjur address,
+    Swiggy's checkout showed the cart at Minjur (Item total 160, Delivery fee 6, GST and
+    other charges 19.06, To pay 185), but get_food_cart echoed an addressId that is none of
+    the get_addresses ids. SmartPlate then refused the bill as "for an address that isn't in
+    your Swiggy list". Such an echo proves nothing, so the bill is read for the chosen
+    address; it is still never verified for placement."""
     _home_user(client, swiggy)
-    swiggy.cart, swiggy.cart_address = "m0", "addr-deleted"
+    swiggy.keep_cart_address, swiggy.cart_address = True, "9876543"     # Swiggy's own cart address id
+    r = _add_item(client)
+    assert r.status_code == 200, r.get_json()                    # #31: 409 "isn't in your Swiggy list"
+    assert r.get_json()["to_pay"] == 160.0
+    assert live_catalog.learned_fees(3)["r-1"]["fee"] == 35.0    # the bill's delivery line, for addr-home
     cart = client.get("/api/user/3/swiggy/live-cart").get_json()["cart"]
-    assert cart["other_address"] == {"id": None, "label": "an address that isn't in your Swiggy list"}
+    assert cart["other_address"] is None and cart["to_pay"] == 160.0
+    samples = db.jl(swiggy_connect._connection(3)["samples"], {})
+    assert samples["get_food_cart.address_echo"]["kind"] == "unlisted" and "9876543" not in json.dumps(samples)
+
+
+def test_echo_outside_the_list_is_never_placed(client, swiggy, monkeypatch):
+    from smartplate import config
+    monkeypatch.setattr(config, "LIVE_ORDERS", True)
+    _home_user(client, swiggy)
+    swiggy.keep_cart_address, swiggy.cart_address = True, "9876543"
+    assert _add_item(client).status_code == 200
+    r = client.get("/api/user/3/swiggy/checkout/preview")
+    assert r.status_code == 502 and "did not confirm the cart's delivery address" in r.get_json()["error"]
+    assert "place_food_order" not in swiggy.tool_calls()
 
 
 def test_unconfirmed_empty_reply_is_still_never_a_base_to_add_to(client, swiggy, monkeypatch):
