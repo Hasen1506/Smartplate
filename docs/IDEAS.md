@@ -204,3 +204,22 @@ Ideas met while building this (not built):
 - **Say which profile is gone.** When the trial server erases its database, live actions on a
   still-open profile answer a bare "not found". Say the profile no longer exists on this
   server and how to recreate it.
+
+## Live finding: Swiggy's cart echoes an address id outside the address list (Oct 8, 2026)
+
+On the deployed app, with the user's Minjur address chosen, "Add to Swiggy cart" put Veg
+Biryani (Minjur Bhavan) in the cart. Swiggy's own checkout showed it at Minjur with the real
+bill (Item total ₹160, Delivery fee ₹6 for 0.3 km, GST and other charges ₹19.06, To pay
+₹185). But `get_food_cart` echoed an `addressId` that is none of the ids `get_addresses`
+returns, so SmartPlate refused the bill as "for an address that isn't in your Swiggy list".
+That is very likely the same cause as the earlier "cart for a different delivery address"
+error.
+
+- **Built now:** only an echo that is one of the user's *other* listed addresses means the
+  cart is for another address. An echo outside the list proves nothing, so the bill is read
+  for the chosen address (Swiggy prices delivery from the `addressId` passed to
+  `get_food_cart`) and its delivery fee is learned. The cart stays unverified, so placement
+  still refuses it. SmartPlate keeps which kind of echo it last saw (no values) beside the
+  reply shapes.
+- **Idea, not built:** ask Swiggy Builders Club how the cart's `addressId` relates to the
+  `get_addresses` ids, so a verified cart can be placed once live orders are approved.

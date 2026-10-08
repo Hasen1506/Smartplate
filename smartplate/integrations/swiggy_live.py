@@ -984,12 +984,51 @@ def _cart_view(data: object, address_id: str) -> dict:
     return {**inner, "items": items, **where, "empty_confirmed": echoed is not None and not items}
 
 
-def _other_address_error(user_id: int, cart: dict, conn: dict, what: str) -> SwiggyError:
-    known = _known_address(user_id, cart.get("cart_address_id"))
+def _read_cart(user_id: int, data: object, address_id: str) -> dict:
+    """`_cart_view` plus what the echoed address means.
+
+    Live finding (Oct 8, 2026): after `update_food_cart` with the chosen address, Swiggy's
+    checkout showed the cart at that address, yet `get_food_cart` echoed an `addressId`
+    that is none of the ids `get_addresses` returns. The echo is therefore not always in
+    the same id space as the address list. Only an echo that is one of the user's *other*
+    listed addresses means the cart is for another address. An echo outside the list
+    proves nothing either way: the cart is read for the chosen address (Swiggy prices
+    delivery from the `addressId` passed to `get_food_cart`), but it stays unverified, so
+    placement still refuses it."""
+    cart = _cart_view(data, address_id)
+    echo = cart["cart_address_id"]
+    kind = "absent" if not (cart["address_verified"] or echo or cart["empty_confirmed"]) else (
+        "chosen" if cart["address_verified"] else None)
+    if echo:
+        known = _known_address(user_id, echo)
+        kind = "listed_other" if known else "unlisted"
+        if known:
+            cart["cart_address_label"] = known
+        else:
+            cart["cart_address_id"] = None
+    _note_echo(user_id, kind)
+    return cart
+
+
+def _note_echo(user_id: int, kind: str | None) -> None:
+    """Keep which kind of address echo the cart last returned (no values) beside the reply
+    shapes, so a real run shows how Swiggy's cart address relates to the address list."""
+    if not kind:
+        return
+    try:
+        conn = sc._connection(user_id)
+        samples = db.jl(conn.get("samples"), {}) if conn else {}
+        samples["get_food_cart.address_echo"] = {"kind": kind, "at": clock.now().isoformat(timespec="seconds")}
+        with db.cursor() as cur:
+            cur.execute("UPDATE swiggy_connections SET samples=? WHERE user_id=?", (db.jd(samples), user_id))
+    except Exception:
+        logging.getLogger(__name__).warning("Could not record the cart's address echo")
+
+
+def _other_address_error(cart: dict, conn: dict, what: str) -> SwiggyError:
     chosen = conn.get("address_label") or "your chosen address"
-    where = f"your {known} address" if known else "an address that isn't in your Swiggy list"
-    return SwiggyError(f"{what} is for {where}, not {chosen}. Choose that address here, or clear the cart in Swiggy.",
-                       code="swiggy_cart_other_address")
+    return SwiggyError(f"{what} is for your {cart['cart_address_label']} address, not {chosen}. "
+                       "Choose that address here, or clear the cart in Swiggy.", code="swiggy_cart_other_address")
 
 
 def _intent(user_id: int) -> dict | None:
@@ -1004,9 +1043,9 @@ def _prepared_cart(user_id: int) -> tuple[dict, dict, dict]:
     intent = _intent(user_id)
     data = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
                 {"address": address_id, "restaurant_name": intent["restaurant_name"] if intent else None}))
-    cart = _cart_view(data, address_id)
+    cart = _read_cart(user_id, data, address_id)
     if cart["cart_address_id"]:
-        raise _other_address_error(user_id, cart, conn, "Your Swiggy cart")
+        raise _other_address_error(cart, conn, "Your Swiggy cart")
     restaurant = cart.get("restaurant") or {}
     items = cart["items"]
     if (not intent or intent["address_id"] != address_id or len(items) != 1
@@ -1024,7 +1063,7 @@ def current_live_cart(user_id: int) -> dict:
     intent = _intent(user_id)
     data = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
                 {"address": address_id, "restaurant_name": intent["restaurant_name"] if intent else None}))
-    cart = _cart_view(data, address_id)
+    cart = _read_cart(user_id, data, address_id)
     if not cart["items"]:
         # An empty cart is an answer, not an error: say so instead of a stale warning. An
         # empty cart Swiggy last tied to another address is still empty; adding an item
@@ -1032,11 +1071,8 @@ def current_live_cart(user_id: int) -> dict:
         return {"cart": None, "empty": True,
                 "address_verified": cart["address_verified"] or cart["empty_confirmed"],
                 "address": conn.get("address_label") or address_id}
-    other = None
-    if cart["cart_address_id"]:
-        known = _known_address(user_id, cart["cart_address_id"])
-        other = {"id": cart["cart_address_id"] if known else None,
-                 "label": known or "an address that isn't in your Swiggy list"}
+    other = ({"id": cart["cart_address_id"], "label": cart["cart_address_label"]}
+             if cart["cart_address_id"] else None)
     restaurant = cart.get("restaurant") or {}
     rid = str(restaurant.get("id")) if isinstance(restaurant, dict) else ""
     prepared = bool(not other and intent and intent["address_id"] == address_id and rid == intent["restaurant_id"]
@@ -1070,10 +1106,10 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     conn = _conn(user_id)
     current = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
                                                        {"address": preview["address_id"]}))
-    before = _cart_view(current, preview["address_id"])
+    before = _read_cart(user_id, current, preview["address_id"])
     if before["items"]:
         if before["cart_address_id"]:
-            raise _other_address_error(user_id, before, conn, "Your Swiggy cart already has items and")
+            raise _other_address_error(before, conn, "Your Swiggy cart already has items and")
         raise SwiggyError("Your Swiggy cart already has items. Review or clear it in Swiggy before starting a new order.")
     # An unconfirmed "empty" reply is never a safe base to add to. A structured empty
     # cart is, whichever address Swiggy last tied it to: the update below sends the
@@ -1086,9 +1122,9 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
         "address": preview["address_id"], "restaurant_name": preview["restaurant"]}))
     cart = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
                          {"address": preview["address_id"], "restaurant_name": preview["restaurant"]}))
-    view = _cart_view(cart, preview["address_id"])
+    view = _read_cart(user_id, cart, preview["address_id"])
     if view["cart_address_id"]:
-        raise _other_address_error(user_id, view, conn, "Swiggy added the item, but the cart")
+        raise _other_address_error(view, conn, "Swiggy added the item, but the cart")
     restaurant = view.get("restaurant") or {}
     if (len(view["items"]) != 1 or str(_get(view["items"][0], "menu_item_id")) != preview["item_id"]
             or view["items"][0].get("quantity") != 1 or not isinstance(restaurant, dict)
