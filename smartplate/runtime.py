@@ -21,9 +21,16 @@ def initialize():
         db.init_db()
         from .integrations import swiggy_connect
         swiggy_connect.init_schema()
-        with db.cursor() as cur:
-            empty = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
-        from .seed import remove_invented_community, seed_all
-        if empty:
-            seed_all()
-        remove_invented_community()
+        from . import cleanup, config
+        from .domain import festivals
+        if config.FIXTURE_DATA:                 # the test-suite's sample world, never production
+            with db.cursor() as cur:
+                empty = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
+            if empty:
+                from .seed import seed_all
+                seed_all()
+        else:
+            removed = cleanup.remove_seeded_samples()
+            cleanup.replan(removed["replanned_plans"])
+        festivals.ensure_calendar()             # the real India holiday calendar
+        cleanup.remove_invented_community()

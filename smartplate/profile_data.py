@@ -79,23 +79,28 @@ def delete(user_id, confirmation):
     with db.cursor() as cur:
         cur.execute("BEGIN IMMEDIATE")
         _private(cur, user_id)
-        plan_scope = "SELECT id FROM plans WHERE user_id=?"
-        decision_scope = f"SELECT id FROM decisions WHERE plan_id IN ({plan_scope})"
-        subscription_scope = "SELECT id FROM push_subscriptions WHERE user_id=?"
-        cur.execute(f"DELETE FROM orders WHERE decision_id IN ({decision_scope})", (user_id,))
-        cur.execute(f"DELETE FROM push_sent WHERE subscription_id IN ({subscription_scope})", (user_id,))
-        for table in ("grocery_baskets", "grocery_have", "grocery_swaps", "decisions", "sessions"):
-            cur.execute(f"DELETE FROM {table} WHERE plan_id IN ({plan_scope})", (user_id,))
-        cur.execute("DELETE FROM community_templates WHERE author_user_id=?", (user_id,))
-        for table in USER_TABLES:
-            cur.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
-        cur.execute("DELETE FROM plans WHERE user_id=?", (user_id,))
-        # the people this profile cooked for (no profile of their own) go with it
-        hid = cur.execute("SELECT household_id FROM users WHERE id=?", (user_id,)).fetchone()["household_id"]
-        if hid:
-            for person in _household_people(cur, hid, user_id, "id, prefs"):
-                cur.execute("DELETE FROM users WHERE id=?", (person["id"],))
-        cur.execute("DELETE FROM users WHERE id=?", (user_id,))
-        if hid and not cur.execute("SELECT 1 FROM users WHERE household_id=?", (hid,)).fetchone():
-            cur.execute("DELETE FROM households WHERE id=?", (hid,))
+        purge(cur, user_id)
     return {"deleted": True}
+
+
+def purge(cur, user_id, *, people=True):
+    """Delete one profile and everything recorded for it, inside the caller's transaction.
+    `people`: also delete the household people this profile cooked for (no profile of their own)."""
+    plan_scope = "SELECT id FROM plans WHERE user_id=?"
+    decision_scope = f"SELECT id FROM decisions WHERE plan_id IN ({plan_scope})"
+    subscription_scope = "SELECT id FROM push_subscriptions WHERE user_id=?"
+    cur.execute(f"DELETE FROM orders WHERE decision_id IN ({decision_scope})", (user_id,))
+    cur.execute(f"DELETE FROM push_sent WHERE subscription_id IN ({subscription_scope})", (user_id,))
+    for table in ("grocery_baskets", "grocery_have", "grocery_swaps", "order_queue", "decisions", "sessions"):
+        cur.execute(f"DELETE FROM {table} WHERE plan_id IN ({plan_scope})", (user_id,))
+    cur.execute("DELETE FROM community_templates WHERE author_user_id=?", (user_id,))
+    for table in USER_TABLES + ("rating_reasons", "live_catalog_state"):
+        cur.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+    cur.execute("DELETE FROM plans WHERE user_id=?", (user_id,))
+    hid = cur.execute("SELECT household_id FROM users WHERE id=?", (user_id,)).fetchone()["household_id"]
+    if hid and people:
+        for person in _household_people(cur, hid, user_id, "id, prefs"):
+            cur.execute("DELETE FROM users WHERE id=?", (person["id"],))
+    cur.execute("DELETE FROM users WHERE id=?", (user_id,))
+    if hid and not cur.execute("SELECT 1 FROM users WHERE household_id=?", (hid,)).fetchone():
+        cur.execute("DELETE FROM households WHERE id=?", (hid,))

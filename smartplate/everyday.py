@@ -18,7 +18,7 @@ from .domain import (allergens, epicure, festivals, flavour, intake, learning, m
                      reverse_mode, taste)
 from .kernel import optimizer, recommender, scheduler
 
-CITY = "Chennai"                 # the sample catalogue covers Chennai only (honest limit)
+CITY = "Chennai"                 # profiles' default city; restaurant dishes come only from live Swiggy menus
 SHORTLIST_PLACES = 4
 SHORTLIST_DISHES = 3
 SHORTLIST_NEW = 3
@@ -541,7 +541,7 @@ def more_like(session_id: int) -> dict:
         cur.execute("UPDATE users SET prefs=? WHERE id=?", (db.jd(prefs), user["id"]))
     optimizer.optimize(plan["id"])
     user = models.get_user(user["id"])
-    menu = [it for it in allergens.safe_items(user, models.menu_for_city(user["city"]))
+    menu = [it for it in allergens.safe_items(user, models.menu_for_user(user))
             if optimizer.meal_suitable(it, session["meal"]) and it["restaurant_rating"] >= float(user["rating_floor"])]
     similar = [{"item_id": it["id"], "name": it["name"], "restaurant": it["restaurant_name"], "price": it["price"],
                 "similarity": it["similarity"]}

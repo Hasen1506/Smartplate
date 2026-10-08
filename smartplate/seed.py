@@ -1,4 +1,4 @@
-"""Demo seed data — a Chennai catalog + users/contexts that exercise all 17 gaps.
+"""TEST FIXTURE ONLY: seed data — a Chennai catalog + users/contexts that exercise all 17 gaps.
 
 The demo week starts on the upcoming Monday so calendar/weather/festival signals
 always line up with the plan grid, whenever you run it.
@@ -27,6 +27,9 @@ def _clear():
 
 
 def seed_all(optimize_starter: bool = True) -> dict:
+    from . import config
+    if not config.FIXTURE_DATA:
+        raise RuntimeError("Sample data is for the test-suite only (SMARTPLATE_FIXTURE_DATA=1, never in production).")
     _clear()
     _households()
     _users()
@@ -208,20 +211,7 @@ def _favourites(rmap: dict):
                                                 "Hotel Saravana Bhavan", "FreshMenu", "Murugan Idli Shop")])
 
 
-# Community weeks are only what real people shared. Earlier trials seeded two invented
-# members ("campus_survivor", "veg_athlete") with invented adoption counts; they are not
-# seeded any more and are removed from databases that still hold them.
-INVENTED_COMMUNITY = (("campus_survivor", "₹1500/week student survival"),
-                      ("veg_athlete", "High-protein veg week"))
-
-
-def remove_invented_community() -> int:
-    with db.cursor() as cur:
-        n = 0
-        for author, title in INVENTED_COMMUNITY:
-            n += cur.execute("DELETE FROM community_templates WHERE author=? AND title=? AND author_user_id IS NULL",
-                             (author, title)).rowcount
-    return n
+from .cleanup import INVENTED_COMMUNITY, remove_invented_community  # noqa: E402,F401  (kept importable)
 
 
 def _starter_plan() -> int:

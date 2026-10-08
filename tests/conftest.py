@@ -6,6 +6,12 @@ import tempfile
 
 import pytest
 
+# The sample Chennai world (seeded profiles, catalogue, weather) is test fixture data only:
+# it needs this flag, and smartplate.config ignores it in production. Set before config loads.
+os.environ["SMARTPLATE_FIXTURE_DATA"] = "1"
+for _var in ("RENDER", "SMARTPLATE_ENV"):
+    os.environ.pop(_var, None)
+
 # Epicure: the suite always uses the small offline fixture (real file formats, a subset of
 # the vectors), checked against the fixture's own SHA-256 sums. Set before smartplate.config loads.
 _EPICURE_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "epicure")

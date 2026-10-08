@@ -227,7 +227,7 @@ def plan_view(plan_id: int) -> dict:
         "coach": coach,
         "grid": grid,
         "week_context": _week_context(user, plan, fests, wx),
-        "weather_source": "live" if any(w["source"] == "live" for w in wx.values()) else "sample",
+        "weather_source": "live" if any(w["source"] == "live" for w in wx.values()) else wx[0].get("source", "none"),
         "learning": {"ratings": sig["ratings"], "orders": sig["orders"], "favourites": len(sig["favourites"])},
         # inverse-optimisation budget band for the planned sessions (docs §5):
         # don't make the user guess the cap — recommend it.
@@ -507,7 +507,7 @@ def _week_context(user, plan, fests, wx=None):
         out.append({
             "day": models.DAYS[i], "date": models.session_date(plan, i),
             "weather": w["condition"], "temp_c": w["temp_c"], "rain_prob": w.get("rain_prob", 0),
-            "weather_source": w.get("source", "sample"), "weather_note": weather.note(w["condition"]),
+            "weather_source": w.get("source", "none"), "weather_note": weather.note(w["condition"]),
             "festival": f["name"] if f else None, "festival_effect": f["effect"] if f else None,
             "festival_note": f.get("note") if f else None, "festival_approx": bool(f and f.get("approx")),
             "your_fast": fast["name"] if fast else None,

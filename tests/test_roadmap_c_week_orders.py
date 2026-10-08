@@ -50,13 +50,14 @@ def test_c1_bill_breakdown_shows_every_line_swiggy_returns():
                         "gst": 12.5, "discount": 20, "to_pay": 262.5}}
     bill = swiggy_live.bill_breakdown(cart, 210)
     assert [(l["label"], l["amount"]) for l in bill["lines"]] == [
-        ("Items", 210), ("Delivery", 35), ("Platform fee", 10), ("Packaging", 15), ("GST & taxes", 12.5),
-        ("Discount", -20)]
+        ("Item Total", 210), ("Delivery Fee", 35), ("Platform Fee", 10), ("Packaging Charges", 15),
+        ("GST & Other Charges", 12.5), ("Discount", -20)]
     assert bill["to_pay"] == 262.5 and bill["itemised"]
-    # fields Swiggy didn't send are never guessed; the gap is shown so the lines add up
+    # fields Swiggy didn't send are never guessed and never invented as a line: the gap is
+    # reported as not itemised by Swiggy, and the bill is not marked itemised
     partial = swiggy_live.bill_breakdown({"pricing": {"item_total": 210, "delivery_charge": 35, "to_pay": 262.5}}, 210)
-    assert partial["lines"][-1] == {"label": "Other charges (as Swiggy shows them)", "amount": 17.5}
-    assert not partial["itemised"] and sum(l["amount"] for l in partial["lines"]) == 262.5
+    assert [l["label"] for l in partial["lines"]] == ["Item Total", "Delivery Fee"]
+    assert partial["unitemised"] == 17.5 and not partial["itemised"]
     # paise payloads are read in rupees
     paise = swiggy_live.bill_breakdown({"pricing": {"item_total": 21000, "delivery_charge": 3500,
                                                     "to_pay_in_paise": 24500}}, 210)
@@ -101,7 +102,7 @@ def test_c3_cart_check_shows_the_true_total_then_tap_to_place(client, swiggy):
     assert r.status_code == 200, r.get_json()
     cart = r.get_json()
     assert cart["to_pay"] == 262.5 and cart["bill"]["itemised"]
-    assert {l["label"] for l in cart["bill"]["lines"]} >= {"Items", "Delivery", "Platform fee", "Packaging", "GST & taxes"}
+    assert {l["label"] for l in cart["bill"]["lines"]} >= {"Item Total", "Delivery Fee", "Platform Fee", "Packaging Charges", "GST & Other Charges"}
     assert cart["next"]["mode"] == "tap_to_place"                     # no real order API enabled
     q = client.get(f"/api/plan/{pid}/order-queue").get_json()
     row = next(m for m in q["meals"] if m["session_id"] == sid)

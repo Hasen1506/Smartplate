@@ -6,7 +6,9 @@ Source order for a given date:
   1. the cached live forecast (Open-Meteo, free and key-less; CC BY 4.0 — attribution
      shown in the UI; commercial use needs their paid plan),
   2. a fresh fetch when SMARTPLATE_WEATHER=live (the default outside tests),
-  3. the synthetic weekly pattern seeded for the demo (always available offline).
+  3. nothing: a day without a real forecast is "unknown" (source "none"), planned as
+     neutral clear weather and never shown. The synthetic weekly pattern exists only as
+     test fixture data (config.FIXTURE_DATA).
 
 A failed fetch backs off for a while so an offline machine never slows planning.
 """
@@ -77,7 +79,12 @@ def _cached(city: str, iso: str) -> dict | None:
             "source": "live", "stale": age_h > CACHE_HOURS}
 
 
+UNKNOWN = {"condition": "clear", "temp_c": None, "rain_prob": None, "source": "none"}
+
+
 def _simulated(city: str, day: int) -> dict:
+    if not config.FIXTURE_DATA:
+        return dict(UNKNOWN)
     with db.cursor() as cur:
         row = cur.execute("SELECT condition, temp_c FROM weather WHERE city=? AND day=?", (city, day)).fetchone()
     if not row:
