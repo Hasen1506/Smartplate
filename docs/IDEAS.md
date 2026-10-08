@@ -223,3 +223,20 @@ error.
   reply shapes.
 - **Idea, not built:** ask Swiggy Builders Club how the cart's `addressId` relates to the
   `get_addresses` ids, so a verified cart can be placed once live orders are approved.
+
+## Live finding: the bill was never learned because the cart check was stricter than Swiggy's cart (Oct 8, 2026)
+
+After #32, "Add to Swiggy cart" again put Veg Biryani in the Minjur cart. Swiggy's checkout
+showed ₹160 + delivery ₹6 (0.3 km) + GST and other charges ₹19.06 = ₹185. SmartPlate said
+"could not confirm the item in Swiggy's cart", so the ₹6 fee was not learned and the plan
+kept "delivery ₹35 estimated".
+
+- **Built now:** one check for "this is exactly the reviewed dish" is used for the add,
+  Refresh cart and checkout. Exactly one dish with the reviewed dish id, and quantity 1
+  however it is spelled (1, 1.0, "1"). A restaurant id that is present must match. A
+  missing restaurant is accepted, because the get_food_cart reference says the cart does not
+  always return it and the dish id is restaurant-scoped. When the check fails, the message
+  names the part (dish, quantity, restaurant) and says the item may already be in the
+  Swiggy cart. Which part failed is kept beside the reply shapes (no values).
+- **Idea, not built:** show a "Remove from Swiggy cart" button in SmartPlate
+  (`flush_food_cart`), so a test add can be undone without opening Swiggy.

@@ -1031,6 +1031,51 @@ def _other_address_error(cart: dict, conn: dict, what: str) -> SwiggyError:
                        "Choose that address here, or clear the cart in Swiggy.", code="swiggy_cart_other_address")
 
 
+def _one(value) -> bool:
+    """Quantity 1 however Swiggy spells it (1, 1.0 or "1")."""
+    if isinstance(value, bool):
+        return False
+    try:
+        return float(value) == 1
+    except (TypeError, ValueError):
+        return False
+
+
+def _cart_mismatch(cart: dict, restaurant_id: str, item_id: str) -> str | None:
+    """Which part of the cart is not exactly the one reviewed dish, or None.
+
+    Swiggy's cart may leave out the restaurant ("the cart API does not always return it",
+    get_food_cart reference). Its absence proves nothing: the dish id is restaurant-scoped
+    and the cart holds one restaurant. A restaurant id that is present must match."""
+    items = cart["items"]
+    if len(items) != 1:
+        return "dishes"
+    if str(_get(items[0], "menu_item_id")) != str(item_id):
+        return "dish"
+    if not _one(items[0].get("quantity")):
+        return "quantity"
+    restaurant = cart.get("restaurant")
+    rid = restaurant.get("id") if isinstance(restaurant, dict) else None
+    if rid not in (None, "") and str(rid) != str(restaurant_id):
+        return "restaurant"
+    return None
+
+
+def _note_confirm(user_id: int, part: str | None) -> None:
+    """Keep which part of a cart could not be confirmed (no values) beside the reply shapes."""
+    try:
+        conn = sc._connection(user_id)
+        samples = db.jl(conn.get("samples"), {}) if conn else {}
+        samples["get_food_cart.confirm"] = {"unconfirmed": part, "at": clock.now().isoformat(timespec="seconds")}
+        with db.cursor() as cur:
+            cur.execute("UPDATE swiggy_connections SET samples=? WHERE user_id=?", (db.jd(samples), user_id))
+    except Exception:
+        logging.getLogger(__name__).warning("Could not record the cart confirmation result")
+
+
+CONFIRM_WORDS = {"dishes": "single dish", "dish": "dish", "quantity": "quantity of 1", "restaurant": "restaurant"}
+
+
 def _intent(user_id: int) -> dict | None:
     with db.cursor() as cur:
         row = cur.execute("SELECT * FROM swiggy_cart_intents WHERE user_id=?", (user_id,)).fetchone()
@@ -1046,12 +1091,8 @@ def _prepared_cart(user_id: int) -> tuple[dict, dict, dict]:
     cart = _read_cart(user_id, data, address_id)
     if cart["cart_address_id"]:
         raise _other_address_error(cart, conn, "Your Swiggy cart")
-    restaurant = cart.get("restaurant") or {}
-    items = cart["items"]
-    if (not intent or intent["address_id"] != address_id or len(items) != 1
-            or not isinstance(restaurant, dict) or str(restaurant.get("id")) != intent["restaurant_id"]
-            or str(_get(items[0], "menu_item_id")) != intent["item_id"]
-            or items[0].get("quantity") != 1):
+    if (not intent or intent["address_id"] != address_id
+            or _cart_mismatch(cart, intent["restaurant_id"], intent["item_id"])):
         raise SwiggyError("This cart differs from the item SmartPlate prepared. Review or clear it in Swiggy, "
                           "then select and review an item here again.")
     return conn, intent, cart
@@ -1074,10 +1115,8 @@ def current_live_cart(user_id: int) -> dict:
     other = ({"id": cart["cart_address_id"], "label": cart["cart_address_label"]}
              if cart["cart_address_id"] else None)
     restaurant = cart.get("restaurant") or {}
-    rid = str(restaurant.get("id")) if isinstance(restaurant, dict) else ""
-    prepared = bool(not other and intent and intent["address_id"] == address_id and rid == intent["restaurant_id"]
-                    and len(cart["items"]) == 1 and cart["items"][0].get("quantity") == 1
-                    and str(_get(cart["items"][0], "menu_item_id")) == intent["item_id"])
+    prepared = bool(not other and intent and intent["address_id"] == address_id
+                    and not _cart_mismatch(cart, intent["restaurant_id"], intent["item_id"]))
     name = restaurant.get("name") if isinstance(restaurant, dict) else None
     return {"cart": {"item": ", ".join(str(_get(i, "name") or "Unnamed item") for i in cart["items"]),
                      "restaurant": name or (intent["restaurant_name"] if prepared else "Check restaurant in Swiggy"),
@@ -1125,11 +1164,11 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     view = _read_cart(user_id, cart, preview["address_id"])
     if view["cart_address_id"]:
         raise _other_address_error(view, conn, "Swiggy added the item, but the cart")
-    restaurant = view.get("restaurant") or {}
-    if (len(view["items"]) != 1 or str(_get(view["items"][0], "menu_item_id")) != preview["item_id"]
-            or view["items"][0].get("quantity") != 1 or not isinstance(restaurant, dict)
-            or str(restaurant.get("id")) != restaurant_id):
-        raise SwiggyError("SmartPlate could not confirm the item in Swiggy's cart. Check your cart before trying again.")
+    part = _cart_mismatch(view, restaurant_id, preview["item_id"])
+    _note_confirm(user_id, part)
+    if part:
+        raise SwiggyError(f"SmartPlate could not confirm the {CONFIRM_WORDS[part]} in Swiggy's cart. "
+                          "The item may be in your Swiggy cart: check it there before trying again.")
     with db.cursor() as cur:
         cur.execute("INSERT OR REPLACE INTO swiggy_cart_intents(user_id, address_id, restaurant_id, restaurant_name, "
                     "item_id, menu_price) VALUES (?,?,?,?,?,?)",
@@ -1158,7 +1197,7 @@ def _checkout_state(user_id: int) -> dict:
     if len(items) != 1:
         raise SwiggyError("Review one exact dish in the Swiggy cart before placing an order.")
     item = items[0]
-    if item.get("quantity") != 1 or not _get(item, "name"):
+    if not _one(item.get("quantity")) or not _get(item, "name"):
         raise SwiggyError("SmartPlate could not verify one dish and quantity in the live cart.")
     if _flag(_get(item, "stock")) is False:
         raise SwiggyError("The dish is no longer in stock. Refresh your cart.")
