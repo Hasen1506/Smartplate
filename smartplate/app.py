@@ -77,6 +77,15 @@ def create_app() -> Flask:
     if config.BEHIND_PROXY:                  # one trusted hop sets X-Forwarded-For/Proto/Host
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+    if config.DATABASE_URL:
+        from . import db_pg
+
+        @app.before_request
+        def database_keepalive():
+            # Started by the process that serves requests, never by a gunicorn --preload
+            # master (db_pg._after_fork_in_child). A no-op once it runs.
+            db_pg.ensure_keepalive()
+
     @app.before_request
     def validate_request():
         # The trial is same-origin and single-process. Prevent another browser

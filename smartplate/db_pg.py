@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import decimal
 import logging
+import os
 import re
 import threading
 import time
@@ -350,8 +351,8 @@ def check_connection(conn: psycopg.Connection) -> None:
 
     A connection returned healthy within the last CHECK_AFTER_IDLE_S seconds is handed out
     without the extra round-trip: one Today load checks out ~30 connections in a row, and a
-    check each time doubled its database round-trips. Idle drops (the Neon pooler's) happen
-    after much longer idles, and the keep-alive finds them off the request path."""
+    check each time doubled its database round-trips. A connection dropped while idle is
+    found by the keep-alive off the request path."""
     used = _last_used.get(id(conn))
     if used is not None and time.monotonic() - used < CHECK_AFTER_IDLE_S and not conn.closed \
             and conn.info.transaction_status == pq.TransactionStatus.IDLE:
@@ -459,17 +460,59 @@ def _keep_alive_loop(stop: threading.Event) -> None:
 
 
 def start_keepalive() -> None:
-    """Ping the pool every KEEPALIVE_S seconds in the background. The Neon pooler drops idle
-    TLS connections from its side (Oct 2026 logs: SSL EOF / bad record mac); before this, the
-    first request after such a drop waited the whole pool timeout while the pool was
-    replaced. The ping keeps one connection in use and finds a dead pool off the request
-    path. It runs only while the web instance is awake (Render's free plan sleeps it)."""
-    if _keeper:
+    """Ping the pool every KEEPALIVE_S seconds in the background, in the process that serves
+    requests. It finds a dead connection or pool off the request path, so the first request
+    after an idle spell doesn't pay for it. It runs only while the web instance is awake
+    (Render's free plan sleeps it).
+
+    This only switches it on: the thread starts on the first request this process serves
+    (`ensure_keepalive`, called by the app). Under gunicorn --preload the app is built in
+    the master, which never serves a request; a thread started there kept pinging
+    connections the forked worker was using (see `_after_fork_in_child`)."""
+    _keepalive_wanted[0] = True
+
+
+def ensure_keepalive() -> None:
+    """Start the keep-alive in this process if it is switched on and not running yet."""
+    if not _keepalive_wanted[0] or _keeper:
         return
-    stop = threading.Event()
-    t = threading.Thread(target=_keep_alive_loop, args=(stop,), name="smartplate-db-keepalive", daemon=True)
-    _keeper.append((t, stop))
-    t.start()
+    with _keeper_lock:
+        if _keeper:
+            return
+        stop = threading.Event()
+        t = threading.Thread(target=_keep_alive_loop, args=(stop,), name="smartplate-db-keepalive", daemon=True)
+        _keeper.append((t, stop))
+        t.start()
+
+
+_keepalive_wanted = [False]
+_keeper_lock = threading.Lock()
+_inherited: list = []               # pools a parent process built before forking this one
+
+
+def _after_fork_in_child() -> None:
+    """Forget every connection the parent process opened.
+
+    Render runs gunicorn with --preload (its default GUNICORN_CMD_ARGS), so create_app() -
+    and with it this pool, the start-up migration's connection and the keep-alive thread -
+    runs in the master, which then forks the worker. The worker inherited the pool's open
+    TLS connections while the master still owned them: the master's keep-alive pinged a
+    connection whose socket and TLS state the worker was also using, and the next record
+    failed with "SSL error: decryption failed or bad record mac" (Oct 8 2026 logs, 45 s
+    after boot). The pool's own threads don't survive a fork either, so the inherited pool
+    could never open a replacement (connections_num stuck, pool_available 0, no "error
+    connecting") and requests waited out PG_POOL_TIMEOUT until the pool was replaced.
+
+    The child starts with no pools; the inherited ones are kept referenced and never used or
+    closed here (closing them would write on sockets the parent owns)."""
+    global _pools_lock, _keeper_lock
+    _pools_lock = threading.Lock()   # a parent thread may have held them at the fork
+    _keeper_lock = threading.Lock()
+    _inherited.extend(_pools.values())
+    _pools.clear()
+    _held.clear()
+    _last_used.clear()
+    _keeper.clear()                  # the parent's keep-alive thread did not come with us
 
 
 def close_pools() -> None:
@@ -640,3 +683,7 @@ class Cursor:
 
 
 IntegrityError = psycopg.IntegrityError
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_after_fork_in_child)

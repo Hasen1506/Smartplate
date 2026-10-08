@@ -132,3 +132,79 @@ def test_the_server_closing_the_connection_does_not_break_the_next_request():
     with db.cursor() as cur:
         assert cur.execute("SELECT 3").fetchone()[0] == 3
     assert time.monotonic() - started < 5
+
+
+# --- Oct 8 2026, second production finding: gunicorn --preload --------------------------- #
+# Render runs gunicorn with --preload (its default GUNICORN_CMD_ARGS also adds the access
+# log). create_app() - the pool, the start-up migration's connection and the keep-alive -
+# ran in the master, which then forked the worker. The master's keep-alive pinged a TLS
+# connection the worker was also using: "SSL error: decryption failed or bad record mac"
+# 45 s after boot, then a pool that could never open a replacement (its threads don't
+# survive a fork) and a 503 after PG_POOL_TIMEOUT. Reproduced locally with an SSL Postgres
+# and `GUNICORN_CMD_ARGS="--preload"`, byte for byte the production log lines.
+
+def test_the_keepalive_starts_in_the_serving_process_never_at_start_up(monkeypatch):
+    started = []
+    monkeypatch.setattr(db_pg, "_keep_alive_loop", lambda stop: started.append(1))
+    monkeypatch.setattr(db_pg, "_keeper", [])
+    monkeypatch.setattr(db_pg, "_keepalive_wanted", [False])
+    db_pg.ensure_keepalive()
+    assert db_pg._keeper == []                           # not switched on: nothing runs
+    db_pg.start_keepalive()                              # start-up (maybe a --preload master)
+    assert db_pg._keeper == []                           # ... only switches it on
+    db_pg.ensure_keepalive()                             # the first request this process serves
+    db_pg.ensure_keepalive()
+    assert len(db_pg._keeper) == 1
+    db_pg._keeper[0][0].join(timeout=5)
+    assert started == [1]
+
+
+def test_a_forked_child_never_touches_its_parents_connections(monkeypatch):
+    parent_pool = object()
+    monkeypatch.setattr(db_pg, "_pools", {("postgresql://x", ""): parent_pool})
+    monkeypatch.setattr(db_pg, "_keeper", [("parent-thread", None)])
+    monkeypatch.setattr(db_pg, "_inherited", [])
+    monkeypatch.setattr(db_pg, "_held", {1: ("t", 0.0)})
+    monkeypatch.setattr(db_pg, "_last_used", {1: 0.0})
+    monkeypatch.setattr(db_pg, "_pools_lock", db_pg._pools_lock)
+    monkeypatch.setattr(db_pg, "_keeper_lock", db_pg._keeper_lock)
+    db_pg._after_fork_in_child()
+    assert db_pg._pools == {} and db_pg._held == {} and db_pg._last_used == {}
+    assert db_pg._keeper == []                           # the child runs its own keep-alive
+    assert db_pg._inherited == [parent_pool]             # kept, never used or closed
+
+
+@needs_pg
+def test_a_worker_forked_after_start_up_gets_its_own_connections():
+    import os
+    with db.cursor() as cur:                             # start-up in the parent opened a connection
+        assert cur.execute("SELECT 1").fetchone()[0] == 1
+    parent_pool = db_pg.pool()
+    parent_conns = {id(c) for c in _pooled()}
+    assert parent_conns
+    read, write = os.pipe()
+    pid = os.fork()
+    if pid == 0:                                         # the "worker"
+        os.close(read)
+        status = b"ok"
+        try:
+            fresh = db_pg.pool()
+            if fresh is parent_pool:
+                status = b"inherited pool"
+            with db.cursor() as cur:
+                if cur.execute("SELECT 6 * 7").fetchone()[0] != 42:
+                    status = b"bad answer"
+            if parent_conns & {id(c) for c in fresh._pool}:
+                status = b"used a parent connection"
+        except BaseException as exc:                     # report, never let pytest run on in the child
+            status = repr(exc).encode()[:300]
+        os.write(write, status)
+        os._exit(0)
+    os.close(write)
+    _, code = os.waitpid(pid, 0)
+    with os.fdopen(read, "rb") as f:
+        assert f.read() == b"ok"
+    assert code == 0
+    assert db_pg.pool() is parent_pool                   # the parent's pool is untouched ...
+    with db.cursor() as cur:                             # ... and still serves
+        assert cur.execute("SELECT 2").fetchone()[0] == 2
