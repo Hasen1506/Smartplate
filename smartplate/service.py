@@ -573,11 +573,18 @@ def save_template(plan_id: int, title: str, show_name: bool = False):
 def record_receipts(plan_id: int) -> dict:
     plan = models.get_plan(plan_id)
     user = models.get_user(plan["user_id"])
+    from .domain import week_orders
+    real = week_orders.real_totals(plan_id)
     n = 0
     for d in models.decisions_for_plan(plan_id):
         if d["chosen_kind"] == "delivery" and d['session_status'] in ('ordered', 'confirmed'):
             iso = (dt.date.fromisoformat(plan["week_start"]) + dt.timedelta(days=d["day"])).isoformat()
-            receipts.record(user["id"], d, iso)
+            bill = real.get(d["session_id"])
+            # A checked Swiggy cart's real total is the expense, not the planner's estimate.
+            rid = receipts.record(user["id"], {**d, "cost": bill["to_pay"]} if bill else d, iso)
+            if bill:
+                with db.cursor() as cur:
+                    cur.execute("UPDATE receipts SET amount=? WHERE id=?", (bill["to_pay"], rid))
             n += 1
     return {"recorded": n}
 
@@ -599,7 +606,17 @@ def order_history(plan_id):
 
 
 def receipts_view(user_id: int):
+    from .domain import week_orders
     rows = receipts.list_for(user_id)
+    # Which amounts are a real Swiggy bill (a checked cart's total) and which are estimates.
+    with db.cursor() as cur:
+        billed = {r["id"]: r["to_pay"] for r in cur.execute(
+            "SELECT r.id, q.to_pay FROM receipts r JOIN decisions d ON d.id=r.decision_id "
+            "JOIN order_queue q ON q.session_id=d.session_id WHERE r.user_id=? AND q.to_pay IS NOT NULL "
+            "AND q.state IN (%s)" % ",".join("?" * len(week_orders.CHECKED)),
+            (user_id, *week_orders.CHECKED)).fetchall()}
+    for r in rows:
+        r["real"] = r["id"] in billed and abs(float(billed[r["id"]]) - float(r["amount"])) < 0.005
     business = sum(r["amount"] for r in rows if r["category"] == "business")
     return {"rows": rows, "business_total": round(business, 2),
             "total": round(sum(r["amount"] for r in rows), 2)}

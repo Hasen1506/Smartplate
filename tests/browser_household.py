@@ -68,7 +68,7 @@ def test_browser_household_split_grocery_and_recap(home, viewport):
             page.goto(k["url"])
             pw.expect(page.get_by_role("navigation", name="Main")).to_be_visible()
             # --- set up the household and add Dev ------------------------------- #
-            page.get_by_role("button", name="More", exact=True).click()
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="You", exact=True).click()
             page.get_by_role("button", name="Household People you cook and order for").click()
             page.get_by_role("button", name="Create household", exact=True).click()
             pw.expect(page.get_by_text("Household created. Add the people you cook for.")).to_be_visible()
@@ -116,14 +116,14 @@ def test_browser_household_split_grocery_and_recap(home, viewport):
             k["client"].post(f"/api/session/{dinner['session_id']}/choose", json={"recipe_key": "dal_rice"}, headers=k["h"])
             page.reload()
             pw.expect(page.get_by_role("navigation", name="Main")).to_be_visible()
-            page.get_by_role("button", name="More", exact=True).click()
-            page.get_by_role("button", name="Cooking & groceries Recipes and one grocery list for cook days").click()
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="Plan", exact=True).click()
+            page.get_by_role("navigation", name="Plan").get_by_role("button", name="Cook & groceries").click()
             pw.expect(page.get_by_text("needs 120 g for 2 servings").first).to_be_visible()
             page.locator('[data-have="Rice 1kg"]').check()
             pw.expect(page.get_by_role("heading", name="Grocery list · ₹130")).to_be_visible()      # 90 dal + 40 onion
             _no_overflow(page)
             # --- the weekly recap ------------------------------------------------ #
-            page.get_by_role("button", name="← More").click()
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="You", exact=True).click()
             page.get_by_role("button", name="This week What you spent and ate, against your plan").click()
             pw.expect(page.get_by_role("heading", name="This week")).to_be_visible()
             pw.expect(page.get_by_text("From what actually happened", exact=False)).to_be_visible()

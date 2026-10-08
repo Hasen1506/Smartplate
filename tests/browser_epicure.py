@@ -81,8 +81,8 @@ def test_browser_out_of_stock_swap_more_like_this_and_credits(kitchen, viewport)
         page, errors = _open(browser, k, viewport)
         try:
             # --- grocery: toor dal is out of stock -------------------------------- #
-            page.get_by_role("button", name="More", exact=True).click()
-            page.get_by_role("button", name="Cooking & groceries Recipes and one grocery list for cook days").click()
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="Plan", exact=True).click()
+            page.get_by_role("navigation", name="Plan").get_by_role("button", name="Cook & groceries").click()
             pw.expect(page.get_by_role("heading", name="Cooking & groceries")).to_be_visible()
             page.locator('[data-oos="toor_dal"]').click()
             picker = page.get_by_role("group", name="Swap Toor dal")
@@ -120,8 +120,8 @@ def test_browser_out_of_stock_swap_more_like_this_and_credits(kitchen, viewport)
             sheet.get_by_role("button", name="Close").click()
 
             # --- credits ---------------------------------------------------------- #
-            page.get_by_role("button", name="More", exact=True).click()
-            back = page.get_by_role("button", name="← More")
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="You", exact=True).click()
+            back = page.get_by_role("button", name="← You")
             if back.count():
                 back.click()
             page.get_by_role("link", name="Credits & licences Data and models SmartPlate uses").click()

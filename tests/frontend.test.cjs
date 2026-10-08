@@ -163,7 +163,10 @@ test('connected profiles with ingredient rules keep the direct Swiggy hand-off',
   vm.runInContext("S.swiggy = { connected: true, address: { id: 'home', label: 'Home' } }", context);
   const html = vm.runInContext('todayScreen()', context);
   assert.match(html, /Order from your area/);
-  assert.match(html, /sample weekly planner/);
+  // Redesign: the plan's next meal is on Today itself, not behind a "sample weekly planner" disclosure.
+  assert.match(html, /aria-label="Next meal"/);
+  assert.match(html, /Veg &lt;b&gt;Meals&lt;\/b&gt;/);
+  assert.match(html, /Order on Swiggy/);
   assert.ok(!html.includes('data-cart="9"'));
 });
 
@@ -976,4 +979,179 @@ test('an error with no message names the HTTP status instead of a bare word', as
   vm.runInContext(LIVE_MENU, context);
   await vm.runInContext("guard(() => searchLivePlaces('Sangeetha'), 'Search Swiggy for “Sangeetha”')", context);
   assert.match(vm.runInContext('S.error', context), /^Search Swiggy for “Sangeetha” failed: The server answered HTTP 500/);
+});
+
+// ---- Dark redesign (8 Oct 2026): three destinations, honest money, real reasons, one-tap toggles ----
+test('three primary destinations, the same on phone and web', async () => {
+  const { context, element } = fixture(); await context.bootPromise;
+  vm.runInContext('render()', context);
+  const nav = element.innerHTML.match(/<nav class="nav" aria-label="Main">([^]*?)<\/nav>/)[1];
+  assert.deepEqual([...nav.matchAll(/data-tab="(\w+)"/g)].map(m => m[1]), ['today', 'week', 'more']);
+  assert.match(nav, /<span>Today<\/span>[^]*<span>Plan<\/span>[^]*<span>You<\/span>/);
+  assert.doesNotMatch(nav, /Places|More</);
+  vm.runInContext('S.more = null', context);
+  const you = vm.runInContext('moreScreen()', context);
+  for (const k of ['recap', 'receipts', 'insights', 'settings', 'connection', 'household', 'profiles'])
+    assert.match(you, new RegExp(`data-go="more:${k}"`));
+  assert.doesNotMatch(you, /more:orders|more:cooking/);            // those live in Plan now
+  vm.runInContext("S.tab = 'week'; S.planView = 'cook'; S.view.coach = { headline: 'x', recipes: [], basket: { total: 0, items: [] } }", context);
+  assert.match(vm.runInContext('planScreen()', context), /<button data-plan-view="cook" aria-current="page">Cook & groceries/);
+});
+
+test('the pick explains itself in plain words, never with a score, and its price is an estimate', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  richView(context);
+  vm.runInContext(`S.view.user.diet = 'nonveg'; S.view.user.allergens = ['peanut'];
+    S.view.next_up.cell.nutrition = { protein_g: 38 }; S.view.budget = { spend: 1000, budget: 1500 }`, context);
+  const html = vm.runInContext('nextUpCard(S.view.next_up)', context);
+  assert.match(html, /aria-label="Why this pick"/);
+  assert.match(html, /Week stays in budget/);
+  assert.match(html, /≈38 g protein \(estimate\)/);
+  assert.match(html, /Peanut filtered out/);                         // sample catalogue
+  assert.match(html, /Your pick/);
+  assert.doesNotMatch(html, /\bFit\b|score/i);
+  assert.match(html, /<span class="est" title="Estimate">₹150<i>est\.<\/i><\/span>/);
+  vm.runInContext("S.view.source = { kind: 'live' }", context);    // live menus: only what the name says
+  assert.match(vm.runInContext('nextUpCard(S.view.next_up)', context), /No peanut by dish name/);
+  // one tap each: order ↔ cook, pin, skip
+  assert.match(html, /data-kind="9:cook" aria-pressed="false"/);
+  assert.match(html, /data-pin="9" aria-pressed="true"/);
+  assert.match(html, /data-sess="9:skipped"/);
+});
+
+test('a checked cart shows Swiggy\'s real bill, the estimate it replaced, and paying becomes the next step', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  richView(context);
+  vm.runInContext(`S.view.user.diet = 'nonveg'; S.view.user.allergens = [];
+    S.swiggy = { connected: true, address: { id: 'home', label: 'Home' } };
+    S.carts = { 9: { item: 'Veg Meals', restaurant: 'Saravana', to_pay: 215, over_plan: 65, planned_cost: 150,
+      checkout_url: 'https://www.swiggy.com/checkout', budget: { over: false },
+      bill: { to_pay: 215, lines: [{ label: 'Item total', amount: 180 }, { label: 'Delivery fee', amount: 35 }] } } }`, context);
+  const html = vm.runInContext('nextUpCard(S.view.next_up)', context);
+  assert.match(html, /Swiggy's bill · real/);
+  assert.match(html, /<td class="num real">₹180<\/td>/);
+  assert.match(html, /Your plan estimated <span class="est"[^>]*>₹150<i>est\.<\/i><\/span> · ₹65 more than planned/);
+  assert.doesNotMatch(html, /data-cart="9"/);                       // already reviewed: no second "Review"
+  assert.match(html, /class="btn primary"[^>]*data-handoff="9">Open Swiggy to review and pay/);
+  assert.match(html, /SmartPlate never pays for you/);
+});
+
+test('week rows: one-tap On/Off, Order/Cook and Pin; weather only when it is real', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  richView(context);
+  const week = vm.runInContext('weekScreen()', context);
+  assert.match(week, /data-sess="9:skipped" aria-pressed="true" aria-label="Lunch on\. Tap to skip it"/);
+  assert.match(week, /data-kind="10:cook" aria-pressed="true"/);
+  assert.match(week, /data-pin="10" aria-pressed="false"/);
+  assert.doesNotMatch(week, /🌧|28°/);                                // sample weather is not drawn
+  vm.runInContext("S.view.weather_source = 'live'; S.view.week_context[0].weather_source = 'live'", context);
+  assert.match(vm.runInContext('weekScreen()', context), /🌧 28°/);
+  const off = vm.runInContext(`mealRow({ kind: 'skipped', status: 'skipped', item: 'Skipped', session_id: 4, reasons: [] }, 'dinner', 0)`, context);
+  assert.match(off, /data-sess="4:active" aria-pressed="false" aria-label="Dinner off\. Tap to plan it again"/);
+});
+
+test('sample weather never appears as a heads-up; real weather does', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.view.heads_up = [{ kind: 'weather', level: 'info', icon: '🌧', title: 'Rain likely', body: 'x' },
+    { kind: 'holiday', level: 'info', icon: '🎉', title: 'Diwali', body: 'y' }]; S.view.weather_source = 'sample'`, context);
+  let html = vm.runInContext('headsUp()', context);
+  assert.doesNotMatch(html, /Rain likely/); assert.match(html, /Diwali/);
+  vm.runInContext("S.view.weather_source = 'live'", context);
+  assert.match(vm.runInContext('headsUp()', context), /Rain likely/);
+});
+
+test('dishes get distinct icons by kind, and a real Swiggy photo when one is given', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  const kind = (n) => vm.runInContext(`dishKind(${JSON.stringify(n)})[0]`, context);
+  assert.deepEqual(['Chicken Dum Biryani', 'Ghee Roast Dosa', 'Idli Vada', 'Paneer Butter Masala', 'Filter Coffee',
+    'Gulab Jamun', 'Veg Meals', 'Chicken Shawarma Roll', 'Hakka Noodles', 'Kothu Parotta', 'Fish Fry', 'Egg Omelette',
+    'Chicken 65', 'Margherita Pizza', 'Samosa', 'Quinoa Bowl', 'Something Unknown'].map(kind),
+    ['biryani', 'dosa', 'tiffin', 'curry', 'drink', 'dessert', 'thali', 'wrap', 'noodles', 'bread', 'fish', 'egg',
+     'grill', 'pizza', 'snack', 'bowl', 'plate']);
+  assert.equal(vm.runInContext('dishKind("Dal + rice", true)[0]', context), 'cook');
+  const photo = vm.runInContext(`dishIcon('<Dosa>', { image: 'https://media-assets.swiggy.com/a.jpg' })`, context);
+  assert.match(photo, /<img class="dphoto" src="https:\/\/media-assets\.swiggy\.com\/a\.jpg" alt="" loading="lazy"/);
+  assert.match(photo, /data-dish="&lt;Dosa&gt;"/);
+});
+
+test('full live menu: Swiggy categories, bestsellers, veg marks, name-based allergen flags and one-tap filters', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.view.user.diet = 'nonveg'; S.view.user.allergens = ['peanut']; S.view.budget = { spend: 1300, budget: 1500 };
+    S.swiggy = { connected: true, address: { id: 'home', label: 'Home' } };
+    S.liveBrowseMenu = { restaurant: { id: 'r-1', name: 'Real Kitchen' }, address: 'Home', fetched: 'now', truncated: true,
+      categories: ['Recommended', 'Dosa', 'Biryani'], items: [
+      { id: 'a', name: 'Peanut Chutney Dosa', price: 90, veg: true, in_stock: true, categories: ['Recommended', 'Dosa'], bestseller: true, name_allergens: ['peanut'] },
+      { id: 'b', name: 'Chicken Biryani', price: 260, veg: false, in_stock: true, categories: ['Biryani'], name_allergens: [] },
+      { id: 'c', name: 'Masala Dosa', price: 120, veg: true, in_stock: false, categories: ['Dosa'], name_allergens: [] }] }`, context);
+  let html = vm.runInContext('liveBrowseCard()', context);
+  assert.match(html, /data-cat="Dosa"[^>]*>Dosa<\/button>/);
+  assert.match(html, /data-cat="Recommended"[^>]*>Bestsellers/);
+  assert.equal((html.match(/data-live-item="a"/g) || []).length, 1);   // once, under its own category
+  assert.match(html, /<p class="lmcat">Dosa<\/p>[^]*<p class="lmcat">Biryani<\/p>/);
+  assert.match(html, /Name suggests peanut/);
+  assert.match(html, /no flag doesn't mean safe/);
+  assert.match(html, /at most 150 dishes/);
+  assert.match(html, /aria-label="Non-veg"/);
+  assert.match(html, /Within ₹200 left/);
+  vm.runInContext("S.filters = { veg: true, stock: true, budget: true, flagged: true, fast: false }", context);
+  html = vm.runInContext('liveBrowseCard()', context);
+  assert.doesNotMatch(html, /data-live-item="[abc]"/);                 // non-veg, unavailable, flagged and over-budget all hidden
+  assert.match(html, /3 hidden by your filters/);
+  vm.runInContext("S.filters = { veg: false, stock: false, budget: false, flagged: false, fast: false }; S.menuCat = 'Biryani'", context);
+  html = vm.runInContext('liveBrowseCard()', context);
+  assert.match(html, /data-live-item="b"/); assert.doesNotMatch(html, /data-live-item="a"/);
+});
+
+test('the address pill opens the real Swiggy address list in one tap', async () => {
+  const { context, calls } = fixture({ '/api/user/2/swiggy/addresses': [{ id: 'addr-1', label: 'Home', text: '<Minjur>' }] });
+  await context.bootPromise;
+  vm.runInContext("S.swiggy = { connected: true, address: { id: 'addr-1', label: 'Home · Minjur' } }", context);
+  assert.match(vm.runInContext('topbar()', context), /data-act="addr-open"[^>]*aria-label="Delivering to Home · Minjur\. Change address"/);
+  await vm.runInContext('openAddresses()', context);
+  assert.ok(calls.some(c => c.url === '/api/user/2/swiggy/addresses'));
+  const sheet = vm.runInContext('addressSheet()', context);
+  assert.match(sheet, /data-swaddr="addr-1" aria-pressed="true"/);
+  assert.match(sheet, /&lt;Minjur&gt;/);
+  assert.match(sheet, /data-act="swiggy-refresh-addresses"/);
+  vm.runInContext('S.swiggy = { connected: false }', context);
+  assert.equal(vm.runInContext('addressPill()', context), '');           // no fake address when not connected
+});
+
+test('one-tap cook picks the first safe recipe the server offers; order picks the first dish that fits', async () => {
+  const opts = { session: { id: 9 }, limits: {}, usual: [{ restaurant: 'A2B', dishes: [{ item_id: 3, name: 'Too much', fits: false }, { item_id: 4, name: 'Dosa', fits: true }] }],
+    new: [], cook: [{ recipe_key: 'dal_rice', name: 'Dal + rice' }], hidden: {} };
+  const view = { plan: { id: 42 }, user: { id: 2 }, grid: [], budget: {} };
+  const { context, calls } = fixture({ '/api/session/9/options': opts, '/api/session/9/choose': view });
+  await context.bootPromise;
+  richView(context);
+  vm.runInContext('globalThis.SAVED = JSON.stringify(S.view)', context);   // choose() adopts the reply's view
+  await vm.runInContext("toKind(9, 'cook')", context);
+  assert.deepEqual(JSON.parse(calls.filter(c => c.url === '/api/session/9/choose').at(-1).options.body), { recipe_key: 'dal_rice' });
+  vm.runInContext("S.view = JSON.parse(SAVED); S.view.grid[0].meals.lunch.kind = 'cook'", context);
+  await vm.runInContext("toKind(9, 'delivery')", context);
+  assert.deepEqual(JSON.parse(calls.filter(c => c.url === '/api/session/9/choose').at(-1).options.body), { item_id: 4 });
+  vm.runInContext("S.view = JSON.parse(SAVED)", context);
+  await vm.runInContext('togglePin(9)', context);                        // pinned: unpin = let SmartPlate choose
+  assert.deepEqual(JSON.parse(calls.filter(c => c.url === '/api/session/9/choose').at(-1).options.body), { action: 'auto' });
+});
+
+test('expenses say which amounts are real Swiggy bills', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.receipts = { total: 395, business_total: 0, rows: [
+    { iso_date: '2026-11-02', note: 'Veg Meals', category: 'personal', amount: 245, real: true },
+    { iso_date: '2026-11-03', note: 'Dosa', category: 'personal', amount: 150, real: false }] }`, context);
+  const html = vm.runInContext('receiptsPanel()', context);
+  assert.match(html, /<span class="real">₹245<\/span> <span class="tag good">real bill<\/span>/);
+  assert.match(html, /<span class="est" title="Estimate">₹150<i>est\.<\/i><\/span>/);
+  assert.match(html, /From real Swiggy bills<\/div><div class="val">₹245</);
+});
+
+test('offline says so and how old the plan is; the over-budget choice gives both options equal weight', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext("S.offline = true; S.loadedAt = new Date(2026, 10, 2, 13, 5)", context);
+  assert.match(vm.runInContext('offlineBar()', context), /You're offline\. Showing your plan as loaded at 1:05/);
+  const warn = vm.runInContext("budgetWarn(9, { message: 'This cart takes the week ₹80 over.' })", context);
+  assert.match(warn, /<button data-over-ok="9">Approve anyway<\/button>/);
+  assert.match(warn, /<button data-replan="9">Re-plan the remaining meals<\/button>/);
+  assert.doesNotMatch(warn, /primary/);
 });

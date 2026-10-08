@@ -160,7 +160,7 @@ def test_browser_golden_first_week(server):
             server["clock"].set(server["clock"].at.replace(hour=10))
             page.clock.set_fixed_time("2026-11-02T10:00:00+05:30")
             page.locator('[data-tab="today"]').click()
-            page.get_by_text("Open the sample weekly planner").click()
+            # the plan's meal is on Today itself now (no "sample weekly planner" disclosure to open)
             good = page.get_by_role("button", name="👍 Good").first
             rated_sid = int(good.get_attribute("data-rate").split(":")[0])
             with page.expect_response(lambda r: r.url.endswith(f"/api/session/{rated_sid}/rate")) as rated:

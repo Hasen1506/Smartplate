@@ -288,6 +288,40 @@ def _flag(value) -> bool | None:
     return None
 
 
+# Dish photos: only Swiggy's own image CDN over HTTPS, so the page's CSP can allow exactly
+# that host (smartplate/app.py). get_restaurant_menu omits images by design (Swiggy docs);
+# search_menu returns `imageUrl`. Anything else is dropped, never proxied or guessed.
+IMAGE_HOSTS = ("media-assets.swiggy.com",)
+
+
+def _image(record: dict) -> str | None:
+    from urllib.parse import urlsplit
+    for key in ("imageUrl", "image_url", "image"):
+        value = record.get(key) if isinstance(record, dict) else None
+        if isinstance(value, str) and len(value) <= 600:
+            parts = urlsplit(value.strip())
+            if parts.scheme == "https" and parts.hostname in IMAGE_HOSTS and not parts.username:
+                return value.strip()
+    return None
+
+
+def _categories(record: dict) -> list[str]:
+    cats = record.get("categories") if isinstance(record, dict) else None
+    if isinstance(cats, str):
+        cats = [cats]
+    if not isinstance(cats, list):
+        return []
+    return [str(c)[:80] for c in cats if isinstance(c, (str, int)) and str(c).strip()][:6]
+
+
+def _name_allergens(name: str, veg) -> list[str]:
+    """Allergens a dish *name* implies (live_catalog's templates). Swiggy menus list no
+    allergens, so this can flag a likely allergen but never establish that a dish is free of one."""
+    from ..domain import live_catalog
+    est = live_catalog.estimate(name, veg)
+    return list(est["allergens"]) if est else []
+
+
 def _lists(value, depth=0):
     if depth > 6:
         return
@@ -696,12 +730,24 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
         if user["diet"] in ("veg", "vegan") and veg in (False, 0):
             hidden += 1
             continue
-        items.append({"id": str(_get(row, "id")), "name": str(_get(row, "name")),
+        name = str(_get(row, "name"))
+        items.append({"id": str(_get(row, "id")), "name": name,
                       "price": rupees(row, unit), "price_estimated": price_estimated(row), "veg": veg,
                       "in_stock": _flag(_get(row, "stock")),
-                      "has_options": _flag(_get(row, "variants")) is True or _flag(_get(row, "addons")) is True})
+                      "has_options": _flag(_get(row, "variants")) is True or _flag(_get(row, "addons")) is True,
+                      "categories": _categories(row), "bestseller": row.get("isBestseller") is True,
+                      "image": _image(row), "name_allergens": _name_allergens(name, veg)})
+    labels = body.get("categoryLabels") if isinstance(body, dict) else None
+    categories = [str(c)[:80] for c in labels if isinstance(c, (str, int))] if isinstance(labels, list) else []
+    for item in items:                                    # keep any label the items use, in order
+        for c in item["categories"]:
+            if c not in categories:
+                categories.append(c)
+    total = body.get("totalItems") if isinstance(body, dict) else None
     return {"restaurant": place, "address": conn.get("address_label") or _address(conn),
-            "items": items, "hidden_nonveg": hidden, "truncated": bool(body.get("truncated")) if isinstance(body, dict) else False,
+            "items": items, "categories": categories, "hidden_nonveg": hidden,
+            "total_items": total if isinstance(total, int) and not isinstance(total, bool) else None,
+            "truncated": bool(body.get("truncated")) if isinstance(body, dict) else False,
             "fetched": clock.now().isoformat(timespec="minutes")}
 
 
@@ -741,9 +787,12 @@ def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, q
         if item_id in seen:
             continue
         seen.add(item_id)
-        items.append({"id": item_id, "name": str(_get(row, "name")), "price": rupees(row, unit),
+        name = str(_get(row, "name"))
+        items.append({"id": item_id, "name": name, "price": rupees(row, unit),
                       "price_estimated": price_estimated(row), "veg": veg,
-                      "in_stock": _flag(_get(row, "stock")), "has_options": _has_options(row)})
+                      "in_stock": _flag(_get(row, "stock")), "has_options": _has_options(row),
+                      "categories": _categories(row), "bestseller": row.get("isBestseller") is True,
+                      "image": _image(row), "name_allergens": _name_allergens(name, veg)})
     more = body.get("hasMore") is True
     next_offset = body.get("nextOffset") if more else None
     if more and (not isinstance(next_offset, int) or isinstance(next_offset, bool) or not offset < next_offset <= 10000):
@@ -860,7 +909,7 @@ def cart_preview(session_id: int) -> dict:
                                             sort_keys=True).encode()).hexdigest()
     return {**details, "address": conn.get("address_label") or "Selected Swiggy address",
             "menu_price": rupees(item, menu_unit(records(data, "menu_item_id", "name"))),
-            "price_estimated": price_estimated(item), "fingerprint": fingerprint}
+            "price_estimated": price_estimated(item), "image": _image(item), "fingerprint": fingerprint}
 
 
 def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
@@ -948,7 +997,7 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
                "item": str(_get(item, "name"))}
     review = {**details, "address": conn.get("address_label") or address_id,
               "menu_price": rupees(item, menu_unit(rows)), "price_estimated": price_estimated(item),
-              "handoff_url": timing.swiggy_handoff(place["name"], str(_get(item, "name")))}
+              "image": _image(item), "handoff_url": timing.swiggy_handoff(place["name"], str(_get(item, "name")))}
     blocked = None
     if _safety_blocked(user):
         blocked = SAFETY_NOTE
