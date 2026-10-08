@@ -145,7 +145,7 @@ def validate_setup(body: dict) -> dict:
             raise ValueError("Area must be at most 80 characters")
         out["area"] = body["area"].strip()
     if "diet" in body:
-        if body["diet"] not in DIETS:
+        if not isinstance(body["diet"], str) or body["diet"] not in DIETS:
             raise ValueError("Choose vegetarian, non-vegetarian, or vegan")
         out["diet"] = body["diet"]
     for key, allowed_values in (("allergens", ALLERGENS), ("medical", MEDICAL), ("observances", OBSERVANCES)):
@@ -164,13 +164,13 @@ def validate_setup(body: dict) -> dict:
             raise ValueError("Pick at least one meal to plan")
         out["meals"] = [m for m in MEALS if m in meals]
     if "goal" in body:
-        if body["goal"] not in GOALS:
+        if not isinstance(body["goal"], str) or body["goal"] not in GOALS:
             raise ValueError("Unknown goal")
         out["goal"] = body["goal"]
     if "body" in body:
         out["body"] = validate_body(body["body"])
     if "variety" in body:
-        if body["variety"] not in VARIETY:
+        if not isinstance(body["variety"], str) or body["variety"] not in VARIETY:
             raise ValueError("Unknown variety level")
         out["variety"] = body["variety"]
     if "favourites" in body:
@@ -194,9 +194,9 @@ def validate_tilt(value) -> dict | None:
         return None
     if not isinstance(value, dict) or set(value) - {"cuisine", "strength"}:
         raise ValueError("Choose a cuisine to lean toward and how much")
-    if value.get("cuisine") not in flavour.CUISINES:
+    if not isinstance(value.get("cuisine"), str) or value["cuisine"] not in flavour.CUISINES:
         raise ValueError("Unknown cuisine")
-    if value.get("strength", "light") not in flavour.TILT_DEGREES:
+    if not isinstance(value.get("strength", "light"), str) or value.get("strength", "light") not in flavour.TILT_DEGREES:
         raise ValueError("Lean a little or a lot")
     return {"cuisine": value["cuisine"], "strength": value.get("strength", "light")}
 
