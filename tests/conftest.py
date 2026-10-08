@@ -12,6 +12,17 @@ _EPICURE_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fix
 os.environ["SMARTPLATE_EPICURE_DIR"] = _EPICURE_FIXTURE
 os.environ["SMARTPLATE_EPICURE_CHECKSUMS"] = os.path.join(_EPICURE_FIXTURE, "SHA256SUMS")
 
+# Postgres run (CI's second job): SMARTPLATE_TEST_DATABASE_URL points at a throwaway local
+# database and every test gets its own schema (tests/pg_support.py). Unset: SQLite files.
+import pg_support  # noqa: E402
+
+if pg_support.enabled():
+    os.environ["DATABASE_URL"] = pg_support.URL
+    os.environ["SMARTPLATE_PG_SCHEMA"] = pg_support.worker_schema()
+    os.environ["SMARTPLATE_PG_POOL_MAX"] = "4"
+else:
+    os.environ.pop("DATABASE_URL", None)          # never touch a real database from the suite
+
 try:                                    # deterministic property runs everywhere (see tests/test_gt_properties.py)
     from hypothesis import HealthCheck, settings
 
@@ -71,6 +82,22 @@ def no_network(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "sqlite_only: exercises the SQLite file itself; on the Postgres "
+                                       "run it still runs, against SQLite")
+    if pg_support.enabled():
+        pg_support.setup_worker()
+
+
+@pytest.fixture(autouse=True)
+def engine_for_test(request, monkeypatch):
+    """On the Postgres run, a test about SQLite files runs against SQLite."""
+    from smartplate import config
+    if pg_support.enabled() and request.node.get_closest_marker("sqlite_only"):
+        monkeypatch.setattr(config, "DATABASE_URL", "")
+    yield
+
+
 _SEEDED = {}      # per worker process: a seeded database image per (fixture, day, solver settings)
 
 
@@ -81,7 +108,9 @@ def _fresh_seeded_db(path: str, kind: str) -> dict:
     a new file, no state shared between tests. Cuts ~0.1 s of setup from every test."""
     from smartplate import clock, config, db, seed
     key = (kind, clock.today().isoformat(), config.SOLVER_GAP, config.SOLVER_MAX_NODES,
-           config.WEATHER_PROVIDER, config.SWIGGY_PROVIDER)
+           config.WEATHER_PROVIDER, config.SWIGGY_PROVIDER, db.engine())
+    if config.DATABASE_URL:
+        return _fresh_seeded_schema(key)
     if key not in _SEEDED:
         db.init_db()
         info = seed.seed_all()
@@ -92,6 +121,41 @@ def _fresh_seeded_db(path: str, kind: str) -> dict:
     with open(path, "wb") as f:
         f.write(image)
     return dict(info)
+
+
+def _fresh_seeded_schema(key) -> dict:
+    """Postgres twin of the file copy: clone a seeded template schema into a new one."""
+    import pytest as _pytest
+    from smartplate import config, db, seed
+    mp = _pytest.MonkeyPatch()        # seeds the template under its own schema, then undone
+    template = pg_support.template_schema(key)
+    if key not in _SEEDED:
+        pg_support.reset(template)
+        mp.setattr(config, "PG_SCHEMA", template)
+        db.init_db()
+        _SEEDED[key] = (None, seed.seed_all())
+        mp.undo()
+    schema = pg_support.fresh_schema()
+    pg_support.clone(template, schema)
+    _CURRENT_SCHEMA.append(schema)
+    config.PG_SCHEMA = schema
+    return dict(_SEEDED[key][1])
+
+
+_CURRENT_SCHEMA = []
+
+
+@pytest.fixture(autouse=True)
+def _pg_schema_cleanup(monkeypatch):
+    """Restores the worker schema after a test that got its own and drops that schema."""
+    from smartplate import config
+    if not pg_support.enabled():
+        yield
+        return
+    monkeypatch.setattr(config, "PG_SCHEMA", config.PG_SCHEMA)     # restored on teardown
+    yield
+    while _CURRENT_SCHEMA:
+        pg_support.drop(_CURRENT_SCHEMA.pop())
 
 
 @pytest.fixture()

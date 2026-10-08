@@ -240,3 +240,20 @@ kept "delivery ₹35 estimated".
   Swiggy cart. Which part failed is kept beside the reply shapes (no values).
 - **Idea, not built:** show a "Remove from Swiggy cart" button in SmartPlate
   (`flush_food_cart`), so a test add can be undone without opening Swiggy.
+
+## Durable storage at no cost: Postgres through DATABASE_URL (Oct 8, 2026)
+
+The free Render instance keeps SQLite on a disk that is erased on every spin-down, restart
+and redeploy. With `DATABASE_URL` set (a free Neon database), every table now lives in
+Postgres, the health checks say `persistent: true` and the erasure banner goes away.
+SQLite stays the default for local runs, Codespaces and tests; CI runs the Python suite on both.
+
+Ideas met while building this (not built):
+
+- **Let Neon sleep while nobody has reminders.** The push worker queries the database every
+  minute while the Render instance is awake, so Neon's compute stays awake with it. That is
+  fine while Render itself sleeps after 15 idle minutes, but an always-on instance would use
+  about 180 of Neon's 100 free compute-hours a month. Skip the tick's query when no push
+  subscription exists (kept in memory, refreshed on subscribe/unsubscribe).
+- **Retire the paid-disk Blueprint** (`render.production.yaml`) once the Neon setup has run
+  in production for a while: one storage story is simpler to explain and to test.

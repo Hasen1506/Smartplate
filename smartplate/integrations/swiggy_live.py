@@ -1478,7 +1478,7 @@ def resolve_attempt(user_id: int, confirmation) -> dict:
     with db.cursor() as cur:
         attempts = [dict(r) for r in cur.execute(
             "SELECT fingerprint, to_pay, created_ts FROM swiggy_order_attempts WHERE user_id=? "
-            "AND state IN ('started','unknown')", (user_id,))]
+            "AND state IN ('started','unknown') ORDER BY created_ts, fingerprint", (user_id,))]
     if not attempts:
         return {"resolved": 0, "message": "No uncertain order attempts."}
     newest = max(dt.datetime.fromisoformat(a["created_ts"]) for a in attempts)

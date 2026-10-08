@@ -10,7 +10,7 @@ from .. import db
 def for_user(user_id: int) -> dict:
     """Return {(day, meal): leftover_row} the user has logged."""
     with db.cursor() as cur:
-        rows = cur.execute("SELECT * FROM leftovers WHERE user_id=?", (user_id,)).fetchall()
+        rows = cur.execute("SELECT * FROM leftovers WHERE user_id=? ORDER BY id", (user_id,)).fetchall()
     return {(r["day"], r["meal"]): db.row_to_dict(r) for r in rows}
 
 

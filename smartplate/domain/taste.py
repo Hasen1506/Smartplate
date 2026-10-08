@@ -76,11 +76,11 @@ def signals(user_id: int, today: str | None = None) -> dict:
     exclusion window), liked items, and a familiarity history keyed by item id."""
     today_d = dt.date.fromisoformat(today) if today else clock.today()
     with db.cursor() as cur:
-        ratings = cur.execute("SELECT * FROM ratings WHERE user_id=?", (user_id,)).fetchall()
+        ratings = cur.execute("SELECT * FROM ratings WHERE user_id=? ORDER BY id", (user_id,)).fetchall()
         orders = cur.execute(
             "SELECT d.item_id, p.week_start, s.day FROM decisions d "
             "JOIN sessions s ON s.id=d.session_id JOIN plans p ON p.id=d.plan_id "
-            "WHERE p.user_id=? AND s.status IN ('ordered','confirmed') AND d.item_id IS NOT NULL",
+            "WHERE p.user_id=? AND s.status IN ('ordered','confirmed') AND d.item_id IS NOT NULL ORDER BY d.id",
             (user_id,)).fetchall()
     disliked, liked = set(), set()
     history: dict[int, dict] = {}

@@ -1,4 +1,8 @@
-"""SQLite persistence. One small module — no ORM needed for v1.1.
+"""Persistence: SQLite by default, Postgres when DATABASE_URL is set. No ORM.
+
+All SQL in the app is written once, in SQLite's dialect. With DATABASE_URL set,
+db_pg.py translates it for Postgres (placeholders, upserts, types, PRAGMA table_info)
+and serves pooled connections, so every table, query and migration below runs on both.
 
 The schema deliberately carries the columns every gap feature needs (allergens,
 nutrition, carbon, surge history, leftovers, calendar, community, receipts) so
@@ -357,7 +361,12 @@ MIGRATIONS = [
 ]
 
 
-def connect() -> sqlite3.Connection:
+def connect():
+    """A connection to the configured store: Postgres when DATABASE_URL is set (a pooled
+    connection that speaks this module's SQLite dialect, see db_pg.py), else SQLite."""
+    if config.DATABASE_URL:
+        from . import db_pg
+        return db_pg.connect()
     conn = sqlite3.connect(config.DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -370,8 +379,22 @@ def cursor():
     try:
         yield conn.cursor()
         conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
     finally:
         conn.close()
+
+
+try:                                   # the error a constraint failure raises, on either database
+    from psycopg import IntegrityError as _PgIntegrityError
+    IntegrityError = (sqlite3.IntegrityError, _PgIntegrityError)
+except ImportError:                    # SQLite-only install
+    IntegrityError = (sqlite3.IntegrityError,)
+
+
+def engine() -> str:
+    return "postgres" if config.DATABASE_URL else "sqlite"
 
 
 def init_db() -> None:
@@ -399,5 +422,5 @@ def jd(value) -> str:
     return json.dumps(value, separators=(",", ":"))
 
 
-def row_to_dict(row: sqlite3.Row) -> dict:
+def row_to_dict(row) -> dict:
     return {k: row[k] for k in row.keys()}

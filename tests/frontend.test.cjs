@@ -867,6 +867,16 @@ test('no erasure banner when storage is persistent or unknown', async () => {
   }
 });
 
+test('a free server with Postgres (DATABASE_URL) shows no erasure banner', async () => {
+  const storage = { engine: 'postgres', persistent: true,
+                    reason: 'external Postgres (DATABASE_URL): survives restarts and redeploys' };
+  const { context, element } = fixture({ '/api/meta': { ...SIMULATED_FREE, storage } });
+  await context.bootPromise;
+  assert.doesNotMatch(element.innerHTML, /storage-warning|temporary disk/);
+  vm.runInContext("S.view = null; S.welcome = true; render()", context);
+  assert.doesNotMatch(element.innerHTML, /storage-warning/);
+});
+
 test('the demo plan banner offers Connect Swiggy only when sign-in is approved', async () => {
   const { context } = fixture({ '/api/meta': SIMULATED_FREE }); await context.bootPromise;
   richView(context);

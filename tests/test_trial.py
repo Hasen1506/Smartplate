@@ -25,6 +25,7 @@ def reviewed_execute(client, pid=1):
     return review, response.get_json()
 
 
+@pytest.mark.sqlite_only
 def test_factory_seeds_existing_empty_database(monkeypatch, tmp_path):
     path = tmp_path / 'empty.db'
     path.touch()

@@ -5,6 +5,8 @@ import pytest
 
 from scripts.backup_sqlite import backup
 
+pytestmark = pytest.mark.sqlite_only      # about the SQLite file / sqlite-only settings
+
 
 def test_backup_is_consistent_and_refuses_overwrite(tmp_path):
     source = tmp_path / "live.db"
