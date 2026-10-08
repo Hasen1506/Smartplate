@@ -411,6 +411,54 @@ def _report_timeout(pool_: ConnectionPool) -> None:
                 pool_.timeout, pool_.get_stats(), holders[:8] or "nobody")
 
 
+KEEPALIVE_S = 45.0
+_keeper: list = []
+
+
+def warm() -> float:
+    """Open and check one pooled connection now (boot), so the first request doesn't pay
+    for the TLS handshake. Returns the seconds it took."""
+    t0 = time.monotonic()
+    conn = Connection(pool())
+    try:
+        conn.execute("SELECT 1")
+        conn.commit()
+    finally:
+        conn.close()
+    return time.monotonic() - t0
+
+
+def _keep_alive_loop(stop: threading.Event) -> None:
+    while not stop.wait(KEEPALIVE_S):
+        current = pool()
+        try:
+            conn = current.getconn(timeout=3)      # the check hook closes a dropped connection
+            try:
+                conn.execute("SELECT 1")
+                conn.rollback()
+            finally:
+                current.putconn(conn)
+        except PoolTimeout:
+            log.warning("keep-alive: no database connection within 3 s; replacing the pool")
+            replace_pool(current)
+        except Exception as exc:                 # never let the keeper die
+            log.warning("keep-alive ping failed (%s: %s)", type(exc).__name__, str(exc).strip()[:200])
+
+
+def start_keepalive() -> None:
+    """Ping the pool every KEEPALIVE_S seconds in the background. The Neon pooler drops idle
+    TLS connections from its side (Oct 2026 logs: SSL EOF / bad record mac); before this, the
+    first request after such a drop waited the whole pool timeout while the pool was
+    replaced. The ping keeps one connection in use and finds a dead pool off the request
+    path. It runs only while the web instance is awake (Render's free plan sleeps it)."""
+    if _keeper:
+        return
+    stop = threading.Event()
+    t = threading.Thread(target=_keep_alive_loop, args=(stop,), name="smartplate-db-keepalive", daemon=True)
+    _keeper.append((t, stop))
+    t.start()
+
+
 def close_pools() -> None:
     with _pools_lock:
         while _pools:

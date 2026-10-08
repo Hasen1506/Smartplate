@@ -31,6 +31,8 @@ PG_POOL_MAX = int(os.environ.get("SMARTPLATE_PG_POOL_MAX", "8"))
 # Neon pooler dropped is detected and replaced after this wait (Oct 2026: 10 s made the
 # first request after an idle spell take ~10 s).
 PG_POOL_TIMEOUT = float(os.environ.get("SMARTPLATE_PG_POOL_TIMEOUT", "5"))
+# Background pool keep-alive (db_pg.start_keepalive): on by default on Render.
+PG_KEEPALIVE = os.environ.get("SMARTPLATE_PG_KEEPALIVE", "on" if os.environ.get("RENDER") else "off") == "on"
 DB_PATH = os.environ.get("SMARTPLATE_DB", "smartplate.db")
 # Where a persistent disk is mounted on Render (render.production.yaml). Anything else
 # on Render lives on the instance's ephemeral disk and is erased on every spin-down,

@@ -34,3 +34,9 @@ def initialize():
             cleanup.replan(removed["replanned_plans"])
         festivals.ensure_calendar()             # the real India holiday calendar
         cleanup.remove_invented_community()
+        if config.DATABASE_URL:
+            from . import db_pg
+            import logging
+            logging.getLogger("smartplate.db").info("database warm in %.2f s", db_pg.warm())
+            if config.PG_KEEPALIVE:
+                db_pg.start_keepalive()

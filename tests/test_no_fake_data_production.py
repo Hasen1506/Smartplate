@@ -197,3 +197,30 @@ def test_no_live_pick_possible_says_why_and_never_fakes_one(prod, swiggy):
     assert r.status_code == 502 and "no dishes SmartPlate can plan" in r.get_json()["error"]
     view = client.get(f"/api/plan/{pid}").get_json()
     assert not [c for d in view["grid"] for c in d["meals"].values() if c["kind"] == "delivery"]
+
+
+# --------------------------------------------------------------------------- #
+# The setup wizard sets a sign-in, so a profile is never bound to one browser
+# --------------------------------------------------------------------------- #
+def test_profile_created_with_sign_in_opens_on_another_device(prod):
+    app = create_app()
+    first = app.test_client()
+    r = first.post("/api/profiles", json={**SETUP, "login": "Priya@Example.com", "password": "long enough pw"})
+    assert r.status_code == 201, r.get_json()
+    body = r.get_json()
+    assert body["login"] == "priya@example.com"
+    other = app.test_client()                              # a new device: no cookies, no key
+    s = other.post("/api/signin", json={"login": "priya@example.com", "password": "long enough pw"})
+    assert s.status_code == 200 and s.get_json()["user_id"] == body["user"]["id"]
+    other.environ_base["HTTP_X_SMARTPLATE_KEY"] = s.get_json()["key"]
+    assert other.get(f"/api/user/{body['user']['id']}/plan").status_code == 200
+
+
+def test_bad_or_taken_sign_in_creates_no_profile(prod):
+    client = create_app().test_client()
+    assert client.post("/api/profiles", json={**SETUP, "login": "priya", "password": "short"}).status_code == 400
+    assert client.post("/api/profiles", json={**SETUP, "login": "priya", "password": "long enough pw"}).status_code == 201
+    taken = client.post("/api/profiles", json={**SETUP, "login": "PRIYA", "password": "another long pw"})
+    assert taken.status_code == 400 and "taken" in taken.get_json()["error"]
+    with db.cursor() as cur:
+        assert cur.execute("SELECT COUNT(*) n FROM users").fetchone()["n"] == 1

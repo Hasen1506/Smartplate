@@ -107,6 +107,11 @@ def _targets_blob(data: dict, existing: dict | None = None) -> tuple[dict, dict,
 
 
 def create_profile(body: dict) -> dict:
+    # Optional sign-in set in the same step, so the profile is never tied to one browser.
+    login = password = None
+    if isinstance(body, dict) and ("login" in body or "password" in body):
+        from . import accounts
+        login, password = accounts.check_new_login(body.pop("login", None), body.pop("password", None))
     cook = body.pop("cook", "never") if isinstance(body, dict) else "never"
     if cook not in COOK_BY_ANSWER:
         raise ValueError("Choose how often you cook")
@@ -139,10 +144,13 @@ def create_profile(body: dict) -> dict:
              db.jd(data.get("medical", [])), db.jd(nt), db.jd(ht), 0.0,
              db.jd(data.get("observances", [])), db.jd(prefs), key_hash))
         user_id = cur.lastrowid
+        if login:
+            from . import accounts
+            accounts.insert_login(cur, user_id, login, password)
     taste.set_favourites(user_id, data.get("favourites", []))
     pid = service.create_plan(user_id)
     # the key is returned exactly once; only its hash is stored
-    return {**service.plan_view(pid), "access_key": key, "recovery_code": f"{user_id}.{key}"}
+    return {**service.plan_view(pid), "access_key": key, "recovery_code": f"{user_id}.{key}", "login": login}
 
 
 def update_setup(user_id: int, body: dict) -> dict:
