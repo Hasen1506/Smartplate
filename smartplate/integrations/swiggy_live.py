@@ -34,6 +34,9 @@ from .swiggy_connect import SwiggyError
 ALLOWED = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu",
                      "get_food_cart", "update_food_cart", "flush_food_cart", "get_payment_options",
                      "place_food_order", "get_food_orders", "track_food_order"})
+# Tools that only read: safe to send again on a fresh MCP session after a session error.
+READ_ONLY = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu",
+                       "get_food_cart", "get_payment_options", "get_food_orders", "track_food_order"})
 MENU_TTL = dt.timedelta(hours=6)
 CHECKOUT_QUOTE_TTL = dt.timedelta(minutes=5)
 MATCH_RESTAURANT = 0.6
@@ -180,15 +183,26 @@ def call(user_id: int, name: str, arguments: dict) -> object:
         _, result = sc.user_rpc(user_id, token, "tools/call", {"name": name, "arguments": arguments}, 2, session_id)
     except SwiggyError as exc:
         status = getattr(exc, "http_status", None)
-        if status == 404:                 # MCP: the session ended; the request was not processed
-            forget_session(user_id)
-            if not reused or name == "place_food_order":
-                raise NotSent(exc) from exc         # an order is never re-sent automatically
+        # Whatever went wrong, the cached MCP session is no longer trusted: one failed call
+        # must never poison the calls after it (a stale session id would fail them all).
+        forget_session(user_id)
+        stale = status == 404 or (status == 400 and name in READ_ONLY)
+        if stale and reused and name != "place_food_order":
+            # MCP: 404 means the session ended and nothing was processed; some servers say
+            # 400 for an unknown session. Re-open once with a fresh session (an order is
+            # never re-sent automatically; a cart write only on 404, which is unprocessed).
             try:
                 session_id, _ = _mcp_session(user_id, token, fresh=True)
             except SwiggyError as again:
                 raise NotSent(again) from again
-            _, result = sc.user_rpc(user_id, token, "tools/call", {"name": name, "arguments": arguments}, 2, session_id)
+            try:
+                _, result = sc.user_rpc(user_id, token, "tools/call", {"name": name, "arguments": arguments},
+                                        2, session_id)
+            except SwiggyError as again:
+                forget_session(user_id)
+                if getattr(again, "http_status", None) in UNPROCESSED:
+                    raise NotSent(again) from again
+                raise
         elif status in UNPROCESSED:
             raise NotSent(exc) from exc
         else:
@@ -893,6 +907,8 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
     address_id = _address(conn)
     tool = _tool(conn, "search_menu")
     exact, offset, seen_offsets, rows = [], 0, set(), []
+    by_name, name_rows = {}, []
+    here = lambda r: _get(r, "restaurant_id") is None or str(_get(r, "restaurant_id")) == str(restaurant_id)
     for _ in range(20):
         data = call(user_id, "search_menu", build_args(tool,
                     {"query": item_name, "address": address_id, "restaurant_scope": restaurant_id,
@@ -900,8 +916,14 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
         rows = records(data, "menu_item_id", "name")
         exact = [r for r in rows
                  if str(_get(r, "menu_item_id")) == str(item_id)
-                 and _name(str(_get(r, "name"))) == _name(item_name)
-                 and (_get(r, "restaurant_id") is None or str(_get(r, "restaurant_id")) == restaurant_id)]
+                 and _name(str(_get(r, "name"))) == _name(item_name) and here(r)]
+        for r in rows:
+            # get_restaurant_menu's compact `id` is not documented to be the same id space
+            # as search_menu's `menu_item_id` (the one update_food_cart takes). Keep the
+            # exact-name dishes of this restaurant in case the browse id is not found.
+            if _name(str(_get(r, "name"))) == _name(item_name) and here(r):
+                by_name.setdefault(str(_get(r, "menu_item_id")), r)
+                name_rows = rows
         body = data.get("data", data) if isinstance(data, dict) else {}
         if exact or body.get("hasMore") is not True:
             break
@@ -911,11 +933,19 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
             raise SwiggyError("Swiggy did not return a usable menu page. Refresh or choose the dish in Swiggy.")
         seen_offsets.add(offset)
         offset = next_offset
+    matched_by = "id"
+    if len(exact) != 1 and len(by_name) == 1:
+        # One dish of exactly this name at this restaurant: that is the dish the person
+        # chose, under the id Swiggy's cart accepts. The review shows it before any add.
+        exact, rows, matched_by = list(by_name.values()), name_rows, "name"
     if len(exact) != 1:
-        raise SwiggyError("The selected dish is no longer an exact live menu match. Refresh the menu.")
+        raise SwiggyError(f"Swiggy's menu search did not return exactly one “{item_name}” at {place['name']}. "
+                          "Refresh the menu, or choose the dish in Swiggy.", code="swiggy_item_unmatched")
     item = exact[0]
+    _note_sample(user_id, "search_menu.item_match", {"by": matched_by})
     details = {"user_id": user_id, "address_id": address_id, "restaurant_id": restaurant_id,
-               "restaurant": place["name"], "item_id": str(item_id), "item": str(_get(item, "name"))}
+               "restaurant": place["name"], "item_id": str(_get(item, "menu_item_id")),
+               "item": str(_get(item, "name"))}
     review = {**details, "address": conn.get("address_label") or address_id,
               "menu_price": rupees(item, menu_unit(rows)), "price_estimated": price_estimated(item),
               "handoff_url": timing.swiggy_handoff(place["name"], str(_get(item, "name")))}
@@ -1008,6 +1038,18 @@ def _read_cart(user_id: int, data: object, address_id: str) -> dict:
             cart["cart_address_id"] = None
     _note_echo(user_id, kind)
     return cart
+
+
+def _note_sample(user_id: int, key: str, value: dict) -> None:
+    """Keep a small fact about how a real reply was read (no values) beside the reply shapes."""
+    try:
+        conn = sc._connection(user_id)
+        samples = db.jl(conn.get("samples"), {}) if conn else {}
+        samples[key] = {**value, "at": clock.now().isoformat(timespec="seconds")}
+        with db.cursor() as cur:
+            cur.execute("UPDATE swiggy_connections SET samples=? WHERE user_id=?", (db.jd(samples), user_id))
+    except Exception:
+        logging.getLogger(__name__).warning("Could not record %s", key)
 
 
 def _note_echo(user_id: int, kind: str | None) -> None:

@@ -74,8 +74,10 @@ async function api(path, method = "GET", body) {
       S.swiggy.connected = false; S.swiggy.expired = data.code === "swiggy_auth_expired";
       S.liveCart = null; S.checkoutReview = null;
     }
-    const err = new Error(data.message || data.error || r.statusText);
+    // Never a bare status word: the server's own sentence, else the HTTP status.
+    const err = new Error(data.message || data.error || `The server answered HTTP ${r.status}${r.statusText ? ` (${r.statusText})` : ""}`);
     err.code = data.code;
+    err.status = r.status;
     err.data = data;
     throw err;
   }
@@ -110,17 +112,37 @@ function setBusy(b) {
   });
 }
 // Wrap every user-triggered action: show progress, surface errors instead of failing silently.
-async function guard(fn) {
+// `label` names the action ("Review “Veg Biryani”") so a failure says what failed and why;
+// Retry re-runs exactly that action, never an unrelated reload.
+function retryLast() {}                       // sentinel for the Retry button (data-act="reload")
+async function guard(fn, label) {
   if (S.busy) return;
-  setBusy(true); S.error = null; S.errorCode = null; S.lastLive = null;
-  try { await fn(); }
+  const again = fn === retryLast ? (S.retry || { fn: reloadPlan, label: "Reload your plan" }) : { fn, label };
+  setBusy(true); S.error = null; S.errorCode = null; S.lastLive = null; S.retry = null;
+  try { await again.fn(); }
   catch (e) {
-    S.error = e.message || String(e); S.errorCode = e.code || null;
+    const reason = e.message || String(e);
+    S.error = again.label ? `${again.label} failed: ${reason}` : reason; S.errorCode = e.code || null;
+    if (e.code === "profile_missing") { await profileGone(S.error); return; }   // no Retry can bring it back
+    S.retry = again;
     // Not connected (or the sign-in expired): Connect, then pick up where the user was.
     if (SWIGGY_RECONNECT.has(S.errorCode) && S.lastLive) S.pendingResume = S.lastLive;
     render();
   }
   finally { setBusy(false); }
+}
+// The server no longer has this profile (free hosting erases its disk on a restart or
+// redeploy). Every later call with this id would fail the same way, so go back to the
+// welcome screen and say what happened instead of offering a Retry that cannot work.
+async function profileGone(message) {
+  if (S.userId) keys.drop(S.userId);
+  store.del("smartplate.user");
+  S.userId = null; S.view = null; S.planId = null; S.exec = null; S.swiggy = null; S.liveBrowseMenu = null;
+  S.liveResults = null; S.liveOrderReview = null; S.liveCart = null; S.liveFavourites = null; S.retry = null;
+  S.checkoutReview = null; S.pendingResume = null; S.tab = "today"; S.more = null;
+  S.users = mergeUsers(await api("/api/users").catch(() => []));
+  S.welcome = true; S.error = message; S.errorCode = "profile_missing";
+  render();
 }
 
 /* ---- one "Connect Swiggy" path for every live surface ---- */
@@ -137,6 +159,16 @@ const RESUME = {
   "live-menu": { label: "opening that Swiggy menu", run: (name) => { S.tab = "places"; return openLiveMenu(name); } },
   "live-place": { label: "opening that Swiggy menu", run: (id, name) => { S.tab = "places"; return openLivePlace(id, name); } },
   "live-menus": { label: "planning from your Swiggy restaurants", run: () => { S.tab = "week"; return planFromLiveMenus(); } },
+};
+// What each button does, in the words an error banner uses ("Add to Swiggy cart failed: …").
+const ACT_LABELS = {
+  "confirm-live-cart": "Add to Swiggy cart", "confirm-cart": "Add to Swiggy cart",
+  "review-live-checkout": "Review the order", "place-live-order": "Place the order",
+  "track-live-order": "Track the order", "live-order-history": "Load your Swiggy orders",
+  "refresh-live-cart": "Refresh Swiggy cart", "resolve-live-attempt": "Resolve the order attempt",
+  "more-live-dishes": "Load more dishes", "restore-live-menu": "Browse the menu",
+  "live-menus": "Plan from Swiggy menus", "swiggy-refresh-addresses": "Refresh addresses",
+  "swiggy-connect": "Connect Swiggy", newweek: "Plan a new week", reopt: "Re-plan", exec: "Review orders",
 };
 function liveAction(kind, ...args) { S.lastLive = { kind, args }; return RESUME[kind].run(...args); }
 function rememberResume() {
@@ -172,7 +204,7 @@ async function boot() {
   try { await loadOrCreatePlan(); }
   catch (e) {
     // The key no longer opens this profile, or the server's data was reset (free hosting).
-    if (!/private|not found/i.test(e.message)) throw e;
+    if (!/missing$/.test(e.code || "") && !/private|not found/i.test(e.message)) throw e;
     keys.drop(S.userId); store.del("smartplate.user"); S.userId = null; S.view = null;
     S.users = mergeUsers(await api("/api/users")); S.welcome = true; render(); return;
   }
@@ -216,7 +248,7 @@ async function switchUser(id) {
   store.set("smartplate.user", String(S.userId));
   try { await loadOrCreatePlan(); }
   catch (e) {
-    if (!/private|not found/i.test(e.message)) throw e;
+    if (!/missing$/.test(e.code || "") && !/private|not found/i.test(e.message)) throw e;
     keys.drop(S.userId); store.del("smartplate.user"); S.userId = null; S.view = null;
     S.users = mergeUsers(await api("/api/users")); S.welcome = true;
     toast("That profile isn't on this server any more");
@@ -1819,7 +1851,7 @@ function wire() {
     "restore-live-menu": () => openLivePlace(S.liveBrowseMenu.restaurant.id, S.liveBrowseMenu.restaurant.name),
     "download-ics": () => downloadPrivate(`/api/user/${S.userId}/reminders.ics`, "smartplate-reminders.ics", "text/calendar"),
     "download-csv": () => downloadPrivate(`/api/receipts/${S.userId}/export.csv`, "smartplate-expenses.csv", "text/csv"),
-    genrcpt: genReceipts, idem: idempotencyDemo, reload: reloadPlan, newweek: newWeek,
+    genrcpt: genReceipts, idem: idempotencyDemo, reload: retryLast, newweek: newWeek,
     "start-onboard": async () => startOnboard(), notify: toggleAlerts,
     "oq-save": async () => {
       const vals = n => [...document.querySelectorAll(`input[name="${n}"]:checked`)].map(i => i.value);
@@ -1843,27 +1875,27 @@ function wire() {
     "hh-leave": () => householdCall("/leave", "POST", {}, "Stopped sharing. Your plan uses your own rules again."),
     "swap-cancel": async () => { S.swapPick = null; render(); },
   };
-  on("[data-act]", "click", (e) => { e.preventDefault(); const f = acts[e.currentTarget.dataset.act]; if (f) guard(f); });
+  on("[data-act]", "click", (e) => { e.preventDefault(); const a = e.currentTarget.dataset.act, f = acts[a]; if (f) guard(f, ACT_LABELS[a]); });
   const deleteForm = document.getElementById("delete-profile");
   if (deleteForm) deleteForm.onsubmit = (e) => { e.preventDefault(); guard(() => deleteProfile(deleteForm)); };
   if (S.orderReview || S.cartReview || S.liveOrderReview || S.checkoutReview) document.querySelector(".checkout [autofocus]")?.focus();
   if (S.sheet?.data) document.querySelector(".sheet .close")?.focus();
-  on("[data-swaddr]", "click", (e) => guard(async () => {
-    S.swiggy = await api(`/api/user/${S.userId}/swiggy/address`, "POST", { address_id: e.currentTarget.dataset.swaddr });
+  on("[data-swaddr]", "click", (e) => { const addressId = e.currentTarget.dataset.swaddr; guard(async () => {
+    S.swiggy = await api(`/api/user/${S.userId}/swiggy/address`, "POST", { address_id: addressId });
     forgetAddressState();
     S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
     await refreshLiveCart(false);
     toast("Delivery address saved"); render();
-    await resumePending(); }));
-  on("[data-live-menu]", "click", (e) => guard(() => liveAction("live-menu", e.currentTarget.dataset.liveMenu)));
-  on("[data-live-fav]", "click", (e) => guard(() => toggleLiveFavourite(e.currentTarget.dataset.liveFav, e.currentTarget.dataset.liveName)));
-  on("[data-live-place]", "click", (e) => guard(() => liveAction("live-place", e.currentTarget.dataset.livePlace, e.currentTarget.dataset.liveName)));
-  on("[data-live-item]", "click", (e) => guard(() => reviewLiveItem(e.currentTarget.dataset.liveItem, e.currentTarget.dataset.liveItemName)));
-  on("[data-live-track]", "click", (e) => guard(() => trackLiveOrder(e.currentTarget.dataset.liveTrack)));
+    await resumePending(); }, "Choose delivery address"); });
+  on("[data-live-menu]", "click", (e) => { const name = e.currentTarget.dataset.liveMenu; guard(() => liveAction("live-menu", name), `Open the Swiggy menu for “${name}”`); });
+  on("[data-live-fav]", "click", (e) => { const t = e.currentTarget; guard(() => toggleLiveFavourite(t.dataset.liveFav, t.dataset.liveName), `Update favourite “${t.dataset.liveName}”`); });
+  on("[data-live-place]", "click", (e) => { const t = e.currentTarget; guard(() => liveAction("live-place", t.dataset.livePlace, t.dataset.liveName), `Open the menu for “${t.dataset.liveName}”`); });
+  on("[data-live-item]", "click", (e) => { const t = e.currentTarget; guard(() => reviewLiveItem(t.dataset.liveItem, t.dataset.liveItemName), `Review “${t.dataset.liveItemName}”`); });
+  on("[data-live-track]", "click", (e) => { const id = e.currentTarget.dataset.liveTrack; guard(() => trackLiveOrder(id), "Track order"); });
   const liveSearch = document.getElementById("live-search");
-  if (liveSearch) liveSearch.onsubmit = (e) => { e.preventDefault(); guard(() => searchLivePlaces(document.getElementById("live-query").value)); };
+  if (liveSearch) liveSearch.onsubmit = (e) => { e.preventDefault(); const q = document.getElementById("live-query").value; guard(() => searchLivePlaces(q), `Search Swiggy for “${q}”`); };
   const dishSearch = document.getElementById("dish-search");
-  if (dishSearch) dishSearch.onsubmit = (e) => { e.preventDefault(); guard(() => searchLiveDishes(document.getElementById("dish-query").value)); };
+  if (dishSearch) dishSearch.onsubmit = (e) => { e.preventDefault(); const q = document.getElementById("dish-query").value; guard(() => searchLiveDishes(q), `Find dishes for “${q}”`); };
   on("[data-cart]", "click", (e) => guard(() => liveAction("order-meal", Number(e.currentTarget.dataset.cart))));
   on("[data-rm-device]", "click", (e) => guard(() => removeDevice(e.currentTarget.dataset.rmDevice)));
   const signin = document.getElementById("signin");

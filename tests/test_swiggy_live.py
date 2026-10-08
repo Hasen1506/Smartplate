@@ -10,20 +10,27 @@ from smartplate.app import create_app
 from smartplate.integrations import swiggy_connect, swiggy_live
 from smartplate.integrations.swiggy_connect import SwiggyError
 
+# Input schemas as Swiggy's public Food reference documents them
+# (https://mcp.swiggy.com/builders/docs/reference/food/<tool>/, read 2026-10-08).
 SCHEMAS = {
     "get_addresses": {"type": "object", "properties": {"page": {"type": "number"}, "pageSize": {"type": "number"}}},
-    "search_restaurants": {"type": "object", "required": ["query", "addressId"],
-                           "properties": {"query": {"type": "string"}, "addressId": {"type": "string"}}},
-    "get_restaurant_menu": {"type": "object", "required": ["restaurantId", "addressId"],
-                            "properties": {"restaurantId": {"type": "string"}, "addressId": {"type": "string"}}},
-    "search_menu": {"type": "object", "required": ["query", "addressId"],
-                    "properties": {"query": {"type": "string"}, "addressId": {"type": "string"},
-                                   "restaurantIdOfAddedItem": {"type": "string"}}},
-    "update_food_cart": {"type": "object", "required": ["cartItems", "restaurantId", "addressId"], "properties": {
+    "search_restaurants": {"type": "object", "required": ["addressId", "query"],
+                           "properties": {"addressId": {"type": "string"}, "query": {"type": "string"},
+                                          "offset": {"type": "number"},
+                                          "collection": {"type": "string", "enum": ["EATRIGHT", "BOLT", "STORE_99"]}}},
+    "get_restaurant_menu": {"type": "object", "required": ["addressId", "restaurantId"],
+                            "properties": {"addressId": {"type": "string"}, "restaurantId": {"type": "string"}}},
+    "search_menu": {"type": "object", "required": ["addressId", "query"],
+                    "properties": {"addressId": {"type": "string"}, "query": {"type": "string"},
+                                   "restaurantIdOfAddedItem": {"type": "string"},
+                                   "vegFilter": {"type": "number", "enum": [0, 1]},
+                                   "offset": {"type": "number"}}},
+    "update_food_cart": {"type": "object", "required": ["restaurantId", "cartItems", "addressId"], "properties": {
         "cartItems": {"type": "array", "items": {"type": "object", "required": ["menu_item_id", "quantity"],
                                                  "properties": {"menu_item_id": {"type": "string"},
                                                                 "quantity": {"type": "integer"}}}},
-        "restaurantId": {"type": "string"}, "addressId": {"type": "string"}, "restaurantName": {"type": "string"}}},
+        "restaurantId": {"type": "string"}, "addressId": {"type": "string"}, "restaurantName": {"type": "string"},
+        "cutleryOptIn": {"type": "boolean"}}},
     "get_food_cart": {"type": "object", "required": ["addressId"], "properties": {
         "addressId": {"type": "string"}, "restaurantName": {"type": "string"}}},
     "get_payment_options": {"type": "object", "properties": {"addressId": {"type": "string"}}},
@@ -36,6 +43,14 @@ SCHEMAS = {
 }
 
 
+def ok(data, message=None):
+    """Every documented Food tool answers {success, data, message} as structuredContent."""
+    body = {"success": True, "data": data}
+    if message:
+        body["message"] = message
+    return {"structuredContent": body, "content": [{"type": "text", "text": json.dumps(body)}]}
+
+
 class FakeLive(FakeSwiggy):
     """Adds tools/call. Addresses come back as JSON text, menus as structuredContent,
     the cart in the documented data.data envelope with pricing.to_pay."""
@@ -46,6 +61,10 @@ class FakeLive(FakeSwiggy):
         self.stock, self.has_variants, self.has_addons, self.is_veg = True, False, False, True
         self.search_error = None
         self.order_uncertain = False
+        self.browse_ids = {}          # get_restaurant_menu id per dish when it differs from menu_item_id
+
+    def browse_id(self, i):
+        return self.browse_ids.get(i, f"m{i}")
 
     def __call__(self, method, url, headers, body):
         if url.endswith("/food") and headers.get("Authorization") == f"Bearer {self.token}":
@@ -67,35 +86,46 @@ class FakeLive(FakeSwiggy):
         for req in SCHEMAS[name].get("required", []):
             assert req in args, (name, req)
         if name == "get_addresses":
-            text = json.dumps({"addresses": [{"id": "addr-home", "annotation": "Home", "address": "12 Lake View Rd, Adyar"},
-                                             {"id": "addr-work", "annotation": "Work", "address": "OMR, Perungudi"}]})
-            return {"content": [{"type": "text", "text": text}]}
+            rows = [{"id": "addr-home", "addressTag": "Home", "addressLine": "12 Lake View Rd, Adyar",
+                     "phoneNumber": "98xxxxxx10"},
+                    {"id": "addr-work", "addressTag": "Work", "addressLine": "OMR, Perungudi",
+                     "phoneNumber": "98xxxxxx10"}]
+            return ok({"addresses": rows, "pagination": {"page": 1, "pageSize": 10, "total": 2,
+                                                         "totalPages": 1, "hasMore": False}})
         if name == "search_restaurants":
             q = args["query"]
-            return {"structuredContent": {"restaurants": [
-                {"restaurantId": "r-1", "name": q if q.endswith(" (Adyar)") else f"{q} (Adyar)", "avgRating": 4.3,
-                 "sla": "30 mins", "availabilityStatus": "OPEN"},
-                {"restaurantId": "r-2", "name": "Completely Different Kitchen", "avgRating": 4.0}]}}
+            return ok({"restaurants": [
+                {"id": "r-1", "name": q if q.endswith(" (Adyar)") else f"{q} (Adyar)", "cuisines": ["South Indian"],
+                 "avgRating": 4.3, "areaName": "Adyar", "deliveryTimeMinutes": 30, "availabilityStatus": "OPEN"},
+                {"id": "r-2", "name": "Completely Different Kitchen", "cuisines": ["Chinese"], "avgRating": 4.0}],
+                "dishes": []})
         if name == "get_restaurant_menu":
             assert args["restaurantId"] == "r-1" and args["addressId"] == "addr-home"
-            items = [{"itemId": f"m{i}", "name": n, "priceInPaise": p, "isVeg": 1} for i, (n, p) in enumerate(self.dishes.items())]
-            return {"structuredContent": {"restaurant": {"id": "r-1", "name": "Hotel Saravana Bhavan (Adyar)",
-                                                        "isOpen": True},
-                                          "menu": {"categories": [{"title": "Mains", "items": items}]}}}
+            items = [{"id": self.browse_id(i), "name": n, "price": p, "inStock": 1, "isVeg": True,
+                      "hasVariants": False, "hasAddons": False, "categories": ["Mains"]}
+                     for i, (n, p) in enumerate(self.dishes.items())]
+            return ok({"restaurant": {"id": "r-1", "name": "Hotel Saravana Bhavan (Adyar)", "areaName": "Adyar",
+                                      "avgRating": 4.3, "isOpen": True},
+                       "items": items, "categoryLabels": ["Mains"], "totalItems": len(items), "totalCategories": 1})
         if name == "search_menu":
             assert args["addressId"] == "addr-home" and args["restaurantIdOfAddedItem"] == "r-1"
+            assert isinstance(args.get("offset", 0), int) and args.get("vegFilter", 0) in (0, 1)
             if self.search_error:
-                return {"structuredContent": {"success": False, "error": {"message": self.search_error}}}
-            items = [{"menu_item_id": f"m{i}", "name": n, "priceInPaise": p,
-                      "restaurant_id": "r-1", "inStock": self.stock,
+                return {"structuredContent": {"success": False, "error": {"message": self.search_error}},
+                        "isError": True}
+            items = [{"menu_item_id": f"m{i}", "name": n, "price": p,
+                      "restaurant_id": "r-1", "restaurant_name": "Hotel Saravana Bhavan (Adyar)",
+                      "inStock": 1 if self.stock else 0,
                       "hasVariants": self.has_variants, "hasAddons": self.has_addons,
                       "isVeg": self.is_veg} for i, (n, p) in enumerate(self.dishes.items())]
-            return {"structuredContent": {"success": True, "data": {"items": items}}}
+            return ok({"items": items, "query": args["query"], "restaurantIdOfAddedItem": "r-1",
+                       "totalItems": len(items), "hasMore": False})
         if name == "update_food_cart":
             item = args["cartItems"][0]
             assert item["quantity"] == 1 and args["restaurantId"] == "r-1"
+            assert item["menu_item_id"] in {f"m{i}" for i in range(len(self.dishes))}, "cart takes menu_item_id"
             self.cart = item["menu_item_id"]
-            return {"content": [{"type": "text", "text": "Cart updated"}]}
+            return ok({"statusCode": 0, "statusMessage": "Cart updated"})
         if name == "get_food_cart":
             if self.cart is None:
                 return {"structuredContent": {"success": True, "data": {"addressId": args["addressId"], "data": {"items": []}}}}
@@ -103,8 +133,8 @@ class FakeLive(FakeSwiggy):
             name = next(n for i, (n, p) in enumerate(self.dishes.items()) if f"m{i}" == self.cart)
             return {"structuredContent": {"success": True, "data": {"addressId": args["addressId"], "data": {
                 "restaurant": {"id": "r-1", "name": "Hotel Saravana Bhavan (Adyar)"},
-                "items": [{"menu_item_id": self.cart, "name": name, "quantity": 1, "total": price,
-                           "is_veg": self.is_veg, "in_stock": self.stock}],
+                "items": [{"menu_item_id": self.cart, "name": name, "quantity": 1, "subtotal": price,
+                           "total": price, "final_price": price, "is_veg": self.is_veg, "in_stock": self.stock}],
                 "pricing": {"item_total": price, "delivery_charge": 35, "to_pay": price + 35}}}}}
         if name == "get_payment_options":
             return {"structuredContent": {"success": True, "data": {"cod": {
@@ -351,8 +381,8 @@ def test_vegetarians_do_not_see_non_veg_dishes(client, swiggy, monkeypatch):
     def tool(name, args):
         out = orig(name, args)
         if name == "get_restaurant_menu":
-            for i in out["structuredContent"]["menu"]["categories"][0]["items"]:
-                i["isVeg"] = 0 if "Chicken" in i["name"] else 1
+            for i in out["structuredContent"]["data"]["items"]:
+                i["isVeg"] = "Chicken" not in i["name"]
         return out
     monkeypatch.setattr(swiggy, "tool", tool)
     m = client.get("/api/user/2/swiggy/menu?restaurant=FreshMenu").get_json()

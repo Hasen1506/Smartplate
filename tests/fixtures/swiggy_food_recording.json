@@ -6,10 +6,36 @@
    "reply": {
     "content": [
      {
-      "text": "{\"addresses\": [{\"id\": \"addr-home\", \"annotation\": \"Home\", \"address\": \"12 Lake View Rd, Adyar\"}, {\"id\": \"addr-work\", \"annotation\": \"Work\", \"address\": \"OMR, Perungudi\"}]}",
+      "text": "{\"success\": true, \"data\": {\"addresses\": [{\"id\": \"addr-home\", \"addressTag\": \"Home\", \"addressLine\": \"12 Lake View Rd, Adyar\", \"phoneNumber\": \"98xxxxxx10\"}, {\"id\": \"addr-work\", \"addressTag\": \"Work\", \"addressLine\": \"OMR, Perungudi\", \"phoneNumber\": \"98xxxxxx10\"}], \"pagination\": {\"page\": 1, \"pageSize\": 10, \"total\": 2, \"totalPages\": 1, \"hasMore\": false}}}",
       "type": "text"
      }
-    ]
+    ],
+    "structuredContent": {
+     "data": {
+      "addresses": [
+       {
+        "addressLine": "12 Lake View Rd, Adyar",
+        "addressTag": "Home",
+        "id": "addr-home",
+        "phoneNumber": "98xxxxxx10"
+       },
+       {
+        "addressLine": "OMR, Perungudi",
+        "addressTag": "Work",
+        "id": "addr-work",
+        "phoneNumber": "98xxxxxx10"
+       }
+      ],
+      "pagination": {
+       "hasMore": false,
+       "page": 1,
+       "pageSize": 10,
+       "total": 2,
+       "totalPages": 1
+      }
+     },
+     "success": true
+    }
    }
   },
   {
@@ -22,11 +48,13 @@
       "data": {
        "items": [
         {
+         "final_price": 125.0,
          "in_stock": true,
          "is_veg": true,
          "menu_item_id": "m0",
          "name": "Mini Tiffin",
          "quantity": 1,
+         "subtotal": 125.0,
          "total": 125.0
         }
        ],
@@ -80,39 +108,66 @@
    "cart": "empty",
    "key": "get_restaurant_menu {\"addressId\":\"addr-home\",\"restaurantId\":\"r-1\"}",
    "reply": {
-    "structuredContent": {
-     "menu": {
-      "categories": [
-       {
-        "items": [
-         {
-          "isVeg": 1,
-          "itemId": "m0",
-          "name": "Mini Tiffin",
-          "priceInPaise": 12500
-         },
-         {
-          "isVeg": 1,
-          "itemId": "m1",
-          "name": "Ghee Pongal",
-          "priceInPaise": 14000
-         },
-         {
-          "isVeg": 1,
-          "itemId": "m2",
-          "name": "Peanut Chutney Dosa",
-          "priceInPaise": 13000
-         }
-        ],
-        "title": "Mains"
-       }
-      ]
-     },
-     "restaurant": {
-      "id": "r-1",
-      "isOpen": true,
-      "name": "Hotel Saravana Bhavan (Adyar)"
+    "content": [
+     {
+      "text": "{\"success\": true, \"data\": {\"restaurant\": {\"id\": \"r-1\", \"name\": \"Hotel Saravana Bhavan (Adyar)\", \"areaName\": \"Adyar\", \"avgRating\": 4.3, \"isOpen\": true}, \"items\": [{\"id\": \"m0\", \"name\": \"Mini Tiffin\", \"price\": 12500, \"inStock\": 1, \"isVeg\": true, \"hasVariants\": false, \"hasAddons\": false, \"categories\": [\"Mains\"]}, {\"id\": \"m1\", \"name\": \"Ghee Pongal\", \"price\": 14000, \"inStock\": 1, \"isVeg\": true, \"hasVariants\": false, \"hasAddons\": false, \"categories\": [\"Mains\"]}, {\"id\": \"m2\", \"name\": \"Peanut Chutney Dosa\", \"price\": 13000, \"inStock\": 1, \"isVeg\": true, \"hasVariants\": false, \"hasAddons\": false, \"categories\": [\"Mains\"]}], \"categoryLabels\": [\"Mains\"], \"totalItems\": 3, \"totalCategories\": 1}}",
+      "type": "text"
      }
+    ],
+    "structuredContent": {
+     "data": {
+      "categoryLabels": [
+       "Mains"
+      ],
+      "items": [
+       {
+        "categories": [
+         "Mains"
+        ],
+        "hasAddons": false,
+        "hasVariants": false,
+        "id": "m0",
+        "inStock": 1,
+        "isVeg": true,
+        "name": "Mini Tiffin",
+        "price": 12500
+       },
+       {
+        "categories": [
+         "Mains"
+        ],
+        "hasAddons": false,
+        "hasVariants": false,
+        "id": "m1",
+        "inStock": 1,
+        "isVeg": true,
+        "name": "Ghee Pongal",
+        "price": 14000
+       },
+       {
+        "categories": [
+         "Mains"
+        ],
+        "hasAddons": false,
+        "hasVariants": false,
+        "id": "m2",
+        "inStock": 1,
+        "isVeg": true,
+        "name": "Peanut Chutney Dosa",
+        "price": 13000
+       }
+      ],
+      "restaurant": {
+       "areaName": "Adyar",
+       "avgRating": 4.3,
+       "id": "r-1",
+       "isOpen": true,
+       "name": "Hotel Saravana Bhavan (Adyar)"
+      },
+      "totalCategories": 1,
+      "totalItems": 3
+     },
+     "success": true
     }
    }
   },
@@ -132,42 +187,55 @@
   },
   {
    "cart": "empty",
-   "key": "search_menu {\"addressId\":\"addr-home\",\"query\":\"Mini Tiffin\",\"restaurantIdOfAddedItem\":\"r-1\"}",
+   "key": "search_menu {\"addressId\":\"addr-home\",\"offset\":0,\"query\":\"Mini Tiffin\",\"restaurantIdOfAddedItem\":\"r-1\"}",
    "reply": {
+    "content": [
+     {
+      "text": "{\"success\": true, \"data\": {\"items\": [{\"menu_item_id\": \"m0\", \"name\": \"Mini Tiffin\", \"price\": 12500, \"restaurant_id\": \"r-1\", \"restaurant_name\": \"Hotel Saravana Bhavan (Adyar)\", \"inStock\": 1, \"hasVariants\": false, \"hasAddons\": false, \"isVeg\": true}, {\"menu_item_id\": \"m1\", \"name\": \"Ghee Pongal\", \"price\": 14000, \"restaurant_id\": \"r-1\", \"restaurant_name\": \"Hotel Saravana Bhavan (Adyar)\", \"inStock\": 1, \"hasVariants\": false, \"hasAddons\": false, \"isVeg\": true}, {\"menu_item_id\": \"m2\", \"name\": \"Peanut Chutney Dosa\", \"price\": 13000, \"restaurant_id\": \"r-1\", \"restaurant_name\": \"Hotel Saravana Bhavan (Adyar)\", \"inStock\": 1, \"hasVariants\": false, \"hasAddons\": false, \"isVeg\": true}], \"query\": \"Mini Tiffin\", \"restaurantIdOfAddedItem\": \"r-1\", \"totalItems\": 3, \"hasMore\": false}}",
+      "type": "text"
+     }
+    ],
     "structuredContent": {
      "data": {
+      "hasMore": false,
       "items": [
        {
         "hasAddons": false,
         "hasVariants": false,
-        "inStock": true,
+        "inStock": 1,
         "isVeg": true,
         "menu_item_id": "m0",
         "name": "Mini Tiffin",
-        "priceInPaise": 12500,
-        "restaurant_id": "r-1"
+        "price": 12500,
+        "restaurant_id": "r-1",
+        "restaurant_name": "Hotel Saravana Bhavan (Adyar)"
        },
        {
         "hasAddons": false,
         "hasVariants": false,
-        "inStock": true,
+        "inStock": 1,
         "isVeg": true,
         "menu_item_id": "m1",
         "name": "Ghee Pongal",
-        "priceInPaise": 14000,
-        "restaurant_id": "r-1"
+        "price": 14000,
+        "restaurant_id": "r-1",
+        "restaurant_name": "Hotel Saravana Bhavan (Adyar)"
        },
        {
         "hasAddons": false,
         "hasVariants": false,
-        "inStock": true,
+        "inStock": 1,
         "isVeg": true,
         "menu_item_id": "m2",
         "name": "Peanut Chutney Dosa",
-        "priceInPaise": 13000,
-        "restaurant_id": "r-1"
+        "price": 13000,
+        "restaurant_id": "r-1",
+        "restaurant_name": "Hotel Saravana Bhavan (Adyar)"
        }
-      ]
+      ],
+      "query": "Mini Tiffin",
+      "restaurantIdOfAddedItem": "r-1",
+      "totalItems": 3
      },
      "success": true
     }
@@ -175,42 +243,55 @@
   },
   {
    "cart": "empty",
-   "key": "search_menu {\"addressId\":\"addr-home\",\"query\":\"tiffin\",\"restaurantIdOfAddedItem\":\"r-1\"}",
+   "key": "search_menu {\"addressId\":\"addr-home\",\"offset\":0,\"query\":\"tiffin\",\"restaurantIdOfAddedItem\":\"r-1\",\"vegFilter\":1}",
    "reply": {
+    "content": [
+     {
+      "text": "{\"success\": true, \"data\": {\"items\": [{\"menu_item_id\": \"m0\", \"name\": \"Mini Tiffin\", \"price\": 12500, \"restaurant_id\": \"r-1\", \"restaurant_name\": \"Hotel Saravana Bhavan (Adyar)\", \"inStock\": 1, \"hasVariants\": false, \"hasAddons\": false, \"isVeg\": true}, {\"menu_item_id\": \"m1\", \"name\": \"Ghee Pongal\", \"price\": 14000, \"restaurant_id\": \"r-1\", \"restaurant_name\": \"Hotel Saravana Bhavan (Adyar)\", \"inStock\": 1, \"hasVariants\": false, \"hasAddons\": false, \"isVeg\": true}, {\"menu_item_id\": \"m2\", \"name\": \"Peanut Chutney Dosa\", \"price\": 13000, \"restaurant_id\": \"r-1\", \"restaurant_name\": \"Hotel Saravana Bhavan (Adyar)\", \"inStock\": 1, \"hasVariants\": false, \"hasAddons\": false, \"isVeg\": true}], \"query\": \"tiffin\", \"restaurantIdOfAddedItem\": \"r-1\", \"totalItems\": 3, \"hasMore\": false}}",
+      "type": "text"
+     }
+    ],
     "structuredContent": {
      "data": {
+      "hasMore": false,
       "items": [
        {
         "hasAddons": false,
         "hasVariants": false,
-        "inStock": true,
+        "inStock": 1,
         "isVeg": true,
         "menu_item_id": "m0",
         "name": "Mini Tiffin",
-        "priceInPaise": 12500,
-        "restaurant_id": "r-1"
+        "price": 12500,
+        "restaurant_id": "r-1",
+        "restaurant_name": "Hotel Saravana Bhavan (Adyar)"
        },
        {
         "hasAddons": false,
         "hasVariants": false,
-        "inStock": true,
+        "inStock": 1,
         "isVeg": true,
         "menu_item_id": "m1",
         "name": "Ghee Pongal",
-        "priceInPaise": 14000,
-        "restaurant_id": "r-1"
+        "price": 14000,
+        "restaurant_id": "r-1",
+        "restaurant_name": "Hotel Saravana Bhavan (Adyar)"
        },
        {
         "hasAddons": false,
         "hasVariants": false,
-        "inStock": true,
+        "inStock": 1,
         "isVeg": true,
         "menu_item_id": "m2",
         "name": "Peanut Chutney Dosa",
-        "priceInPaise": 13000,
-        "restaurant_id": "r-1"
+        "price": 13000,
+        "restaurant_id": "r-1",
+        "restaurant_name": "Hotel Saravana Bhavan (Adyar)"
        }
-      ]
+      ],
+      "query": "tiffin",
+      "restaurantIdOfAddedItem": "r-1",
+      "totalItems": 3
      },
      "success": true
     }
@@ -220,21 +301,38 @@
    "cart": "empty",
    "key": "search_restaurants {\"addressId\":\"addr-home\",\"query\":\"Hotel Saravana Bhavan\"}",
    "reply": {
+    "content": [
+     {
+      "text": "{\"success\": true, \"data\": {\"restaurants\": [{\"id\": \"r-1\", \"name\": \"Hotel Saravana Bhavan (Adyar)\", \"cuisines\": [\"South Indian\"], \"avgRating\": 4.3, \"areaName\": \"Adyar\", \"deliveryTimeMinutes\": 30, \"availabilityStatus\": \"OPEN\"}, {\"id\": \"r-2\", \"name\": \"Completely Different Kitchen\", \"cuisines\": [\"Chinese\"], \"avgRating\": 4.0}], \"dishes\": []}}",
+      "type": "text"
+     }
+    ],
     "structuredContent": {
-     "restaurants": [
-      {
-       "availabilityStatus": "OPEN",
-       "avgRating": 4.3,
-       "name": "Hotel Saravana Bhavan (Adyar)",
-       "restaurantId": "r-1",
-       "sla": "30 mins"
-      },
-      {
-       "avgRating": 4.0,
-       "name": "Completely Different Kitchen",
-       "restaurantId": "r-2"
-      }
-     ]
+     "data": {
+      "dishes": [],
+      "restaurants": [
+       {
+        "areaName": "Adyar",
+        "availabilityStatus": "OPEN",
+        "avgRating": 4.3,
+        "cuisines": [
+         "South Indian"
+        ],
+        "deliveryTimeMinutes": 30,
+        "id": "r-1",
+        "name": "Hotel Saravana Bhavan (Adyar)"
+       },
+       {
+        "avgRating": 4.0,
+        "cuisines": [
+         "Chinese"
+        ],
+        "id": "r-2",
+        "name": "Completely Different Kitchen"
+       }
+      ]
+     },
+     "success": true
     }
    }
   },
@@ -244,10 +342,17 @@
    "reply": {
     "content": [
      {
-      "text": "Cart updated",
+      "text": "{\"success\": true, \"data\": {\"statusCode\": 0, \"statusMessage\": \"Cart updated\"}}",
       "type": "text"
      }
-    ]
+    ],
+    "structuredContent": {
+     "data": {
+      "statusCode": 0,
+      "statusMessage": "Cart updated"
+     },
+     "success": true
+    }
    }
   }
  ],
