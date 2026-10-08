@@ -71,6 +71,7 @@ def test_a_connection_that_fails_its_check_is_closed_not_put_back(monkeypatch):
     only). Ours closes it, so the pool opens a fresh one and the request goes on."""
     with db.cursor() as cur:                             # make sure the pool holds a connection
         cur.execute("SELECT 1")
+    db_pg._last_used.clear()                             # it has been idle: the next checkout checks it
     poisoned = {id(c) for c in _pooled()}
     assert poisoned
     real_execute = db_pg.psycopg.Connection.execute
@@ -102,6 +103,24 @@ def test_a_pool_that_cannot_hand_out_a_connection_is_replaced_once(monkeypatch):
     assert fresh is not stale
     with db.cursor() as cur:                             # the replacement keeps serving
         assert cur.execute("SELECT 2").fetchone()[0] == 2
+
+
+@needs_pg
+def test_a_connection_used_moments_ago_skips_the_check_round_trip(monkeypatch):
+    with db.cursor() as cur:
+        cur.execute("SELECT 1")
+    checks = []
+    real_execute = db_pg.psycopg.Connection.execute
+
+    def execute(self, query, *args, **kwargs):
+        if query == "":
+            checks.append(1)
+        return real_execute(self, query, *args, **kwargs)
+    monkeypatch.setattr(db_pg.psycopg.Connection, "execute", execute)
+    for _ in range(5):
+        with db.cursor() as cur:
+            cur.execute("SELECT 1")
+    assert checks == []
 
 
 @needs_pg
