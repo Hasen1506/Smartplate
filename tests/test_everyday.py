@@ -363,6 +363,7 @@ def test_heads_up_flags_rain_and_budget_skips(client):
     assert len(v["heads_up"]) <= 6
 
 
+@pytest.mark.sqlite_only
 def test_existing_database_is_migrated_in_place(tmp_path, monkeypatch):
     import sqlite3
     path = tmp_path / "old.db"

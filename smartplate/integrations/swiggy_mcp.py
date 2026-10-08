@@ -132,12 +132,13 @@ def place_order(decision: dict, restaurant: dict, item: dict, *, user_id, plan_i
 
     def record(st):
         with db.cursor() as cur:
+            # one row per idempotency key, updated in place (portable upsert: SQLite + Postgres)
             cur.execute(
-                "INSERT OR REPLACE INTO orders(id, decision_id, idempotency_key, "
-                "provider_order_id, state, amount, log, created_ts) "
-                "VALUES ((SELECT id FROM orders WHERE idempotency_key=?), ?,?,?,?,?,?,?)",
-                (key, decision.get("id"), key, order_id, st, amount,
-                 db.jd(log), _now()),
+                "INSERT INTO orders(decision_id, idempotency_key, provider_order_id, state, amount, log, created_ts) "
+                "VALUES (?,?,?,?,?,?,?) ON CONFLICT(idempotency_key) DO UPDATE SET "
+                "decision_id=excluded.decision_id, provider_order_id=excluded.provider_order_id, "
+                "state=excluded.state, amount=excluded.amount, log=excluded.log, created_ts=excluded.created_ts",
+                (decision.get("id"), key, order_id, st, amount, db.jd(log), _now()),
             )
 
     try:

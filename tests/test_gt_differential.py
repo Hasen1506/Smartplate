@@ -29,6 +29,8 @@ from hypothesis import strategies as st
 from gt_support import MONDAY_8AM, NAVRATRI_MONDAY
 from test_gt_properties import profiles
 
+pytestmark = pytest.mark.sqlite_only      # about the SQLite file / sqlite-only settings
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 BASELINES = {"pre19": "cd15aa2e4d395870abe3b1099869d1c7baf03cc0",     # git rev-parse 4bd8408:smartplate
              "main": "db0833e7fc9ca90bdfd782f7ae42c0492a82f637"}      # git rev-parse 33c6916:smartplate

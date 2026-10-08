@@ -7,6 +7,14 @@ v1.1 incurs no per-decision LLM cost (see FEASIBILITY.md §2).
 import os
 
 # Persistence
+# DATABASE_URL (a postgres:// URL, e.g. Neon's free tier) makes Postgres the store: data
+# then lives outside the app server and survives restarts and redeploys. Unset, the app
+# uses the SQLite file at SMARTPLATE_DB (local runs, tests, Codespaces).
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+# Postgres schema to use (default "public"); the test-suite gives every test its own.
+PG_SCHEMA = os.environ.get("SMARTPLATE_PG_SCHEMA", "").strip()
+# Connection pool: gunicorn runs one worker with 8 threads, so up to 8 connections.
+PG_POOL_MAX = int(os.environ.get("SMARTPLATE_PG_POOL_MAX", "8"))
 DB_PATH = os.environ.get("SMARTPLATE_DB", "smartplate.db")
 # Where a persistent disk is mounted on Render (render.production.yaml). Anything else
 # on Render lives on the instance's ephemeral disk and is erased on every spin-down,
@@ -153,10 +161,13 @@ EPICURE_CHECKSUMS = os.environ.get("SMARTPLATE_EPICURE_CHECKSUMS", "pinned")
 
 
 def storage_status() -> dict:
-    """Whether the SQLite database survives a restart or redeploy, and why we think so.
+    """Whether the database survives a restart or redeploy, and why we think so.
 
     persistent is True, False or None (unknown). It is decided from configuration only,
     so the answer is deterministic and needs no disk probing."""
+    if DATABASE_URL:
+        return {"engine": "postgres", "persistent": True,
+                "reason": "external Postgres (DATABASE_URL): survives restarts and redeploys"}
     path = DB_PATH
     if path == ":memory:" or path.startswith("file::memory:"):
         return {"engine": "sqlite", "persistent": False, "reason": "in-memory database"}

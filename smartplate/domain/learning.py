@@ -45,7 +45,7 @@ def record(user_id: int, session_id: int, reasons: list, *, item_id=None, restau
 
 def _taps(user_id: int) -> list[dict]:
     with db.cursor() as cur:
-        return [dict(r) for r in cur.execute("SELECT * FROM rating_reasons WHERE user_id=?", (user_id,))]
+        return [dict(r) for r in cur.execute("SELECT * FROM rating_reasons WHERE user_id=? ORDER BY id", (user_id,))]
 
 
 def weights(user_id: int) -> dict:
@@ -102,10 +102,15 @@ def chips(user_id: int) -> list[dict]:
     """What was learned, in words, each with the key that undoes it."""
     with db.cursor() as cur:
         rows = cur.execute(
-            "SELECT t.reason, t.item_id, t.restaurant_id, COUNT(*) n, m.name item, r.name place "
+            # one chip per (reason, what it is about); the columns a chip shows are constant
+            # within its group, so MAX() just names them in a way Postgres accepts too
+            "SELECT t.reason, MAX(t.item_id) item_id, MAX(t.restaurant_id) restaurant_id, COUNT(*) n, "
+            "MAX(m.name) item, MAX(r.name) place "
             "FROM rating_reasons t LEFT JOIN menu_items m ON m.id=t.item_id LEFT JOIN restaurants r ON r.id=t.restaurant_id "
             "WHERE t.user_id=? GROUP BY t.reason, CASE WHEN t.reason='late' THEN t.restaurant_id "
-            "WHEN t.reason='pricey' THEN 0 ELSE t.item_id END ORDER BY t.reason", (user_id,)).fetchall()
+            "WHEN t.reason='pricey' THEN 0 ELSE t.item_id END "
+            "ORDER BY t.reason, CASE WHEN t.reason='late' THEN t.restaurant_id "
+            "WHEN t.reason='pricey' THEN 0 ELSE t.item_id END", (user_id,)).fetchall()
     out = []
     for r in rows:
         if r["reason"] == "late":

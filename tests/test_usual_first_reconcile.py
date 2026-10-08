@@ -37,7 +37,7 @@ def test_usual_pen_is_zero_when_disabled(seeded):
     assert config.USUAL_FIRST == "off"
     user, plan = models.get_user(1), models.get_plan(seeded["plan_id"])
     ctx = optimizer.build_context(user, plan)
-    session = {"day": "Mon", "meal": "lunch"}
+    session = {"day": 0, "meal": "lunch"}          # sessions store day as 0=Mon..6=Sun
     cands = optimizer.build_candidates(user, plan, session, ctx)
     delivery = [c for c in cands if c["kind"] == "delivery"]
     # the sample profile has usual places: those carry no premium; only the few

@@ -71,6 +71,7 @@ def menu_for_city(city: str) -> list[dict]:
                    r.provider_id AS restaurant_provider_id
             FROM menu_items m JOIN restaurants r ON r.id = m.restaurant_id
             WHERE r.city = ? AND r.is_open = 1
+            ORDER BY m.id
             """,
             (city,),
         ).fetchall()

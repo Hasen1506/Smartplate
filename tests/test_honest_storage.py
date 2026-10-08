@@ -9,6 +9,8 @@ import pytest
 from smartplate import config
 from smartplate.app import create_app
 
+pytestmark = pytest.mark.sqlite_only      # about the SQLite file / sqlite-only settings
+
 
 @pytest.fixture
 def client(seeded):

@@ -1,7 +1,7 @@
 """Production entry point: `gunicorn wsgi:app` (see render.yaml / Procfile).
 
 Run ONE worker process (threads are fine). The app serialises edits with an
-in-process lock and keeps SQLite on local disk, so several worker processes
+in-process lock (and, without DATABASE_URL, keeps SQLite on local disk), so several worker processes
 would not coordinate.
 """
 from smartplate import push

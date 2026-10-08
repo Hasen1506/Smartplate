@@ -200,7 +200,7 @@ def leave(owner: dict) -> None:
     joined keep their own plans."""
     hid = _require(owner)
     with db.cursor() as cur:
-        rows = cur.execute("SELECT id, prefs FROM users WHERE household_id=?", (hid,)).fetchall()
+        rows = cur.execute("SELECT id, prefs FROM users WHERE household_id=? ORDER BY id", (hid,)).fetchall()
         managed = [r["id"] for r in rows if is_managed(dict(r))]
         for mid in managed:
             cur.execute("DELETE FROM users WHERE id=?", (mid,))

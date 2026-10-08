@@ -313,9 +313,9 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
     if user:
         with db.cursor() as cur:
             ratings = {r["session_id"]: r["score"] for r in cur.execute(
-                "SELECT session_id, score FROM ratings WHERE user_id=?", (user["id"],))}
+                "SELECT session_id, score FROM ratings WHERE user_id=? ORDER BY id", (user["id"],))}
             reasons = {}
-            for r in cur.execute("SELECT session_id, reason FROM rating_reasons WHERE user_id=?", (user["id"],)):
+            for r in cur.execute("SELECT session_id, reason FROM rating_reasons WHERE user_id=? ORDER BY id", (user["id"],)):
                 reasons.setdefault(r["session_id"], []).append(r["reason"])
     etas = {}
     with db.cursor() as cur:
@@ -639,7 +639,7 @@ def week_recap(plan_id: int) -> dict:
     start = dt.date.fromisoformat(plan["week_start"])
     days = [(start + dt.timedelta(days=i)).isoformat() for i in range(7)]
     with db.cursor() as cur:
-        rows = cur.execute("SELECT * FROM intake_log WHERE user_id=? AND iso_date>=? AND iso_date<=?",
+        rows = cur.execute("SELECT * FROM intake_log WHERE user_id=? AND iso_date>=? AND iso_date<=? ORDER BY iso_date, id",
                            (user["id"], days[0], days[-1])).fetchall()
     logged = intake.by_day([db.row_to_dict(r) for r in rows])
     targets = nutrition.targets_for(user)

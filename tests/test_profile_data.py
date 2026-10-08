@@ -1,6 +1,5 @@
 """Private data controls: ownership, credential exclusion and atomic removal."""
 import json
-import sqlite3
 
 import pytest
 
@@ -90,9 +89,15 @@ def test_delete_rolls_back_every_record_on_database_failure(client):
     uid, headers, pid = private(client, "Still here")
     with db.cursor() as cur:
         before = cur.execute("SELECT COUNT(*) FROM sessions WHERE plan_id=?", (pid,)).fetchone()[0]
-        cur.execute(f"CREATE TRIGGER prevent_delete BEFORE DELETE ON plans WHEN OLD.id={int(pid)} "
-                    "BEGIN SELECT RAISE(ABORT, 'test interruption'); END")
-    with pytest.raises(sqlite3.IntegrityError):
+        if db.engine() == "postgres":
+            cur.execute("CREATE FUNCTION prevent_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                        "RAISE EXCEPTION 'test interruption' USING ERRCODE = 'integrity_constraint_violation'; END $$")
+            cur.execute(f"CREATE TRIGGER prevent_delete BEFORE DELETE ON plans FOR EACH ROW "
+                        f"WHEN (OLD.id={int(pid)}) EXECUTE FUNCTION prevent_delete()")
+        else:
+            cur.execute(f"CREATE TRIGGER prevent_delete BEFORE DELETE ON plans WHEN OLD.id={int(pid)} "
+                        "BEGIN SELECT RAISE(ABORT, 'test interruption'); END")
+    with pytest.raises(db.IntegrityError):
         profile_data.delete(uid, "DELETE")
     with db.cursor() as cur:
         assert cur.execute("SELECT COUNT(*) FROM sessions WHERE plan_id=?", (pid,)).fetchone()[0] == before

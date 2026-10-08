@@ -4,4 +4,7 @@ PuLP==3.3.2
 icalendar==6.1.0
 gunicorn==23.0.0
 cryptography==50.0.2
+# Postgres (DATABASE_URL, e.g. Neon); SQLite needs nothing extra
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
 numpy==2.5.3

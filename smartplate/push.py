@@ -78,7 +78,7 @@ def unsubscribe(user_id: int, body: dict) -> dict:
 
 def status(user_id: int, endpoint: str | None = None) -> dict:
     with db.cursor() as cur:
-        rows = cur.execute("SELECT endpoint FROM push_subscriptions WHERE user_id=?", (user_id,)).fetchall()
+        rows = cur.execute("SELECT endpoint FROM push_subscriptions WHERE user_id=? ORDER BY id", (user_id,)).fetchall()
     return {"enabled": config.PUSH_ENABLED, "public_key": public_key(), "devices": len(rows),
             "this_device": bool(endpoint) and any(r["endpoint"] == endpoint for r in rows)}
 
@@ -157,7 +157,7 @@ def test_message(user_id: int, sender=None) -> dict:
     """Send "Reminders are on" to this profile's devices right away."""
     sender = sender or webpush.send
     with db.cursor() as cur:
-        subs = [db.row_to_dict(r) for r in cur.execute("SELECT * FROM push_subscriptions WHERE user_id=?", (user_id,))]
+        subs = [db.row_to_dict(r) for r in cur.execute("SELECT * FROM push_subscriptions WHERE user_id=? ORDER BY id", (user_id,))]
     ok = 0
     for sub in subs:
         code = sender(sub["endpoint"], sub["p256dh"], sub["auth"],

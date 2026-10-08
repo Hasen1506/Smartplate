@@ -54,10 +54,62 @@ When the build finishes, open the `https://smartplate-….onrender.com` link on 
 phone and use **Add to Home Screen**. The blueprint is [render.yaml](render.yaml).
 
 On Render's free plan the app sleeps after about 15 minutes idle, so the first visit
-afterwards takes about a minute. Its disk is also wiped on spin-down, restart or redeploy:
-treat profiles there as a demo. For data that lasts, use a paid instance with a disk
-and set `SMARTPLATE_DB` to a path on it. Any host that runs a `Procfile` (Railway,
+afterwards takes about a minute. Its disk is also wiped on spin-down, restart or redeploy,
+so by default profiles there are a demo. **To keep them at no cost, give the app a free
+Postgres database on Neon** (next section). Any host that runs a `Procfile` (Railway,
 Koyeb, Heroku) works the same way; run **one** worker process.
+
+### Keep your data: free Postgres on Neon
+
+With `DATABASE_URL` set, SmartPlate stores everything (profiles, private-profile keys,
+sign-ins, plans, ratings, receipts, Swiggy links, push subscriptions) in that Postgres
+database instead of the SQLite file, so restarts, spin-downs and redeploys lose nothing.
+Without it the app uses SQLite, as before (local runs, Codespaces, tests).
+
+1. **Create the database.** Sign in at [console.neon.tech](https://console.neon.tech)
+   and choose **New project**: name `smartplate`, region **AWS Asia Pacific (Singapore)**
+   (the Render service runs in Singapore), default Postgres version. The Free plan is enough.
+2. **Copy the connection string.** On the project dashboard choose **Connect**, keep
+   branch `main` and database `neondb`, turn **Connection pooling** on and copy the URL. It
+   looks like `postgresql://neondb_owner:…@ep-…-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`.
+   Treat it as a password.
+3. **Give it to Render.** Render dashboard → service **smartplate** → **Environment** →
+   **Add Environment Variable**: key `DATABASE_URL`, value the URL → **Save, rebuild, and
+   deploy**. (`render.yaml` declares `DATABASE_URL` with `sync: false`: Render asks for it
+   when a new Blueprint is created, but an existing service needs this manual step.)
+   Leave `SMARTPLATE_SECRET` unchanged: it encrypts the Swiggy tokens stored in the database.
+4. **Check it.** Open `https://smartplate-xgxd.onrender.com/healthz`: it must show
+   `"engine": "postgres", "persistent": true`, and the yellow “Trial server … erased”
+   banner is gone. On first start the app creates its tables and the three sample
+   profiles in Neon. Make a test profile, then **Manual Deploy → Restart service** (or
+   wait for a spin-down) and open it again: it is still there.
+
+**Moving an existing SQLite database (optional).** If you have a SmartPlate SQLite file
+worth keeping (a local or Codespaces `smartplate.db`, or a snapshot from
+`scripts/backup_sqlite.py`), copy it in before step 3, while Neon is still empty:
+
+```bash
+pip install -r requirements.txt
+export DATABASE_URL='postgresql://…neon.tech/neondb?sslmode=require'   # the URL from step 2
+python scripts/sqlite_to_postgres.py smartplate.db --dry-run   # copy, verify, roll back
+python scripts/sqlite_to_postgres.py smartplate.db             # the real copy
+```
+
+It copies every table with its ids, checks the row counts and commits once (on any error
+nothing is written); the source file is never changed. If the app has already started on
+Neon and seeded its sample profiles, add `--replace` to overwrite them with the file's
+contents. The free Render instance's own disk can't be copied this way: Render's free
+plan has no shell, and setting `DATABASE_URL` redeploys onto a fresh disk, so profiles
+created on the free trial server before the switch are not carried over.
+
+**Free-tier notes.** Neon's Free plan ([plans](https://neon.com/docs/introduction/plans))
+includes 1 GB of storage per project and 100 compute-hours a month, and suspends the
+database after 5 minutes without queries; the first request after that waits a moment
+while it wakes, and the app's connection pool re-checks connections before use. The free
+Render instance itself sleeps after 15 minutes idle, which keeps Neon's compute use low;
+an uptime pinger that keeps Render awake around the clock would also keep Neon awake
+(about 180 compute-hours a month at the smallest size), past the free allowance.
+To go back to SQLite, delete `DATABASE_URL` (data then lives on the temporary disk again).
 
 For a private persistent pilot, review the separate [production Blueprint](render.production.yaml)
 and [deployment runbook](docs/production-deployment.md) before applying it.
@@ -81,9 +133,10 @@ Once Swiggy has approved this deployment's exact callback, set
 connecting Swiggy is not available on that server yet, instead of promising real restaurants.
 
 `/healthz`, `/readyz` and `/api/meta` report whether the database survives a restart
-(`database.persistent` / `storage.persistent`). On Render it is persistent only under the
-disk mount (`/var/data`); the free Blueprint's database is not, and the app shows every
-visitor a banner saying their data can be erased.
+(`database.persistent` / `storage.persistent`). It is persistent with `DATABASE_URL`
+(Postgres) or, on Render, under the disk mount (`/var/data`); SQLite on the free
+instance's temporary disk is not, and then the app shows every visitor a banner saying
+their data can be erased.
 
 **Or use GitHub Codespaces (private to you):**
 [Open SmartPlate in GitHub Codespaces](https://codespaces.new/Hasen1506/Smartplate?quickstart=1).
@@ -114,7 +167,9 @@ demo Chennai catalog, three users, and a sample week on first run.
 
 ```bash
 pip install -r requirements-dev.txt   # test + audit tools (not needed in production)
-python -m pytest -q                 # current backend regression suite
+python -m pytest -q                 # current backend regression suite (SQLite)
+# the same suite against Postgres: a throwaway local database, one schema per test
+SMARTPLATE_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/smartplate_test python -m pytest -q
 ```
 
 ## What's in the box
@@ -165,7 +220,10 @@ instead of silently ordered.
 | `SMARTPLATE_BRAIN` | `deterministic` | `llm` opts into the paid narrator (off the critical path) |
 | `SMARTPLATE_SWIGGY` | `simulated` | `live` enables MCP sign-in after provider approval; current Render origin is rejected by Swiggy |
 | `SMARTPLATE_LIVE_ORDERS` | `off` | `on` permits explicitly approved Cash on Delivery placement after durable storage and provider validation |
-| `SMARTPLATE_DB` | `smartplate.db` | SQLite path |
+| `DATABASE_URL` | unset | Postgres connection URL (e.g. Neon, see “Keep your data”). Set: all data lives in Postgres and survives restarts; TLS is required unless the URL says otherwise. Unset: SQLite at `SMARTPLATE_DB` |
+| `SMARTPLATE_PG_POOL_MAX` | `8` | Most Postgres connections the app holds (one gunicorn worker × 8 threads) |
+| `SMARTPLATE_PG_SCHEMA` | `public` | Postgres schema to use |
+| `SMARTPLATE_DB` | `smartplate.db` | SQLite path (used when `DATABASE_URL` is unset) |
 | `SMARTPLATE_WEATHER` | `live` | `live` = Open-Meteo forecast (cached, falls back to the sample feed offline); `simulated` = sample feed only |
 | `SMARTPLATE_SOLVER_GAP` | `0.001` | Relative optimality gap for the weekly MILP |
 | `SMARTPLATE_SOLVER_TIME_LIMIT` | `10` | Seconds per solve before returning the best plan found |

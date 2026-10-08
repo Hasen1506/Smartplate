@@ -23,7 +23,7 @@ def applies(item: dict) -> bool:
 def predict(city: str, day: int, meal: str, condition: str) -> float:
     with db.cursor() as cur:
         row = cur.execute(
-            "SELECT multiplier FROM surge_history WHERE city=? AND day=? AND meal=? AND condition=?",
+            "SELECT multiplier FROM surge_history WHERE city=? AND day=? AND meal=? AND condition=? ORDER BY id",
             (city, day, meal, condition),
         ).fetchone()
     if row:

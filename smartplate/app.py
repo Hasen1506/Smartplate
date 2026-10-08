@@ -19,9 +19,11 @@ SWIGGY_COOKIE = "sp_swiggy_oauth"
 
 def create_app() -> Flask:
     if config.LIVE_ORDERS and os.environ.get("RENDER"):
-        if (config.SWIGGY_PROVIDER != "live" or not config.DB_PATH.startswith("/var/data/")
+        durable = bool(config.DATABASE_URL) or config.DB_PATH.startswith("/var/data/")
+        if (config.SWIGGY_PROVIDER != "live" or not durable
                 or not config.SECRET or not config.PUBLIC_URL.startswith("https://")):
-            raise RuntimeError("Live orders on Render require the live provider, persistent /var/data database, "
+            raise RuntimeError("Live orders on Render require the live provider, a durable database "
+                               "(DATABASE_URL or /var/data), "
                                "stable SMARTPLATE_SECRET and HTTPS SMARTPLATE_PUBLIC_URL")
     initialize()
     app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
@@ -149,7 +151,8 @@ def create_app() -> Flask:
         try:
             with db.cursor() as cur:
                 cur.execute("SELECT 1 FROM users LIMIT 1").fetchone()
-            if (not os.access(os.path.dirname(os.path.abspath(config.DB_PATH)), os.W_OK)
+            if not config.DATABASE_URL and (
+                    not os.access(os.path.dirname(os.path.abspath(config.DB_PATH)), os.W_OK)
                     or not os.access(config.DB_PATH, os.W_OK)):
                 raise OSError("database storage is read-only")
         except Exception:
