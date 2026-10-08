@@ -88,7 +88,10 @@ def test_browser_live_menu_cart_review_reload_order_and_tracking(pilot, viewport
             dialog = page.get_by_role("dialog")
             pw.expect(dialog.get_by_role("heading", name="Add this exact item?")).to_be_visible()
             dialog.get_by_role("button", name="Add to Swiggy cart", exact=True).click()
-            pw.expect(page.get_by_text("Current total ₹160.", exact=False)).to_be_visible()
+            pw.expect(page.locator(".cartnote .bill .total")).to_contain_text("₹160")
+            pw.expect(page.locator(".cartnote a.btn", has_text="Open Swiggy checkout")).to_have_attribute(
+                "href", "https://www.swiggy.com/checkout")
+            pw.expect(page.locator(".cartnote .cancel-note")).to_contain_text("cancellation policy applies")
             page.reload()
             pw.expect(page.get_by_role("button", name="Review and place order", exact=True)).to_be_visible()
             no_overflow(page)

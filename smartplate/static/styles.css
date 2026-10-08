@@ -421,3 +421,24 @@ tr.have td{color:var(--tx2)}
 .errbar.connect .connect-swiggy{flex:1}
 
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* ---------------- live-only states (Oct 2026): empty, syncing, added ---------------- */
+.empty-state{background:var(--card);border:1px dashed var(--line-2);border-radius:var(--r);padding:18px;margin-bottom:16px;display:grid;gap:10px}
+.empty-state h2{font-size:17px;line-height:1.3;margin:0}
+.empty-state p{margin:0;color:var(--tx2);font-size:14px}
+.empty-state .btn,.empty-state button{justify-self:start}
+.empty-state .connect-swiggy{margin:0}
+.hero-card.syncing h2{margin:4px 0 12px}
+.hero-card.syncing .skeleton i:nth-child(2){width:72%}
+.hero-card.syncing .skeleton i:nth-child(3){width:48%}
+.checkout .skeleton{margin:14px 0}
+.checkout .skeleton i:nth-child(2){width:60%}
+.source-tag{margin:-4px 0 10px}
+.cartnote.added{border:1px solid rgba(74,222,128,.28);background:var(--ok-bg)}
+.cartnote .ok-head{font-weight:650;color:var(--ok)}
+.cartnote .billcard{background:var(--card);border-radius:var(--r-sm);padding:10px 12px}
+.cancel-note{margin-top:-4px}
+button[aria-busy="true"]{opacity:.85;cursor:progress}
+.signin-set{border:1px solid var(--line-2);border-radius:var(--r-sm);padding:12px 14px;margin:16px 0 0;display:grid;gap:10px;min-width:0}
+.signin-set legend{font-weight:650;font-size:14px;padding:0 6px}
+.signin-set label{display:grid;gap:6px;font-size:13.5px}

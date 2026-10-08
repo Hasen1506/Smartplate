@@ -635,7 +635,7 @@ function todayScreen() {
   const live = swiggyReady();
   return `<h1 class="greet">${hello}${v.user?.name && v.user.name !== "Me" ? ", " + esc(v.user.name.split(" ")[0]) : ""}</h1>
     ${realDishesState()}
-    ${nu ? nextUpCard(nu) : `<section class="hero-card"><p class="eyebrow">This week</p><h2>Nothing left to plan this week.</h2><div class="actions"><button class="primary" data-act="newweek">Plan next week</button></div></section>`}
+    ${nu ? nextUpCard(nu) : v.source?.kind === "none" ? "" : `<section class="hero-card"><p class="eyebrow">This week</p><h2>Nothing left to plan this week.</h2><div class="actions"><button class="primary" data-act="newweek">Plan next week</button></div></section>`}
     ${todayRest(nu)}
     ${budgetCard()}
     ${headsUp()}
@@ -752,13 +752,14 @@ function nextUpCard(nu) {
     <div class="actions">
       ${canCart ? `<button class="primary" data-cart="${c.session_id}">Review &amp; add to Swiggy cart</button>`
         : !isCook && !carted && c.handoff_url ? `<a class="btn primary" href="${esc(c.handoff_url)}" target="_blank" rel="noopener" data-handoff="${c.session_id}">Order on Swiggy ↗</a>` : ""}
-      <div class="two"><button data-sheet="${c.session_id}">Change</button>
+      ${carted ? "" : `<div class="two"><button data-sheet="${c.session_id}">Change</button>
         <button class="${isCook ? "primary" : ""}" data-confirm="${c.session_id}">${isCook ? "I cooked it ✓" : "I had it ✓"}</button></div>
       <div class="togs" role="group" aria-label="Quick changes">${kindToggle(c)}${pinToggle(c)}
-        <button class="tg" data-sess="${c.session_id}:skipped">Skip this meal</button></div>
+        <button class="tg" data-sess="${c.session_id}:skipped">Skip this meal</button></div>`}
     </div>
     ${!isCook && swiggyReady() && !cartEligible() ? `<p class="fine">SmartPlate cannot verify your ingredient or medical rules on Swiggy's menu. Check this dish directly in Swiggy before ordering.</p>` : ""}
     ${cartNote(c)}
+    ${carted ? `<div class="row"><button class="small" data-confirm="${c.session_id}">I had it ✓</button></div>` : ""}
     ${S.handedOff === c.session_id ? `<div class="consent">Placed it on Swiggy? Tap <b>I had it</b> so your budget stays accurate.</div>` : ""}
   </section>`;
 }
@@ -2071,7 +2072,7 @@ function onboardingScreen() {
   const last = st === OB_STEPS.length - 1;
   return `<main class="onboard"><div class="obtop"><button class="ghost small" data-ob-nav="back">${st ? "← Back" : "Cancel"}</button>
       <div class="dots" aria-label="Step ${st + 1} of ${OB_STEPS.length}">${dots}</div><span class="fine">${st + 1}/${OB_STEPS.length}</span></div>
-    ${errbar()}<form class="obbody" id="obform" novalidate>${body}</form>
+    ${errbar(false)}<form class="obbody" id="obform" novalidate>${body}</form>
     <div class="obfoot"><button class="primary big" data-ob-nav="next">${last ? "Create profile →" : "Continue"}</button>
       </div></main>`;
 }
