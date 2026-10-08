@@ -257,3 +257,28 @@ Ideas met while building this (not built):
   subscription exists (kept in memory, refreshed on subscribe/unsubscribe).
 - **Retire the paid-disk Blueprint** (`render.production.yaml`) once the Neon setup has run
   in production for a while: one storage story is simpler to explain and to test.
+
+## Dark redesign: three places, honest money, one-tap changes (Oct 8, 2026)
+
+Built: the Dark v2 tokens app-wide; Today / Plan / You (bottom tabs on phones, a sidebar from
+1024 px); the next pick on Today with its reasons in plain words and one saffron action;
+Swiggy's real bill drawn line by line once a cart is checked; estimates grey with "est.",
+real Swiggy numbers solid; the delivery address as a pill on every screen; the full live
+menu with Swiggy's own categories, bestsellers, veg marks, name-based allergen flags and
+one-tap filters; dish icons by kind, and Swiggy's photo where `search_menu` sends one;
+one-tap On/Off, Order/Cook and Pin on every meal; expenses recorded at the real bill and
+labelled. Dropped from the mockup as decoration with no real data: fit scores, rain-delay
+and exam chips, today's-protein and streaks, the monthly ring, a Swiggy-fee total,
+"Copy list for Instamart", mood chips, an appearance switch, the read-only Swiggy claim.
+
+Ideas met while building this (not built):
+
+- **Photos on the browse menu.** `get_restaurant_menu` omits `imageUrl` by design (Swiggy
+  docs), so only searched dishes and the reviewed item show a photo. Fetching photos would
+  mean one `search_menu` per dish: too many calls. Ask Builders Club for an image field.
+- **A real fee ledger.** Keep each checked cart's bill lines per order, so "Swiggy fees this
+  month" could be shown honestly. Today only the latest bill per meal is kept.
+- **Remembered photo per dish.** Cache the `imageUrl` a search returned with the dish id,
+  so the week can show it too.
+- **Offline copy of the plan.** The service worker never caches API replies (by design);
+  an explicit read-only snapshot would let the offline screen show more than what is loaded.

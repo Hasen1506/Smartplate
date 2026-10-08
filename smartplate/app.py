@@ -149,7 +149,7 @@ def create_app() -> Flask:
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; "
             "frame-ancestors 'none'; form-action 'self'; connect-src 'self'; worker-src 'self'; "
-            "img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "img-src 'self' data: https://media-assets.swiggy.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com")
         if request.path.startswith('/api/'):
             response.headers['Cache-Control'] = 'no-store'
