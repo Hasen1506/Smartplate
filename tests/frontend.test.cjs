@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const source = fs.readFileSync('smartplate/static/app.js', 'utf8').replace(
   'boot().catch', 'globalThis.bootPromise = boot().catch');
 
-function fixture(overrides = {}) {
+function fixture(overrides = {}, env = {}) {
   const calls = [];
   const element = { innerHTML: '', classList: { toggle() {} }, appendChild() {}, remove() {}, addEventListener() {}, setAttribute() {} };
   const view = {
@@ -28,7 +28,8 @@ function fixture(overrides = {}) {
   const context = vm.createContext({
     document: { getElementById: () => element, querySelectorAll: () => [], querySelector: () => null,
       createElement: () => element, addEventListener() {}, body: element },
-    localStorage: { getItem: () => '2', setItem() {} },
+    localStorage: env.storage || { getItem: () => '2', setItem() {} },
+    ...(env.location ? { location: env.location, URLSearchParams, history: { replaceState() {} } } : {}),
     fetch: async (url, options) => { calls.push({ url, options });
       return { ok: !!replies[url] && !replies[url].__status, json: async () => replies[url] || { error: 'Unexpected route' } }; },
     setTimeout: () => {}, console,
@@ -678,7 +679,7 @@ test('an unconnected Swiggy offers Connect, not Retry (409 swiggy_not_connected)
   await vm.runInContext("guard(() => api('/api/user/2/swiggy/addresses'))", context);
   const bar = vm.runInContext('errbar()', context);
   assert.match(bar, /data-act="swiggy-connect"/);
-  assert.match(bar, /Connect your Swiggy account first/);
+  assert.match(bar, /Connect Swiggy to use real menus and prices\./);      // one message on every live surface
   assert.doesNotMatch(bar, /data-act="reload"/);
   // a real upstream failure keeps Retry
   vm.runInContext("S.error = 'Swiggy returned an error'; S.errorCode = 'swiggy_error'", context);
@@ -708,4 +709,116 @@ test('community: an empty list says nobody has shared yet, never shows sample me
   const html = vm.runInContext('communityPanel()', context);
   assert.match(html, /Nobody has shared a week here so far/);
   assert.doesNotMatch(html, /Sample weeks/);
+});
+
+// ---- One "Connect Swiggy" path on every live surface (proposal 2) ----
+const NOT_CONNECTED = { __status: 409, error: 'swiggy_not_connected', code: 'swiggy_not_connected',
+  message: 'Connect your Swiggy account first.' };
+function memoryStorage(initial = {}) {
+  const m = new Map(Object.entries(initial));
+  return { map: m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
+}
+function assertConnectPrompt(html, where) {
+  assert.match(html, /Connect Swiggy to use real menus and prices\./, where);
+  assert.match(html, /data-act="swiggy-connect"/, where);
+  assert.doesNotMatch(html, /data-act="reload"|>Retry</, where);
+}
+
+test('every live surface without a Swiggy connection shows the same Connect prompt, never Retry', async () => {
+  const { context } = fixture({
+    '/api/plan/42/live-menus': NOT_CONNECTED,
+    '/api/session/7/swiggy-cart/preview': NOT_CONNECTED,
+    '/api/user/2/swiggy/menu?restaurant=A2B': NOT_CONNECTED,
+    '/api/user/2/swiggy/live-menu?restaurant_id=r-1&restaurant_name=A2B': NOT_CONNECTED,
+    '/api/user/2/swiggy/live-cart': NOT_CONNECTED,
+  });
+  await context.bootPromise;
+  const actions = [['live-menus'], ['order-meal', 7], ['order-week', 7], ['live-menu', 'A2B'], ['live-place', 'r-1', 'A2B']];
+  for (const [kind, ...args] of actions) {
+    vm.runInContext(`S.error = null; S.errorCode = null;`, context);
+    await vm.runInContext(`guard(() => liveAction(${JSON.stringify(kind)}, ...${JSON.stringify(args)}))`, context);
+    assertConnectPrompt(vm.runInContext('errbar()', context), kind);
+    assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(S.pendingResume)', context)), { kind, args });
+  }
+  await vm.runInContext('refreshLiveCart(false)', context);                         // the live cart panel
+  assertConnectPrompt(vm.runInContext('liveError(S.liveCartError, S.liveCartErrorCode)', context), 'live cart');
+  assertConnectPrompt(vm.runInContext("sourceLine({ kind: 'sample', connected: false, label: 'Sample dishes', note: '' })", context), 'plan source');
+  // an ordinary failure still offers Retry, and is not mistaken for a connection problem
+  vm.runInContext(`S.error = "Swiggy is busy"; S.errorCode = "swiggy_rate_limited";`, context);
+  assert.match(vm.runInContext('errbar()', context), /data-act="reload"/);
+});
+
+test('after connecting, the action the user started resumes exactly once', async () => {
+  // 1. Not connected: "Review live Swiggy item" is remembered across the Swiggy sign-in redirect.
+  const storage = memoryStorage({ 'smartplate.user': '2' });
+  const first = fixture({ '/api/session/7/swiggy-cart/preview': NOT_CONNECTED }, { storage });
+  await first.context.bootPromise;
+  await vm.runInContext('guard(() => liveAction("order-meal", 7))', first.context);
+  vm.runInContext('rememberResume()', first.context);
+  assert.equal(JSON.parse(storage.map.get('smartplate.resume')).kind, 'order-meal');
+
+  // 2. Back from Swiggy, connected but no address yet: it waits for the address.
+  const review = { session_id: 7, item: 'Mini Tiffin', restaurant: 'A2B', address: 'Home', menu_price: 125,
+    planned_cost: 160, fingerprint: 'f1' };
+  const connected = { connected: true, address: null, tools: [], callback_url: '' };
+  const back = fixture({ '/api/user/2/swiggy': connected, '/api/session/7/swiggy-cart/preview': review },
+    { storage, location: { search: '?swiggy=connected', href: '/' } });
+  await back.context.bootPromise;
+  const previews = () => back.calls.filter(c => c.url === '/api/session/7/swiggy-cart/preview').length;
+  assert.equal(previews(), 0);
+  assert.equal(storage.map.has('smartplate.resume'), false);                       // taken once, never again
+  assert.equal(vm.runInContext('S.pendingResume.kind', back.context), 'order-meal');
+
+  // 3. The address is chosen: the review opens, once.
+  vm.runInContext("S.swiggy = { ...S.swiggy, address: { id: 'addr-home', label: 'Home' } }", back.context);
+  assert.equal(await vm.runInContext('resumePending()', back.context), true);
+  assert.equal(previews(), 1);
+  assert.equal(vm.runInContext('S.cartReview.fingerprint', back.context), 'f1');
+  assert.equal(await vm.runInContext('resumePending()', back.context), false);
+  assert.equal(previews(), 1);
+
+  // 4. A later reload does not run it again.
+  const again = fixture({ '/api/user/2/swiggy': { ...connected, address: { id: 'addr-home', label: 'Home' } },
+    '/api/session/7/swiggy-cart/preview': review }, { storage, location: { search: '?swiggy=connected', href: '/' } });
+  await again.context.bootPromise;
+  assert.equal(again.calls.filter(c => c.url === '/api/session/7/swiggy-cart/preview').length, 0);
+});
+
+test('a resume saved for another profile, or long ago, is dropped', async () => {
+  const old = { user: 2, at: 0, kind: 'order-meal', args: [7] };
+  const storage = memoryStorage({ 'smartplate.user': '2', 'smartplate.resume': JSON.stringify(old) });
+  const { context, calls } = fixture({ '/api/user/2/swiggy': { connected: true, address: { id: 'a', label: 'Home' }, tools: [] } },
+    { storage, location: { search: '?swiggy=connected', href: '/' } });
+  await context.bootPromise;
+  assert.equal(vm.runInContext('S.pendingResume', context), null);
+  assert.equal(calls.filter(c => c.url.includes('swiggy-cart/preview')).length, 0);
+});
+
+// ---- The real bill corrects the plan (proposal 1) ----
+test('an over-budget cart shows the overage with Approve anyway and Re-plan, never a silent approve', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.orderQueue = { order_enabled: false, queued: 1, planned_total: 165, confirmed_total: 208.5,
+    scheduling: { why: 'x' }, meals: [{ session_id: 9, day_index: 1, meal: 'lunch', item: 'Peanut Chutney Dosa',
+    restaurant: 'A2B', planned_cost: 165, queued: true, state: 'cart_ready', to_pay: 208.5, bill: null }] };
+    S.cartBudget = { 9: { over: true, over_by: 23.5, message: 'This cart is ₹208.50. It takes the week ₹23.50 over your ₹1130 budget (₹1153.50 planned in all).' } };`, context);
+  const html = vm.runInContext('orderQueuePanel()', context);
+  assert.match(html, /takes the week ₹23\.50 over/);
+  assert.match(html, /data-over-ok="9"/);
+  assert.match(html, /data-replan="9"/);
+  assert.doesNotMatch(html, /data-oq-place="9"/);
+  // the single-meal hand-off hides the Swiggy link until the user says yes
+  vm.runInContext(`S.carts = { 9: { item: 'Dosa', restaurant: 'A2B', to_pay: 208.5, over_plan: 43.5, checkout_url: 'https://www.swiggy.com/',
+    budget: { over: true, message: 'over' } } }`, context);
+  assert.doesNotMatch(vm.runInContext('cartNote({ session_id: 9 })', context), /data-handoff/);
+  vm.runInContext('S.carts[9].budgetOk = true', context);
+  assert.match(vm.runInContext('cartNote({ session_id: 9 })', context), /data-handoff="9"/);
+});
+
+test('a live dish says its delivery fee is estimated until a real bill', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  const row = (fee, extra = '') => vm.runInContext(`mealRow({ kind: 'delivery', status: 'active', item: 'Dosa', restaurant: 'A2B',
+    cost: 171, session_id: 3, delivery_fee: ${JSON.stringify(fee)}${extra} }, 'lunch', 0)`, context);
+  assert.match(row({ amount: 35, estimated: true }), /delivery ₹35 estimated/);
+  assert.match(row({ amount: 41, estimated: false }), /delivery ₹41 from your bill/);
+  assert.match(row(null, ', real_bill: true'), /real Swiggy bill/);
 });
