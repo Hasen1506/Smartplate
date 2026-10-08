@@ -186,17 +186,23 @@ def test_redesign_today_cart_menu_week_you(world, viewport):
             # --- the main flow: two taps to the real bill -------------------------------------- #
             hero.get_by_role("button", name="Review & add to Swiggy cart").click()          # tap 1
             dialog = page.get_by_role("dialog")
-            expect(dialog.get_by_role("heading", name="Add this exact item?")).to_be_visible()
+            expect(dialog.get_by_role("heading", name="Add to your Swiggy cart?")).to_be_visible()
+            expect(dialog.locator(".est")).to_have_count(1)                                 # a menu price is an estimate
             dialog.get_by_role("button", name="Add to Swiggy cart", exact=True).click()     # tap 2
             hero = page.locator('section[aria-label="Next meal"]')
             bill = hero.locator(".billcard")
-            expect(bill).to_contain_text("Swiggy's bill · real")
-            expect(bill).to_contain_text("To pay")
+            expect(bill).to_contain_text("Swiggy's bill")
+            expect(bill).to_contain_text("To Pay")
+            expect(hero).to_contain_text("Added to your Swiggy cart")
+            checkout = hero.get_by_role("link", name="Open Swiggy checkout ↗")
+            expect(checkout).to_have_attribute("href", "https://www.swiggy.com/checkout")
+            expect(hero.locator(".cancel-note")).to_contain_text("cancellation policy applies")
             assert "update_food_cart" in w["fake"].tool_calls() and "place_food_order" not in w["fake"].tool_calls()
-            expect(hero).to_contain_text("Your plan estimated")
+            expect(hero).to_contain_text("Plan estimate")
             # the next step is paying in Swiggy: it becomes the one primary; the cart isn't shown twice
-            assert primaries(page) == ["Open Swiggy to review and pay ↗"], primaries(page)
-            assert page.get_by_text("In your Swiggy cart:", exact=False).count() == 1
+            assert primaries(page) == ["Open Swiggy checkout ↗"], primaries(page)
+            assert page.get_by_text("Added to your Swiggy cart", exact=False).count() == 1
+            assert page.get_by_text("In your Swiggy cart:", exact=False).count() == 0     # the cart is shown once
             expect(page.locator("main")).not_to_contain_text("cart for Home · 12 Lake View Rd, Adyar is empty")
             assert page.evaluate(CONTRAST_JS) == []
             shot("bill")

@@ -27,7 +27,12 @@ PG_SCHEMA = os.environ.get("SMARTPLATE_PG_SCHEMA", "").strip()
 PG_POOL_MAX = int(os.environ.get("SMARTPLATE_PG_POOL_MAX", "8"))
 # Seconds a request waits for a pooled connection before the pool is replaced once and,
 # if that fails too, the request answers 503 "database unavailable" (never a 30 s hang).
-PG_POOL_TIMEOUT = float(os.environ.get("SMARTPLATE_PG_POOL_TIMEOUT", "10"))
+# 5 s: a healthy pooled checkout takes milliseconds, and a pool stuck on connections the
+# Neon pooler dropped is detected and replaced after this wait (Oct 2026: 10 s made the
+# first request after an idle spell take ~10 s).
+PG_POOL_TIMEOUT = float(os.environ.get("SMARTPLATE_PG_POOL_TIMEOUT", "5"))
+# Background pool keep-alive (db_pg.start_keepalive): on by default on Render.
+PG_KEEPALIVE = os.environ.get("SMARTPLATE_PG_KEEPALIVE", "on" if os.environ.get("RENDER") else "off") == "on"
 DB_PATH = os.environ.get("SMARTPLATE_DB", "smartplate.db")
 # Where a persistent disk is mounted on Render (render.production.yaml). Anything else
 # on Render lives on the instance's ephemeral disk and is erased on every spin-down,
@@ -36,6 +41,27 @@ RENDER_DISK_MOUNT = os.environ.get("SMARTPLATE_DISK_MOUNT", "/var/data")
 # Optional explicit declaration for other hosts: "1" (the DB path survives restarts)
 # or "0" (it does not). Unset off Render means "unknown".
 DB_PERSISTENT = os.environ.get("SMARTPLATE_DB_PERSISTENT", "")
+
+# Where the app runs. Production is any Render service or any database that is not on this
+# machine; there, fixture data can never be switched on.
+def _production() -> bool:
+    if os.environ.get("RENDER") or os.environ.get("SMARTPLATE_ENV", "").lower() == "production":
+        return True
+    if DATABASE_URL:
+        from urllib.parse import urlsplit
+        try:
+            host = (urlsplit(DATABASE_URL).hostname or "").lower()
+        except ValueError:
+            return True
+        return host not in ("localhost", "127.0.0.1", "::1", "")
+    return False
+
+
+PRODUCTION = _production()
+# No fake data anywhere a person can see it (Oct 2026 rule). The sample Chennai catalogue,
+# sample profiles, sample weather and surge history exist only for the test-suite, behind
+# SMARTPLATE_FIXTURE_DATA=1, which is ignored in production.
+FIXTURE_DATA = os.environ.get("SMARTPLATE_FIXTURE_DATA") == "1" and not PRODUCTION
 
 # Brain selection — "deterministic" (free, default) or "llm" (optional, paid).
 AGENT_BRAIN = os.environ.get("SMARTPLATE_BRAIN", "deterministic")

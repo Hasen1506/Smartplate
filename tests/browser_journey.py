@@ -81,6 +81,9 @@ def test_browser_golden_first_week(server):
             page.get_by_role("button", name="Continue").click()
             page.locator('[data-ob="goal"][data-val="protein"]').click()
             page.locator("#ob-name").fill("Asha")
+            expect(page.get_by_text("You'll need this to sign in on another device", exact=False)).to_be_visible()
+            page.locator("#ob-login").fill("asha@example.com")       # the wizard saves a sign-in
+            page.locator("#ob-pw").fill("asha-long-password")
             page.get_by_role("button", name="Create profile →").click()
             expect(page.get_by_role("heading", name="Swiggy connection")).to_be_visible()
             uid = page.evaluate("S.userId")

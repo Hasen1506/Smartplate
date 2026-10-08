@@ -97,8 +97,9 @@ def test_b4_not_connected_falls_back_clearly(client, swiggy, monkeypatch):
     body = r.get_json()                    # 409 swiggy_not_connected once PR A is in; 502 on main today
     assert r.status_code in (409, 502) and "Connect your Swiggy account" in (body.get("message") or body["error"])
     view = client.get(f"/api/plan/{pid}").get_json()
-    assert view["source"] == {"kind": "sample", "connected": False, "label": "Sample dishes (not real restaurants)",
-                              "note": "Connect Swiggy to plan from real restaurants near you."}
+    assert view["source"] == {"kind": "sample", "connected": False, "needs": "connect", "stale_address": False,
+                              "label": "Sample dishes (test data)",
+                              "note": "Connect Swiggy and pick an address to see real dishes."}
 
 
 def test_b5_disconnect_returns_to_sample_and_says_so(client, swiggy):

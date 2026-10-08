@@ -3,7 +3,7 @@
 Everything returns plain dicts/lists so the rest of the engine stays simple and
 the optimiser can treat features uniformly.
 """
-from .. import db
+from .. import config, db
 
 # Meal windows in minutes-from-midnight: (open, peak, offpeak, close).
 # The off-peak slot is the cheaper time the surge engine can shift into (§3.3).
@@ -70,10 +70,10 @@ def menu_for_city(city: str) -> list[dict]:
                    r.delivery_fee, r.eta_min, r.is_open, r.flaky, r.city,
                    r.provider_id AS restaurant_provider_id
             FROM menu_items m JOIN restaurants r ON r.id = m.restaurant_id
-            WHERE r.city = ? AND r.is_open = 1
+            WHERE r.city = ? AND r.is_open = 1 AND (? = 1 OR (r.source = 'live' AND m.source = 'live'))
             ORDER BY m.id
             """,
-            (city,),
+            (city, 1 if config.FIXTURE_DATA else 0),
         ).fetchall()
     items = []
     for r in rows:
@@ -86,19 +86,20 @@ def menu_for_city(city: str) -> list[dict]:
 
 
 def menu_for_user(user: dict) -> list[dict]:
-    """The catalogue a user's plan is built from: their live Swiggy menus when they have
-    refreshed them (domain/live_catalog), otherwise the sample catalogue for their city.
-    The two are never mixed."""
+    """The catalogue a user's plan is built from: their live Swiggy menus, read for their
+    chosen delivery address (domain/live_catalog). Without them there are no restaurant
+    dishes at all (the plan offers home-cooked meals and says how to get real dishes);
+    the sample catalogue exists only as test fixture data (config.FIXTURE_DATA)."""
     from . import live_catalog
     if user.get("id") and live_catalog.has_live(user["id"]):
         return live_catalog.with_learned_fees(user["id"], menu_for_city(live_catalog.city_key(user["id"])))
-    return menu_for_city(user["city"])
+    return menu_for_city(user["city"]) if config.FIXTURE_DATA else []
 
 
 def restaurants_for_city(city: str) -> list[dict]:
     with db.cursor() as cur:
-        rows = cur.execute("SELECT * FROM restaurants WHERE city=? ORDER BY rating DESC, name",
-                           (city,)).fetchall()
+        rows = cur.execute("SELECT * FROM restaurants WHERE city=? AND (? = 1 OR source='live') "
+                           "ORDER BY rating DESC, name", (city, 1 if config.FIXTURE_DATA else 0)).fetchall()
     out = []
     for r in rows:
         d = db.row_to_dict(r)

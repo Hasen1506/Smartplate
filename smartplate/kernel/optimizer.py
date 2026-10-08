@@ -339,6 +339,9 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
         cands.append(cook)
 
     skip_reason = "No safe option within your rating floor and budget — session skipped."
+    if not ctx["menu"]:
+        # No restaurant dishes at all (no live Swiggy menus yet): say so, not "budget".
+        skip_reason = "No real restaurant dishes yet — connect Swiggy and pick an address."
     if fasting:
         skip_reason = "Inside your fasting window — kept clear (cook/skip only)."
     skip = _skip(forced=False, reason=skip_reason)

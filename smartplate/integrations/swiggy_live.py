@@ -40,7 +40,7 @@ READ_ONLY = frozenset({"get_addresses", "search_restaurants", "get_restaurant_me
 MENU_TTL = dt.timedelta(hours=6)
 CHECKOUT_QUOTE_TTL = dt.timedelta(minutes=5)
 MATCH_RESTAURANT = 0.6
-CHECKOUT_URL = "https://www.swiggy.com/"
+CHECKOUT_URL = "https://www.swiggy.com/checkout"
 
 ALIASES = {
     "query": ["query", "searchQuery", "search_query", "keyword", "q", "restaurantName", "restaurant_name"],
@@ -441,39 +441,84 @@ def cart_total(cart: dict, anchor: float | None = None) -> float | None:
     return None
 
 
-BILL_FIELDS = [   # (label, keys Swiggy may use) in display order; amounts as Swiggy returns them
-    ("Items", ("item_total", "itemTotal", "items_total", "subtotal", "sub_total")),
-    ("Delivery", ("delivery_charge", "deliveryCharge", "delivery_fee", "deliveryFee")),
-    ("Platform fee", ("platform_fee", "platformFee", "convenience_fee", "convenienceFee")),
-    ("Packaging", ("packaging_charge", "packagingCharge", "packaging_charges", "packing_charges", "packingCharges")),
-    ("Small-cart fee", ("small_cart_fee", "smallCartFee")),
-    ("GST & taxes", ("gst", "taxes", "tax", "total_tax", "totalTax", "gst_and_restaurant_charges")),
+BILL_FIELDS = [   # (label, keys Swiggy may use) in display order; amounts as Swiggy returns them.
+    # Labels are the ones Swiggy's own bill uses ("GST & Other Charges" is Swiggy's
+    # documented `taxes_and_charges`, https://mcp.swiggy.com/builders/docs/reference/food/get_food_cart/).
+    ("Item Total", ("item_total", "itemTotal", "items_total", "subtotal", "sub_total")),
+    ("Delivery Fee", ("delivery_charge", "deliveryCharge", "delivery_fee", "deliveryFee")),
+    ("Platform Fee", ("platform_fee", "platformFee", "convenience_fee", "convenienceFee")),
+    ("Packaging Charges", ("packaging_charge", "packagingCharge", "packaging_charges", "packing_charges", "packingCharges")),
+    ("Small Cart Fee", ("small_cart_fee", "smallCartFee")),
+    ("GST & Other Charges", ("taxes_and_charges", "taxesAndCharges", "gst_and_other_charges", "gst", "taxes", "tax",
+                             "total_tax", "totalTax", "gst_and_restaurant_charges")),
     ("Discount", ("discount", "total_discount", "totalDiscount", "coupon_discount")),
 ]
+ROUNDING_TOLERANCE = 1.0          # Swiggy rounds the payable total to the rupee
 
 
 def bill_breakdown(cart: dict, anchor: float | None = None) -> dict | None:
-    """The cart's bill line by line, exactly as Swiggy returned it: items, delivery,
-    platform and packaging fees, GST, discounts and the payable total. Lines Swiggy did
-    not return are left out (never guessed); any gap between the lines and the total is
-    shown as "Other charges" so the lines always add up to what will be paid."""
+    """The cart's bill line by line, exactly as Swiggy returned it, to the paisa: item
+    total, delivery, fees, GST & Other Charges, discount and the payable total, with
+    Swiggy's own labels. Lines Swiggy did not return are left out (never guessed).
+
+    No line is ever invented. Swiggy rounds the payable total to the rupee, so the lines
+    can differ from it by under ₹1 (`rounding`, shown as a note). A larger gap means
+    Swiggy charged something it did not itemise: `unitemised` says so, and the bill is
+    not marked itemised; the amount is never presented as a Swiggy line."""
     total = cart_total(cart, anchor)
     if total is None:
         return None
     pricing = cart.get("pricing") if isinstance(cart.get("pricing"), dict) else cart
+    offers = cart.get("offers") if isinstance(cart.get("offers"), dict) else {}
     raw = []
     for label, keys in BILL_FIELDS:
         for key in keys:
-            value = pricing.get(key) if isinstance(pricing, dict) else None
+            node = pricing if isinstance(pricing, dict) else {}
+            value = node.get(key)
+            if value is None and label == "Discount":
+                value = offers.get(key)          # coupon_discount lives under offers; > 0 means applied
             if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value:
                 raw.append((label, -abs(value) if label == "Discount" else float(value)))
                 break
     scale = _line_scale(raw, total)
     lines = [{"label": label, "amount": round(v / scale, 2)} for label, v in raw]
     gap = round(total - sum(line["amount"] for line in lines), 2)
+    out = {"lines": lines, "to_pay": total, "source": "swiggy_cart"}
     if lines and abs(gap) >= 0.01:
-        lines.append({"label": "Other charges (as Swiggy shows them)", "amount": gap})
-    return {"lines": lines, "to_pay": total, "itemised": bool(lines) and abs(gap) < 0.01}
+        if abs(gap) < ROUNDING_TOLERANCE:
+            out["rounding"] = gap
+        else:
+            out["unitemised"] = gap
+    out["itemised"] = bool(lines) and "unitemised" not in out
+    return out
+
+
+CANCELLATION_RE = re.compile(r"[^.\n]*cancell?ation[^.\n]*(fee|charge)[^.\n]*\.?|[^.\n]*(fee|charge)[^.\n]*cancell?ed[^.\n]*\.?",
+                             re.IGNORECASE)
+
+
+def cancellation_note(data: object) -> str | None:
+    """Swiggy's own cancellation-fee sentence when its reply carries one (e.g. "100%
+    cancellation fee if cancelled after 60 seconds"), else None. Never paraphrased."""
+    stack, seen = [data], 0
+    while stack and seen < 5000:
+        node = stack.pop()
+        seen += 1
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+        elif isinstance(node, str) and "cancel" in node.lower():
+            if node.lstrip().startswith(("{", "[")):
+                try:
+                    stack.append(json.loads(node))
+                    continue
+                except ValueError:
+                    pass
+            m = CANCELLATION_RE.search(node)
+            if m:
+                return re.sub(r"\s+", " ", m.group(0)).strip()[:200]
+    return None
 
 
 def _line_scale(raw: list, total: float) -> float:
@@ -491,13 +536,13 @@ def billed_delivery_fee(cart: dict, anchor: float | None = None) -> float | None
     if bill is None:
         return None
     pricing = cart.get("pricing") if isinstance(cart.get("pricing"), dict) else cart
-    keys = dict(BILL_FIELDS)["Delivery"]
+    keys = dict(BILL_FIELDS)["Delivery Fee"]
     value = next((pricing.get(k) for k in keys if isinstance(pricing, dict) and k in pricing), None)
     if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
         return None
     if value == 0:
         return 0.0
-    line = next((l for l in bill["lines"] if l["label"] == "Delivery"), None)
+    line = next((l for l in bill["lines"] if l["label"] == "Delivery Fee"), None)
     return line["amount"] if line else None
 
 
@@ -866,6 +911,20 @@ def _planned(session_id: int) -> tuple[int, dict]:
     return view["user"]["id"], cell
 
 
+def _live_ids(cell: dict) -> dict | None:
+    """Swiggy's restaurant and menu item ids for a planned live dish, else None."""
+    if not cell.get("restaurant_id"):
+        return None
+    with db.cursor() as cur:
+        r = cur.execute("SELECT source, provider_id FROM restaurants WHERE id=?", (cell["restaurant_id"],)).fetchone()
+        m = cur.execute("SELECT provider_item_id FROM menu_items WHERE id=?", (cell.get("item_id"),)).fetchone() \
+            if cell.get("item_id") else None
+    if not r or r["source"] != "live" or not r["provider_id"]:
+        return None
+    return {"restaurant_id": str(r["provider_id"]),
+            "item_id": str(m["provider_item_id"]) if m and m["provider_item_id"] else None}
+
+
 def _name(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", (value or "").lower())).strip()
 
@@ -884,12 +943,18 @@ def cart_preview(session_id: int) -> dict:
                           "Open Swiggy and confirm the dish with the restaurant before ordering.")
     conn = _conn(user_id)
     address_id = _address(conn)
-    place = find_restaurant(user_id, cell["restaurant"])
+    live = _live_ids(cell)
+    # A dish from the user's live catalogue carries Swiggy's own restaurant and item ids:
+    # use them, never a fuzzy name search (Oct 8 live test: a planned dish was looked up
+    # by name and "couldn't be found on Swiggy for your address").
+    place = {"id": live["restaurant_id"], "name": cell["restaurant"]} if live else find_restaurant(user_id, cell["restaurant"])
     tool = _tool(conn, "search_menu")
     data = call(user_id, "search_menu", build_args(tool, {
         "query": cell["item"], "address": address_id, "restaurant_scope": place["id"]}))
-    exact = [r for r in records(data, "menu_item_id", "name") if _name(str(_get(r, "name"))) == _name(cell["item"])
-             and (_get(r, "restaurant_id") is None or str(_get(r, "restaurant_id")) == str(place["id"]))]
+    rows = records(data, "menu_item_id", "name")
+    exact = [r for r in rows if live and live.get("item_id") and str(_get(r, "menu_item_id")) == live["item_id"]] or [
+        r for r in rows if _name(str(_get(r, "name"))) == _name(cell["item"])
+        and (_get(r, "restaurant_id") is None or str(_get(r, "restaurant_id")) == str(place["id"]))]
     if len(exact) != 1:
         raise SwiggyError(f"Could not verify one exact live match for {cell['item']} at {place['name']}. "
                           "Open Swiggy to choose the right dish.")
@@ -926,7 +991,8 @@ def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
     return {"session_id": session_id, "restaurant": preview["restaurant"], "item": preview["item"],
             "planned": cell["item"], "planned_cost": planned, "menu_price": preview["menu_price"],
             "to_pay": to_pay, "over_plan": round(to_pay - planned, 2) if to_pay is not None else None,
-            "bill": prepared.get("bill"), "checkout_url": CHECKOUT_URL}
+            "bill": prepared.get("bill"), "checkout_url": CHECKOUT_URL,
+            "cancellation_note": prepared.get("cancellation_note")}
 
 
 SAFETY_NOTE = ("SmartPlate cannot verify your ingredient or medical rules from Swiggy's menu, so it won't add "
@@ -1209,9 +1275,12 @@ def current_live_cart(user_id: int) -> dict:
     prepared = bool(not other and intent and intent["address_id"] == address_id
                     and not _cart_mismatch(cart, intent["restaurant_id"], intent["item_id"]))
     name = restaurant.get("name") if isinstance(restaurant, dict) else None
+    anchor = intent.get("menu_price") if prepared and intent else None
     return {"cart": {"item": ", ".join(str(_get(i, "name") or "Unnamed item") for i in cart["items"]),
                      "restaurant": name or (intent["restaurant_name"] if prepared else "Check restaurant in Swiggy"),
-                     "to_pay": cart_total(cart, intent.get("menu_price") if prepared and intent else None),
+                     "to_pay": cart_total(cart, anchor),
+                     "bill": bill_breakdown(cart, anchor),
+                     "cancellation_note": cancellation_note(data),
                      "orderable": prepared,
                      "checkout_url": CHECKOUT_URL,
                      "other_address": other},
@@ -1270,7 +1339,8 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     live_catalog.record_fee(user_id, preview["address_id"], restaurant_id, preview["restaurant"],
                             billed_delivery_fee(view, preview.get("menu_price")))
     return {**preview, "to_pay": cart_total(view, preview.get("menu_price")), "checkout_url": CHECKOUT_URL,
-            "bill": bill_breakdown(view, preview.get("menu_price")), "orderable": True}
+            "bill": bill_breakdown(view, preview.get("menu_price")), "orderable": True,
+            "cancellation_note": cancellation_note(cart)}
 
 
 def _checkout_state(user_id: int) -> dict:

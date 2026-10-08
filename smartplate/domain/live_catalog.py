@@ -10,8 +10,9 @@ plan say so. The delivery fee is LIVE_DELIVERY_FEE_ESTIMATE until a real cart bi
 that restaurant has been seen; from then on the planner uses the fee Swiggy billed
 (`record_fee`, `with_learned_fees`) and says so.
 
-Without a connection the planner keeps the sample catalogue, and the plan view says
-plainly that it is sample data (`source_for`).
+Without live menus the plan has no restaurant dishes at all: it offers home-cooked meals
+and `source_for` says what is needed for real dishes. (The sample catalogue is test
+fixture data only.)
 """
 import re
 
@@ -239,26 +240,34 @@ def with_learned_fees(user_id: int, items: list[dict]) -> list[dict]:
 
 
 def source_for(user_id: int, connected: bool | None = None) -> dict:
-    """What the plan is built from, in words the user can act on."""
+    """What the plan's restaurant dishes come from, in words the user can act on.
+
+    kind "live": real Swiggy menus read for the chosen address. Otherwise kind "none"
+    (no restaurant dishes; only home-cooked meals) with `needs` saying the next step:
+    "connect" Swiggy, choose an "address", or "sync" (connected with an address: the app
+    reads the live menus itself). Test fixture runs report kind "sample" instead of "none"."""
+    from ..integrations import swiggy_connect
     with db.cursor() as cur:
         row = cur.execute("SELECT * FROM live_catalog_state WHERE user_id=?", (user_id,)).fetchone()
-    if row and not _for_current_address(user_id, row["address_id"]):
-        return {"kind": "sample", "connected": True, "stale_address": True,
-                "label": "Sample dishes (not real restaurants)",
-                "note": "Your live menus were read for another delivery address. "
-                        "Plan from your Swiggy restaurants again for the address you chose."}
-    if row:
+    if row and _for_current_address(user_id, row["address_id"]):
         return {"kind": "live", "fetched": row["fetched_ts"], "restaurants": row["restaurants"],
                 "dishes": row["dishes"],
                 "label": f"Live Swiggy menus · {row['restaurants']} restaurant{'s' if row['restaurants'] != 1 else ''}, "
                          f"{row['dishes']} dishes",
                 "note": "Prices from Swiggy. Nutrition is estimated from dish names; delivery fees are estimates "
                         "until the cart is checked."}
-    if connected is None:
-        from ..integrations import swiggy_connect
-        connected = bool(swiggy_connect.status(user_id).get("connected"))
-    return {"kind": "sample", "connected": connected,
-            "label": "Sample dishes (not real restaurants)",
-            "note": ("Plan from your Swiggy restaurants to use real menus and prices." if connected else
-                     "Connect Swiggy to plan from real restaurants near you." if config.SWIGGY_REDIRECT_APPROVED else
-                     "Connecting Swiggy on this server is waiting for Swiggy's approval, so plans use sample dishes.")}
+    status = swiggy_connect.status(user_id) if connected is None else {"connected": connected}
+    connected = bool(status.get("connected"))
+    has_address = bool(_address_id(user_id))
+    needs = "sync" if connected and has_address else "address" if connected else "connect"
+    kind = "sample" if config.FIXTURE_DATA else "none"
+    note = {"sync": ("Your live menus were read for another delivery address. Reading real dishes for the "
+                     "address you chose." if row else "Reading real dishes from Swiggy for your address."),
+            "address": "Pick a delivery address to see real dishes.",
+            "connect": ("Connect Swiggy and pick an address to see real dishes." if config.SWIGGY_REDIRECT_APPROVED
+                        else "Connecting Swiggy from SmartPlate is waiting for Swiggy's approval. "
+                             "Until then, plans show home-cooked meals only.")}[needs]
+    out = {"kind": kind, "connected": connected, "needs": needs, "stale_address": bool(row),
+           "label": "Sample dishes (test data)" if kind == "sample" else "No restaurant dishes yet",
+           "note": note}
+    return out

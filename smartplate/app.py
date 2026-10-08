@@ -40,6 +40,29 @@ def _missing(key: str, value) -> tuple:
                    missing=key, id=value), 404
 
 
+ASSETS = {"app.js": "text/javascript", "styles.css": "text/css"}
+
+
+def _fingerprinted_assets() -> dict:
+    import gzip
+    import hashlib
+    out = {}
+    for name, mime in ASSETS.items():
+        with open(os.path.join(STATIC_DIR, name), "rb") as f:
+            raw = f.read()
+        out[name] = {"raw": raw, "gzip": gzip.compress(raw, 9, mtime=0), "mime": mime,
+                     "hash": hashlib.sha256(raw).hexdigest()[:12]}
+    return out
+
+
+def _shell_html(assets: dict) -> str:
+    with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as f:
+        html = f.read()
+    for name, asset in assets.items():
+        html = html.replace(f'"/static/{name}"', f'"/static/{name}?v={asset["hash"]}"')
+    return html
+
+
 def create_app() -> Flask:
     if config.LIVE_ORDERS and os.environ.get("RENDER"):
         durable = bool(config.DATABASE_URL) or config.DB_PATH.startswith("/var/data/")
@@ -49,7 +72,7 @@ def create_app() -> Flask:
                                "(DATABASE_URL or /var/data), "
                                "stable SMARTPLATE_SECRET and HTTPS SMARTPLATE_PUBLIC_URL")
     initialize()
-    app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
+    app = Flask(__name__, static_folder=None)
     app.config['MAX_CONTENT_LENGTH'] = 256 * 1024
     if config.BEHIND_PROXY:                  # one trusted hop sets X-Forwarded-For/Proto/Host
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
@@ -172,9 +195,33 @@ def create_app() -> Flask:
         return response
 
     # ---- UI ---- #
+    # The app shell and its two assets. app.js and styles.css are fingerprinted (?v=<hash>
+    # of their bytes) so a browser may keep them for a year: a release changes the hash and
+    # the URL. They are gzipped once here (the app runs behind no compressing proxy).
+    assets = _fingerprinted_assets()
+    shell = _shell_html(assets)
+
     @app.get("/")
     def index():
-        return send_from_directory(STATIC_DIR, "index.html")
+        response = Response(shell, mimetype="text/html")
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    @app.get("/static/<path:filename>")
+    def static_file(filename):
+        asset = assets.get(filename)
+        if asset and request.args.get("v") == asset["hash"]:
+            gz = "gzip" in (request.headers.get("Accept-Encoding") or "")
+            response = Response(asset["gzip"] if gz else asset["raw"], mimetype=asset["mime"])
+            if gz:
+                response.headers["Content-Encoding"] = "gzip"
+            response.headers["Vary"] = "Accept-Encoding"
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            response.headers["ETag"] = f'"{asset["hash"]}"'
+            return response
+        response = send_from_directory(STATIC_DIR, filename)
+        response.headers["Cache-Control"] = "no-cache" if asset else "public, max-age=86400"
+        return response
 
     @app.get("/healthz")
     def healthz():
@@ -225,6 +272,7 @@ def create_app() -> Flask:
             "note": "v1.1 plans with a MILP solver — no per-decision LLM cost (see FEASIBILITY.md).",
             "weather_provider": config.WEATHER_PROVIDER,
             "catalog_city": everyday.CITY,
+            "fixture_data": config.FIXTURE_DATA,
             "features": _FEATURE_MAP,
             # Epicure ingredient embeddings: swaps, "more like this", cuisine tilt
             "epicure": {"available": epicure.get() is not None, "cuisines": flavour.CUISINES},
@@ -319,7 +367,9 @@ def create_app() -> Flask:
 
     @app.post("/api/plan/<int:plan_id>/sample-menus")
     def plan_from_sample_menus(plan_id):
-        """Go back to the sample catalogue (clears the user's live catalogue)."""
+        """Test runs only: go back to the sample catalogue (clears the user's live catalogue)."""
+        if not config.FIXTURE_DATA:
+            return jsonify(error="Not available."), 404
         plan = models.get_plan(plan_id)
         if not plan:
             raise ValueError("Plan not found")
@@ -368,6 +418,8 @@ def create_app() -> Flask:
     @app.post("/api/plan/<int:plan_id>/execute")
     def execute(plan_id):
         body = request.get_json(silent=True) or {}
+        if not config.FIXTURE_DATA:
+            return jsonify(error='Simulated ordering exists only in test runs. Add a meal to your Swiggy cart from Today.'), 404
         if config.SWIGGY_PROVIDER != 'simulated':
             return jsonify(error='Live Swiggy checkout is not connected. The demo catalog cannot be ordered on Swiggy.'), 503
         if body.get('expected_fingerprint') is None or body.get('max_total') is None:
@@ -452,6 +504,8 @@ def create_app() -> Flask:
     # ---- idempotency demo: place the same order twice ---- #
     @app.post("/api/demo/idempotency")
     def idempotency_demo():
+        if not config.FIXTURE_DATA:                # a demo with an invented "Demo Diner": tests only
+            return jsonify(error="Not available."), 404
         prov = swiggy_mcp.SimulatedSwiggyProvider(seed=1)
         decision = {"id": -1, "cost": 199.0}
         restaurant = {"id": 1, "name": "Demo Diner", "flaky": 0}

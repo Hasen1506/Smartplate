@@ -45,6 +45,13 @@ def seed_calendar(cur) -> None:
         INDIA_CALENDAR)
 
 
+def ensure_calendar() -> None:
+    """Load the real holiday calendar into an empty table (production never runs the seed)."""
+    with db.cursor() as cur:
+        if cur.execute("SELECT 1 FROM festivals LIMIT 1").fetchone() is None:
+            seed_calendar(cur)
+
+
 def for_week(week_start_iso: str) -> dict:
     """Return {day_index: festival_row} for the plan week. When a day has several
     entries, a feast/holiday wins over an opt-in fast for display; the fast still

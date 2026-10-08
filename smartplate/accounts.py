@@ -43,6 +43,24 @@ def _now() -> str:
     return clock.now().isoformat(timespec="seconds")
 
 
+def check_new_login(login, password) -> tuple[str, str]:
+    """Validate a sign-in chosen while creating a profile, before anything is written."""
+    login, pw = _norm(login), _password(password)
+    with db.cursor() as cur:
+        if cur.execute("SELECT 1 FROM logins WHERE login=?", (login,)).fetchone():
+            raise ValueError("That sign-in name is taken. Try another.")
+    return login, pw
+
+
+def insert_login(cur, user_id: int, login: str, password: str) -> None:
+    now = _now()
+    try:
+        cur.execute("INSERT INTO logins(user_id, login, pw_hash, created_ts, updated_ts) VALUES (?,?,?,?,?)",
+                    (user_id, login, generate_password_hash(password), now, now))
+    except db.IntegrityError as exc:                      # taken between the check and the insert
+        raise ValueError("That sign-in name is taken. Try another.") from exc
+
+
 def summary(user_id: int, presented: str | None = None) -> dict:
     here = access.digest(presented) if presented else None
     with db.cursor() as cur:

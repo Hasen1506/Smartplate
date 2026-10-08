@@ -338,11 +338,24 @@ def conninfo(url: str, schema: str = "") -> tuple[str, dict]:
     return url, kwargs
 
 
+CHECK_AFTER_IDLE_S = 5.0
+_last_used: dict[int, float] = {}            # id(connection) -> monotonic time it was returned healthy
+
+
 def check_connection(conn: psycopg.Connection) -> None:
     """The pool's check before it hands out a connection. One that fails is CLOSED, so the
     pool discards it and opens a fresh one. (psycopg_pool's own check only raises: a
     connection whose socket still looks fine is put straight back and checked again, in a
-    loop that ends in PoolTimeout with nothing but INFO lines. Fresh connections work.)"""
+    loop that ends in PoolTimeout with nothing but INFO lines. Fresh connections work.)
+
+    A connection returned healthy within the last CHECK_AFTER_IDLE_S seconds is handed out
+    without the extra round-trip: one Today load checks out ~30 connections in a row, and a
+    check each time doubled its database round-trips. Idle drops (the Neon pooler's) happen
+    after much longer idles, and the keep-alive finds them off the request path."""
+    used = _last_used.get(id(conn))
+    if used is not None and time.monotonic() - used < CHECK_AFTER_IDLE_S and not conn.closed \
+            and conn.info.transaction_status == pq.TransactionStatus.IDLE:
+        return
     try:
         ConnectionPool.check_connection(conn)
     except Exception as exc:
@@ -411,6 +424,54 @@ def _report_timeout(pool_: ConnectionPool) -> None:
                 pool_.timeout, pool_.get_stats(), holders[:8] or "nobody")
 
 
+KEEPALIVE_S = 45.0
+_keeper: list = []
+
+
+def warm() -> float:
+    """Open and check one pooled connection now (boot), so the first request doesn't pay
+    for the TLS handshake. Returns the seconds it took."""
+    t0 = time.monotonic()
+    conn = Connection(pool())
+    try:
+        conn.execute("SELECT 1")
+        conn.commit()
+    finally:
+        conn.close()
+    return time.monotonic() - t0
+
+
+def _keep_alive_loop(stop: threading.Event) -> None:
+    while not stop.wait(KEEPALIVE_S):
+        current = pool()
+        try:
+            conn = current.getconn(timeout=3)      # the check hook closes a dropped connection
+            try:
+                conn.execute("SELECT 1")
+                conn.rollback()
+            finally:
+                current.putconn(conn)
+        except PoolTimeout:
+            log.warning("keep-alive: no database connection within 3 s; replacing the pool")
+            replace_pool(current)
+        except Exception as exc:                 # never let the keeper die
+            log.warning("keep-alive ping failed (%s: %s)", type(exc).__name__, str(exc).strip()[:200])
+
+
+def start_keepalive() -> None:
+    """Ping the pool every KEEPALIVE_S seconds in the background. The Neon pooler drops idle
+    TLS connections from its side (Oct 2026 logs: SSL EOF / bad record mac); before this, the
+    first request after such a drop waited the whole pool timeout while the pool was
+    replaced. The ping keeps one connection in use and finds a dead pool off the request
+    path. It runs only while the web instance is awake (Render's free plan sleeps it)."""
+    if _keeper:
+        return
+    stop = threading.Event()
+    t = threading.Thread(target=_keep_alive_loop, args=(stop,), name="smartplate-db-keepalive", daemon=True)
+    _keeper.append((t, stop))
+    t.start()
+
+
 def close_pools() -> None:
     with _pools_lock:
         while _pools:
@@ -429,10 +490,27 @@ class Connection:
             conn = pool_.getconn()           # one bounded try on a fresh pool, then PoolTimeout -> 503
         self._pool = pool_
         self._conn = conn
+        self._first = True                   # nothing sent yet: a dead connection can be swapped
         _held[id(conn)] = (threading.current_thread().name, time.monotonic())
 
     def cursor(self) -> "Cursor":
-        return Cursor(self._conn)
+        return Cursor(self._conn, owner=self)
+
+    def _swap_dead(self) -> psycopg.Connection | None:
+        """Before anything was sent on this connection: if it turns out dead (it was handed
+        out without a check because it was used moments ago), discard it and take a
+        checked one. Returns the new connection, or None when the old one is alive (a real
+        SQL error that must surface)."""
+        old = self._conn
+        if not (old.closed or old.info.status == pq.ConnStatus.BAD):
+            return None
+        _held.pop(id(old), None)
+        _last_used.pop(id(old), None)
+        with suppress(Exception):
+            self._pool.putconn(old)
+        self._conn = self._pool.getconn()
+        _held[id(self._conn)] = (threading.current_thread().name, time.monotonic())
+        return self._conn
 
     def execute(self, sql, params=()):
         return self.cursor().execute(sql, params)
@@ -458,6 +536,10 @@ class Connection:
                 with suppress(Exception):
                     conn.close()
             finally:
+                if not conn.closed and conn.info.transaction_status == pq.TransactionStatus.IDLE:
+                    _last_used[id(conn)] = time.monotonic()
+                else:
+                    _last_used.pop(id(conn), None)
                 self._pool.putconn(conn)
 
 
@@ -468,11 +550,27 @@ def connect() -> Connection:
 class Cursor:
     """sqlite3.Cursor's surface over a psycopg cursor."""
 
-    def __init__(self, conn: psycopg.Connection):
+    def __init__(self, conn: psycopg.Connection, owner: "Connection | None" = None):
         self._conn = conn
+        self._owner = owner
         self._cur = conn.cursor()
         self.lastrowid = None
         self._pending = None          # the row consumed to read RETURNING id
+
+    def _run(self, fn):
+        owner = self._owner
+        if owner is None or not owner._first:
+            return fn()
+        try:
+            out = fn()
+        except psycopg.OperationalError:
+            fresh = owner._swap_dead()
+            if fresh is None:
+                raise
+            self._conn, self._cur = fresh, fresh.cursor()
+            out = fn()
+        owner._first = False
+        return out
 
     @property
     def rowcount(self):
@@ -487,7 +585,8 @@ class Cursor:
         self._pending = None
         if t.noop:
             return self
-        self._cur.execute(t.sql, tuple(params or ()))
+        params = tuple(params or ())
+        self._run(lambda: self._cur.execute(t.sql, params))
         if t.returning_id:
             row = self._cur.fetchone()
             self.lastrowid = row[0] if row else self.lastrowid
@@ -500,7 +599,7 @@ class Cursor:
         seq = [tuple(p) for p in seq]
         if t.noop or not seq:
             return self
-        self._cur.executemany(t.sql, seq)
+        self._run(lambda: self._cur.executemany(t.sql, seq))
         if t.explicit_id_table:
             self._sync_identity(t.explicit_id_table)
         return self

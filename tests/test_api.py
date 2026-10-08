@@ -1,4 +1,6 @@
 """Smoke tests over the HTTP API surface."""
+import re
+
 import pytest
 
 from smartplate.app import create_app
@@ -22,7 +24,7 @@ def test_private_app_security_policy_works_with_external_bootstrap(client):
     assert "script-src 'self'" in policy and "frame-ancestors 'none'" in policy
     assert response.headers["X-Frame-Options"] == "DENY"
     html = response.data.decode()
-    assert '<script src="/static/app.js">' in html and '<script>' not in html
+    assert re.search(r'<script src="/static/app\.js\?v=[0-9a-f]{12}">', html) and '<script>' not in html
     script = client.get("/static/app.js").data.decode()
     assert 'onclick="' not in script and 'register("/sw.js")' in script
 
