@@ -7,6 +7,11 @@ cooking — that's the point (widens the moat).
 """
 
 
+# What a home-cooked meal's cost is: an estimate, never a live price.
+COST_BASIS = ("Grocery estimate per serving, from typical Chennai shop pack prices "
+              "(Toor dal, rice, vegetables); not a live Instamart price.")
+
+
 def _ing(*tokens):
     """A recipe's ingredients as Epicure tokens (labels live in domain/ingredients.py)."""
     from .ingredients import name

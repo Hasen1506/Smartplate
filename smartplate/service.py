@@ -339,6 +339,8 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
                 if d.get("real_bill"):
                     extra["real_bill"] = True
                     extra["planned_cost"] = round(d["planned_cost"], 2)
+            elif d["chosen_kind"] == "cook":
+                extra["cost_basis"] = reverse_mode.COST_BASIS
         grid[d["day"]]["meals"][d["meal"]] = {
             "kind": d["chosen_kind"], "item": d["item_name"],
             "restaurant": d.get("restaurant_name") or "",

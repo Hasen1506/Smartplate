@@ -911,6 +911,20 @@ def _planned(session_id: int) -> tuple[int, dict]:
     return view["user"]["id"], cell
 
 
+def _live_ids(cell: dict) -> dict | None:
+    """Swiggy's restaurant and menu item ids for a planned live dish, else None."""
+    if not cell.get("restaurant_id"):
+        return None
+    with db.cursor() as cur:
+        r = cur.execute("SELECT source, provider_id FROM restaurants WHERE id=?", (cell["restaurant_id"],)).fetchone()
+        m = cur.execute("SELECT provider_item_id FROM menu_items WHERE id=?", (cell.get("item_id"),)).fetchone() \
+            if cell.get("item_id") else None
+    if not r or r["source"] != "live" or not r["provider_id"]:
+        return None
+    return {"restaurant_id": str(r["provider_id"]),
+            "item_id": str(m["provider_item_id"]) if m and m["provider_item_id"] else None}
+
+
 def _name(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", (value or "").lower())).strip()
 
@@ -929,12 +943,18 @@ def cart_preview(session_id: int) -> dict:
                           "Open Swiggy and confirm the dish with the restaurant before ordering.")
     conn = _conn(user_id)
     address_id = _address(conn)
-    place = find_restaurant(user_id, cell["restaurant"])
+    live = _live_ids(cell)
+    # A dish from the user's live catalogue carries Swiggy's own restaurant and item ids:
+    # use them, never a fuzzy name search (Oct 8 live test: a planned dish was looked up
+    # by name and "couldn't be found on Swiggy for your address").
+    place = {"id": live["restaurant_id"], "name": cell["restaurant"]} if live else find_restaurant(user_id, cell["restaurant"])
     tool = _tool(conn, "search_menu")
     data = call(user_id, "search_menu", build_args(tool, {
         "query": cell["item"], "address": address_id, "restaurant_scope": place["id"]}))
-    exact = [r for r in records(data, "menu_item_id", "name") if _name(str(_get(r, "name"))) == _name(cell["item"])
-             and (_get(r, "restaurant_id") is None or str(_get(r, "restaurant_id")) == str(place["id"]))]
+    rows = records(data, "menu_item_id", "name")
+    exact = [r for r in rows if live and live.get("item_id") and str(_get(r, "menu_item_id")) == live["item_id"]] or [
+        r for r in rows if _name(str(_get(r, "name"))) == _name(cell["item"])
+        and (_get(r, "restaurant_id") is None or str(_get(r, "restaurant_id")) == str(place["id"]))]
     if len(exact) != 1:
         raise SwiggyError(f"Could not verify one exact live match for {cell['item']} at {place['name']}. "
                           "Open Swiggy to choose the right dish.")
