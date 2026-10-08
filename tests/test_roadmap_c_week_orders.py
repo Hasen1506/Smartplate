@@ -106,7 +106,11 @@ def test_c3_cart_check_shows_the_true_total_then_tap_to_place(client, swiggy):
     q = client.get(f"/api/plan/{pid}/order-queue").get_json()
     row = next(m for m in q["meals"] if m["session_id"] == sid)
     assert row["state"] == "cart_ready" and row["to_pay"] == 262.5 and q["confirmed_total"] == 262.5
-    placed = client.post(f"/api/session/{sid}/order/place", json={}).get_json()
+    if cart["budget"]["over"]:      # the real bill takes this week over budget: never approved silently
+        r = client.post(f"/api/session/{sid}/order/place", json={})
+        assert r.status_code == 409 and r.get_json()["error"] == "over_budget"
+    placed = client.post(f"/api/session/{sid}/order/place",
+                         json={"over_budget_ok": cart["budget"]["over"]}).get_json()
     assert placed == {"mode": "tap_to_place", "placed": False, "url": swiggy_live.CHECKOUT_URL,
                       "message": "Your cart is ready in Swiggy. Tap to place it there."}
     assert "place_food_order" not in swiggy.tool_calls()
@@ -125,7 +129,12 @@ def test_c4_placement_needs_the_explicit_approval_of_that_exact_total(client, sw
     assert "place_food_order" not in swiggy.tool_calls()
     approval = client.get("/api/user/3/swiggy/checkout/preview").get_json()
     assert approval["to_pay"] == 262.5 and approval["bill"]["to_pay"] == 262.5
-    done = client.post(f"/api/session/{sid}/order/place", json={"expected_fingerprint": approval["fingerprint"]}).get_json()
+    if cart["budget"]["over"]:      # the real bill takes this week over budget: never approved silently
+        r = client.post(f"/api/session/{sid}/order/place", json={"expected_fingerprint": approval["fingerprint"]})
+        assert r.status_code == 409 and r.get_json()["error"] == "over_budget"
+        assert "place_food_order" not in swiggy.tool_calls()
+    done = client.post(f"/api/session/{sid}/order/place", json={"expected_fingerprint": approval["fingerprint"],
+                                                               "over_budget_ok": cart["budget"]["over"]}).get_json()
     assert done["mode"] == "placed" and done["order_id"] == "real-order-17"
     assert swiggy.tool_calls().count("place_food_order") == 1
     row = next(m for m in client.get(f"/api/plan/{pid}/order-queue").get_json()["meals"] if m["session_id"] == sid)

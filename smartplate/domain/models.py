@@ -67,7 +67,8 @@ def menu_for_city(city: str) -> list[dict]:
         rows = cur.execute(
             """
             SELECT m.*, r.name AS restaurant_name, r.rating AS restaurant_rating,
-                   r.delivery_fee, r.eta_min, r.is_open, r.flaky, r.city
+                   r.delivery_fee, r.eta_min, r.is_open, r.flaky, r.city,
+                   r.provider_id AS restaurant_provider_id
             FROM menu_items m JOIN restaurants r ON r.id = m.restaurant_id
             WHERE r.city = ? AND r.is_open = 1
             """,
@@ -89,7 +90,7 @@ def menu_for_user(user: dict) -> list[dict]:
     The two are never mixed."""
     from . import live_catalog
     if user.get("id") and live_catalog.has_live(user["id"]):
-        return menu_for_city(live_catalog.city_key(user["id"]))
+        return live_catalog.with_learned_fees(user["id"], menu_for_city(live_catalog.city_key(user["id"])))
     return menu_for_city(user["city"])
 
 

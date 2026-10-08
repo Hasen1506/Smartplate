@@ -176,6 +176,15 @@ def plan_view(plan_id: int) -> dict:
     at = optimizer.now()
     for d in decisions:
         d["past"] = d["session_status"] == "active" and scheduler.is_past(d, at)
+    # A meal whose real Swiggy cart was checked counts at the bill's total, not the estimate.
+    from .domain import week_orders
+    real = week_orders.real_totals(plan_id)
+    for d in decisions:
+        r = real.get(d["session_id"])
+        if r and d["chosen_kind"] == "delivery":
+            d["planned_cost"] = r["planned_cost"] if r["planned_cost"] is not None else d["cost"]
+            d["cost"] = r["to_pay"]
+            d["real_bill"] = True
     # a past meal the user never confirmed is unknown, not spent (reconcile, don't assume)
     spend_rows = [d for d in decisions if d["chosen_kind"] in ("delivery", "cook") and not d["past"]]
     cap = optimizer.week_cap(user, plan)
@@ -325,6 +334,11 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
                 extra["order"] = timing.order_plan(d["meal"], eta_min=etas.get(d.get("restaurant_id")),
                                                    time_shift=d.get("time_shift"), condition=cond)
                 extra["handoff_url"] = timing.swiggy_handoff(d.get("restaurant_name") or "", d.get("item_name") or "")
+                if d.get("delivery_fee") is not None:   # live dish: estimated until a real bill shows the fee
+                    extra["delivery_fee"] = {"amount": d["delivery_fee"], "estimated": bool(d.get("fee_estimated"))}
+                if d.get("real_bill"):
+                    extra["real_bill"] = True
+                    extra["planned_cost"] = round(d["planned_cost"], 2)
         grid[d["day"]]["meals"][d["meal"]] = {
             "kind": d["chosen_kind"], "item": d["item_name"],
             "restaurant": d.get("restaurant_name") or "",

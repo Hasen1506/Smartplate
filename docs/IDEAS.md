@@ -134,3 +134,37 @@ them is built. Grouped by the PR that surfaced it.
 - **Sample weather fallback** is labelled in Insights and in the week's footer line, but the
   weather icon on each day carries no "(sample)" mark when the live forecast is unavailable.
   Mark the icon too, or hide it.
+
+## Proposals 1 and 2, approved and being built (real bill corrects the plan; one Connect path)
+
+Approved by the user on Oct 8, 2026, and built in this PR. The source ideas above stay listed
+where they were first met: PR C "Budget guard at cart check" and "Learn real fees per
+restaurant", PR B "Real delivery fee per restaurant", and PR A "One Connect banner for all live
+Swiggy surfaces".
+
+- **The real Swiggy bill corrects the plan.** When a cart check returns Swiggy's bill, the
+  meal's real total replaces its planned cost in the week, and the week is compared with its
+  budget before approval. If the week goes over, the user sees by how much and chooses
+  "Approve anyway" or "Re-plan the remaining meals". Placing never happens silently over
+  budget. The re-plan is the normal planner run: it keeps every meal that is ordered, pinned
+  or already in a checked cart (at its real total) and re-plans the open meals within the
+  money left, with the same allergy, diet and nutrition-target rules as every plan.
+- **Learned delivery fee per restaurant.** The "Delivery" line of a real cart bill is stored
+  for that restaurant and delivery address and replaces the flat ₹35 estimate for it. A live
+  dish says "delivery ₹X estimated" until a real bill has been seen, then "delivery ₹X from
+  your bill". A bill with no delivery line teaches nothing (never guessed).
+- **One "Connect Swiggy" path.** Every live surface (error bar, live cart, order list, live
+  menus, plan source line) shows the same message and the same Connect button when Swiggy is
+  not connected or the sign-in expired, never a Retry. The action the user started (order a
+  meal, check a week's cart, open a live menu, plan from live menus) resumes once after
+  connecting and choosing an address.
+
+Ideas met while building these (not built):
+
+- **Learn the other fees too.** Platform fee, packaging and GST also differ from the plan.
+  They depend on the dish and the cart size, so they need more than one bill per restaurant
+  before the planner can use them.
+- **Fee by meal slot.** Swiggy's delivery fee can change with time of day and demand. Keep
+  the fee per restaurant and slot once a user has bills for more than one slot.
+- **Fee age.** A fee learned months ago may be stale. Show its date and fall back to
+  "estimated" after a few weeks without a new bill.

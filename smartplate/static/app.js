@@ -13,6 +13,7 @@ const S = {
   busy: false, error: null, hideCold: false, orderReview: null, cartReview: null,
   liveResults: null, liveFavourites: null, liveBrowseMenu: null, liveOrderReview: null, liveCart: null,
   checkoutReview: null, placedOrder: null, liveOrderStatus: null, liveOrderHistory: null, liveCartError: null,
+  cartBudget: {}, pendingResume: null, lastLive: null, liveCartErrorCode: null,
   sheet: null, hhEdit: null, recap: null, swapPick: null, moving: null, onboard: null, places: null, calendar: null, welcome: false, signin: false, account: null,
 };
 const MEALS = ["breakfast", "lunch", "dinner"];
@@ -75,6 +76,7 @@ async function api(path, method = "GET", body) {
     }
     const err = new Error(data.message || data.error || r.statusText);
     err.code = data.code;
+    err.data = data;
     throw err;
   }
   return r.json();
@@ -110,10 +112,52 @@ function setBusy(b) {
 // Wrap every user-triggered action: show progress, surface errors instead of failing silently.
 async function guard(fn) {
   if (S.busy) return;
-  setBusy(true); S.error = null; S.errorCode = null;
+  setBusy(true); S.error = null; S.errorCode = null; S.lastLive = null;
   try { await fn(); }
-  catch (e) { S.error = e.message || String(e); S.errorCode = e.code || null; render(); }
+  catch (e) {
+    S.error = e.message || String(e); S.errorCode = e.code || null;
+    // Not connected (or the sign-in expired): Connect, then pick up where the user was.
+    if (SWIGGY_RECONNECT.has(S.errorCode) && S.lastLive) S.pendingResume = S.lastLive;
+    render();
+  }
   finally { setBusy(false); }
+}
+
+/* ---- one "Connect Swiggy" path for every live surface ---- */
+const CONNECT_MSG = "Connect Swiggy to use real menus and prices.";
+function connectPrompt() {
+  return `<div class="connect-swiggy" role="alert"><span>${CONNECT_MSG}</span>
+    <button class="small primary" data-act="swiggy-connect">Connect Swiggy</button></div>`;
+}
+// The live actions that resume once after connecting (and choosing an address).
+const RESUME = {
+  "order-meal": { label: "reviewing your meal's live Swiggy item", run: (sid) => reviewCart(Number(sid)) },
+  "order-week": { label: "checking that meal's real Swiggy cart",
+    run: async (sid) => { S.tab = "more"; S.more = "orders"; await checkQueueCart(sid); } },
+  "live-menu": { label: "opening that Swiggy menu", run: (name) => { S.tab = "places"; return openLiveMenu(name); } },
+  "live-place": { label: "opening that Swiggy menu", run: (id, name) => { S.tab = "places"; return openLivePlace(id, name); } },
+  "live-menus": { label: "planning from your Swiggy restaurants", run: () => { S.tab = "week"; return planFromLiveMenus(); } },
+};
+function liveAction(kind, ...args) { S.lastLive = { kind, args }; return RESUME[kind].run(...args); }
+function rememberResume() {
+  if (S.pendingResume) store.set("smartplate.resume", JSON.stringify({ user: S.userId, at: Date.now(), ...S.pendingResume }));
+  else store.del("smartplate.resume");
+}
+function takeResume() {
+  let saved = null;
+  try { saved = JSON.parse(store.get("smartplate.resume") || "null"); } catch (_) { saved = null; }
+  store.del("smartplate.resume");                         // runs once, whatever happens next
+  const fresh = saved && typeof saved === "object" && saved.user === S.userId && RESUME[saved.kind]
+    && Array.isArray(saved.args) && Date.now() - Number(saved.at) < 30 * 60 * 1000;
+  return fresh ? { kind: saved.kind, args: saved.args } : null;
+}
+async function resumePending() {
+  const p = S.pendingResume;
+  if (!p || !swiggyReady()) return false;                 // still needs an address: wait for it
+  S.pendingResume = null;
+  await liveAction(p.kind, ...p.args);
+  render();
+  return true;
 }
 async function reloadPlan() { S.view = await api(`/api/plan/${S.planId}`); render(); }
 
@@ -142,11 +186,12 @@ async function boot() {
       expired: "That Swiggy sign-in link expired or was already used. Tap Connect Swiggy again.",
       other_browser: "That Swiggy sign-in was started in a different browser. Tap Connect Swiggy again on this device.",
       failed: "Swiggy sign-in didn't complete. Tap Connect Swiggy to try again." };
-    if (params.get("swiggy_error")) S.error = SWIGGY_ERRORS[params.get("swiggy_error")] || SWIGGY_ERRORS.failed;
-    else toast("Connected to Swiggy");
+    if (params.get("swiggy_error")) { S.error = SWIGGY_ERRORS[params.get("swiggy_error")] || SWIGGY_ERRORS.failed; store.del("smartplate.resume"); }
+    else { toast("Connected to Swiggy"); S.pendingResume = takeResume(); }
     if (typeof history !== "undefined") history.replaceState(null, "", "/");
   }
   render();
+  if (S.pendingResume) await guard(resumePending);
   scheduleAlerts().catch(() => {});
   syncPush().catch(() => {});
 }
@@ -348,10 +393,16 @@ function welcomeScreen() {
 
 function errbar(retry = true) {
   if (!S.error) return "";
-  return `<div class="errbar" role="alert"><span>⚠ ${esc(S.error)}</span>
-    ${SWIGGY_RECONNECT.has(S.errorCode) ? `<button class="retry" data-act="swiggy-connect">Connect Swiggy</button>`
-      : retry ? `<button class="retry ghost" data-act="reload">Retry</button>` : ""}
+  if (SWIGGY_RECONNECT.has(S.errorCode)) return `<div class="errbar connect" role="alert">${connectPrompt()}
     <button class="x" data-close-err="1" title="Dismiss" aria-label="Dismiss">✕</button></div>`;
+  return `<div class="errbar" role="alert"><span>⚠ ${esc(S.error)}</span>
+    ${retry ? `<button class="retry ghost" data-act="reload">Retry</button>` : ""}
+    <button class="x" data-close-err="1" title="Dismiss" aria-label="Dismiss">✕</button></div>`;
+}
+// A live panel's own error: the shared Connect prompt when that is the fix, else the message.
+function liveError(msg, code) {
+  if (SWIGGY_RECONNECT.has(code)) return connectPrompt();
+  return msg ? `<p class="fine" role="alert">${esc(msg)}</p>` : "";
 }
 
 function topbar() {
@@ -386,7 +437,7 @@ function todayScreen() {
     <details><summary>Open the sample weekly planner</summary><p class="fine">This planner currently uses demonstration Chennai dishes and prices. It is separate from the live Swiggy ordering flow.</p>
       ${budgetCard()}${nu ? nextUpCard(nu) : ""}${todayRest(nu)}</details>`;
   const sample = v.user?.prefs?.sample ? `<div class="coldstart"><span class="i">Sample</span><span>This profile uses demonstration preferences and sample menu data. <a href="#" data-act="start-onboard">Set up your own</a>.</span></div>`
-    : `<div class="coldstart"><span class="i">Demo plan</span><span>These weekly restaurant dishes and prices are sample data. <a href="#" data-go="more:connection">Connect Swiggy</a> to order from real restaurants near your saved address.</span></div>`;
+    : `<div class="coldstart"><span class="i">Demo plan</span><span>These weekly restaurant dishes and prices are sample data. <a href="#" data-act="swiggy-connect">Connect Swiggy</a> to order from real restaurants near your saved address.</span></div>`;
   return `${sample}<h1 class="greet">${hello}${v.user?.name && v.user.name !== "Me" && !v.user?.prefs?.sample ? ", " + esc(v.user.name.split(" ")[0]) : ""}</h1>
     ${budgetCard()}
     ${nu ? nextUpCard(nu) : `<div class="card empty">Nothing left to plan this week. <button data-act="newweek">Plan next week</button></div>`}
@@ -597,8 +648,7 @@ function sourceLine(src) {
       <span class="row gap"><button class="ghost small" data-act="live-menus">↻ Refresh live menus</button>
       <button class="ghost small" data-act="sample-menus">Use sample dishes</button></span></div>`;
   return `<div class="source sample" role="note"><b>${esc(src.label)}</b> <span class="fine">${esc(src.note)}</span>
-      ${src.connected ? `<button class="small" data-act="live-menus">Plan from my Swiggy restaurants</button>`
-        : `<button class="small" data-act="swiggy-connect">Connect Swiggy</button>`}</div>`;
+      ${src.connected ? `<button class="small" data-act="live-menus">Plan from my Swiggy restaurants</button>` : connectPrompt()}</div>`;
 }
 function fmtDate(iso) {
   if (!iso) return "";
@@ -630,7 +680,9 @@ function mealRow(m, meal, dayIdx) {
   const kindLabel = { delivery: "", cook: "cook", skip: "skip", skipped: "skipped", snoozed: "snoozed", cooked: "cooked", past: "" }[m.kind] ?? "";
   const status = m.status === "confirmed" ? `<span class="tag good">had it</span>` : m.status === "ordered" ? `<span class="tag good">ordered</span>`
     : past && ["delivery", "cook"].includes(m.kind) ? `<span class="tag warn">did you have it?</span>` : "";
-  const sub = m.kind === "delivery" ? `${esc(m.restaurant)}${m.order?.order_at && !locked && !past ? ` · order by ${esc(m.order.order_at)}` : ""}`
+  const fee = m.kind === "delivery" && m.real_bill ? " · real Swiggy bill"
+    : m.kind === "delivery" && m.delivery_fee ? ` · delivery ${rupee0(m.delivery_fee.amount)} ${m.delivery_fee.estimated ? "estimated" : "from your bill"}` : "";
+  const sub = m.kind === "delivery" ? `${esc(m.restaurant)}${fee}${m.order?.order_at && !locked && !past ? ` · order by ${esc(m.order.order_at)}` : ""}`
     : m.kind === "cook" ? (m.recipe_key ? "Home kitchen" : "From your fridge") : esc((m.reasons || [])[0] || "");
   return `<div class="meal ${esc(m.kind)} ${past ? "is-past" : ""} ${target ? "target" : ""} ${S.moving === m.session_id ? "lifted" : ""}"
       data-meal="${m.session_id}" ${movable ? 'draggable="true"' : ""} role="button" tabindex="0"
@@ -747,7 +799,7 @@ function livePlacesScreen() {
   return `<h1 class="greet">Order from your area</h1><p class="sub">Live Swiggy restaurants and menus for ${esc(S.swiggy.address.label)}. Choose a real item and review the cart before checkout.</p>
     <form id="live-search" class="row" style="gap:8px;margin:14px 0"><input id="live-query" aria-label="Restaurant or cuisine" placeholder="Restaurant or cuisine" maxlength="80" required style="flex:1;min-width:150px"><button class="primary">Search Swiggy</button></form>
     <div class="row"><button class="ghost small" data-act="live-order-history">Check recent Swiggy orders</button><button class="ghost small" data-act="refresh-live-cart">Refresh Swiggy cart</button></div>
-    ${S.liveCartError ? `<p class="fine" role="alert">${esc(S.liveCartError)}</p>` : ""}
+    ${S.liveCartError || S.liveCartErrorCode ? liveError(S.liveCartError, S.liveCartErrorCode) : ""}
     ${!S.liveCart && S.liveCartEmpty ? `<p class="fine">Your Swiggy cart for ${esc(S.liveCartEmpty.address)} is empty${S.liveCartEmpty.address_verified ? "" : " (Swiggy didn't confirm the address; check in Swiggy before ordering)"}.</p>` : ""}
     ${S.liveOrderHistory ? `<section class="card"><h3>Recent Swiggy orders</h3><p class="fine">Orders at ${esc(S.liveOrderHistory.address)}. If a placement failed or timed out, check here and in Swiggy before trying again.</p>
       ${S.liveOrderHistory.attempts.some(a => a.state === "unknown" || a.state === "started") ? `<p class="fine">A SmartPlate order attempt has an uncertain result. Check Swiggy or contact support before ordering the same cart again.</p>
@@ -783,9 +835,9 @@ async function refreshLiveCart(show = true) {
     S.liveCart = r.cart;
     S.liveCartEmpty = r.cart ? null : { address: r.address || S.swiggy?.address?.label || "this address",
                                          address_verified: r.address_verified !== false };
-    S.liveCartError = null;
+    S.liveCartError = null; S.liveCartErrorCode = null;
     if (show && !r.cart) toast("Your Swiggy cart is empty");
-  } catch (error) { S.liveCart = null; S.liveCartEmpty = null; S.liveCartError = error.message; }
+  } catch (error) { S.liveCart = null; S.liveCartEmpty = null; S.liveCartError = error.message; S.liveCartErrorCode = error.code || null; }
   if (show) render();
 }
 async function resolveLiveAttempt() {
@@ -912,6 +964,38 @@ async function openLiveMenu(name) {
   S.liveMenu = await api(`/api/user/${S.userId}/swiggy/menu?restaurant=${encodeURIComponent(name)}`);
   render(); if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);
 }
+async function planFromLiveMenus() {
+  adoptView(await api(`/api/plan/${S.planId}/live-menus`, "POST", {})); toast("Planned from your live Swiggy menus"); render();
+}
+async function checkQueueCart(sid) {
+  const p = await api(`/api/session/${sid}/swiggy-cart/preview`);
+  const c = await api(`/api/session/${sid}/order/cart`, "POST", { expected_fingerprint: p.fingerprint });
+  S.cartBudget = { ...S.cartBudget, [sid]: c.budget };
+  toast(c.budget?.over ? `In your Swiggy cart: ${rupee(c.to_pay)}. That's over this week's budget.` : `In your Swiggy cart: ${rupee(c.to_pay)} to pay`);
+  S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`); render();
+}
+async function placeQueued(sid, overBudgetOk) {
+  const body = overBudgetOk ? { over_budget_ok: true } : {};
+  if (S.orderQueue?.order_enabled) body.expected_fingerprint = (await api(`/api/user/${S.userId}/swiggy/checkout/preview`)).fingerprint;
+  let r;
+  try { r = await api(`/api/session/${sid}/order/place`, "POST", body); }
+  catch (e) {
+    if (e.code === "over_budget") { S.cartBudget = { ...S.cartBudget, [sid]: e.data.budget }; render(); return; }
+    throw e;
+  }
+  S.cartBudget = { ...S.cartBudget, [sid]: null };
+  if (r.mode === "tap_to_place") window.open?.(r.url, "_blank");
+  toast(r.mode === "placed" ? "Order placed" : r.message);
+  S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`); render();
+}
+async function replanRemaining(sid) {
+  const r = await api(`/api/plan/${S.planId}/replan-remaining`, "POST", { session_id: sid });
+  adoptView(r.plan); S.orderQueue = r.queue; S.cartBudget = { ...S.cartBudget, [sid]: r.budget };
+  if (S.carts?.[sid]) S.carts[sid] = { ...S.carts[sid], budget: r.budget };
+  toast(r.budget.over ? `Re-planned. Still ${rupee(r.budget.over_by)} over: this cart alone is more than the money left.`
+    : `Re-planned the rest of the week around this cart. ${rupee(r.budget.left)} left.`);
+  render();
+}
 async function reviewCart(sid) {
   S.cartReview = await api(`/api/session/${sid}/swiggy-cart/preview`);
   render();
@@ -946,9 +1030,17 @@ function cartNote(c) {
   const r = (S.carts || {})[c.session_id];
   if (!r) return "";
   const diff = r.over_plan == null ? "" : r.over_plan > 0 ? ` · ${rupee0(r.over_plan)} more than planned` : " · within plan";
+  const warn = r.budget?.over && !r.budgetOk;
   return `<div class="consent cartnote"><b>In your Swiggy cart:</b> ${esc(r.item)} · ${esc(r.restaurant)}.
     ${r.to_pay != null ? `To pay <b>${rupee0(r.to_pay)}</b>${diff}.` : "Open Swiggy to see the total."}
-    <a class="btn small primary" href="${esc(r.checkout_url)}" target="_blank" rel="noopener" data-handoff="${c.session_id}">Open Swiggy to review and pay ↗</a></div>`;
+    ${warn ? budgetWarn(c.session_id, r.budget)
+      : `<a class="btn small primary" href="${esc(r.checkout_url)}" target="_blank" rel="noopener" data-handoff="${c.session_id}">Open Swiggy to review and pay ↗</a>`}</div>`;
+}
+// The real bill takes the week over budget: say by how much, and let the user choose.
+function budgetWarn(sid, b) {
+  return `<div class="overbudget" role="alert"><b>Over budget.</b> ${esc(b.message)}
+    <span class="row gap"><button class="small" data-over-ok="${sid}">Approve anyway</button>
+    <button class="small primary" data-replan="${sid}">Re-plan the remaining meals</button></span></div>`;
 }
 
 /* ================================================================ MORE */
@@ -1175,6 +1267,7 @@ function orderQueuePanel() {
   const pickedDays = [...new Set(q.meals.filter(m => m.queued).map(m => m.day_index))];
   const step = m => m.state === "placed" ? `<span class="tag good">placed</span>`
     : m.state === "handed_off" ? `<span class="tag good">in Swiggy</span>`
+    : m.state === "cart_ready" && S.cartBudget[m.session_id]?.over ? `<span class="row gap"><b>${rupee(m.to_pay)}</b></span>${budgetWarn(m.session_id, S.cartBudget[m.session_id])}`
     : m.state === "cart_ready" ? `<span class="row gap"><b>${rupee(m.to_pay)}</b>
         <button class="small primary" data-oq-place="${m.session_id}">${q.order_enabled ? `Approve ${rupee(m.to_pay)} and place` : "Cart ready — tap to place in Swiggy"}</button></span>`
     : m.queued ? `<button class="small" data-oq-cart="${m.session_id}">Check the real cart</button>` : "";
@@ -1642,18 +1735,12 @@ function wire() {
   on("[data-meal]", "drop", (e) => { e.preventDefault(); const from = e.dataTransfer.getData("text/plain"), to = e.currentTarget.dataset.meal;
     if (from && from !== to) guard(() => swapMeals(from, to)); });
   on("[data-close]", "click", (e) => { if (e.target.dataset.close) { S.drawer = null; render(); } });
-  on("[data-oq-cart]", "click", (e) => { const sid = e.currentTarget.dataset.oqCart; guard(async () => {
-    const p = await api(`/api/session/${sid}/swiggy-cart/preview`);
-    const c = await api(`/api/session/${sid}/order/cart`, "POST", { expected_fingerprint: p.fingerprint });
-    toast(`In your Swiggy cart: ${rupee(c.to_pay)} to pay`);
-    S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`); render(); }); });
-  on("[data-oq-place]", "click", (e) => { const sid = e.currentTarget.dataset.oqPlace; guard(async () => {
-    let body = {};
-    if (S.orderQueue?.order_enabled) body = { expected_fingerprint: (await api(`/api/user/${S.userId}/swiggy/checkout/preview`)).fingerprint };
-    const r = await api(`/api/session/${sid}/order/place`, "POST", body);
-    if (r.mode === "tap_to_place") window.open?.(r.url, "_blank");
-    toast(r.mode === "placed" ? "Order placed" : r.message);
-    S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`); render(); }); });
+  on("[data-oq-cart]", "click", (e) => { const sid = e.currentTarget.dataset.oqCart; guard(() => liveAction("order-week", sid)); });
+  on("[data-oq-place]", "click", (e) => { const sid = e.currentTarget.dataset.oqPlace; guard(() => placeQueued(sid, false)); });
+  on("[data-over-ok]", "click", (e) => { const sid = Number(e.currentTarget.dataset.overOk); guard(async () => {
+    if (S.carts?.[sid]) { S.carts[sid] = { ...S.carts[sid], budgetOk: true }; render(); return; }   // hand-off: open Swiggy next
+    await placeQueued(sid, true); }); });
+  on("[data-replan]", "click", (e) => { const sid = Number(e.currentTarget.dataset.replan); guard(() => replanRemaining(sid)); });
   on("[data-close-err]", "click", () => { S.error = null; S.errorCode = null; render(); });
   on("[data-close-review]", "click", (e) => { if (e.target.dataset.closeReview) { S.orderReview = null; render(); } });
   on("[data-close-cart-review]", "click", (e) => { if (e.target.dataset.closeCartReview) { S.cartReview = null; render(); } });
@@ -1702,9 +1789,9 @@ function wire() {
       const vals = n => [...document.querySelectorAll(`input[name="${n}"]:checked`)].map(i => i.value);
       S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`, "POST", { meals: vals("oq-meal"), days: vals("oq-day").map(Number) });
       toast(`${S.orderQueue.queued} meal${S.orderQueue.queued === 1 ? "" : "s"} on your order list`); render(); },
-    "live-menus": async () => { S.view = await api(`/api/plan/${S.planId}/live-menus`, "POST", {}); toast("Planned from your live Swiggy menus"); render(); },
+    "live-menus": () => liveAction("live-menus"),
     "sample-menus": async () => { S.view = await api(`/api/plan/${S.planId}/sample-menus`, "POST", {}); toast("Back to sample dishes"); render(); },
-    "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); location.href = r.authorize_url; },
+    "swiggy-connect": async () => { const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {}); rememberResume(); location.href = r.authorize_url; },
     "swiggy-discover": async () => { S.swiggy = await api(`/api/user/${S.userId}/swiggy/discover`, "POST", {}); toast("Tool list refreshed"); render(); },
     "swiggy-addresses": async () => { S.swAddrs = await api(`/api/user/${S.userId}/swiggy/addresses`); render(); },
     "close-live-menu": async () => { S.liveMenu = null; render(); },
@@ -1729,17 +1816,18 @@ function wire() {
     S.swAddrs = null; S.liveMenu = null; S.liveResults = null; S.liveBrowseMenu = null; S.liveCart = null; S.liveCartError = null; S.checkoutReview = null; S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null;
     S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
     await refreshLiveCart(false);
-    toast("Delivery address saved"); render(); }));
-  on("[data-live-menu]", "click", (e) => guard(() => openLiveMenu(e.currentTarget.dataset.liveMenu)));
+    toast("Delivery address saved"); render();
+    await resumePending(); }));
+  on("[data-live-menu]", "click", (e) => guard(() => liveAction("live-menu", e.currentTarget.dataset.liveMenu)));
   on("[data-live-fav]", "click", (e) => guard(() => toggleLiveFavourite(e.currentTarget.dataset.liveFav, e.currentTarget.dataset.liveName)));
-  on("[data-live-place]", "click", (e) => guard(() => openLivePlace(e.currentTarget.dataset.livePlace, e.currentTarget.dataset.liveName)));
+  on("[data-live-place]", "click", (e) => guard(() => liveAction("live-place", e.currentTarget.dataset.livePlace, e.currentTarget.dataset.liveName)));
   on("[data-live-item]", "click", (e) => guard(() => reviewLiveItem(e.currentTarget.dataset.liveItem, e.currentTarget.dataset.liveItemName)));
   on("[data-live-track]", "click", (e) => guard(() => trackLiveOrder(e.currentTarget.dataset.liveTrack)));
   const liveSearch = document.getElementById("live-search");
   if (liveSearch) liveSearch.onsubmit = (e) => { e.preventDefault(); guard(() => searchLivePlaces(document.getElementById("live-query").value)); };
   const dishSearch = document.getElementById("dish-search");
   if (dishSearch) dishSearch.onsubmit = (e) => { e.preventDefault(); guard(() => searchLiveDishes(document.getElementById("dish-query").value)); };
-  on("[data-cart]", "click", (e) => guard(() => reviewCart(Number(e.currentTarget.dataset.cart))));
+  on("[data-cart]", "click", (e) => guard(() => liveAction("order-meal", Number(e.currentTarget.dataset.cart))));
   on("[data-rm-device]", "click", (e) => guard(() => removeDevice(e.currentTarget.dataset.rmDevice)));
   const signin = document.getElementById("signin");
   if (signin) signin.onsubmit = (e) => { e.preventDefault(); guard(() => signIn(signin)); };

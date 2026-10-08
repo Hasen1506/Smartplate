@@ -1,0 +1,64 @@
+{
+ "provenance": "Cart replies in the shape recorded in tests/fixtures/swiggy_food_recording.json (get_food_cart, documented Food MCP envelope data.data with a `pricing` object). The envelope below is copied from that recording; each bill lists only the fee lines and units, and the test cart fills in the dish's own price as item_total. Fee lines use the documented field names that smartplate/integrations/swiggy_live.BILL_FIELDS reads. No real account, cart or order is used.",
+ "envelope": {
+  "structuredContent": {
+   "data": {
+    "addressId": "addr-home",
+    "data": {
+     "items": [
+      {
+       "in_stock": true,
+       "is_veg": true,
+       "menu_item_id": "m0",
+       "name": "Mini Tiffin",
+       "quantity": 1,
+       "total": 125.0
+      }
+     ],
+     "pricing": {
+      "delivery_charge": 35,
+      "item_total": 125.0,
+      "to_pay": 160.0
+     },
+     "restaurant": {
+      "id": "r-1",
+      "name": "Hotel Saravana Bhavan (Adyar)"
+     }
+    }
+   },
+   "success": true
+  }
+ },
+ "bills": {
+  "itemised_rupees": {
+   "unit": "rupees",
+   "fees": {
+    "delivery_charge": 41,
+    "platform_fee": 10,
+    "packaging_charge": 15,
+    "gst": 12.5
+   }
+  },
+  "itemised_paise": {
+   "unit": "paise",
+   "fees": {
+    "deliveryCharge": 4100,
+    "platformFee": 1000
+   }
+  },
+  "free_delivery": {
+   "unit": "rupees",
+   "fees": {
+    "delivery_charge": 0,
+    "platform_fee": 10
+   }
+  },
+  "no_delivery_line": {
+   "unit": "rupees",
+   "fees": {
+    "platform_fee": 10,
+    "gst": 6
+   }
+  }
+ }
+}

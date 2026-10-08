@@ -245,9 +245,21 @@ def create_app() -> Flask:
             raise ValueError("Meal not found")
         user_id = models.get_plan(session["plan_id"])["user_id"]
         try:
-            return jsonify(week_orders.place(session_id, user_id, body.get("expected_fingerprint")))
+            return jsonify(week_orders.place(session_id, user_id, body.get("expected_fingerprint"),
+                                             over_budget_ok=body.get("over_budget_ok") is True))
         except swiggy_live.CartChanged as exc:
             return jsonify(error="cart_changed", message=str(exc)), 409
+        except week_orders.OverBudget as exc:
+            return jsonify(error="over_budget", code="over_budget", message=str(exc), budget=exc.budget), 409
+
+    @app.post("/api/plan/<int:plan_id>/replan-remaining")
+    def replan_remaining(plan_id):
+        """Re-plan the open meals around the checked carts' real totals (budget guard)."""
+        if not models.get_plan(plan_id):
+            raise ValueError("Plan not found")
+        body = request.get_json(force=True, silent=True) or {}
+        sid = body.get("session_id")
+        return jsonify(week_orders.replan_remaining(plan_id, sid if isinstance(sid, int) else None))
 
     @app.post("/api/plan/<int:plan_id>/live-menus")
     def plan_from_live_menus(plan_id):
@@ -628,7 +640,7 @@ def create_app() -> Flask:
     @app.post("/api/session/<int:session_id>/swiggy-cart")
     def swiggy_fill_cart(session_id):
         try:
-            return jsonify(swiggy_live.fill_cart(session_id, request.get_json().get("expected_fingerprint")))
+            return jsonify(week_orders.check_single_cart(session_id, request.get_json().get("expected_fingerprint")))
         except swiggy_live.CartChanged as exc:
             return jsonify(error="cart_changed", message=str(exc)), 409
 

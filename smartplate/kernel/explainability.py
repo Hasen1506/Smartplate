@@ -27,10 +27,18 @@ def reasons_for(decision: dict, context: dict) -> list[str]:
         return r
 
     # delivery
-    if context.get("pinned"):
+    if context.get("carted"):
+        r.append(f"In your Swiggy cart at the real bill's ₹{decision['cost']:.2f} — the rest of the week "
+                 f"was re-balanced around it.")
+    elif context.get("pinned"):
         r.append("Your pick — the rest of the week was re-balanced around it.")
     r.append(f"{decision['item_name']} from {decision['restaurant_name']} "
              f"(₹{decision['cost']:.0f} incl. delivery, rated {decision['rating']:.1f}).")
+    fee = context.get("fee")
+    if fee and not context.get("carted"):
+        r.append(f"Delivery ₹{fee['amount']:.0f} is an estimate until a Swiggy bill from this restaurant shows "
+                 f"the real fee." if fee["estimated"] else
+                 f"Delivery ₹{fee['amount']:.0f}: the delivery fee from your last Swiggy bill here.")
     if context.get("discovery"):
         r.append("Something new from outside your usual places — within your variety setting.")
     if context.get("liked"):
