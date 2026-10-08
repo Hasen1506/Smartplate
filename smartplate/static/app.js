@@ -133,12 +133,24 @@ function mergeUsers(open) {
 // Swiggy answers 409 with one of these when the user's own sign-in is missing or no longer
 // accepted: the fix is a Connect button, not a Retry.
 const SWIGGY_RECONNECT = new Set(["swiggy_not_connected", "swiggy_auth_expired"]);
-async function api(path, method = "GET", body) {
+async function api(path, method = "GET", body, { timeoutMs } = {}) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
   const k = S.userId ? keys.get(S.userId) : null;
   if (k) opt.headers["X-SmartPlate-Key"] = k;
   if (body) opt.body = JSON.stringify(body);
-  const r = await fetch(path, opt);
+  let timer = null;
+  if (timeoutMs && typeof AbortController !== "undefined") {   // boot never waits forever
+    const ctl = new AbortController(); opt.signal = ctl.signal;
+    timer = setTimeout(() => ctl.abort(), timeoutMs);
+  }
+  let r;
+  try { r = await fetch(path, opt); }
+  catch (e) {
+    if (e?.name !== "AbortError") throw e;
+    const err = new Error("The server took too long to answer. It may be waking up or unable to reach its database.");
+    err.code = "server_timeout";
+    throw err;
+  } finally { if (timer) clearTimeout(timer); }
   if (!r.ok) {
     const data = await r.json().catch(() => ({}));
     if (SWIGGY_RECONNECT.has(data.code) && S.swiggy) {
@@ -267,10 +279,11 @@ async function resumePending() {
 async function reloadPlan() { S.view = await api(`/api/plan/${S.planId}`); render(); }
 
 /* ---------------------------------------------------------------- bootstrap */
+const BOOT_TIMEOUT_MS = 25000;
 async function boot() {
   ensureBusyBar();
-  S.meta = await api("/api/meta");
-  S.users = mergeUsers(await api("/api/users"));
+  S.meta = await api("/api/meta", "GET", null, { timeoutMs: BOOT_TIMEOUT_MS });
+  S.users = mergeUsers(await api("/api/users", "GET", null, { timeoutMs: BOOT_TIMEOUT_MS }));
   const saved = Number(store.get("smartplate.user"));
   S.userId = S.users.find(u => u.id === saved)?.id || null;
   if (!S.userId) { S.welcome = true; render(); return; }
@@ -2247,11 +2260,20 @@ document.addEventListener('keydown', e => {
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   }
 });
+// The server is up but can't serve (database unreachable, overloaded, timed out): a clear
+// screen with Try again, never an endless "Loading SmartPlate…" or a bare status.
+function serverDown(e) {
+  return ["database_unavailable", "server_timeout"].includes(e?.code) || (e?.status >= 500);
+}
 function bootFailed(e) {
   const offline = (typeof navigator !== "undefined" && navigator.onLine === false) || /fetch|network/i.test(e?.message || "");
   document.getElementById("app").innerHTML = offline
     ? `<main class="welcome"><div class="brand big">Smart<em>Plate</em></div><h1 class="hero">You're offline.</h1>
        <p class="lede">Plans and budgets are always live, so SmartPlate needs a connection. It will reload by itself when you're back online.</p>
+       <button class="primary big" id="retry-boot">Try again</button></main>`
+    : serverDown(e)
+    ? `<main class="welcome" role="alert"><div class="brand big">Smart<em>Plate</em></div><h1 class="hero">SmartPlate can't start right now.</h1>
+       <p class="lede">${esc(e.message)}</p>
        <button class="primary big" id="retry-boot">Try again</button></main>`
     : `<div class="boot">Failed to start: ${esc(e.message)}</div>`;
   if (offline && typeof window !== "undefined") window.addEventListener("online", () => location.reload(), { once: true });

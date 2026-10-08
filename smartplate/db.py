@@ -392,6 +392,12 @@ try:                                   # the error a constraint failure raises, 
 except ImportError:                    # SQLite-only install
     IntegrityError = (sqlite3.IntegrityError,)
 
+try:                                   # the database could not be reached / no connection in time
+    from psycopg import OperationalError as _PgOperationalError
+    UNAVAILABLE = (_PgOperationalError,)   # includes psycopg_pool.PoolTimeout
+except ImportError:
+    UNAVAILABLE = ()
+
 
 def engine() -> str:
     return "postgres" if config.DATABASE_URL else "sqlite"
