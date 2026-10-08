@@ -113,3 +113,29 @@ Unverified assumptions, to check on the first real sign-in:
    before enabling it.
 
 No real cart, address, payment or order was touched while building this.
+## Live finding: "⚠ not found" on Review (8 October 2026)
+
+On the free Render server, Review on a real Minjur Bhavan dish showed only "⚠ not found".
+After that, Find dishes, a new restaurant search and Retry showed the same. The cause was
+not a Swiggy tool. The server keeps SQLite on Render's temporary disk (`/healthz`:
+`persistent: false`), and a redeploy erased the profile mid-session. The browser kept the
+old profile id, and every `/api/user/<id>/…` call got a bare `{"error": "not found"}` 404.
+Retry reloaded the plan, which could never succeed.
+
+What changed:
+- A missing profile, plan or meal is a 404 with a code (`profile_missing`, `plan_missing`,
+  `session_missing`) and a sentence that says why (the erased temporary disk, when that
+  applies) and what to do next.
+- Every banner names the action that failed ("Review “Veg Biryani” failed: …"). Retry
+  re-runs that action. A missing profile goes back to the welcome screen with the reason.
+- Review no longer assumes `get_restaurant_menu`'s `id` is `search_menu`'s `menu_item_id`.
+  The exact id is tried first. If it is missing, the one exact-name dish at that restaurant
+  is used, and the cart gets its `menu_item_id`. Which one matched is kept in `samples`
+  (`search_menu.item_match`).
+- Any failed `tools/call` drops the cached MCP session, so it can't break the calls after
+  it. A read-only tool that hits 400 or 404 on a reused session is sent once more on a
+  fresh session. Orders are never re-sent.
+- The test fake (`tests/test_swiggy_live.py`) now answers in the documented
+  `{success, data}` envelope with the documented field names and input schemas.
+
+To keep profiles and Swiggy links across redeploys, set `DATABASE_URL` (Neon) on Render.

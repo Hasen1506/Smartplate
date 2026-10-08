@@ -31,7 +31,8 @@ function fixture(overrides = {}, env = {}) {
     localStorage: env.storage || { getItem: () => '2', setItem() {} },
     ...(env.location ? { location: env.location, URLSearchParams, history: { replaceState() {} } } : {}),
     fetch: async (url, options) => { calls.push({ url, options });
-      return { ok: !!replies[url] && !replies[url].__status, json: async () => replies[url] || { error: 'Unexpected route' } }; },
+      return { ok: !!replies[url] && !replies[url].__status, status: replies[url] ? (replies[url].__status || 200) : 404,
+        json: async () => replies[url] || { error: 'Unexpected route' } }; },
     setTimeout: () => {}, console,
   });
   vm.runInContext(source, context);
@@ -927,4 +928,52 @@ test('a cart for another address says which and offers to deliver there', async 
   assert.match(html, /This cart is for Work · OMR, not Home · Adyar/);
   assert.match(html, /data-swaddr="addr-work"/);
   assert.ok(!html.includes('data-act="review-live-checkout"'));
+});
+
+// Live finding (8 Oct 2026): Review showed only "⚠ not found", and Retry re-ran an
+// unrelated plan reload, so the banner never cleared.
+const LIVE_MENU = `S.swiggy = { connected: true, address: { id: 'addr-home', label: 'Minjur' } };
+  S.liveBrowseMenu = { restaurant: { id: 'r-1', name: 'Minjur Bhavan' }, address: 'Minjur', fetched: 'today',
+    items: [{ id: 'm0', name: 'Veg Biryani', price: 160, veg: true, in_stock: true, has_options: false }] };`;
+
+test('a failed Review names the action and its reason, and Retry re-runs that Review', async () => {
+  const preview = '/api/user/2/swiggy/live-cart/preview';
+  const { context, calls } = fixture({ [preview]: { __status: 502, error: 'Swiggy said: Item lookup failed',
+    code: 'swiggy_error' } });
+  await context.bootPromise;
+  vm.runInContext(LIVE_MENU, context);
+  await vm.runInContext("guard(() => reviewLiveItem('m0', 'Veg Biryani'), 'Review “Veg Biryani”')", context);
+  const bar = vm.runInContext('errbar()', context);
+  assert.match(bar, /Review “Veg Biryani” failed: Swiggy said: Item lookup failed/);
+  assert.doesNotMatch(bar, /⚠ not found/);
+  assert.match(bar, /data-act="reload"/);
+  const before = calls.filter(c => c.url === preview).length;
+  const plans = calls.filter(c => c.url === '/api/plan/42').length;
+  await vm.runInContext('guard(retryLast)', context);                       // the Retry button
+  assert.equal(calls.filter(c => c.url === preview).length, before + 1);   // the same Review again
+  assert.equal(calls.filter(c => c.url === '/api/plan/42').length, plans); // not an unrelated reload
+  assert.match(vm.runInContext('S.error', context), /^Review “Veg Biryani” failed:/);
+});
+
+test('a profile the server no longer has returns to welcome with the reason, never a dead Retry', async () => {
+  const msg = "This profile is no longer on this server. The server's temporary storage was erased by a restart or redeploy. Create your profile again, or add it with its recovery code.";
+  const { context } = fixture({ '/api/user/2/swiggy/dishes?restaurant_id=r-1&restaurant_name=Minjur%20Bhavan&query=Veg%20Biryani&offset=0':
+    { __status: 404, error: msg, code: 'profile_missing' } });
+  await context.bootPromise;
+  vm.runInContext(LIVE_MENU, context);
+  await vm.runInContext("guard(() => searchLiveDishes('Veg Biryani'), 'Find dishes for “Veg Biryani”')", context);
+  assert.equal(vm.runInContext('S.userId', context), null);
+  assert.equal(vm.runInContext('S.welcome', context), true);
+  assert.match(vm.runInContext('S.error', context), /^Find dishes for “Veg Biryani” failed: This profile is no longer on this server/);
+  const bar = vm.runInContext('errbar(false)', context);
+  assert.match(bar, /restart or redeploy/);
+  assert.doesNotMatch(bar, /data-act="reload"/);
+});
+
+test('an error with no message names the HTTP status instead of a bare word', async () => {
+  const { context } = fixture({ '/api/user/2/swiggy/restaurants?query=Sangeetha': { __status: 500 } });
+  await context.bootPromise;
+  vm.runInContext(LIVE_MENU, context);
+  await vm.runInContext("guard(() => searchLivePlaces('Sangeetha'), 'Search Swiggy for “Sangeetha”')", context);
+  assert.match(vm.runInContext('S.error', context), /^Search Swiggy for “Sangeetha” failed: The server answered HTTP 500/);
 });

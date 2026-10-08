@@ -17,6 +17,29 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 SWIGGY_COOKIE = "sp_swiggy_oauth"
 
 
+MISSING = {   # (code, what is gone) for an id in the URL that this server no longer has
+    "user_id": ("profile_missing", "This profile"),
+    "plan_id": ("plan_missing", "This plan"),
+    "session_id": ("session_missing", "This meal"),
+}
+
+
+def _missing(key: str, value) -> tuple:
+    """A 404 that says what is gone and why, never a bare "not found".
+
+    On a server whose storage is erased by restarts (Render's free temporary disk) the
+    likely cause is a restart or redeploy, and the person's next step is to create the
+    profile again or add it with its recovery code; a Retry can never bring it back."""
+    code, what = MISSING[key]
+    reason = ("The server's temporary storage was erased by a restart or redeploy."
+              if config.storage_status().get("persistent") is False else
+              "It may have been deleted.")
+    step = ("Create your profile again, or add it with its recovery code."
+            if key == "user_id" else "Reload SmartPlate to open your current plan.")
+    return jsonify(error=f"{what} is no longer on this server. {reason} {step}", code=code,
+                   missing=key, id=value), 404
+
+
 def create_app() -> Flask:
     if config.LIVE_ORDERS and os.environ.get("RENDER"):
         durable = bool(config.DATABASE_URL) or config.DB_PATH.startswith("/var/data/")
@@ -47,7 +70,7 @@ def create_app() -> Flask:
                 with db.cursor() as cur:
                     found = cur.execute(f'SELECT id FROM {table} WHERE id=?', (args[key],)).fetchone()
                 if not found:
-                    return jsonify(error='not found'), 404
+                    return _missing(key, args[key])
         if request.path.startswith('/api/'):
             presented = request.headers.get(access.HEADER)
             body = request.get_json(silent=True) if request.method == 'POST' else None
@@ -219,7 +242,7 @@ def create_app() -> Flask:
     @app.get("/api/plan/<int:plan_id>")
     def get_plan(plan_id):
         view = service.plan_view(plan_id)
-        return (jsonify(view), 200) if view else (jsonify({"error": "not found"}), 404)
+        return (jsonify(view), 200) if view else _missing("plan_id", plan_id)
 
     @app.post("/api/plan/<int:plan_id>/optimize")
     def optimize(plan_id):
@@ -326,7 +349,7 @@ def create_app() -> Flask:
     @app.get("/api/plan/<int:plan_id>/execute/preview")
     def execute_preview(plan_id):
         preview = service.execution_preview(plan_id)
-        return (jsonify(preview), 200) if preview else (jsonify({"error": "not found"}), 404)
+        return (jsonify(preview), 200) if preview else _missing("plan_id", plan_id)
 
     @app.post("/api/plan/<int:plan_id>/execute")
     def execute(plan_id):
@@ -343,7 +366,7 @@ def create_app() -> Flask:
         except CheckoutConflict as exc:
             return jsonify({"error": "checkout_conflict", "message": str(exc),
                             "preview": service.execution_preview(plan_id)}), 409
-        return (jsonify(result), 200) if result else (jsonify({"error": "not found"}), 404)
+        return (jsonify(result), 200) if result else _missing("plan_id", plan_id)
 
     # ---- reverse mode / cooking coach ---- #
     @app.get("/api/plan/<int:plan_id>/basket")
@@ -364,7 +387,7 @@ def create_app() -> Flask:
         except ratelimit.TooMany:
             count = False
         found = service.adopt_template(template_id, count=count)
-        return (jsonify(found), 200) if found else (jsonify(error="not found"), 404)
+        return (jsonify(found), 200) if found else (jsonify(error="That shared plan is no longer available.", code="template_missing"), 404)
 
     @app.post("/api/plan/<int:plan_id>/save-template")
     def save_template(plan_id):
