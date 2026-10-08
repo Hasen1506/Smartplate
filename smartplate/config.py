@@ -27,8 +27,8 @@ PG_SCHEMA = os.environ.get("SMARTPLATE_PG_SCHEMA", "").strip()
 PG_POOL_MAX = int(os.environ.get("SMARTPLATE_PG_POOL_MAX", "8"))
 # Seconds a request waits for a pooled connection before the pool is replaced once and,
 # if that fails too, the request answers 503 "database unavailable" (never a 30 s hang).
-# 5 s: a healthy pooled checkout takes milliseconds, and a pool stuck on connections the
-# Neon pooler dropped is detected and replaced after this wait (Oct 2026: 10 s made the
+# 5 s: a healthy pooled checkout takes milliseconds, and a pool that cannot hand out a
+# connection is detected and replaced after this wait (Oct 2026: 10 s made the
 # first request after an idle spell take ~10 s).
 PG_POOL_TIMEOUT = float(os.environ.get("SMARTPLATE_PG_POOL_TIMEOUT", "5"))
 # Background pool keep-alive (db_pg.start_keepalive): on by default on Render.
