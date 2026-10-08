@@ -1350,9 +1350,9 @@ function communityPanel() {
   const rows = S.community.map(t => `<div class="card"><div class="row" style="align-items:center">
     <div style="flex:1"><div style="font-weight:600">${esc(t.title)}</div>
       <div class="sub">by ${esc(t.author)} · ${esc(t.city)} · ${esc(t.mode)} · ${rupee(t.budget)}/wk · ${t.adopts} adopts</div></div>
-    <button data-adopt="${t.id}">Adopt</button></div></div>`).join("") || `<div class="card empty">No templates yet.</div>`;
+    <button data-adopt="${t.id}">Adopt</button></div></div>`).join("") || `<div class="card empty">No templates yet. Nobody has shared a week here so far. Share yours to be the first.</div>`;
   return `<h2 class="sec">Community weeks</h2>
-    <div class="sub">Sample weeks saved in this trial. “Adopt” records interest. It does not replace your plan.</div>
+    <div class="sub">Weeks people shared in this trial. “Adopt” records interest. It does not replace your plan.</div>
     <div class="row" style="margin-bottom:12px"><button class="primary" data-act="savetpl">Share my current week</button></div>
     <div class="grid-cards">${rows}</div>`;
 }

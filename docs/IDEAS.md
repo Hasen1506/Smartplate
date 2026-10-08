@@ -122,3 +122,15 @@ them is built. Grouped by the PR that surfaced it.
   user says they ran out.
 - **Order the grocery list** on Instamart when a cart tool exists, with the same review step
   as food orders.
+
+## From the no-fabricated-data fix (live prices without invented surge, no invented community members)
+
+- **Sample plans still use the demo surge model.** Live Swiggy dishes are now priced exactly
+  as Swiggy lists them. The labelled sample catalogue still shows "Surge ×1.25 priced in" and
+  "time-shifted … saved ₹X" from seeded multipliers. Drop surge from sample plans too, or mark
+  those lines "(sample)".
+- **A real peak-time signal**, if one ever exists: compare checked cart totals by slot
+  (lunch rush versus 15:00) from the user's own bills before claiming any time-shift saving.
+- **Sample weather fallback** is labelled in Insights and in the week's footer line, but the
+  weather icon on each day carries no "(sample)" mark when the live forecast is unavailable.
+  Mark the icon too, or hide it.

@@ -30,6 +30,8 @@ def _expected_cost(item: dict, meal: str) -> float:
     is surfaced separately as a contingency, not baked into the headline number.
     """
     base = item.get("price", 0) + item.get("delivery_fee", 0)
+    if not surge.applies(item):                   # live Swiggy dish: Swiggy's own price
+        return round(base, 2)
     mult = surge.predict(item.get("city", ""), 0, meal, "clear")
     return round(base * mult, 2)
 

@@ -137,6 +137,9 @@ def test_sentiment_local_scoring(seeded):
 
 # §5.3.13 community
 def test_community_adopt_increments(seeded):
+    from smartplate import everyday
+    v = everyday.create_profile({"name": "Sharer", "diet": "veg", "weekly_budget": 2000})
+    service.save_template(v["plan"]["id"], "My week")
     before = service.list_community()[0]
     after = service.adopt_template(before["id"])
     assert after["adopts"] == before["adopts"] + 1
