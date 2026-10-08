@@ -84,7 +84,18 @@ CREATE TABLE IF NOT EXISTS order_queue (          -- meals the user picked to or
     state TEXT NOT NULL DEFAULT 'queued',         -- queued | cart_ready | placed | handed_off
     to_pay REAL,
     bill TEXT,
-    updated_ts TEXT NOT NULL
+    updated_ts TEXT NOT NULL,
+    planned_cost REAL                             -- the plan's estimate when the real cart was checked
+);
+
+CREATE TABLE IF NOT EXISTS swiggy_delivery_fees (  -- the delivery fee Swiggy actually billed (domain/live_catalog)
+    user_id INTEGER NOT NULL,
+    address_id TEXT NOT NULL,                      -- fees depend on the delivery address
+    provider_id TEXT NOT NULL,                     -- Swiggy restaurant id
+    restaurant_name TEXT NOT NULL,
+    delivery_fee REAL NOT NULL,                    -- rupees, the bill's Delivery line
+    seen_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, address_id, provider_id)
 );
 
 CREATE TABLE IF NOT EXISTS live_catalog_state (   -- the user's live Swiggy catalogue (domain/live_catalog)
@@ -338,6 +349,9 @@ MIGRATIONS = [
     ("festivals", "approx", "INTEGER NOT NULL DEFAULT 0"),
     ("calendar_events", "uid", "TEXT"),                  # .ics UID: re-imports replace, not duplicate
     ("sessions", "eaters", "TEXT"),                      # household: who eats this meal (split by consumption)
+    ("order_queue", "planned_cost", "REAL"),             # the plan's estimate when the real cart was checked
+    ("decisions", "delivery_fee", "REAL"),               # live dish: the delivery fee priced into cost
+    ("decisions", "fee_estimated", "INTEGER"),           # 1 = flat estimate, 0 = from a real Swiggy bill
 ]
 
 
