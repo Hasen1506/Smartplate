@@ -420,15 +420,37 @@ def bill_breakdown(cart: dict, anchor: float | None = None) -> dict | None:
             if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value:
                 raw.append((label, -abs(value) if label == "Discount" else float(value)))
                 break
-    # Lines come in the same unit as the cart (rupees or paise): use the reading whose
-    # sum is closer to the payable total.
-    raw_sum = sum(v for _, v in raw)
-    scale = 100.0 if raw and abs(raw_sum / 100 - total) < abs(raw_sum - total) else 1.0
+    scale = _line_scale(raw, total)
     lines = [{"label": label, "amount": round(v / scale, 2)} for label, v in raw]
     gap = round(total - sum(line["amount"] for line in lines), 2)
     if lines and abs(gap) >= 0.01:
         lines.append({"label": "Other charges (as Swiggy shows them)", "amount": gap})
     return {"lines": lines, "to_pay": total, "itemised": bool(lines) and abs(gap) < 0.01}
+
+
+def _line_scale(raw: list, total: float) -> float:
+    """Lines come in the same unit as the cart (rupees or paise): use the reading whose
+    sum is closer to the payable total."""
+    raw_sum = sum(v for _, v in raw)
+    return 100.0 if raw and abs(raw_sum / 100 - total) < abs(raw_sum - total) else 1.0
+
+
+def billed_delivery_fee(cart: dict, anchor: float | None = None) -> float | None:
+    """The delivery fee on Swiggy's bill, in rupees: 0 when Swiggy billed free delivery,
+    None when the bill has no delivery line or its total can't be read unambiguously
+    (then nothing is learned)."""
+    bill = bill_breakdown(cart, anchor)
+    if bill is None:
+        return None
+    pricing = cart.get("pricing") if isinstance(cart.get("pricing"), dict) else cart
+    keys = dict(BILL_FIELDS)["Delivery"]
+    value = next((pricing.get(k) for k in keys if isinstance(pricing, dict) and k in pricing), None)
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
+        return None
+    if value == 0:
+        return 0.0
+    line = next((l for l in bill["lines"] if l["label"] == "Delivery"), None)
+    return line["amount"] if line else None
 
 
 def _num(data, field: str):
@@ -764,7 +786,7 @@ def cart_preview(session_id: int) -> dict:
         raise SwiggyError("Swiggy did not verify this dish as vegetarian. Check it in Swiggy before ordering.")
     item_id = _get(item, "menu_item_id")
     details = {"session_id": session_id, "planned": cell["item"], "planned_restaurant": cell["restaurant"],
-               "planned_cost": cell["cost"], "restaurant": place["name"], "restaurant_id": place["id"],
+               "planned_cost": cell.get("planned_cost", cell["cost"]), "restaurant": place["name"], "restaurant_id": place["id"],
                "item": str(_get(item, "name")), "item_id": item_id, "address_id": address_id}
     fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price")},
                                             sort_keys=True).encode()).hexdigest()
@@ -783,9 +805,10 @@ def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
     user_id, cell = _planned(session_id)
     prepared = _fill_reviewed_cart(user_id, preview)
     to_pay = prepared["to_pay"]
+    planned = cell.get("planned_cost", cell["cost"])
     return {"session_id": session_id, "restaurant": preview["restaurant"], "item": preview["item"],
-            "planned": cell["item"], "planned_cost": cell["cost"], "menu_price": preview["menu_price"],
-            "to_pay": to_pay, "over_plan": round(to_pay - cell["cost"], 2) if to_pay is not None else None,
+            "planned": cell["item"], "planned_cost": planned, "menu_price": preview["menu_price"],
+            "to_pay": to_pay, "over_plan": round(to_pay - planned, 2) if to_pay is not None else None,
             "bill": prepared.get("bill"), "checkout_url": CHECKOUT_URL}
 
 
@@ -991,6 +1014,10 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
                     "item_id, menu_price) VALUES (?,?,?,?,?,?)",
                     (user_id, preview["address_id"], restaurant_id, preview["restaurant"], preview["item_id"],
                      preview.get("menu_price")))
+    # The bill's delivery line replaces the planner's flat estimate for this restaurant.
+    from ..domain import live_catalog
+    live_catalog.record_fee(user_id, preview["address_id"], restaurant_id, preview["restaurant"],
+                            billed_delivery_fee(view, preview.get("menu_price")))
     return {**preview, "to_pay": cart_total(view, preview.get("menu_price")), "checkout_url": CHECKOUT_URL,
             "bill": bill_breakdown(view, preview.get("menu_price")), "orderable": True}
 
