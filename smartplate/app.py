@@ -137,7 +137,8 @@ def create_app() -> Flask:
 
     @app.get("/healthz")
     def healthz():
-        return jsonify(ok=True)
+        # Liveness stays 200; it also says honestly whether user data survives a restart.
+        return jsonify(ok=True, database=config.storage_status())
 
     @app.get("/readyz")
     def readyz():
@@ -150,8 +151,8 @@ def create_app() -> Flask:
                     or not os.access(config.DB_PATH, os.W_OK)):
                 raise OSError("database storage is read-only")
         except Exception:
-            return jsonify(ok=False), 503
-        return jsonify(ok=True)
+            return jsonify(ok=False, database=config.storage_status()), 503
+        return jsonify(ok=True, database=config.storage_status())
 
     # Installable app: the manifest and the service worker are served from the root
     # so the worker's scope covers the whole app.
@@ -174,6 +175,8 @@ def create_app() -> Flask:
             "brain": brain.name,
             "brain_cost_per_decision": brain.cost_per_decision,
             "swiggy_provider": config.SWIGGY_PROVIDER,
+            "swiggy_redirect_approved": config.SWIGGY_REDIRECT_APPROVED,
+            "storage": config.storage_status(),
             "order_edit_window_min": config.ORDER_EDIT_WINDOW_MIN,
             "modes": config.MODE_LABELS,
             "mode_outcomes": {k: v["outcome"] for k, v in config.MODE_META.items()},

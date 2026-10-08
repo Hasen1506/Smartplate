@@ -18,7 +18,8 @@ def client(seeded):
 
 def test_health_check(client):
     r = client.get("/healthz")
-    assert r.status_code == 200 and r.get_json() == {"ok": True}
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+    assert set(r.get_json()["database"]) == {"engine", "persistent", "reason"}
 
 
 def test_single_worker_start_command_everywhere():

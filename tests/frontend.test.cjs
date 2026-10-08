@@ -822,3 +822,58 @@ test('a live dish says its delivery fee is estimated until a real bill', async (
   assert.match(row({ amount: 41, estimated: false }), /delivery ₹41 from your bill/);
   assert.match(row(null, ', real_bill: true'), /real Swiggy bill/);
 });
+
+// ---- Honest copy (8 Oct 2026 audit, S1/S2): the UI says what this server really does ----
+const SIMULATED_FREE = { modes: { balanced: 'Balanced' }, mode_outcomes: {}, version: '1.1.0', swiggy_provider: 'simulated',
+  swiggy_redirect_approved: false, storage: { engine: 'sqlite', persistent: false, reason: "on Render's temporary disk" } };
+
+test('welcome on the simulated, unapproved server never promises real Swiggy restaurants', async () => {
+  const { context, element } = fixture({ '/api/meta': SIMULATED_FREE });
+  vm.runInContext("localStorage.getItem = () => null", context);
+  await vm.runInContext('boot()', context);
+  const html = element.innerHTML;
+  assert.match(html, /sample Chennai dishes and prices, not live Swiggy menus/);
+  assert.match(html, /waiting for Swiggy to approve/);
+  assert.doesNotMatch(html, /connect Swiggy to find real restaurants/i);
+  assert.doesNotMatch(html, /browse their current Swiggy menus/);
+});
+
+test('welcome promises real restaurants only once Swiggy approved sign-in', async () => {
+  const meta = { ...SIMULATED_FREE, swiggy_provider: 'live', swiggy_redirect_approved: true, storage: { persistent: true } };
+  const { context, element } = fixture({ '/api/meta': meta });
+  vm.runInContext("localStorage.getItem = () => null", context);
+  await vm.runInContext('boot()', context);
+  const lede = element.innerHTML.match(/<p class="lede">([^<]*)<\/p>/)[1];
+  assert.match(lede, /Connect Swiggy to find real restaurants/);
+  assert.match(lede, /Until a Swiggy account is connected, the weekly planner uses sample Chennai dishes/);
+  assert.doesNotMatch(lede, /waiting for Swiggy/);
+});
+
+test('a temporary-disk server shows the data-erasure banner on every screen', async () => {
+  const { context, element } = fixture({ '/api/meta': SIMULATED_FREE });
+  await context.bootPromise;                       // signed-in app screen
+  assert.match(element.innerHTML, /Trial server:[^<]*<\/strong> profiles, plans and Swiggy links here are stored on a temporary disk and are erased/);
+  vm.runInContext("S.view = null; S.welcome = true; render()", context);
+  assert.match(element.innerHTML, /class="storage-warning"/);
+  vm.runInContext("startOnboard()", context);
+  assert.match(element.innerHTML, /class="storage-warning"/);
+});
+
+test('no erasure banner when storage is persistent or unknown', async () => {
+  for (const persistent of [true, null]) {
+    const { context, element } = fixture({ '/api/meta': { ...SIMULATED_FREE, storage: { persistent } } });
+    await context.bootPromise;
+    assert.doesNotMatch(element.innerHTML, /storage-warning/);
+  }
+});
+
+test('the demo plan banner offers Connect Swiggy only when sign-in is approved', async () => {
+  const { context } = fixture({ '/api/meta': SIMULATED_FREE }); await context.bootPromise;
+  richView(context);
+  let html = vm.runInContext('todayScreen()', context);
+  assert.doesNotMatch(html, /to order from real restaurants/);
+  assert.match(html, /Order in the Swiggy app for now/);
+  vm.runInContext('S.meta.swiggy_redirect_approved = true', context);
+  html = vm.runInContext('todayScreen()', context);
+  assert.match(html, /Connect Swiggy<\/a> to order from real restaurants/);
+});

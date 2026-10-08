@@ -352,11 +352,29 @@ async function toggleFav(rid) {
 }
 
 /* ---------------------------------------------------------------- render */
+/* Honest copy that follows what this server actually does (GET /api/meta). */
+// Profiles on a temporary disk are erased on restart or redeploy: say so on every screen.
+function storageBanner() {
+  if (S.meta?.storage?.persistent !== false) return "";
+  return `<div class="storage-warning" role="note"><strong>Trial server:</strong> profiles, plans and Swiggy links here are stored on a temporary disk and are erased whenever the server restarts or is updated, which can happen several times a day. Don't keep anything here you can't lose; use More → Profiles → Download my data to keep a copy.</div>`;
+}
+const swiggySignInOpen = () => !!S.meta?.swiggy_redirect_approved;
+function welcomeLede() {
+  // Without a Swiggy connection the planner uses the sample catalogue (everyday.py).
+  // Real restaurants need Swiggy sign-in, which works only once Swiggy approves this
+  // server's exact callback URL (SMARTPLATE_SWIGGY_REDIRECT_APPROVED).
+  const plan = "Plan a week of meals around your diet, allergies and budget. Until a Swiggy account is connected, the weekly planner uses sample Chennai dishes and prices, not live Swiggy menus.";
+  const swiggy = swiggySignInOpen()
+    ? " Connect Swiggy to find real restaurants and dishes for your saved delivery address."
+    : " Connecting a Swiggy account is not available on this server yet: it is waiting for Swiggy to approve its sign-in address. Order in the Swiggy app for now.";
+  return plan + swiggy;
+}
+
 function render() {
   const app = document.getElementById("app");
-  if (S.onboard) { app.innerHTML = onboardingScreen(); wire(); return; }
-  if (S.welcome || !S.view) { app.innerHTML = welcomeScreen(); wire(); return; }
-  app.innerHTML = topbar() + `<main class="wrap ${S.tab === "more" ? "wide" : ""}" id="main">${errbar() + tabBody()}</main>`
+  if (S.onboard) { app.innerHTML = storageBanner() + onboardingScreen(); wire(); return; }
+  if (S.welcome || !S.view) { app.innerHTML = storageBanner() + welcomeScreen(); wire(); return; }
+  app.innerHTML = storageBanner() + topbar() + `<main class="wrap ${S.tab === "more" ? "wide" : ""}" id="main">${errbar() + tabBody()}</main>`
     + navBar() + (S.sheet ? sheetDialog() : "") + (S.drawer ? drawer() : "")
     + (S.orderReview ? orderReviewDialog() : "") + (S.cartReview ? cartReviewDialog() : "")
     + (S.liveOrderReview ? liveOrderReviewDialog() : "")
@@ -369,9 +387,9 @@ function welcomeScreen() {
   return `<main class="welcome">
     <div class="brand big">Smart<em>Plate</em></div>
     <h1 class="hero">Meals from the places you like.</h1>
-    <p class="lede">Create your private profile and connect Swiggy to find real restaurants and dishes for your saved delivery address.</p>
+    <p class="lede">${welcomeLede()}</p>
     <ul class="promise">
-      <li><b>Remember your favourites.</b> Search local restaurants and browse their current Swiggy menus after connecting.</li>
+      ${swiggySignInOpen() ? `<li><b>Remember your favourites.</b> Search local restaurants and browse their current Swiggy menus after connecting.</li>` : ""}
       <li><b>Review before ordering.</b> Check the restaurant, dish, delivery address and current payable total.</li>
       <li><b>Plans around your rules.</b> The sample planner filters declared allergies and caps estimated spend. Check ingredients and the final price in Swiggy before ordering.</li>
     </ul>
@@ -437,7 +455,7 @@ function todayScreen() {
     <details><summary>Open the sample weekly planner</summary><p class="fine">This planner currently uses demonstration Chennai dishes and prices. It is separate from the live Swiggy ordering flow.</p>
       ${budgetCard()}${nu ? nextUpCard(nu) : ""}${todayRest(nu)}</details>`;
   const sample = v.user?.prefs?.sample ? `<div class="coldstart"><span class="i">Sample</span><span>This profile uses demonstration preferences and sample menu data. <a href="#" data-act="start-onboard">Set up your own</a>.</span></div>`
-    : `<div class="coldstart"><span class="i">Demo plan</span><span>These weekly restaurant dishes and prices are sample data. <a href="#" data-act="swiggy-connect">Connect Swiggy</a> to order from real restaurants near your saved address.</span></div>`;
+    : `<div class="coldstart"><span class="i">Demo plan</span><span>These weekly restaurant dishes and prices are sample data. ${swiggySignInOpen() ? `<a href="#" data-act="swiggy-connect">Connect Swiggy</a> to order from real restaurants near your saved address.` : "Order in the Swiggy app for now: connecting Swiggy here awaits Swiggy's approval."}</span></div>`;
   return `${sample}<h1 class="greet">${hello}${v.user?.name && v.user.name !== "Me" && !v.user?.prefs?.sample ? ", " + esc(v.user.name.split(" ")[0]) : ""}</h1>
     ${budgetCard()}
     ${nu ? nextUpCard(nu) : `<div class="card empty">Nothing left to plan this week. <button data-act="newweek">Plan next week</button></div>`}
@@ -1575,7 +1593,7 @@ function connectionPanel() {
       ${sw.needs_reconnect ? `<p class="sub">This server can no longer read the saved Swiggy sign-in. Connect again.</p>` : ""}
       <p class="sub">You sign in on Swiggy's own page (phone + OTP). SmartPlate can then search real restaurants and menus for your saved address, remember favourites, and let you review a live item before adding it to your cart. Swiggy sign-ins last about 5 days.</p>
       <button class="primary" data-act="swiggy-connect">Connect Swiggy</button>
-      <p class="fine">Swiggy requires production access and an exact-match allowlisted HTTPS redirect. ${sw.callback_url ? `For this deployment, request <code>${esc(sw.callback_url)}</code> from Swiggy Builders Club. ` : ""}A Render URL is an HTTPS redirect; it still needs Swiggy approval. This connection has only been tested against a fake server.</p></div>`;
+      <p class="fine">Swiggy requires production access and an exact-match allowlisted HTTPS redirect. ${sw.callback_url ? `For this deployment, request <code>${esc(sw.callback_url)}</code> from Swiggy Builders Club. ` : ""}A Render URL is an HTTPS redirect; it still needs Swiggy approval. ${swiggySignInOpen() ? "" : "Swiggy has not approved this server's callback yet, so sign-in is expected to fail here. "}This connection has only been tested against a fake server.</p></div>`;
   return `<h2 class="sec">Swiggy connection</h2>${live}<div class="card"><span class="tag">Hand-off mode</span>
     <h3>The public deployment uses Swiggy checkout until real placement is approved.</h3>
     <p><b>Today:</b> “Order on Swiggy” opens Swiggy's search for that restaurant and dish. You check the real price there and order. Then tap “I had it” so your budget and nutrition stay accurate.</p>
@@ -1684,7 +1702,7 @@ async function onboardNav(dir) {
     S.onboard = null; S.userId = view.user.id; store.set("smartplate.user", String(S.userId));
     adoptView(view); S.exec = await api(`/api/plan/${S.planId}/orders`);
     S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
-    S.tab = "more"; S.more = "connection"; toast("Profile saved. Connect Swiggy to use real restaurants."); render(); return;
+    S.tab = "more"; S.more = "connection"; toast(swiggySignInOpen() ? "Profile saved. Connect Swiggy to use real restaurants." : "Profile saved."); render(); return;
   }
   o.step += 1; S.error = null; render();
   render();
