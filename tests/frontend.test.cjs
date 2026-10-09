@@ -1464,3 +1464,29 @@ test('cook it: typed dish search, a recipe scaled to who eats, cook along with t
   assert.match(along, /Start 10 min timer/);
   assert.equal(vm.runInContext('ingredientQuery', context)('2 green chillies, slit'), 'green chillies');
 });
+
+test('budget changes in place with a per-meal figure, and Try different dishes calls the plan with undo', async () => {
+  const tried = { plan: { id: 42, mode: 'balanced', week_start: '2026-09-14' }, user: { id: 2, weekly_budget: 1500 },
+    budget: { spend: 900, budget: 1500, weekly_budget: 1500 }, grid: [], try_different: { changed: 3, meals: 5, can_undo: true } };
+  const { context, calls } = fixture({ '/api/plan/42/try-different': tried });
+  await context.bootPromise;
+  vm.runInContext(`S.view.budget = { spend: 1000, budget: 750, weekly_budget: 1500, prorated: true };
+    S.view.grid = [{ day: 'Thu', date: '2026-09-17', meals: { lunch: { status: 'active', kind: 'delivery' }, dinner: { status: 'past', kind: 'delivery' } } },
+                   { day: 'Fri', date: '2026-09-18', meals: { lunch: { status: 'active', kind: 'cook' }, dinner: { status: 'skipped', kind: 'skip' } } }];
+    S.budgetSheet = { value: 2000 };`, context);
+  const sheet = vm.runInContext('budgetSheet()', context);
+  assert.match(sheet, /Now ₹1,500 a week/);
+  assert.match(sheet, /about ₹500 a meal for the 2 meals left \(this week counts from today\)/);   // 2000 × (750/1500) ÷ 2
+  assert.match(sheet, /Re-plan with ₹2,000/);
+  assert.match(sheet, /data-budget-preset="1500"/);
+  vm.runInContext('S.budgetSheet = { value: 1500 }', context);
+  assert.match(vm.runInContext('budgetSheet()', context), /data-act="save-budget" disabled/);   // nothing to change
+  const week = vm.runInContext('weekScreen()', context);
+  assert.match(week, /data-act="budget">Change budget/);
+  assert.match(week, /data-act="try-different"/);
+  assert.match(vm.runInContext('todayScreen()', context), /data-act="budget"/);
+  await vm.runInContext('tryDifferent()', context);
+  const post = calls.find(c => c.url === '/api/plan/42/try-different');
+  assert.equal(post.options.method, 'POST');
+  assert.equal(vm.runInContext('S.view.try_different.changed', context), 3);
+});

@@ -923,6 +923,14 @@ def create_app() -> Flask:
             raise ValueError("Send the two meal ids to swap as a and b")
         return jsonify(everyday.swap(plan_id, a, b))
 
+    @app.post("/api/plan/<int:plan_id>/try-different")
+    def plan_try_different(plan_id):
+        return jsonify(everyday.try_different(plan_id))
+
+    @app.post("/api/plan/<int:plan_id>/try-different/undo")
+    def plan_try_different_undo(plan_id):
+        return jsonify(everyday.try_different_undo(plan_id))
+
     # ---- household (domain/household.py) ---- #
     @app.post("/api/user/<int:user_id>/household")
     def household_create(user_id):

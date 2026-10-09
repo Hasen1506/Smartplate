@@ -561,6 +561,58 @@ def swap(plan_id: int, a: int, b: int) -> dict:
     return service.plan_view(plan_id)
 
 
+def _open_dishes(plan_id: int) -> dict[int, str]:
+    """session id → the delivery dish Ziggy chose for each open, unpinned meal."""
+    at = optimizer.now()
+    sessions = {s["id"]: s for s in models.sessions_for_plan(plan_id)}
+    out = {}
+    for d in models.decisions_for_plan(plan_id):
+        s = sessions.get(d["session_id"])
+        if (s and s["status"] == "active" and not s.get("pinned") and not scheduler.is_past(s, at)
+                and d["chosen_kind"] == "delivery" and d.get("item_id")):
+            out[s["id"]] = d["item_id"]
+    return out
+
+
+def _set_avoid(plan_id: int, batches: list) -> None:
+    with db.cursor() as cur:
+        cur.execute("UPDATE plans SET avoid=? WHERE id=?", (db.jd(batches), plan_id))
+
+
+def try_different(plan_id: int) -> dict:
+    """"Try different dishes": the dishes Ziggy picked for the open meals now carry a small
+    penalty, and the week is planned again from scratch (meals the person chose or pinned
+    stay). Each tap adds one batch, so a second tap goes further; undo takes the last off.
+    Budget, safety and variety rules are unchanged: when nothing else fits, the week stays."""
+    before = _open_dishes(plan_id)
+    if not before:
+        raise ValueError("No open meals Ziggy picked to change: the rest are yours or already past")
+    plan = models.get_plan(plan_id)
+    batches = db.jl(plan.get("avoid"), []) + [sorted(set(before.values()))]
+    _set_avoid(plan_id, batches)
+    optimizer.optimize(plan_id, stable=False)
+    after = _open_dishes(plan_id)
+    changed = sum(1 for sid, iid in before.items() if after.get(sid) != iid)
+    if not changed:
+        _set_avoid(plan_id, batches[:-1])
+        optimizer.optimize(plan_id)
+    view = service.plan_view(plan_id)
+    view["try_different"] = {"changed": changed, "meals": len(before), "can_undo": bool(changed)}
+    return view
+
+
+def try_different_undo(plan_id: int) -> dict:
+    """Take the last "Try different dishes" back: its dishes lose their penalty and the
+    week is planned again, which brings them back when they were the better fit."""
+    plan = models.get_plan(plan_id)
+    batches = db.jl(plan.get("avoid"), [])
+    if not batches:
+        raise ValueError("Nothing to undo")
+    _set_avoid(plan_id, batches[:-1])
+    optimizer.optimize(plan_id, stable=False)
+    return service.plan_view(plan_id)
+
+
 def confirm(session_id: int) -> dict:
     """"I had it" — the meal happened (ordered via the Swiggy hand-off, or cooked).
     It becomes spent money and logged nutrition, and the rest of the week re-balances."""

@@ -379,7 +379,7 @@ const ACT_LABELS = {
   "refresh-live-cart": "Refresh Swiggy cart", "resolve-live-attempt": "Resolve the order attempt",
   "more-live-dishes": "Load more dishes", "restore-live-menu": "Browse the menu", "more-places": "Load more places",
   "live-menus": "Plan from Swiggy menus", "swiggy-refresh-addresses": "Refresh addresses",
-  "swiggy-connect": "Connect Swiggy", newweek: "Plan a new week", reopt: "Re-plan", exec: "Review orders",
+  "swiggy-connect": "Connect Swiggy", newweek: "Plan a new week", reopt: "Re-plan", "save-budget": "Re-plan", "try-different": "Try different dishes", budget: "Change budget", exec: "Review orders",
   "addr-open": "Load your Swiggy addresses",
 };
 function liveAction(kind, ...args) { S.lastLive = { kind, args }; return RESUME[kind].run(...args); }
@@ -477,7 +477,7 @@ function resetProfileState() {
   for (const key of ["exec", "receipts", "recap", "orderReview", "sheet", "moving", "places", "calendar", "account", "swiggy",
     "swAddrs", "carts", "acctDraft", "liveResults", "liveFavourites", "liveBrowseMenu", "liveOrderReview", "liveCart",
     "checkoutReview", "placedOrder", "liveOrderStatus", "liveOrderHistory", "liveCartError", "liveCartEmpty", "saved",
-    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "cook", "dish", "cookAlong"]) S[key] = null;
+    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "cook", "dish", "cookAlong", "budgetSheet"]) S[key] = null;
   S.welcome = false; S.tab = "today"; S.more = null; S.connectSheet = false; S.addrSheet = false; S.ask = false;
 }
 async function switchUser(id) {
@@ -890,7 +890,7 @@ function render() {
     + (S.sheet ? sheetDialog() : "") + (S.addrSheet ? addressSheet() : "") + (S.connectSheet ? connectSheet() : "")
     + (S.liveBrowseMenu || S.liveLoading ? menuSheet() : "")
     + (S.orderReview ? orderReviewDialog() : "") + (S.liveOrderReview ? liveOrderReviewDialog() : "")
-    + (S.checkoutReview ? checkoutReviewDialog() : "") + (S.dish ? dishSheet() : "") + (S.cookAlong ? cookAlongView() : "");
+    + (S.checkoutReview ? checkoutReviewDialog() : "") + (S.dish ? dishSheet() : "") + (S.cookAlong ? cookAlongView() : "") + (S.budgetSheet ? budgetSheet() : "");
   // A sheet slides up once, when it opens; re-renders while it is open don't replay that.
   const open = [...(document.querySelectorAll?.(".sheet-bg[data-ov]") || [])];
   open.forEach(el => { if (!S.openSheets?.has(el.dataset.ov)) el.classList.add("enter"); });
@@ -1036,7 +1036,7 @@ function todayScreen() {
   const left = (b.budget || 0) - (b.spend || 0);
   const first = v.user?.name && v.user.name !== "Me" ? `, ${esc(v.user.name.split(" ")[0])}` : "";
   return `<div class="rise"><h1 class="h1">${greeting()}${first}</h1>
-      <p class="muted">${left >= 0 ? `${rupee0(left)} left this week` : `${rupee0(-left)} over this week's budget`} · <button class="link" data-tab="week" style="min-height:0;font-size:inherit;color:inherit">see the week</button></p></div>
+      <p class="muted">${left >= 0 ? `${rupee0(left)} left this week` : `${rupee0(-left)} over this week's budget`} · <button class="link" data-tab="week" style="min-height:0;font-size:inherit;color:inherit">see the week</button> · <button class="link" data-act="budget" style="min-height:0;font-size:inherit;color:inherit">change budget</button></p></div>
     ${realDishesState()}
     ${hungryCard(nu)}
     ${nu ? nextUpCard(nu) : v.source?.kind === "none" ? "" : `<section class="empty rise2">${mascot()}<h2 class="h2">Nothing left to plan this week.</h2><button class="primary" data-act="newweek">Plan next week</button></section>`}
@@ -1339,7 +1339,7 @@ function headsUp() {
   return `<section class="stack rise3" aria-label="Heads-up">${hs.map(h => `<div class="note ${h.level === "warn" ? "warn" : ""}">
     <span class="ic" aria-hidden="true">${esc({ reconcile: "✓", budget: "₹", saving: "₹", holiday: "★", fast: "◐", weather: "☂", nutrition: "+" }[h.kind] || "•")}</span><div><b>${esc(h.title)}</b><p class="muted">${esc(h.body)}</p>
     ${h.kind === "reconcile" ? `<div class="acts"><button class="link" data-tab="week">Review past meals</button></div>` : ""}
-    ${h.kind === "budget" ? `<div class="acts"><button class="link" data-go="more:settings">Adjust budget</button>${S.view.plan.mode !== "survival" && S.meta?.modes?.survival ? `<button class="link" data-mode="survival">Switch to ${esc(S.meta.modes.survival)}</button>` : ""}</div>` : ""}</div></div>`).join("")}</section>`;
+    ${h.kind === "budget" ? `<div class="acts"><button class="link" data-act="budget">Adjust budget</button>${S.view.plan.mode !== "survival" && S.meta?.modes?.survival ? `<button class="link" data-mode="survival">Switch to ${esc(S.meta.modes.survival)}</button>` : ""}</div>` : ""}</div></div>`).join("")}</section>`;
 }
 
 /* Push reminders arrive at the order-by time even when Ziggy is closed
@@ -1471,7 +1471,8 @@ function weekScreen() {
       <div class="row" style="justify-content:space-between;align-items:baseline"><span><span class="money" style="font-size:26px">${est(b.spend || 0)}</span> <span class="muted">planned of ${rupee0(b.budget)}</span></span>
         <b style="color:${left < 0 ? "var(--bad)" : "var(--leaf-ink)"}">${left < 0 ? `${rupee0(-left)} over` : `${rupee0(left)} left`}</b></div>
       <div class="bar"><i class="${left < 0 ? "over" : ""}" style="width:${pct}%"></i></div>
-      <span class="fine">${n("delivery")} to order · ${n("cook")} to cook${b.prorated ? ` · rest of the week only` : ""}${b.daily_cap ? ` · daily limit ${rupee0(b.daily_cap)}` : ""} · ${esc(v.plan.mode_label || "")}</span></section>
+      <span class="fine">${n("delivery")} to order · ${n("cook")} to cook${b.prorated ? ` · rest of the week only` : ""}${b.daily_cap ? ` · daily limit ${rupee0(b.daily_cap)}` : ""} · ${esc(v.plan.mode_label || "")}</span>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="small secondary" data-act="budget">Change budget</button>${n("delivery") ? `<button class="small secondary" data-act="try-different" title="Swap the dishes Ziggy picked for others that still fit your rules and budget">Try different dishes</button>` : ""}</div></section>
     ${sourceLine(v.source)}
     ${S.moving ? `<div class="note" role="status"><span class="ic">${ICON.swap}</span><span style="flex:1">Tap the meal to swap it with, on any day.</span><button class="small ghost" data-act="cancel-move">Cancel</button></div>` : ""}
     ${day ? `<nav class="days rise2" aria-label="Days">${days.map((d, i) => {
@@ -1487,6 +1488,58 @@ function weekScreen() {
     <button class="ghost" data-act="newweek">Plan next week</button>`;
 }
 const i18nToday = (day) => day.date === todayIso() ? " · today" : "";
+
+/* ---- budget in place, and "Try different dishes": both re-plan the week, both undo ---- */
+const BUDGET_STEP = 250;
+function mealsLeft() {
+  return (S.view.grid || []).flatMap(d => Object.values(d.meals)).filter(m => m && m.status === "active").length;
+}
+function perMealText(weekly) {
+  const b = S.view.budget || {}, n = mealsLeft();
+  if (!weekly || !n) return "";
+  const share = b.weekly_budget ? (b.budget || 0) / b.weekly_budget : 1;
+  return `about ${rupee0((weekly * share) / n)} a meal for the ${n} meal${n === 1 ? "" : "s"} left${b.prorated ? " (this week counts from today)" : ""}`;
+}
+function budgetSheet() {
+  const d = S.budgetSheet, b = S.view.budget || {};
+  return `<div class="sheet-bg" data-ov="budget" data-close-budget="1"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="budget-title">
+    <span class="grab" aria-hidden="true"></span>
+    <div class="sheet-head"><div><p class="eyebrow">Now ${rupee0(b.weekly_budget)} a week</p><h2 class="h2" id="budget-title">Weekly food budget</h2></div>
+      <button class="icon-btn" data-close-budget="1" aria-label="Close">${ICON.close}</button></div>
+    <div class="row" style="justify-content:center;align-items:center;gap:14px">
+      <span class="stepper"><button type="button" data-budget-step="-${BUDGET_STEP}" aria-label="${rupee0(BUDGET_STEP)} less" ${d.value <= 250 ? "disabled" : ""}>${ICON.minus}</button></span>
+      <label class="sr" for="budget-in">Weekly budget in rupees</label>
+      <input id="budget-in" class="money" type="number" inputmode="numeric" min="100" max="100000" step="50" value="${d.value || ""}" style="font-size:36px;width:170px;text-align:center">
+      <span class="stepper"><button type="button" data-budget-step="${BUDGET_STEP}" aria-label="${rupee0(BUDGET_STEP)} more" ${d.value >= 100000 ? "disabled" : ""}>${ICON.plus}</button></span></div>
+    <p class="muted" id="budget-per" style="text-align:center">${esc(perMealText(d.value))}</p>
+    <div class="chips" style="justify-content:center">${[...new Set([...BUDGET_PRESETS, b.weekly_budget].filter(Boolean))].sort((x, y) => x - y).map(n => `<button class="chip" data-budget-preset="${n}" aria-pressed="${d.value === n}">${rupee0(n)}</button>`).join("")}</div>
+    <button class="primary" data-act="save-budget" ${!d.value || d.value === b.weekly_budget ? "disabled" : ""}>Re-plan with ${d.value ? rupee0(d.value) : "this budget"}</button>
+    <p class="fine">Meals you kept, ordered or put in your Swiggy cart stay as they are. Undo puts the old budget back.</p>
+  </section></div>`;
+}
+function openBudget() { S.budgetSheet = { value: S.view.budget?.weekly_budget || S.view.user?.weekly_budget || 0 }; render(); }
+async function setBudget(weekly, undoTo) {
+  const before = S.view.budget?.weekly_budget;
+  adoptView(await api(`/api/user/${S.userId}/setup`, "PATCH", { weekly_budget: weekly }));
+  S.budgetSheet = null;
+  const b = S.view.budget || {};
+  const msg = undoTo ? `Back to ${rupee0(weekly)} a week` : `${rupee0(weekly)} a week: about ${rupee0(b.spend || 0)} planned`;
+  toast(msg, undoTo ? null : () => setBudget(before, true));
+  render();
+}
+async function saveBudget() {
+  const v = Math.round(Number(S.budgetSheet?.value));
+  if (!(v >= 100 && v <= 100000)) throw new Error("Weekly budget must be between ₹100 and ₹1,00,000");
+  await setBudget(v, false);
+}
+async function tryDifferent() {
+  const view = await api(`/api/plan/${S.planId}/try-different`, "POST", {});
+  adoptView(view);
+  const t = view.try_different || {};
+  toast(t.changed ? `${t.changed} of ${t.meals} meal${t.meals === 1 ? "" : "s"} changed` : "Nothing else fits your rules and budget right now: the week stays",
+    t.can_undo ? async () => { adoptView(await api(`/api/plan/${S.planId}/try-different/undo`, "POST", {})); toast("The dishes from before are back"); render(); } : null);
+  render();
+}
 
 /* ---- the Change sheet: better fits, other places, cook, skip, keep ---- */
 function pickBtn(x, place, d) {
@@ -2783,6 +2836,20 @@ function wire() {
   on("[data-choose-auto]", "click", (e) => guard(() => choose(e.currentTarget.dataset.chooseAuto, { action: "auto" }, "Ziggy will choose this one")));
   on("[data-move]", "click", (e) => { S.moving = Number(e.currentTarget.dataset.move); S.sheet = null; S.tab = "week"; S.weekView = null; render(); });
   on("[data-close-dish]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.dish = null; render(); } });
+  on("[data-close-budget]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.budgetSheet = null; render(); } });
+  on("[data-budget-step]", "click", (e) => {
+    S.budgetSheet.value = Math.min(100000, Math.max(250, (Number(S.budgetSheet.value) || 0) + Number(e.currentTarget.dataset.budgetStep))); render(); });
+  on("[data-budget-preset]", "click", (e) => { S.budgetSheet.value = Number(e.currentTarget.dataset.budgetPreset); render(); });
+  const bin = document.getElementById("budget-in");
+  if (bin) {
+    bin.oninput = () => {
+      S.budgetSheet.value = Math.round(Number(bin.value)) || 0;
+      const per = document.getElementById("budget-per"); if (per) per.textContent = perMealText(S.budgetSheet.value);
+      const save = document.querySelector('[data-act="save-budget"]');
+      if (save) { save.disabled = !S.budgetSheet.value || S.budgetSheet.value === S.view.budget?.weekly_budget; save.textContent = `Re-plan with ${S.budgetSheet.value ? rupee0(S.budgetSheet.value) : "this budget"}`; }
+    };
+    bin.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); guard(saveBudget, "Re-plan"); } };
+  }
   on("[data-dish]", "click", (e) => { const t = e.currentTarget; if (t.dataset.dishSid) S.cook = { sid: Number(t.dataset.dishSid) }; guard(() => openDish(t.dataset.dish), "Open the recipe"); });
   on("[data-dish-people]", "click", (e) => { const n = Math.max(1, Math.min(20, S.dish.people + Number(e.currentTarget.dataset.dishPeople))); guard(() => openDish(S.dish.key, n), "Change how many eat"); });
   on("[data-have-ing]", "change", (e) => { const d = S.dish || S.cookAlong?.dish; if (!d) return; d.have = { ...(d.have || {}), [e.currentTarget.dataset.haveIng]: e.currentTarget.checked }; render(); });
@@ -2830,6 +2897,7 @@ function wire() {
   const acts = {
     "download-profile": () => downloadPrivate(`/api/user/${S.userId}/data.json`, "ziggy-profile.json", "application/json"),
     reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute,
+    budget: async () => openBudget(), "save-budget": saveBudget, "try-different": tryDifferent,
     "confirm-live-cart": addLiveItemToCart,
     "review-live-checkout": reviewLiveCheckout, "place-live-order": placeLiveOrder,
     "track-live-order": trackLiveOrder, "live-order-history": loadLiveOrderHistory,
@@ -2963,11 +3031,12 @@ async function goTab(tab, sub = null) {
   if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);
 }
 
-const anyDialog = () => S.orderReview || S.liveOrderReview || S.checkoutReview || S.sheet || S.addrSheet || S.connectSheet || S.liveBrowseMenu || S.dish || S.cookAlong;
+const anyDialog = () => S.orderReview || S.liveOrderReview || S.checkoutReview || S.sheet || S.addrSheet || S.connectSheet || S.liveBrowseMenu || S.dish || S.cookAlong || S.budgetSheet;
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && (anyDialog() || S.moving)) {
     if (S.cookAlong) { stopCookAlong(); return; }
-    if (S.dish) S.dish = null;
+    if (S.budgetSheet) S.budgetSheet = null;
+    else if (S.dish) S.dish = null;
     else if (S.liveOrderReview) S.liveOrderReview = null;
     else if (S.checkoutReview) S.checkoutReview = null;
     else { S.orderReview = null; S.sheet = null; S.moving = null; S.addrSheet = false; S.connectSheet = false; S.liveBrowseMenu = null; }
