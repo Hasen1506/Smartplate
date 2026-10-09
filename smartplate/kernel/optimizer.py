@@ -291,10 +291,11 @@ def _cook_candidate(user, session, ctx, recipe=None):
     }
 
 
-def meal_suitable(item: dict, meal: str) -> bool:
+def meal_suitable(item: dict, meal: str, chosen: bool = False) -> bool:
     """Keep treats and sides (Swiggy menu sections like Breads or Beverages) visible in the
-    catalogue without planning them as whole meals by themselves."""
-    return ("dessert" not in item.get("tags", []) and "side" not in item.get("tags", [])
+    catalogue without planning them as whole meals by themselves. A dish the person chose
+    themselves (`chosen`) may be a side: a curry for dinner is their call."""
+    return ("dessert" not in item.get("tags", []) and (chosen or "side" not in item.get("tags", []))
             and item.get("cuisine") != "dessert"
             and not item.get("name", "").lower().endswith(" sweet"))
 
@@ -348,6 +349,17 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     elif not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
         safe = [it for it in safe if meal_suitable(it, meal) and it.get("nutrition_known", 1) != 0]
+        if meal == "breakfast":
+            # Dishes the restaurant files as breakfast ("Tiffin", "South Indian Breakfast"),
+            # when the person's places have any: not a dal or a thali at 8 am.
+            morning = [it for it in safe if "breakfast" in (it.get("tags") or [])]
+            safe = morning or safe
+        elif meal == "lunch":
+            # …and the other way round at lunch: tiffin is for mornings and evenings.
+            # A whole plate (Swiggy's "Meals", "Thali", rice and bowls) when there is one.
+            midday = [it for it in safe if "breakfast" not in (it.get("tags") or [])]
+            plates = [it for it in midday if "main" in (it.get("tags") or [])]
+            safe = plates or midday or safe
         safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
         safe = [it for it in safe if it["id"] not in ctx["taste"]["disliked"]]   # "not again" is a lock
         # keep the most promising few (cheap-but-decent) to bound the MILP
@@ -455,7 +467,7 @@ def pinned_candidate(user, plan, session, ctx) -> dict | None:
         return None
     if pin.get("kind") == "delivery":
         item = next((it for it in ctx["menu"] if it["id"] == pin.get("item_id")), None)
-        if not item or allergens.violates(user, item) or not meal_suitable(item, session["meal"]):
+        if not item or allergens.violates(user, item) or not meal_suitable(item, session["meal"], chosen=True):
             return None
         cand = _delivery_candidate(user, plan, session, item, ctx)
     elif pin.get("kind") == "cook":
@@ -483,7 +495,7 @@ def carted_candidate(user, session, real, ctx) -> dict | None:
     item = next((it for it in ctx["menu"] if it["id"] == d["item_id"]), None) or next(
         (it for it in ctx["menu"] if it["name"] == d["item_name"] and it["restaurant_name"] == d["restaurant_name"]),
         None)
-    if item is not None and (allergens.violates(user, item) or not meal_suitable(item, session["meal"])):
+    if item is not None and (allergens.violates(user, item) or not meal_suitable(item, session["meal"], chosen=True)):
         return None
     nut = db.jl(d["nutrition"], {})
     return {"kind": "delivery", "restaurant_id": d["restaurant_id"], "restaurant_name": d["restaurant_name"],

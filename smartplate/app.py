@@ -691,10 +691,12 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy/restaurants")
     def swiggy_live_restaurants(user_id):
+        offset = request.args.get("offset", "0")
+        offset = int(offset) if offset.isdigit() else 0
         if request.args.get("browse") == "1":      # every place Swiggy lists for the address
-            found = swiggy_live.search_live_restaurants(user_id, live_catalog.DEFAULT_QUERY)
+            found = swiggy_live.search_live_restaurants(user_id, live_catalog.DEFAULT_QUERY, offset)
             return jsonify({**found, "browse": True})
-        return jsonify(swiggy_live.search_live_restaurants(user_id, request.args.get("query", "")))
+        return jsonify(swiggy_live.search_live_restaurants(user_id, request.args.get("query", ""), offset))
 
     @app.get("/api/user/<int:user_id>/swiggy/favourites")
     def swiggy_live_favourites(user_id):

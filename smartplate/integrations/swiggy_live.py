@@ -784,15 +784,23 @@ def _address(conn: dict) -> str:
     return conn["address_id"]
 
 
-def search_live_restaurants(user_id: int, query: str) -> dict:
-    """Only provider results for the selected delivery address; never seed rows."""
+AD_MARK = re.compile(r"\s*\((ad|ads|sponsored|promoted)\)\s*$", re.I)
+
+
+def search_live_restaurants(user_id: int, query: str, offset: int = 0) -> dict:
+    """Only provider results for the selected delivery address; never seed rows. One page
+    (Swiggy sends ten; `next_offset` reads the next). Live finding (9 Oct 2026): sponsored
+    places come back named "Name (Ad)"; the mark is taken off the name and kept as
+    `sponsored`, so Ziggy never picks an ad for you without saying so."""
     query = (query or "").strip()
     if len(query) < 2 or len(query) > 80:
         raise ValueError("Search for a restaurant or cuisine using 2–80 characters")
     conn = _conn(user_id)
     address_id = _address(conn)
+    offset = max(0, min(10000, int(offset or 0)))
     data = call(user_id, "search_restaurants", build_args(_tool(conn, "search_restaurants"),
-                                                         {"query": query, "address": address_id}))
+                                                         {"query": query, "address": address_id,
+                                                          "offset": offset or None}))
     body = data.get("data", data) if isinstance(data, dict) else {}
     rows = body.get("restaurants") if isinstance(body, dict) else None
     if not isinstance(rows, list):
@@ -807,13 +815,20 @@ def search_live_restaurants(user_id: int, query: str) -> dict:
             continue
         seen.add(rid)
         cuisines = row.get("cuisines")
-        found.append({"id": rid, "name": str(_get(row, "name")), "rating": _get(row, "rating"),
+        raw_name = str(_get(row, "name"))
+        name = AD_MARK.sub("", raw_name) or raw_name
+        found.append({"id": rid, "name": name, "sponsored": name != raw_name, "rating": _get(row, "rating"),
                       "eta": _get(row, "eta"), "area": _get(row, "area"),
                       "availability": _get(row, "availability"), "distance": _get(row, "distance"),
                       "cuisines": [str(c)[:40] for c in cuisines if isinstance(c, str)][:6]
                                   if isinstance(cuisines, list) else []})
+    nxt = body.get("nextOffset")
+    more = body.get("hasMore") is True and isinstance(nxt, int) and not isinstance(nxt, bool) and nxt > offset
+    total = body.get("totalRestaurants")
     return {"address": conn.get("address_label") or address_id, "address_id": address_id,
-            "query": query, "restaurants": found}
+            "query": query, "restaurants": found, "offset": offset,
+            "next_offset": nxt if more else None, "has_more": more,
+            "total": total if isinstance(total, int) and not isinstance(total, bool) else None}
 
 
 def live_favourites(user_id: int) -> list[dict]:
@@ -843,17 +858,77 @@ def toggle_live_favourite(user_id: int, restaurant_id: str, restaurant_name: str
     return {"favourite": True, "restaurants": live_favourites(user_id)}
 
 
+MENU_PAGES = 5                   # get_restaurant_menu pages of categories read per menu
+MENU_PAGE_SIZE = 8               # categories per page (Swiggy's maximum)
+
+
+def _menu_sections(body: dict) -> tuple[list[tuple[dict, list[str]]], list[dict]]:
+    """(dish, [section, subsection]) from Swiggy's `categories` (live finding, 9 Oct 2026:
+    get_restaurant_menu nests dishes in categories, some in subcategories, ten at most each),
+    plus the sections Swiggy cut short (`hasMoreItems`)."""
+    rows, cut = [], []
+
+    def walk(cat, path, depth=0):
+        if not isinstance(cat, dict) or depth > 3:
+            return
+        title = str(cat.get("title") or "").strip()[:80]
+        here = path + ([title] if title else [])
+        items = cat.get("items")
+        for it in items if isinstance(items, list) else []:
+            if isinstance(it, dict):
+                rows.append((it, here))
+        if cat.get("hasMoreItems") is True:
+            cut.append({"section": " · ".join(here), "shown": len(items or []), "total": cat.get("totalItems")})
+        for sub in cat.get("subcategories") or []:
+            walk(sub, here, depth + 1)
+
+    for cat in body.get("categories") or []:
+        walk(cat, [])
+    return rows, cut
+
+
+def _read_menu(user_id: int, conn: dict, restaurant_id: str) -> tuple[dict, list[tuple[dict, list[str]]], dict]:
+    """Every page of a menu: (first reply body, (dish, sections) rows, notes)."""
+    tool = _tool(conn, "get_restaurant_menu")
+    paged = bool(_find((tool.get("input_schema") or {}).get("properties") or {}, "page"))
+    first, rows, cut, pages = None, [], [], 0
+    for page in range(1, MENU_PAGES + 1):
+        args = {"restaurant": restaurant_id, "address": _address(conn)}
+        if paged:
+            args.update(page=page, page_size=MENU_PAGE_SIZE)
+        data = call(user_id, "get_restaurant_menu", build_args(tool, args))
+        body = data.get("data", data) if isinstance(data, dict) else {}
+        body = body if isinstance(body, dict) else {}
+        pages += 1
+        if first is None:
+            first = body
+        if not isinstance(body.get("categories"), list):
+            # A compact reply (one flat list of dishes, as Swiggy's docs describe): no paging.
+            browse = body.get("items")
+            flat = browse if isinstance(browse, list) else records(data, "id", "name")
+            rows += [(r, _categories(r)) for r in flat if isinstance(r, dict)]
+            break
+        got, short = _menu_sections(body)
+        rows += got
+        cut += short
+        if not paged or body.get("hasMore") is not True:
+            break
+    more = bool(first and first.get("hasMore") is True and pages >= MENU_PAGES and paged)
+    return first or {}, rows, {"cut": cut, "more_sections": more, "pages": pages,
+                               "sectioned": isinstance((first or {}).get("categories"), list),
+                               "sections_total": (first or {}).get("totalCategories")}
+
+
 def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
-    """Browse the exact provider restaurant ID, with a fresh menu for this address."""
+    """Browse the exact provider restaurant ID, with a fresh menu for this address: every
+    section Swiggy returns (up to MENU_PAGES pages), each dish once, with its sections."""
     if not restaurant_id or not restaurant_name:
         raise ValueError("Choose a restaurant from live Swiggy search")
     conn = _conn(user_id)
-    data = call(user_id, "get_restaurant_menu", build_args(_tool(conn, "get_restaurant_menu"),
-                    {"restaurant": restaurant_id, "address": _address(conn)}))
+    body, rows, notes = _read_menu(user_id, conn, restaurant_id)
     from ..domain import models
     user = models.get_user(user_id)
-    body = data.get("data", data) if isinstance(data, dict) else {}
-    provider_restaurant = body.get("restaurant") if isinstance(body, dict) else None
+    provider_restaurant = body.get("restaurant")
     if (not isinstance(provider_restaurant, dict) or str(_get(provider_restaurant, "id")) != restaurant_id
             or not _get(provider_restaurant, "name")):
         raise SwiggyError("Swiggy did not verify this exact restaurant for your address. Search again.")
@@ -861,37 +936,47 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
         raise SwiggyError("This restaurant is closed right now. Search again later.")
     place = {"id": restaurant_id, "name": str(_get(provider_restaurant, "name")),
              "area": _get(provider_restaurant, "area"), "rating": _get(provider_restaurant, "rating")}
-    items = []
-    hidden = 0
-    browse = body.get("items") if isinstance(body, dict) else None
-    rows = browse if isinstance(browse, list) else records(data, "id", "name")
-    unit = menu_unit(rows)
-    for row in rows:
-        if not isinstance(row, dict) or _get(row, "id") is None or _get(row, "name") is None:
+    items, by_id, hidden = [], {}, 0
+    # Live finding (9 Oct 2026): the sectioned menu's bare `price` is whole rupees (Idiyappam
+    # 3 pcs: 153, as the Swiggy app shows), so those prices are not marked as estimates.
+    verified = notes["sectioned"]
+    unit = "rupees" if verified else menu_unit([r for r, _ in rows])
+    for row, sections in rows:
+        if _get(row, "id") is None or _get(row, "name") is None:
+            continue
+        iid = str(_get(row, "id"))
+        if iid in by_id:                                  # "Recommended" repeats dishes from other sections
+            known = by_id[iid]
+            for c in sections:
+                if c not in known["categories"]:
+                    known["categories"].append(c)
             continue
         veg = _flag(_get(row, "veg"))
         if user["diet"] in ("veg", "vegan") and veg in (False, 0):
             hidden += 1
             continue
         name = str(_get(row, "name"))
-        items.append({"id": str(_get(row, "id")), "name": name,
-                      "price": rupees(row, unit), "price_estimated": price_estimated(row), "veg": veg,
-                      "in_stock": _flag(_get(row, "stock")),
-                      "has_options": _flag(_get(row, "variants")) is True or _flag(_get(row, "addons")) is True,
-                      "categories": _categories(row), "bestseller": row.get("isBestseller") is True,
-                      "image": _image(row), "name_allergens": _name_allergens(name, veg)})
-    labels = body.get("categoryLabels") if isinstance(body, dict) else None
+        item = {"id": iid, "name": name,
+                "price": rupees(row, unit), "price_estimated": price_estimated(row) and not verified, "veg": veg,
+                "in_stock": _flag(_get(row, "stock")),
+                "has_options": _flag(_get(row, "variants")) is True or _flag(_get(row, "addons")) is True,
+                "categories": list(sections), "bestseller": row.get("isBestseller") is True,
+                "image": _image(row), "name_allergens": _name_allergens(name, veg)}
+        by_id[iid] = item
+        items.append(item)
+    labels = body.get("categoryLabels")
     categories = [str(c)[:80] for c in labels if isinstance(c, (str, int))] if isinstance(labels, list) else []
     for item in items:                                    # keep any label the items use, in order
         for c in item["categories"]:
             if c not in categories:
                 categories.append(c)
     remember_photos(user_id, restaurant_id, items)
-    total = body.get("totalItems") if isinstance(body, dict) else None
+    total = body.get("totalItems")
     return {"restaurant": place, "address": conn.get("address_label") or _address(conn),
             "items": items, "categories": categories, "hidden_nonveg": hidden,
             "total_items": total if isinstance(total, int) and not isinstance(total, bool) else None,
-            "truncated": bool(body.get("truncated")) if isinstance(body, dict) else False,
+            "truncated": bool(body.get("truncated")) or bool(notes["cut"]) or notes["more_sections"],
+            "cut_sections": notes["cut"], "more_sections": notes["more_sections"],
             "fetched": clock.now().isoformat(timespec="minutes")}
 
 
@@ -968,11 +1053,10 @@ def menu(user_id: int, restaurant: str, *, fresh: bool = False) -> dict:
             return {**db.jl(row["payload"], {}), "cached": True}
     conn = _conn(user_id)
     place = find_restaurant(user_id, restaurant)
-    tool = _tool(conn, "get_restaurant_menu")
-    data = call(user_id, "get_restaurant_menu",
-                build_args(tool, {"restaurant": place["id"], "address": _address(conn)}))
-    items = []
-    rows = records(data, "id", "name")[:150]
+    _, sections, _ = _read_menu(user_id, conn, str(place["id"]))
+    items, seen = [], set()
+    rows = [r for r, _ in sections if _get(r, "id") is not None and _get(r, "name") is not None]
+    rows = [r for r in rows if not (str(_get(r, "id")) in seen or seen.add(str(_get(r, "id"))))][:150]
     unit = menu_unit(rows)
     for r in rows:
         veg = _get(r, "veg")

@@ -15,6 +15,7 @@ and `source_for` says what is needed for real dishes. (The sample catalogue is t
 fixture data only.)
 """
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from .. import clock, config, db
 
@@ -65,10 +66,34 @@ ALLERGEN_WORDS = {"peanut": "peanut", "groundnut": "peanut", "cashew": "tree_nut
                   "ghee": "dairy", "curd": "dairy", "cream": "dairy", "egg": "egg", "prawn": "shellfish",
                   "fish": "fish", "soya": "soy", "wheat": "gluten", "maida": "gluten", "sesame": "sesame"}
 NONVEG_WORDS = r"chicken|mutton|lamb|fish|meen|prawn|shrimp|crab|egg|omelet|keema|kheema|beef|pork"
+SEARCH_PAGES = 2                 # pages of the broad search read to pick places when none are saved
+NEAR_KM = 3.0                    # places this close come first
+MENU_READERS = 3                 # live menus read at the same time on a refresh
 # Swiggy's own menu sections that hold sides, breads, drinks and sweets, not a whole meal.
 # A dish filed there isn't planned as a meal by itself, unless the person pools it.
+# Live finding (9 Oct 2026): real menus file curries, dals, soups, starters and snacks in
+# their own sections too ("Indian Gravies", "Dal", "Soups", "Starters", "Chaat").
 SIDE_SECTIONS = re.compile(r"\b(breads?|rotis?|sides?|accompaniments?|beverages?|drinks?|juices?|shakes?|desserts?|"
-                           r"sweets?|extras?|add[- ]?ons?|raitas?|papads?|condiments?|dips?|ice creams?)\b", re.I)
+                           r"sweets?|extras?|add[- ]?ons?|raitas?|papads?|condiments?|dips?|ice creams?|soups?|"
+                           r"starters?|appeti[sz]ers?|chaats?|snacks?|quick ?bites|pakoras?|gravies|gravy|curries|"
+                           r"subzi|sabzi|dals?|evening|fries|curry|podis?|pickles?|retail|groceries|packaged|"
+                           r"store|masalas? powders?)\b", re.I)
+# …unless the section says it's a whole meal ("Curry Rice Combos", "Meals & Thalis").
+MEAL_SECTIONS = re.compile(r"\b(meals?|combos?|thalis?|bowls?|platters?)\b", re.I)
+# Dishes that are a side whatever section they sit in (Andhra Mess files Sambar under
+# "Veg curry andhra style"; live finding, 9 Oct 2026).
+# A pack sold by weight ("Idli Podi (150 Gm)") is shopping, not a meal. Volume isn't: a
+# "Sambar Rice (500ml)" is a portion.
+PACK_NAMES = re.compile(r"\b(podi|powder|pickle|masala mix|premix)\b|\b\d+\s*(gm|gms|g|grams?|kg)\b", re.I)
+SIDE_NAMES = re.compile(r"^\s*(extra\s+.*|(plain\s+)?(sambar|rasam|raita|curd|papad|pickle|chutney|salna|"
+                        r"kurma|gravy|dal|ghee|butter)(\s*\(.*\))?|(steamed|plain|jeera|white)\s+rice(\s*\(.*\))?|"
+                        r"([\w-]+\s+){0,3}(roti|chapati|chapathi|phulka|naan|kulcha|pav)s?"
+                        r"(\s*\(.*\))?)\s*$", re.I)
+# A whole plate for lunch, from its section or its name ("Meals", "Thali", "Sambar Rice").
+MAIN_WORDS = re.compile(r"\b(meals?|thalis?|rice|biryani|briyani|pulao|pulav|khichdi|combos?|bowls?|platters?)\b", re.I)
+# Sections that say a dish is a breakfast ("Tiffin", "South Indian Breakfast", "Dosa").
+BREAKFAST_SECTIONS = re.compile(r"\b(breakfast|tiffins?|idl[iy]s?|dosas?|uttap+ams?|pongal|upma|poha|parathas?|"
+                                r"morning)\b", re.I)
 TAG_WORDS = {"biryani": "heavy", "meals": "comfort", "thali": "comfort", "salad": "light", "idli": "light"}
 
 
@@ -145,10 +170,40 @@ def _places(user_id: int) -> list[dict]:
                 seen.add(p["id"])
                 out.append(p)
         return out
-    found = swiggy_live.search_live_restaurants(user_id, DEFAULT_QUERY)["restaurants"]
-    found = [r for r in found if str(r.get("availability") or "OPEN").upper() != "CLOSED"]
-    found.sort(key=lambda r: -float(r.get("rating") or 0))
-    return [{"id": r["id"], "name": r["name"]} for r in found[:MAX_PLACES]]
+    # Nothing saved yet: the best nearby results of a broad search, two pages of it. Ads and
+    # closed places are left out, and close places come first (live finding, 9 Oct 2026:
+    # the first page is mostly sponsored).
+    found, offset = [], 0
+    for _ in range(SEARCH_PAGES):
+        page = swiggy_live.search_live_restaurants(user_id, DEFAULT_QUERY, offset)
+        found += page["restaurants"]
+        if not page.get("has_more"):
+            break
+        offset = page["next_offset"]
+    open_ = [r for r in found if str(r.get("availability") or "OPEN").upper() != "CLOSED"]
+    organic = [r for r in open_ if not r.get("sponsored")] or open_
+
+    def near(r):
+        try:
+            return float(r.get("distance")) > NEAR_KM
+        except (TypeError, ValueError):
+            return False
+    organic.sort(key=lambda r: (near(r), -float(r.get("rating") or 0)))
+    return [{"id": r["id"], "name": r["name"]} for r in organic[:MAX_PLACES]]
+
+
+def section_tags(tags, sections, name: str = "") -> list[str]:
+    """A dish's tags plus what its Swiggy menu sections (and a bare side's name) say:
+    "side" (not a meal by itself) and "breakfast"."""
+    out, sections = set(tags or []), sections or []
+    if any(SIDE_SECTIONS.search(c) and not MEAL_SECTIONS.search(c) for c in sections) or SIDE_NAMES.match(name or "") \
+            or PACK_NAMES.search(name or ""):
+        out.add("side")
+    if any(BREAKFAST_SECTIONS.search(c) for c in sections):
+        out.add("breakfast")
+    if "side" not in out and (MAIN_WORDS.search(name or "") or any(MAIN_WORDS.search(c) for c in sections)):
+        out.add("main")
+    return sorted(out)
 
 
 def refresh(user_id: int) -> dict:
@@ -161,12 +216,23 @@ def refresh(user_id: int) -> dict:
     places = _places(user_id)
     pooled = meal_pools.keys(user_id)
     menus, skipped = [], []
-    for place in places:
+
+    def read(place):
         try:
-            menus.append(swiggy_live.live_menu(user_id, str(place["id"]), place["name"]))
+            return swiggy_live.live_menu(user_id, str(place["id"]), place["name"]), None
         except SwiggyError as exc:
-            if exc.code in ("swiggy_not_connected", "swiggy_auth_expired"):
-                raise
+            return None, exc
+
+    # A real menu is several pages (live finding, 9 Oct 2026: ~3 s a page), so read a few
+    # places at once rather than one after another.
+    with ThreadPoolExecutor(max_workers=MENU_READERS) as pool:
+        results = list(pool.map(read, places))
+    for place, (menu, exc) in zip(places, results):
+        if exc is None:
+            menus.append(menu)
+        elif exc.code in ("swiggy_not_connected", "swiggy_auth_expired"):
+            raise exc
+        else:
             skipped.append({"name": place["name"], "why": str(exc)})
     rows = []
     for m in menus:
@@ -180,8 +246,7 @@ def refresh(user_id: int) -> dict:
                 est = unestimated(it["name"], it.get("veg"))      # their pick: planned, nutrition unknown
             if not est:
                 continue
-            if any(SIDE_SECTIONS.search(c) for c in it.get("categories") or []):
-                est = {**est, "tags": sorted(set(est["tags"]) | {"side"})}
+            est = {**est, "tags": section_tags(est["tags"], it.get("categories"), it["name"])}
             dishes.append({**est, "name": it["name"], "price": float(it["price"]), "provider_item_id": it["id"]})
         if dishes:
             rows.append((r, dishes))
@@ -252,8 +317,7 @@ def add_dish(user_id: int, restaurant: dict, item: dict) -> int:
         else:
             rid, rating = _insert_restaurant(cur, user_id, restaurant)
         est = estimate(item["name"], item.get("veg")) or unestimated(item["name"], item.get("veg"))
-        if any(SIDE_SECTIONS.search(c) for c in item.get("categories") or []):
-            est = {**est, "tags": sorted(set(est["tags"]) | {"side"})}
+        est = {**est, "tags": section_tags(est["tags"], item.get("categories"), item["name"])}
         local = _insert_dish(cur, rid, rating, {**est, "name": item["name"], "price": float(item["price"]),
                                                 "provider_item_id": str(item["id"])})
         cur.execute("UPDATE live_catalog_state SET dishes = dishes + 1 WHERE user_id=?", (user_id,))

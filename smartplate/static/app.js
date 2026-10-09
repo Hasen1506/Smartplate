@@ -377,7 +377,7 @@ const ACT_LABELS = {
   "review-live-checkout": "Review the order", "place-live-order": "Place the order",
   "track-live-order": "Track the order", "live-order-history": "Load your Swiggy orders",
   "refresh-live-cart": "Refresh Swiggy cart", "resolve-live-attempt": "Resolve the order attempt",
-  "more-live-dishes": "Load more dishes", "restore-live-menu": "Browse the menu",
+  "more-live-dishes": "Load more dishes", "restore-live-menu": "Browse the menu", "more-places": "Load more places",
   "live-menus": "Plan from Swiggy menus", "swiggy-refresh-addresses": "Refresh addresses",
   "swiggy-connect": "Connect Swiggy", newweek: "Plan a new week", reopt: "Re-plan", exec: "Review orders",
   "addr-open": "Load your Swiggy addresses",
@@ -1869,11 +1869,12 @@ function wirePoolDrag() {
 function placeRow(p, { starred, live }) {
   const letter = esc(String(p.name || "?").replace(/^the\s+/i, "").charAt(0).toUpperCase());
   const eta = live && p.eta != null ? (/^\d+$/.test(String(p.eta)) ? `${p.eta} min` : String(p.eta)) : "";
-  const meta = live ? [p.area, p.rating ? `${p.rating}★` : "", eta].filter(Boolean).map(String).map(esc).join(" · ")
+  const km = live && Number.isFinite(Number(p.distance)) && p.distance !== null && p.distance !== "" ? `${Number(p.distance).toFixed(1)} km` : "";
+  const meta = live ? [p.area, p.rating ? `${p.rating}★` : "", eta, km].filter(Boolean).map(String).map(esc).join(" · ")
     : [p.rating ? `${Number(p.rating).toFixed(1)}★` : "", p.eta_min ? `${p.eta_min} min` : "", p.dishes_fit != null ? `${p.dishes_fit} of ${p.dishes_total} fit you` : ""].filter(Boolean).join(" · ");
   const star = live ? `data-live-fav="${esc(p.id)}" data-live-name="${esc(p.name)}"` : `data-fav="${p.id}"`;
   return `<div class="mrow" style="cursor:default"><span class="ico lilac" aria-hidden="true" style="border-radius:50%;font-weight:800">${letter}</span>
-    <span class="t"><b>${esc(p.name)}</b><span class="s">${meta || (live ? "Saved on Swiggy" : "")}</span></span>
+    <span class="t"><b>${esc(p.name)}${p.sponsored ? ` <span class="tag" title="Swiggy shows this place as an ad">Ad</span>` : ""}</b><span class="s">${meta || (live ? "Saved on Swiggy" : "")}</span></span>
     ${live ? `<button class="small secondary" data-live-place="${esc(p.id)}" data-live-name="${esc(p.name)}">Menu</button>` : ""}
     <button class="heart" ${star} aria-pressed="${starred}" aria-label="${starred ? "Remove" : "Save"} ${esc(p.name)}">${ICON.heart}</button></div>`;
 }
@@ -1944,7 +1945,21 @@ function liveResultsBlock() {
       <button class="small ghost" data-act="clear-results">Clear</button></div>
     ${anyEta || cuisines.length > 1 ? `<div class="chips scroll">${anyEta ? filterChip("fast", `Fast (≤${FAST_MIN} min)`) : ""}${cuisines.length > 1 ? cuisines.map(c => `<button class="chip" data-cuisine="${esc(c)}" aria-pressed="${S.cuisine === c}">${esc(c)}</button>`).join("") : ""}</div>` : ""}
     <div class="card tight">${shown.length ? shown.map(r => placeRow(r, { starred: starred.has(r.id), live: true })).join("")
-      : results.length ? `<p class="fine" style="padding:14px 0">None of these match your filters. Turn them off to see all ${results.length}.</p>` : `<p class="fine" style="padding:14px 0">No live restaurants returned for this address and search.</p>`}</div></section>`;
+      : results.length ? `<p class="fine" style="padding:14px 0">None of these match your filters. Turn them off to see all ${results.length}.</p>` : `<p class="fine" style="padding:14px 0">No live restaurants returned for this address and search.</p>`}</div>
+    ${S.liveResults.has_more ? `<button class="secondary" data-act="more-places" ${S.morePlaces ? 'disabled aria-busy="true"' : ""}>${S.morePlaces ? `${roller()}<span>Loading…</span>` : `Load more places${S.liveResults.total ? ` (${results.length} of about ${S.liveResults.total})` : ""}`}</button>` : ""}</section>`;
+}
+// The next page of Swiggy's answer, added below (each place once).
+async function morePlaces() {
+  const r = S.liveResults;
+  if (!r?.has_more || S.morePlaces) return;
+  S.morePlaces = true; render();
+  try {
+    const q = r.browse ? "browse=1" : `query=${encodeURIComponent(r.query)}`;
+    const next = await api(`/api/user/${S.userId}/swiggy/restaurants?${q}&offset=${r.next_offset}`);
+    const seen = new Set(r.restaurants.map(x => x.id));
+    S.liveResults = { ...next, restaurants: [...r.restaurants, ...next.restaurants.filter(x => !seen.has(x.id))] };
+  } finally { S.morePlaces = false; }
+  render();
 }
 // A restaurant's live menu: Swiggy's own categories, veg marks, bestsellers, real photos when
 // Swiggy sends them, and allergen flags read from dish names (Swiggy menus list none).
@@ -2684,6 +2699,7 @@ function wire() {
     "swiggy-refresh-addresses": refreshSwiggyAddresses,
     "close-live-browse": async () => { S.liveBrowseMenu = null; render(); },
     "clear-results": async () => { S.liveResults = null; S.cuisine = null; render(); },
+    "more-places": morePlaces,
     "browse-nearby": async () => { S.liveResults = await api(`/api/user/${S.userId}/swiggy/restaurants?browse=1`); S.cuisine = null; render(); },
     "pick-cancel": async () => { S.pickFor = null; render(); },
     "pools-nudge-off": async () => { store.set(`smartplate.poolsNudge.${S.userId}`, "1"); render(); },

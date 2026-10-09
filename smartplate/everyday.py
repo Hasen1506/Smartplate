@@ -451,7 +451,7 @@ def choose(session_id: int, body: dict) -> dict:
         item = next((it for it in models.menu_for_user(user) if it["id"] == body["item_id"]), None)
         if not item:
             raise ValueError("That dish isn't available right now")
-        if not optimizer.meal_suitable(item, session["meal"]):
+        if not optimizer.meal_suitable(item, session["meal"], chosen=True):
             raise ValueError("That item is a treat, not a complete meal. Choose a meal instead.")
         reason = allergens.violates(user, item)
         if reason:
