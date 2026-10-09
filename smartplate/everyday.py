@@ -379,6 +379,7 @@ def options(session_id: int) -> dict:
     photos = swiggy_live.known_photos(user["id"], [d["item_id"] for g in groups for d in g["dishes"]])
     for d in [d for g in groups for d in g["dishes"]] + new:
         d["image"] = photos.get(d["item_id"])
+    n = optimizer.portions(user, session, ctx)
     cook_all = [r for r in reverse_mode.RECIPES if r["key"] in reverse_mode.RECIPE_BY_MEAL.get(session["meal"], [])]
     cooks = [r for r in cook_all if reverse_mode.unsafe_reason(user, r) is None]   # allergy/medical/diet: hard
     return {
@@ -387,7 +388,8 @@ def options(session_id: int) -> dict:
         "limits": limits,
         "usual": usual[:SHORTLIST_PLACES], "usual_more": max(0, len(usual) - SHORTLIST_PLACES),
         "new": new, "has_favourites": bool(favs),
-        "cook": [{"recipe_key": r["key"], "name": r["name"], "price": r["cost"], "kcal": r["kcal"],
+        "portions": n,
+        "cook": [{"recipe_key": r["key"], "name": r["name"], "price": round(r["cost"] * n, 2), "kcal": r["kcal"],
                   "protein_g": r["protein_g"]} for r in cooks],
         "hidden": {"not_safe": len(menu) - len(safe_all), "cook_not_safe": len(cook_all) - len(cooks), "not_a_meal": len(safe_all) - len(safe),
                    "below_rating": len(safe) - len(rated_ok),

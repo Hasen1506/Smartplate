@@ -52,6 +52,12 @@ everything first.
 - Allergy and diet rules are filters, not preferences: no tool can override them.
 - Estimates stay labelled as estimates (nutrition from dish names, delivery fees
   until a real bill, grocery prices).
+- Every refusal names its rule. The app already sends `rule` (`id`, `whose`,
+  `title`, `plain`, `fix`) with each Swiggy error, from
+  `smartplate/integrations/swiggy_rules.py`, so a tool error can tell the assistant
+  and the person the cause, not just "422".
+- A household meal is one portion per person eating, and everyone eating counts for
+  the allergy and diet checks, not only the account holder.
 
 ## Auth and scopes
 

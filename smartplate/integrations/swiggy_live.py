@@ -28,7 +28,7 @@ import statistics
 import threading
 
 from .. import clock, config, db
-from . import swiggy_connect as sc
+from . import swiggy_connect as sc, swiggy_rules
 from .swiggy_connect import SwiggyError
 
 ALLOWED = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu",
@@ -256,13 +256,16 @@ def build_args(tool: dict, values: dict) -> dict:
     return args
 
 
-def _cart_item(tool: dict, item_id) -> dict:
+MAX_PORTIONS = 8                 # a household meal; anything bigger is a party order, made in Swiggy
+
+
+def _cart_item(tool: dict, item_id, quantity: int = 1) -> dict:
     props = ((tool.get("input_schema") or {}).get("properties") or {})
     items_key = _find(props, "cart_items")
     item_props = (((props.get(items_key) or {}).get("items") or {}).get("properties") or {}) if items_key else {}
     id_key = _find(item_props, "item_id") or "menu_item_id"
     qty_key = _find(item_props, "quantity") or "quantity"
-    return {id_key: item_id, qty_key: 1}
+    return {id_key: item_id, qty_key: quantity}
 
 
 # --------------------------------------------------------------------------- #
@@ -1032,9 +1035,15 @@ def cart_preview(session_id: int) -> dict:
     user_id, cell = _planned(session_id)
     from ..domain import models
     user = models.get_user(user_id)
-    if user["allergens"] or user["medical"] or user["diet"] == "vegan":
-        raise SwiggyError("Ziggy cannot verify your ingredient or medical rules from Swiggy's menu. "
+    # Everyone eating this meal (a household's ticks), and always the account holder.
+    eating = [user] + [m for m in user.get("household_members", []) if m["id"] in (cell.get("eaters") or [])]
+    if any(p.get("allergens") or p.get("medical") or p.get("diet") == "vegan" for p in eating):
+        who = "your" if (user["allergens"] or user["medical"] or user["diet"] == "vegan") else "your household's"
+        raise SwiggyError(f"Ziggy cannot verify {who} ingredient or medical rules from Swiggy's menu. "
                           "Open Swiggy and confirm the dish with the restaurant before ordering.")
+    quantity = int(cell.get("portions") or 1)
+    if quantity > MAX_PORTIONS:
+        raise SwiggyError(f"{quantity} portions is a large order. Add it in Swiggy, where you can see every option.")
     conn = _conn(user_id)
     address_id = _address(conn)
     live = _live_ids(cell)
@@ -1058,12 +1067,12 @@ def cart_preview(session_id: int) -> dict:
     if _has_options(item):
         raise SwiggyError("This dish needs options or add-ons Ziggy cannot safely choose. "
                           "Customize it in Swiggy instead.")
-    if user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
+    if any(p.get("diet") == "veg" for p in eating) and _get(item, "veg") not in (True, 1):
         raise SwiggyError("Swiggy did not verify this dish as vegetarian. Check it in Swiggy before ordering.")
     item_id = _get(item, "menu_item_id")
     details = {"session_id": session_id, "planned": cell["item"], "planned_restaurant": cell["restaurant"],
                "planned_cost": cell.get("planned_cost", cell["cost"]), "restaurant": place["name"], "restaurant_id": place["id"],
-               "item": str(_get(item, "name")), "item_id": item_id, "address_id": address_id}
+               "item": str(_get(item, "name")), "item_id": item_id, "address_id": address_id, "quantity": quantity}
     fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price")},
                                             sort_keys=True).encode()).hexdigest()
     remember_photos(user_id, place["id"], [{"name": cell["item"], "image": _image(item)}])
@@ -1084,6 +1093,7 @@ def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
     to_pay = prepared["to_pay"]
     planned = cell.get("planned_cost", cell["cost"])
     return {"session_id": session_id, "restaurant": preview["restaurant"], "item": preview["item"],
+            "quantity": preview.get("quantity", 1),
             "planned": cell["item"], "planned_cost": planned, "menu_price": preview["menu_price"],
             "to_pay": to_pay, "over_plan": round(to_pay - planned, 2) if to_pay is not None else None,
             "bill": prepared.get("bill"), "checkout_url": CHECKOUT_URL,
@@ -1169,7 +1179,8 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
     elif user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
         blocked = "Swiggy did not verify this dish as vegetarian. Check it in Swiggy."
     if blocked:
-        return {**review, "orderable": False, "reason": blocked, "fingerprint": None}
+        return {**review, "orderable": False, "reason": blocked, "fingerprint": None,
+                "rule": swiggy_rules.explain(blocked)}
     fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price")},
                                             sort_keys=True).encode()).hexdigest()
     return {**review, "orderable": True, "reason": None, "fingerprint": fingerprint}
@@ -1283,17 +1294,17 @@ def _other_address_error(cart: dict, conn: dict, what: str) -> SwiggyError:
                        "Choose that address here, or clear the cart in Swiggy.", code="swiggy_cart_other_address")
 
 
-def _one(value) -> bool:
-    """Quantity 1 however Swiggy spells it (1, 1.0 or "1")."""
+def _one(value, quantity: int = 1) -> bool:
+    """Exactly `quantity` (1 unless a household meal) however Swiggy spells it (2, 2.0 or "2")."""
     if isinstance(value, bool):
         return False
     try:
-        return float(value) == 1
+        return float(value) == quantity
     except (TypeError, ValueError):
         return False
 
 
-def _cart_mismatch(cart: dict, restaurant_id: str, item_id: str) -> str | None:
+def _cart_mismatch(cart: dict, restaurant_id: str, item_id: str, quantity: int = 1) -> str | None:
     """Which part of the cart is not exactly the one reviewed dish, or None.
 
     Swiggy's cart may leave out the restaurant ("the cart API does not always return it",
@@ -1304,7 +1315,7 @@ def _cart_mismatch(cart: dict, restaurant_id: str, item_id: str) -> str | None:
         return "dishes"
     if str(_get(items[0], "menu_item_id")) != str(item_id):
         return "dish"
-    if not _one(items[0].get("quantity")):
+    if not _one(items[0].get("quantity"), quantity):
         return "quantity"
     restaurant = cart.get("restaurant")
     rid = restaurant.get("id") if isinstance(restaurant, dict) else None
@@ -1325,7 +1336,17 @@ def _note_confirm(user_id: int, part: str | None) -> None:
         logging.getLogger(__name__).warning("Could not record the cart confirmation result")
 
 
-CONFIRM_WORDS = {"dishes": "single dish", "dish": "dish", "quantity": "quantity of 1", "restaurant": "restaurant"}
+CONFIRM_WORDS = {"dishes": "single dish", "dish": "dish", "quantity": "quantity of {n}", "restaurant": "restaurant"}
+
+
+def _intent_qty(intent: dict) -> int:
+    return int(intent.get("quantity") or 1)
+
+
+def _anchor(reviewed: dict | None) -> float | None:
+    """What the reviewed dishes cost on the menu (price × portions): the bill total is read against it."""
+    price = (reviewed or {}).get("menu_price")
+    return round(price * _intent_qty(reviewed), 2) if price else None
 
 
 def _intent(user_id: int) -> dict | None:
@@ -1344,7 +1365,7 @@ def _prepared_cart(user_id: int) -> tuple[dict, dict, dict]:
     if cart["cart_address_id"]:
         raise _other_address_error(cart, conn, "Your Swiggy cart")
     if (not intent or intent["address_id"] != address_id
-            or _cart_mismatch(cart, intent["restaurant_id"], intent["item_id"])):
+            or _cart_mismatch(cart, intent["restaurant_id"], intent["item_id"], _intent_qty(intent))):
         raise SwiggyError("This cart differs from the item Ziggy prepared. Review or clear it in Swiggy, "
                           "then select and review an item here again.")
     return conn, intent, cart
@@ -1368,9 +1389,9 @@ def current_live_cart(user_id: int) -> dict:
              if cart["cart_address_id"] else None)
     restaurant = cart.get("restaurant") or {}
     prepared = bool(not other and intent and intent["address_id"] == address_id
-                    and not _cart_mismatch(cart, intent["restaurant_id"], intent["item_id"]))
+                    and not _cart_mismatch(cart, intent["restaurant_id"], intent["item_id"], _intent_qty(intent)))
     name = restaurant.get("name") if isinstance(restaurant, dict) else None
-    anchor = intent.get("menu_price") if prepared and intent else None
+    anchor = _anchor(intent) if prepared else None
     return {"cart": {"item": ", ".join(str(_get(i, "name") or "Unnamed item") for i in cart["items"]),
                      "restaurant": name or (intent["restaurant_name"] if prepared else "Check restaurant in Swiggy"),
                      "to_pay": cart_total(cart, anchor),
@@ -1412,29 +1433,29 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
         raise SwiggyError("Swiggy did not verify the cart and delivery address. Check your cart in Swiggy.")
     tool = _tool(conn, "update_food_cart")
     call(user_id, "update_food_cart", build_args(tool, {
-        "cart_items": [_cart_item(tool, preview["item_id"])], "restaurant": restaurant_id,
+        "cart_items": [_cart_item(tool, preview["item_id"], preview.get("quantity", 1))], "restaurant": restaurant_id,
         "address": preview["address_id"], "restaurant_name": preview["restaurant"]}))
     cart = call(user_id, "get_food_cart", build_args(_tool(conn, "get_food_cart"),
                          {"address": preview["address_id"], "restaurant_name": preview["restaurant"]}))
     view = _read_cart(user_id, cart, preview["address_id"])
     if view["cart_address_id"]:
         raise _other_address_error(view, conn, "Swiggy added the item, but the cart")
-    part = _cart_mismatch(view, restaurant_id, preview["item_id"])
+    part = _cart_mismatch(view, restaurant_id, preview["item_id"], preview.get("quantity", 1))
     _note_confirm(user_id, part)
     if part:
-        raise SwiggyError(f"Ziggy could not confirm the {CONFIRM_WORDS[part]} in Swiggy's cart. "
+        raise SwiggyError(f"Ziggy could not confirm the {CONFIRM_WORDS[part].format(n=preview.get('quantity', 1))} in Swiggy's cart. "
                           "The item may be in your Swiggy cart: check it there before trying again.")
     with db.cursor() as cur:
         cur.execute("INSERT OR REPLACE INTO swiggy_cart_intents(user_id, address_id, restaurant_id, restaurant_name, "
-                    "item_id, menu_price) VALUES (?,?,?,?,?,?)",
+                    "item_id, menu_price, quantity) VALUES (?,?,?,?,?,?,?)",
                     (user_id, preview["address_id"], restaurant_id, preview["restaurant"], preview["item_id"],
-                     preview.get("menu_price")))
+                     preview.get("menu_price"), preview.get("quantity", 1)))
     # The bill's delivery line replaces the planner's flat estimate for this restaurant.
     from ..domain import live_catalog
     live_catalog.record_fee(user_id, preview["address_id"], restaurant_id, preview["restaurant"],
-                            billed_delivery_fee(view, preview.get("menu_price")))
-    return {**preview, "to_pay": cart_total(view, preview.get("menu_price")), "checkout_url": CHECKOUT_URL,
-            "bill": bill_breakdown(view, preview.get("menu_price")), "orderable": True,
+                            billed_delivery_fee(view, _anchor(preview)))
+    return {**preview, "to_pay": cart_total(view, _anchor(preview)), "checkout_url": CHECKOUT_URL,
+            "bill": bill_breakdown(view, _anchor(preview)), "orderable": True,
             "cancellation_note": cancellation_note(cart)}
 
 
@@ -1448,22 +1469,27 @@ def _checkout_state(user_id: int) -> dict:
         raise SwiggyError("Ziggy cannot verify your ingredient or medical rules for a real order. "
                           "Review and place it in Swiggy instead.")
     conn, intent, cart = _prepared_cart(user_id)
+    # More than one portion means household members eat too: their rules count as well.
+    eating = [user] + (user.get("household_members", []) if _intent_qty(intent) > 1 else [])
+    if any(p["allergens"] or p["medical"] or p["diet"] == "vegan" for p in eating):
+        raise SwiggyError("Ziggy cannot verify your ingredient or medical rules for a real order. "
+                          "Review and place it in Swiggy instead.")
     address_id = _address(conn)
     items = cart["items"]
     if len(items) != 1:
         raise SwiggyError("Review one exact dish in the Swiggy cart before placing an order.")
     item = items[0]
-    if not _one(item.get("quantity")) or not _get(item, "name"):
+    if not _one(item.get("quantity"), _intent_qty(intent)) or not _get(item, "name"):
         raise SwiggyError("Ziggy could not verify one dish and quantity in the live cart.")
     if _flag(_get(item, "stock")) is False:
         raise SwiggyError("The dish is no longer in stock. Refresh your cart.")
-    if user["diet"] == "veg" and _flag(_get(item, "veg")) is not True:
+    if any(p["diet"] == "veg" for p in eating) and _flag(_get(item, "veg")) is not True:
         raise SwiggyError("Swiggy did not verify the cart dish as vegetarian. Check it in Swiggy.")
     if item.get("variants") or item.get("addons") or item.get("variations") or item.get("variantsV2"):
         raise SwiggyError("The cart has customizations that Ziggy did not review. Check it in Swiggy.")
     if not cart.get("address_verified"):
         raise SwiggyError("Swiggy did not confirm the cart's delivery address. Refresh your cart or check it in Swiggy.")
-    total = cart_total(cart, intent.get("menu_price"))
+    total = cart_total(cart, _anchor(intent))
     if total is None or total <= 0 or total > 1000:
         raise SwiggyError("Swiggy did not return a valid payable total within its ₹1,000 Builders Club limit.")
     options = call(user_id, "get_payment_options", build_args(_tool(conn, "get_payment_options"),
@@ -1481,7 +1507,7 @@ def _checkout_state(user_id: int) -> dict:
                "quantity": item.get("quantity"), "to_pay": total, "payment_method": str(cod["id"])}
     fingerprint = hashlib.sha256(json.dumps(details, sort_keys=True).encode()).hexdigest()
     return {**details, "payment_label": str(cod.get("displayName") or "Cash on Delivery"),
-            "bill": bill_breakdown(cart, intent.get("menu_price")), "fingerprint": fingerprint}
+            "bill": bill_breakdown(cart, _anchor(intent)), "fingerprint": fingerprint}
 
 
 def live_checkout_preview(user_id: int) -> dict:

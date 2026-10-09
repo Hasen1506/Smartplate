@@ -1358,3 +1358,35 @@ test('the grocery list hands each line to Instamart search without pack sizes, a
   vm.runInContext("S.tab = 'more'", context);
   assert.equal(vm.runInContext('balanceAside()', context), '');
 });
+
+test('a Swiggy problem says which rule caused it, and Me → Swiggy marks the rules that stopped you', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  const rule = { id: 'one_cart', whose: 'swiggy', title: 'One restaurant, one cart', plain: 'A cart holds one <restaurant>.', fix: 'Clear it in Swiggy.' };
+  const why = vm.runInContext('ruleWhy', context)(rule);
+  assert.match(why, /Why\? One restaurant, one cart/);
+  assert.match(why, /What to do:<\/b> Clear it in Swiggy/);
+  assert.match(why, /Swiggy's rule/);
+  assert.match(why, /data-act="rules-open"/);
+  assert.ok(!why.includes('<restaurant>'));
+  assert.equal(vm.runInContext('ruleWhy', context)(null), '');
+  vm.runInContext(`S.swRules = { rules: [
+    { id: 'you_review', whose: 'ziggy', title: 'You review every cart', plain: 'p', fix: 'f', hits_7d: 0 },
+    { id: 'one_cart', whose: 'swiggy', title: 'One restaurant, one cart', plain: 'p', fix: 'f', hits_7d: 2 }],
+    issues: [{ at: '2026-10-08T12:00:00', rule: 'one_cart', title: 'One restaurant, one cart', message: 'Your cart already has items.' }] }`, context);
+  const card = vm.runInContext('rulesCard()', context);
+  assert.ok(card.indexOf('One restaurant, one cart') < card.indexOf('You review every cart'));   // what stopped you comes first
+  assert.match(card, /2× this week/);
+  assert.match(card, /Recent problems \(1\)/);
+  vm.runInContext('S.swRules = { rules: [{ id: "x", whose: "ziggy", title: "T", plain: "p", fix: "f", hits_7d: 0 }], issues: [] }', context);
+  assert.match(vm.runInContext('rulesCard()', context), /Nothing has stopped you in the last 7 days/);
+});
+
+test('Who is eating chips show the household with the current eaters pressed', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.view.household = { people: [{ id: 2, name: 'Meera', you: true }, { id: 3, name: '<Arjun>' }] }`, context);
+  const html = vm.runInContext('whoEats', context)({ session_id: 9, eaters: [2] });
+  assert.match(html, /aria-pressed="true" data-eater="9:2">You</);
+  assert.match(html, /aria-pressed="false" data-eater="9:3">&lt;Arjun&gt;</);
+  vm.runInContext('S.view.household = null', context);
+  assert.equal(vm.runInContext('whoEats', context)({ session_id: 9, eaters: [2] }), '');
+});

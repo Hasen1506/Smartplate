@@ -40,6 +40,10 @@ or your phone's setting, and an optional Zomato-red-to-Swiggy-orange colour mesh
    **Hungry now?** appears when it's mealtime and the week leaves that meal out (or
    you skipped it): one tap puts a dish that fits into today, the next adds it to
    the cart, and the rest of the week re-balances.
+   In a household, **Who's eating?** chips sit under the price: one portion each,
+   so the cost, the Swiggy cart quantity and the split follow who's ticked. If
+   anyone eating has an allergy, a medical rule or a vegan diet, Ziggy won't fill
+   the cart (Swiggy menus don't list ingredients) and says so.
 3. **Change** (on any meal) opens one sheet: *Better fits*, *Other places* (switch
    restaurants with one tap) and *Cook*, plus Skip (with Undo), Keep and Swap with
    another meal.
@@ -59,6 +63,10 @@ or your phone's setting, and an optional Zomato-red-to-Swiggy-orange colour mesh
    search real nearby restaurants, star favourites, inspect current menus and put
    one exact item in the cart. Review and pay in Swiggy. An optional Cash on
    Delivery order path requires a separate server flag and explicit approval.
+   When Swiggy or Ziggy stops a cart, the message says which rule caused it and
+   what to do (*Why?*). **Me → Swiggy → How ordering works** lists every rule
+   (Swiggy's own and Ziggy's safety rules), marks the ones that stopped you in the
+   last 7 days and keeps the last few problems.
 
 ## Try it in your browser
 

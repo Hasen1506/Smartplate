@@ -73,6 +73,13 @@ CREATE TABLE IF NOT EXISTS swiggy_photos (       -- Swiggy's own dish photo, see
     checked_ts TEXT NOT NULL,
     PRIMARY KEY (user_id, restaurant_id, dish)
 );
+CREATE TABLE IF NOT EXISTS swiggy_issues (       -- recent problems and the rule behind each (swiggy_rules.py)
+    user_id INTEGER NOT NULL,
+    ts TEXT NOT NULL,
+    rule TEXT NOT NULL,
+    message TEXT NOT NULL,
+    PRIMARY KEY (user_id, ts)
+);
 CREATE TABLE IF NOT EXISTS swiggy_favourites (
     user_id INTEGER NOT NULL,
     address_id TEXT NOT NULL,
@@ -112,6 +119,7 @@ COLUMNS = [                                      # added after gate 1 shipped
     ("swiggy_order_attempts", "resolved_ts", "TEXT"),
     ("swiggy_order_attempts", "to_pay", "REAL"),
     ("swiggy_cart_intents", "menu_price", "REAL"),
+    ("swiggy_cart_intents", "quantity", "INTEGER"),          # portions for a household meal; NULL = 1
 ]
 CLIENT_VERSION = "2025-06-18"          # protocol we offer; the server's reply is what we record
 PENDING_TTL = dt.timedelta(minutes=15)
@@ -479,6 +487,7 @@ def disconnect(user_id: int) -> dict:
         cur.execute("DELETE FROM swiggy_pending WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_photos WHERE user_id=?", (user_id,))
+        cur.execute("DELETE FROM swiggy_issues WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
     return {"connected": False}

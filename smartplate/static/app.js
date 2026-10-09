@@ -329,11 +329,11 @@ function retryLast() {}                       // sentinel for the Retry button (
 async function guard(fn, label) {
   if (S.busy) return;
   const again = fn === retryLast ? (S.retry && typeof S.retry.fn === "function" ? S.retry : { fn: reloadPlan, label: "Reload your plan" }) : { fn, label };
-  setBusy(true); S.error = null; S.errorCode = null; S.lastLive = null; S.retry = null;
+  setBusy(true); S.error = null; S.errorCode = null; S.errorRule = null; S.lastLive = null; S.retry = null;
   try { await again.fn(); }
   catch (e) {
     const reason = e.message || String(e);
-    S.error = again.label ? `${again.label} failed: ${reason}` : reason; S.errorCode = e.code || null;
+    S.error = again.label ? `${again.label} failed: ${reason}` : reason; S.errorCode = e.code || null; S.errorRule = e.data?.rule || null;
     if (e.code === "profile_missing") { await profileGone(S.error); return; }   // no Retry can bring it back
     S.retry = again;
     // Not connected (or the sign-in expired): Connect, then pick up where the user was.
@@ -640,7 +640,14 @@ function toggleFilter(key) {
 /* ---------------------------------------------------------------- Swiggy */
 const swiggyReady = () => !!(S.swiggy && S.swiggy.connected && S.swiggy.address);
 const swiggySignInOpen = () => !!S.meta?.swiggy_redirect_approved;
-const cartEligible = () => !S.view?.user?.allergens?.length && !S.view?.user?.medical?.length && S.view?.user?.diet !== "vegan";
+// Swiggy menus don't list ingredients: no cart fill when anyone eating has an allergy, a
+// medical rule or a vegan diet (the server checks the same: swiggy_live.cart_preview).
+const ruleBound = (p) => !!(p?.allergens?.length || p?.medical?.length || p?.diet === "vegan");
+const cartEligible = (c) => {
+  if (ruleBound(S.view?.user)) return false;
+  const on = new Set(c?.eaters || []);
+  return !(S.view?.household?.people || []).some(p => !p.you && on.has(p.id) && ruleBound(p));
+};
 async function loadAddresses() { S.swAddrs = await api(`/api/user/${S.userId}/swiggy/addresses`); render(); }
 async function openAddresses() { S.addrSheet = true; S.connectSheet = false; S.swAddrs = null; render(); await loadAddresses(); }
 async function connectSwiggy() {
@@ -691,7 +698,7 @@ async function refreshLiveCart(show = true) {
                                          address_verified: r.address_verified !== false };
     S.liveCartError = null; S.liveCartErrorCode = null;
     if (show && !r.cart) toast("Your Swiggy cart is empty");
-  } catch (error) { S.liveCart = null; S.liveCartEmpty = null; S.liveCartError = error.message; S.liveCartErrorCode = error.code || null; }
+  } catch (error) { S.liveCart = null; S.liveCartEmpty = null; S.liveCartError = error.message; S.liveCartErrorCode = error.code || null; S.liveCartErrorRule = error.data?.rule || null; }
   if (show) render();
 }
 async function resolveLiveAttempt() {
@@ -901,14 +908,34 @@ function errbar(retry = true) {
   if (!S.error) return "";
   if (SWIGGY_RECONNECT.has(S.errorCode)) return `<div class="errbar connect" role="alert">${connectPrompt()}
     <button class="x" data-close-err="1" title="Dismiss" aria-label="Dismiss">${ICON.close}</button></div>`;
-  return `<div class="errbar" role="alert"><span>${esc(S.error)}</span>
+  return `<div class="errbar" role="alert"><div class="msg">${esc(S.error)}${ruleWhy(S.errorRule)}</div>
     ${retry ? `<button class="small" data-act="reload">Retry</button>` : ""}
     <button class="x" data-close-err="1" title="Dismiss" aria-label="Dismiss">${ICON.close}</button></div>`;
 }
+// The rule behind a Swiggy problem: what it is, whose rule, and what to do now.
+function ruleWhy(rule) {
+  if (!rule) return "";
+  return `<details class="why-rule"><summary>Why? ${esc(rule.title)}</summary>
+    <p>${esc(rule.plain)}</p><p><b>What to do:</b> ${esc(rule.fix)}</p>
+    <p class="fine">${rule.whose === "swiggy" ? "Swiggy's rule" : "Ziggy's safety rule"} · <button class="link" data-act="rules-open">All ordering rules</button></p></details>`;
+}
 // A live panel's own error: the shared Connect prompt when that is the fix, else the message.
-function liveError(msg, code) {
+function liveError(msg, code, rule) {
   if (SWIGGY_RECONNECT.has(code)) return connectPrompt();
-  return msg ? `<p class="fine" role="alert">${esc(msg)}</p>` : "";
+  return msg ? `<div class="fine" role="alert">${esc(msg)}${ruleWhy(rule)}</div>` : "";
+}
+// Me → Swiggy: every rule that can stop an order, marked when it stopped this profile lately.
+function rulesCard() {
+  const r = S.swRules;
+  if (!r) return `<section class="card" id="rules"><h2 class="h2">How ordering works</h2><div class="skeleton" aria-busy="true"><i></i><i></i></div></section>`;
+  const hit = r.rules.filter(x => x.hits_7d).sort((a, b) => b.hits_7d - a.hits_7d);
+  return `<section class="card" id="rules" aria-labelledby="rules-h"><h2 class="h2" id="rules-h">How ordering works</h2>
+    <p class="fine">The rules that can stop a cart or an order, and what to do. ${hit.length ? `Marked: what stopped you in the last 7 days.` : "Nothing has stopped you in the last 7 days."}</p>
+    <ul class="rules">${[...hit, ...r.rules.filter(x => !x.hits_7d)].map(x => `<li class="${x.hits_7d ? "hit" : ""}"><details><summary><b>${esc(x.title)}</b>
+      ${x.hits_7d ? `<span class="tag warn">${x.hits_7d}× this week</span>` : ""}<span class="tag">${x.whose === "swiggy" ? "Swiggy" : "Ziggy"}</span></summary>
+      <p>${esc(x.plain)}</p><p class="fine"><b>What to do:</b> ${esc(x.fix)}</p></details></li>`).join("")}</ul>
+    ${r.issues.length ? `<details><summary>Recent problems (${r.issues.length})</summary><ul class="issues">${r.issues.map(i => `<li><span class="fine">${esc(fmtWhen(i.at))} · ${esc(i.title)}</span><br>${esc(i.message)}</li>`).join("")}</ul></details>` : ""}
+  </section>`;
 }
 
 /* ================================================================ WELCOME */
@@ -1093,8 +1120,8 @@ function nextUpCard(nu) {
   let cta = "";
   if (isCook) cta = `<button class="primary" data-confirm="${c.session_id}">I cooked it</button>`;
   else if (carted) cta = "";
-  else if (live && cartEligible()) cta = `<button class="primary" data-cart="${c.session_id}" aria-live="polite" ${adding ? 'aria-busy="true"' : ""}>${adding ? `${roller()}<span>Adding to your cart…</span>` : "Add to Swiggy cart"}</button>`;
-  else if (!live && swiggySignInOpen() && cartEligible() && S.view.source?.kind === "live") cta = `<button class="primary" data-connect-order="${c.session_id}">Connect Swiggy &amp; add</button>`;
+  else if (live && cartEligible(c)) cta = `<button class="primary" data-cart="${c.session_id}" aria-live="polite" ${adding ? 'aria-busy="true"' : ""}>${adding ? `${roller()}<span>Adding to your cart…</span>` : (c.portions || 1) > 1 ? `Add ${c.portions} to Swiggy cart` : "Add to Swiggy cart"}</button>`;
+  else if (!live && swiggySignInOpen() && cartEligible(c) && S.view.source?.kind === "live") cta = `<button class="primary" data-connect-order="${c.session_id}">Connect Swiggy &amp; add</button>`;
   else if (c.handoff_url) cta = `<a class="btn primary" href="${esc(c.handoff_url)}" target="_blank" rel="noopener" data-handoff="${c.session_id}">Order on Swiggy ${ICON.out}</a>`;
   const heart = !isCook && c.restaurant_id && S.view.source?.kind !== "live"
     ? `<button class="heart" data-fav="${c.restaurant_id}" aria-pressed="${!!c.usual}" aria-label="${c.usual ? "Remove" : "Save"} ${esc(c.restaurant)} ${c.usual ? "from" : "to"} your places">${ICON.heart}</button>` : "";
@@ -1104,14 +1131,15 @@ function nextUpCard(nu) {
       <h2 class="h2">${esc(c.item)}</h2>
       <span class="muted" style="font-size:14px">${isCook ? "Cook at home" : esc(c.restaurant)}${!isCook && c.rating ? ` · ${Number(c.rating).toFixed(1)}★` : ""}</span></div>${heart}</div>
     ${carted ? "" : whyChips(c)}
-    ${carted ? "" : `<div class="price-line"><span class="money">${c.real_bill ? real(c.cost) : est(c.cost)}</span><span class="fine">${isCook ? esc(c.cost_basis || "grocery estimate") : c.real_bill ? "Swiggy's bill" : "Swiggy shows the exact bill"}</span></div>`}
+    ${carted ? "" : `<div class="price-line"><span class="money">${c.real_bill ? real(c.cost) : est(c.cost)}</span><span class="fine">${(c.portions || 1) > 1 ? `for ${c.portions} · ` : ""}${isCook ? esc(c.cost_basis || "grocery estimate") : c.real_bill ? "Swiggy's bill" : "Swiggy shows the exact bill"}</span></div>`}
+    ${carted ? "" : whoEats(c)}
     ${reasons.length && !carted ? `<details class="why-more"><summary>Why this?</summary><ul>${reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul></details>` : ""}
     ${cta}
     ${carted ? "" : quickStrip(c)}
     ${carted ? "" : `<div class="two"><button class="secondary" data-sheet="${c.session_id}">${ICON.swap}Change</button>
       <button class="secondary" data-sess="${c.session_id}:skipped">Skip ${esc(nu.meal)}</button></div>
       ${isCook ? "" : `<button class="ghost small" data-confirm="${c.session_id}">Already had it? Mark as had</button>`}`}
-    ${!isCook && live && !cartEligible() && !carted ? `<p class="fine">Ziggy can't verify your ingredient or medical rules on Swiggy's menu. Check this dish in Swiggy before ordering.</p>` : ""}
+    ${!isCook && live && !cartEligible(c) && !carted ? `<div class="fine">Ziggy can't verify ${ruleBound(S.view.user) ? "your" : "everyone's"} ingredient or medical rules on Swiggy's menu. Check this dish in Swiggy before ordering.${ruleWhy(INGREDIENTS_RULE)}</div>` : ""}
     ${cartNote(c)}
     ${S.handedOff === c.session_id && !carted ? `<div class="note"><span class="ic">✓</span><span>Placed it on Swiggy? Tap <b>Mark as had</b> so your budget stays right.</span></div>` : ""}
   </section>`;
@@ -1123,7 +1151,7 @@ function cartNote(c) {
   const diff = r.over_plan == null ? "" : r.over_plan > 0 ? ` · ${rupee(r.over_plan)} more` : " · within plan";
   const warn = r.budget?.over && !r.budgetOk;
   const fresh = S.fresh === c.session_id;
-  return `<div class="bill-card${fresh ? " fresh" : ""}" role="status"><div class="ok-head">${mascot(fresh ? "hop" : "", "")}Added to your Swiggy cart</div>
+  return `<div class="bill-card${fresh ? " fresh" : ""}" role="status"><div class="ok-head">${mascot(fresh ? "hop" : "", "")}Added to your Swiggy cart${r.quantity > 1 ? ` · ${r.quantity} portions` : ""}</div>
     ${r.bill ? `<p class="k">Swiggy's bill</p>${billLines(r.bill)}`
       : r.to_pay != null ? `<div>To Pay ${real(r.to_pay)}</div>` : `<p class="fine">Open Swiggy to see the total.</p>`}
     ${r.planned_cost != null && r.to_pay != null ? `<p class="fine">Plan estimate ${est(r.planned_cost)}${diff}.</p>` : ""}</div>
@@ -1182,7 +1210,7 @@ function liveCartBlock() {
     <p class="fine">Order ${esc(S.placedOrder.order_id)}${S.placedOrder.message ? ` · ${esc(S.placedOrder.message)}` : ""}</p>
     <button class="small" data-act="track-live-order">Check delivery status</button></section>`);
   if (S.liveOrderStatus) blocks.push(trackingCard());
-  if (S.liveCartError || S.liveCartErrorCode) blocks.push(liveError(S.liveCartError, S.liveCartErrorCode));
+  if (S.liveCartError || S.liveCartErrorCode) blocks.push(liveError(S.liveCartError, S.liveCartErrorCode, S.liveCartErrorRule));
   // Already shown, with its bill, on Today's meal card: don't repeat it.
   const onCard = c && S.view?.next_up && (S.carts || {})[S.view.next_up.cell.session_id];
   if (c && !onCard) {
@@ -1471,7 +1499,7 @@ function sheetDialog() {
   const cook = d.cook[0];
   return `<div class="sheet-bg" data-ov="sheet" data-close-sheet="1"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
     <span class="grab" aria-hidden="true"></span>
-    <div class="sheet-head"><div><p class="eyebrow">${esc(s.day)} ${esc(fmtDate(s.date))} · ${rupee0(left)} left${L.left_day != null ? " today" : " this week"}</p>
+    <div class="sheet-head"><div><p class="eyebrow">${esc(s.day)} ${esc(fmtDate(s.date))} · ${rupee0(left)} left${L.left_day != null ? " today" : " this week"}${(d.portions || 1) > 1 ? ` · prices for ${d.portions}` : ""}</p>
       <h2 class="h2" id="sheet-title">Change ${esc(s.meal)}</h2>${d.current ? `<p class="muted">Now: ${esc(d.current.item)}</p>` : ""}</div>
       <button class="icon-btn" data-close-sheet="1" aria-label="Close">${ICON.close}</button></div>
     ${d.timing_tip ? `<p class="fine">${esc(d.timing_tip)}</p>` : ""}
@@ -1496,14 +1524,27 @@ function eatersBlock(s) {
   const cell = cellOf(s.id);
   const on = new Set(cell?.eaters || []);
   return `<p class="k">Who's eating</p><div class="chips">${h.people.map(p => `<button class="chip" aria-pressed="${on.has(p.id)}" data-eater="${s.id}:${p.id}">${esc(p.name)}</button>`).join("")}</div>
-    <p class="fine">Splits the cost by who eats. Shared meals stay safe for everyone either way.</p>`;
+    <p class="fine">One portion each: the cost, your Swiggy cart and the split follow who eats. Every meal stays safe for the whole household.</p>`;
 }
+// Today: who's eating this meal, one tap each. Portions, the cost and the cart follow.
+function whoEats(c) {
+  const h = S.view.household;
+  if (!h || !c.session_id) return "";
+  const on = new Set(c.eaters || []);
+  return `<div class="who" role="group" aria-labelledby="who-${c.session_id}"><span class="k" id="who-${c.session_id}">Who's eating?</span>
+    <div class="chips">${h.people.map(p => `<button class="chip" aria-pressed="${on.has(p.id)}" data-eater="${c.session_id}:${p.id}">${esc(p.you ? "You" : p.name)}</button>`).join("")}</div></div>`;
+}
+const INGREDIENTS_RULE = { id: "ingredients", whose: "ziggy", title: "Swiggy menus don't list ingredients",
+  plain: "With an allergy, a medical rule or a vegan diet, Ziggy can't confirm a dish is safe from the menu alone, so it won't fill the cart.",
+  fix: "Check the dish with the restaurant and order it in Swiggy." };
 async function toggleEater(sid, pid) {
   const cell = cellOf(sid);
   const cur = new Set(cell?.eaters || []);
   if (cur.has(pid)) cur.delete(pid); else cur.add(pid);
   if (!cur.size) { toast("At least one person eats each meal. Skip the meal instead."); return; }
-  adoptView(await api(`/api/session/${sid}/eaters`, "POST", { eaters: [...cur] })); render();
+  adoptView(await api(`/api/session/${sid}/eaters`, "POST", { eaters: [...cur] }));
+  if (S.carts?.[sid]) { delete S.carts[sid]; toast(`Now for ${cur.size}. Your Swiggy cart was for a different number: clear it in Swiggy, then add again.`); }
+  render();
 }
 function moreLikeBlock(d, s) {
   if (!epicureOn() || d.current?.kind !== "delivery") return "";
@@ -1783,7 +1824,7 @@ function liveOrderReviewDialog() {
     <div class="dish-row">${dishIcon(r.item, { image: r.image, lg: true })}<div class="t"><b class="h3">${esc(r.item)}</b><span class="muted">${esc(r.restaurant)} · to ${esc(r.address)}</span></div>
       <b>${r.menu_price == null ? "Price in cart" : livePrice(r.menu_price)}</b></div>
     <p class="fine">Swiggy shows the exact total, with fees and taxes, once it's in your cart.</p>
-    ${r.orderable === false ? `<p class="fine" role="note">${esc(r.reason)}</p>
+    ${r.orderable === false ? `<div class="fine" role="note">${esc(r.reason)}${ruleWhy(r.rule)}</div>
       <a class="btn primary" href="${esc(r.handoff_url)}" target="_blank" rel="noopener">Open in Swiggy ${ICON.out}</a>
       <button class="ghost" data-close-live-review="1">Close</button>` : `
       <p class="fine">Ziggy cannot verify all ingredients or cross-contact. Check the details before placing an order.</p>
@@ -1875,11 +1916,11 @@ function connectionPanel() {
   if (!sw) return `<h1 class="h1">Swiggy</h1><div class="skeleton"><i></i><i></i></div>`;
   if (sw.requires_private_profile) return `<h1 class="h1">Swiggy</h1><section class="card"><h2 class="h2">Use your own private profile</h2>
     <p class="sub">Sample profiles are shared by every visitor. Create or sign in to your own profile to keep your Swiggy account and addresses private.</p>
-    <button class="primary" data-act="start-onboard">Create my profile</button><button class="ghost" data-act="signin-open">Sign in</button></section>`;
+    <button class="primary" data-act="start-onboard">Create my profile</button><button class="ghost" data-act="signin-open">Sign in</button></section>${rulesCard()}`;
   if (!sw.connected) return `<h1 class="h1">Swiggy</h1><section class="card"><span class="tag">${sw.needs_reconnect ? "Reconnect required" : sw.expired ? "Sign-in expired" : "Not connected"}</span>
     <p class="sub">Sign in on Swiggy's own page (phone + OTP). Ziggy then plans from real places near your address, fills your cart in one tap, and you pay in Swiggy. Sign-ins last about 5 days.</p>
     <button class="primary" data-act="connect-open">${sw.expired || sw.needs_reconnect ? "Reconnect Swiggy" : "Connect Swiggy"}</button>
-    ${!swiggySignInOpen() ? `<p class="fine">Swiggy needs production access and an exact-match allowlisted HTTPS redirect, and hasn't approved this server's yet, so sign-in is expected to fail here.${sw.callback_url ? ` Request <code>${esc(sw.callback_url)}</code> from Swiggy Builders Club.` : ""}</p>` : ""}</section>`;
+    ${!swiggySignInOpen() ? `<p class="fine">Swiggy needs production access and an exact-match allowlisted HTTPS redirect, and hasn't approved this server's yet, so sign-in is expected to fail here.${sw.callback_url ? ` Request <code>${esc(sw.callback_url)}</code> from Swiggy Builders Club.` : ""}</p>` : ""}</section>${rulesCard()}`;
   return `<h1 class="h1">Swiggy</h1>
     <section class="card"><span class="tag good">Connected</span>
       <div class="row" style="justify-content:space-between"><span>Delivering to <b>${esc(sw.address?.label || "no address yet")}</b></span><button class="small secondary" data-act="addr-open">${sw.address ? "Change" : "Choose address"}</button></div>
@@ -1888,7 +1929,7 @@ function connectionPanel() {
       <button class="ghost" data-act="swiggy-disconnect">Disconnect</button>
       <details><summary>Technical details</summary><p class="fine">Protocol ${esc(sw.protocol_version || "?")} · ${(sw.tools || []).length} tools (${sw.read_tools} read, ${sw.write_tools} write).</p>
         ${(sw.tools || []).map(t => `<p class="fine"><b>${esc(t.name)}</b> <span class="tag ${t.kind === "write" ? "warn" : ""}">${t.kind}</span> ${esc(t.description)}</p>`).join("")}
-        <button class="small" data-act="swiggy-discover">Refresh tools</button></details></section>`;
+        <button class="small" data-act="swiggy-discover">Refresh tools</button></details></section>${rulesCard()}`;
 }
 function insights() {
   const v = S.view, N = v.nutrition;
@@ -2457,6 +2498,7 @@ function wire() {
     "close-live-browse": async () => { S.liveBrowseMenu = null; render(); },
     "clear-results": async () => { S.liveResults = null; render(); },
     "swiggy-disconnect": disconnectSwiggy,
+    "rules-open": async () => { await goTab("more", "connection"); document.getElementById("rules")?.scrollIntoView?.({ block: "start" }); },
     "signin-open": async () => { S.signin = true; S.connectSheet = false; S.error = null; if (S.view) { S.welcome = true; } render(); document.getElementById("si-login")?.focus(); },
     "signin-close": async () => { S.signin = false; S.error = null; if (S.view) S.welcome = false; render(); },
     "sign-out": signOut,
@@ -2532,7 +2574,10 @@ async function goTab(tab, sub = null) {
     [S.recap, S.receipts] = await Promise.all([api(`/api/plan/${S.planId}/recap`), api(`/api/receipts/${S.userId}`)]);
   }
   if (S.more === "calendar") S.calendar = await api(`/api/user/${S.userId}/calendar`);
-  if (S.more === "connection") S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
+  if (S.more === "connection") {
+    [S.swiggy, S.swRules] = await Promise.all([api(`/api/user/${S.userId}/swiggy`),
+      api(`/api/user/${S.userId}/swiggy/rules`).catch(() => ({ rules: [], issues: [] }))]);
+  }
   if (S.more === "profiles" || (tab === "more" && !sub && keys.get(S.userId) && !S.account)) S.account = keys.get(S.userId) ? await api(`/api/user/${S.userId}/account`).catch(() => null) : null;
   render();
   if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);

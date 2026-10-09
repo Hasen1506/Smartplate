@@ -239,6 +239,8 @@ def plan_view(plan_id: int) -> dict:
         for day in grid:
             for cell in day["meals"].values():
                 cell["eaters"] = eat.get(cell["session_id"], [])
+                if cell["kind"] == "delivery" or (cell["kind"] == "cook" and cell.get("recipe_key")):
+                    cell["portions"] = max(1, len(cell["eaters"]))      # optimizer.portions()
         view["household"].pop("_members")
     # Swiggy's own photo of a planned dish, once Swiggy has shown it (search_menu)
     from .integrations import swiggy_live
@@ -500,6 +502,12 @@ def set_eaters(session_id: int, value) -> dict:
     if not user.get("household_id"):
         raise ValueError("Only a household plan has people to tick")
     household.set_eaters(session, models.get_household_members(user["household_id"]), value)
+    if session["status"] == "active":
+        # Portions follow who eats: re-price this meal (and balance the week around it).
+        # A checked cart was for the old head count, so it has to be checked again.
+        from .domain import week_orders
+        week_orders.release(session_id)
+        optimizer.optimize(plan["id"])
     return plan_view(plan["id"])
 
 

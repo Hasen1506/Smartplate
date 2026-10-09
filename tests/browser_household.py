@@ -129,6 +129,20 @@ def test_browser_household_split_grocery_and_recap(home, viewport):
             pw.expect(page.get_by_text("From what actually happened", exact=False)).to_be_visible()
             pw.expect(page.get_by_text("Home · who owes what so far")).to_be_visible()
             _no_overflow(page)
+            # --- Me → Swiggy explains every rule that can stop an order ---------- #
+            page.get_by_role("button", name="Me: settings, money and account", exact=True).click()
+            page.locator('[data-go="more:connection"]').click()
+            pw.expect(page.get_by_role("heading", name="How ordering works")).to_be_visible()
+            pw.expect(page.get_by_text("Nothing has stopped you in the last 7 days.", exact=False)).to_be_visible()
+            page.get_by_text("One restaurant, one cart").click()
+            pw.expect(page.get_by_text("A Swiggy cart holds dishes from one restaurant", exact=False)).to_be_visible()
+            _no_overflow(page)
+            # --- Today: who's eating the next meal, one portion each -------------- #
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="Today").click()
+            who = page.get_by_role("group", name="Who's eating?").first
+            pw.expect(who).to_be_visible()
+            pw.expect(who.get_by_role("button", name="You", exact=True)).to_have_attribute("aria-pressed", "true")
+            _no_overflow(page)
             assert not errors
             assert page.evaluate("policyViolations") == []
         except Exception:

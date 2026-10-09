@@ -9,7 +9,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
 from .domain import epicure, flavour, learning, live_catalog, models, sentiment, week_orders
 from .domain.checkout import CheckoutConflict
-from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp
+from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
 from .kernel import agent_brain
 from .runtime import initialize, user_lock
 
@@ -147,22 +147,36 @@ def create_app() -> Flask:
         app.logger.exception("Unhandled TypeError on %s", request.path)
         return jsonify(error="Something went wrong on our side. Try again."), 500
 
+    def swiggy_owner():
+        """The profile a Swiggy route acts for, so its problem log can be kept."""
+        owners = [o for o in access.owners_of(request.view_args or {}, None, None) if o is not None]
+        return owners[0] if owners else None
+
     @app.errorhandler(ratelimit.TooMany)
     def too_many(error):
+        if '/swiggy' in request.path:
+            swiggy_rules.note(swiggy_owner(), swiggy_connect.SwiggyError(str(error), code="swiggy_rate_limited"))
+            response = jsonify(error=str(error), rule=swiggy_rules.BY_ID["rate_limit"])
+            response.headers['Retry-After'] = str(error.wait_s)
+            return response, 429
         response = jsonify(error=str(error))
         response.headers['Retry-After'] = str(error.wait_s)
         return response, 429
 
     @app.errorhandler(swiggy_connect.SwiggyError)
     def swiggy_error(error):
+        # Every Swiggy problem names the rule behind it (plain words + what to do) and is
+        # kept on the profile, so "why did this fail?" always has an answer.
+        swiggy_rules.note(swiggy_owner(), error)
+        rule = swiggy_rules.explain(error)
         if error.code in swiggy_connect.NOT_CONNECTED_CODES:
             # The user's own sign-in is missing or no longer accepted: a state they fix
             # by connecting, not an upstream failure (502 pages ops and misleads monitoring).
             uid = (request.view_args or {}).get("user_id")
-            return jsonify(error=error.code, code=error.code, message=str(error),
+            return jsonify(error=error.code, code=error.code, message=str(error), rule=rule,
                            action={"label": "Connect Swiggy", "act": "swiggy-connect"},
                            connect_url=f"/api/user/{uid}/swiggy/connect" if uid else None), 409
-        response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after)
+        response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after, rule=rule)
         if error.retry_after is not None:
             response.headers['Retry-After'] = str(error.retry_after)
         if error.code == 'swiggy_cart_other_address':
@@ -701,6 +715,10 @@ def create_app() -> Flask:
             raise ValueError("Invalid menu page")
         return jsonify(swiggy_live.search_live_dishes(user_id, request.args.get("restaurant_id", ""),
             request.args.get("restaurant_name", ""), request.args.get("query", ""), int(offset)))
+
+    @app.get("/api/user/<int:user_id>/swiggy/rules")
+    def swiggy_rules_view(user_id):
+        return jsonify(swiggy_rules.overview(user_id))
 
     @app.post("/api/user/<int:user_id>/swiggy/photos")
     def swiggy_photos(user_id):

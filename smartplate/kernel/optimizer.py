@@ -18,7 +18,7 @@ import math
 import pulp
 
 from .. import clock, config, db
-from ..domain import (allergens, carbon, fatigue, festivals, flavour, health, learning, leftovers,
+from ..domain import (allergens, carbon, fatigue, festivals, flavour, health, household, learning, leftovers,
                       models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
 from ..integrations import calendar_sync
 from . import explainability, scheduler
@@ -157,6 +157,8 @@ def build_context(user: dict, plan: dict) -> dict:
     return {
         "learned": learned,
         "menu": menu,
+        # A household plan feeds everyone eating a meal: one portion each (portions()).
+        "members": models.get_household_members(user["household_id"]) if user.get("household_id") else [],
         # Epicure flavour signals ("more like this", cuisine tilt); {} when neither is set
         "flavour": flavour.context(user, menu),
         "festivals": festivals.for_week(plan["week_start"]),
@@ -176,6 +178,14 @@ def build_context(user: dict, plan: dict) -> dict:
     }
 
 
+def portions(user: dict, session: dict, ctx: dict) -> int:
+    """How many portions a meal needs: one for each household member eating it (the
+    meal's ticks, else who usually eats it), one for a person planning alone. Nutrition
+    stays per person; cost and the Swiggy cart scale with this."""
+    members = ctx.get("members") or []
+    return max(1, len(household.eaters(session, members, user))) if members else 1
+
+
 def _wx(ctx: dict, day) -> dict:
     return ctx["weather"].get(day) or {"condition": "clear", "temp_c": 30.0}
 
@@ -193,7 +203,8 @@ def _delivery_candidate(user, plan, session, item, ctx):
     day, meal = session["day"], session["meal"]
     item, learned_pen = learning.adjust(item, ctx.get("learned"))
     cond = _wx(ctx, day)["condition"]
-    base_cost = item["price"] + item["delivery_fee"]
+    n = portions(user, session, ctx)
+    base_cost = item["price"] * n + item["delivery_fee"]          # one delivery fee, a portion each
 
     # Surge + optional time-shift (calendar-aware) -------------------------- #
     if surge.applies(item):
@@ -234,7 +245,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "kind": "delivery",
         "restaurant_id": item["restaurant_id"], "restaurant_name": item["restaurant_name"],
         "item_id": item["id"], "item_name": item["name"], "rating": item["restaurant_rating"],
-        "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3),
+        "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3), "portions": n,
         "delivery_fee": item["delivery_fee"], "delivery_fee_estimated": item.get("delivery_fee_estimated"),
         "time_shift": time_shift, "flaky": item.get("flaky", 0), "rating_pen": _rating_pen(user, item),
         "is_usual": (not discovery) if ctx["taste"]["favourites"] else not fatigue.is_novel(item, history),
@@ -258,9 +269,10 @@ def _cook_candidate(user, session, ctx, recipe=None):
     if not r:
         return None
     nutri = nutrition.penalty(user, session["meal"], r, tol=ctx["nutri_tol"])
+    n = portions(user, session, ctx)
     return {
-        "kind": "cook", "recipe_key": r["key"], "item_name": f"Cook: {r['name']}",
-        "restaurant_name": "Home kitchen", "rating": 5.0, "cost": float(r["cost"]),
+        "kind": "cook", "recipe_key": r["key"], "item_name": f"Cook: {r['name']}", "portions": n,
+        "restaurant_name": "Home kitchen", "rating": 5.0, "cost": round(float(r["cost"]) * n, 2),
         "surge_mult": 1.0, "time_shift": None, "taste": 0.62, "sentiment": {"score": 0, "n": 0, "label": ""},
         "nutri": nutri, "health": health.protein_penalty(user, r), "carbon_pen": carbon.penalty(r),
         "cook_effort": _cook_effort(user, session["meal"]),
