@@ -133,7 +133,7 @@ button:disabled{opacity:.55;cursor:default;transform:none}
     border-top:0;border-right:1px solid var(--line);background:var(--ground)}
   .nav .brand-rail{display:flex;align-items:center;gap:10px;padding:4px 8px 22px}
   .tab{flex-direction:row;justify-content:flex-start;gap:12px;padding:0 16px;font-size:15px;min-height:50px}
-  .topbar{padding:18px 32px 10px}
+  .topbar{padding:18px max(32px,calc((100% - 576px) / 2)) 10px}
   .topbar .mark{display:none}
   .main{padding:8px 32px 48px}
 }

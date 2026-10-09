@@ -310,7 +310,8 @@ test('change sheet: better fits, other places, cook and hidden counts', async ()
     cook: [{ recipe_key: 'dal_rice', name: 'Dal + rice', price: 45 }], hidden: { not_safe: 4, below_rating: 1, not_again: 0 } } }`, context);
   let html = vm.runInContext('sheetDialog()', context);
   assert.match(html, /Change lunch/);
-  assert.match(html, /data-pick="1"[^]*fits your budget/);
+  assert.doesNotMatch(html, /fits your budget/);                     // every option fits unless it says otherwise
+  assert.match(html, /data-pick="2"[^]*Over by ₹50/);
   assert.match(html, /class="pick over/);
   assert.match(html, /Over by ₹50/);
   assert.match(html, /A&quot;B/);

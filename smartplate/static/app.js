@@ -180,7 +180,7 @@ const DISH_SVG = {
   burger: '<path d="M4 11a8 6 0 0 1 16 0z"/><path d="M3 14.5h18"/><path d="M4.5 17.5h15a1 1 0 0 1-1 2h-13a1 1 0 0 1-1-2z"/>',
   wrap: '<path d="M6.5 20.5l-3-3L15 6a4.2 4.2 0 0 1 6 6z"/><path d="M13 8l3 3M10 11l3 3"/>',
   noodles: '<path d="M3 12h18a9 9 0 0 1-18 0z"/><path d="M13 3l-2.5 9M19 4l-5 8"/><path d="M7 15c2 1 8 1 10 0"/>',
-  dosa: '<path d="M3 18L18.5 4.5l1.5 1.5L6 21z"/><path d="M6.5 15l3 3M10 12l3 3M13.5 9l3 3"/>',
+  dosa: '<path d="M3 16.5L18.5 8a2.6 2.6 0 0 1 2.4 4.6L4.5 18.5z"/><path d="M2.5 21h19"/><path d="M9 13.4l1.1 2.1M13.6 10.9l1.1 2.1"/>',
   tiffin: '<ellipse cx="8" cy="11" rx="4.5" ry="2.6"/><ellipse cx="16" cy="11" rx="4.5" ry="2.6"/><path d="M3.5 11v2c0 1.5 2 2.6 4.5 2.6s4.5-1.1 4.5-2.6v-2M11.5 11v2c0 1.5 2 2.6 4.5 2.6s4.5-1.1 4.5-2.6v-2"/><path d="M3 19h18"/>',
   bread: '<ellipse cx="12" cy="12" rx="9" ry="7"/><path d="M7 9.5c3 1.5 7 1.5 10 0M6.5 13c3 1.5 8 1.5 11 0"/>',
   fish: '<path d="M2.5 12c3.5-5.5 10-6.5 14.5-2.5L21 6.5v11l-4-3c-4.5 4-11 3-14.5-2.5z"/><circle cx="7.5" cy="11" r=".9"/>',
@@ -198,8 +198,9 @@ function dishKind(name, cook) {
   const hit = DISH_KINDS.find(([, , re]) => re.test(String(name || "")));
   return hit ? [hit[0], hit[1]] : ["plate", 220];
 }
+const BROKEN_PHOTOS = new Set();          // photos that failed once stay icons on every re-render
 function dishIcon(name, { cook = false, image = null, lg = false } = {}) {
-  if (image) return `<img class="dphoto${lg ? " lg" : ""}" src="${esc(image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-dish="${esc(name)}">`;
+  if (image && !BROKEN_PHOTOS.has(image)) return `<img class="dphoto${lg ? " lg" : ""}" src="${esc(image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-dish="${esc(name)}">`;
   const [kind, hue] = dishKind(name, cook);
   return `<span class="dicon${lg ? " lg" : ""}" style="--h:${hue}" data-kind="${kind}" aria-hidden="true"><svg viewBox="0 0 24 24">${DISH_SVG[kind]}</svg></span>`;
 }
@@ -980,8 +981,9 @@ function realDishesState() {
       <p class="sub">Real dishes and prices depend on where Swiggy delivers.</p>
       <button class="primary" data-act="addr-open">Choose delivery address</button></section>`;
   }
+  if (src.kind === "sample" && !swiggySignInOpen()) return tag;       // nothing to connect yet: don't contradict the sample plan
   return `${tag}<section class="empty" role="status">${mascot()}<h2 class="h2">Plan from real places near you</h2>
-    ${swiggySignInOpen() ? `<p class="sub">Until then, your plan shows home-cooked meals only.</p>${connectPrompt()}` : `<p class="sub">${esc(src.note || "")}</p>`}</section>`;
+    ${swiggySignInOpen() ? connectPrompt() : `<p class="sub">${esc(src.note || "")}</p>`}</section>`;
 }
 // Why this pick, in plain words from real fields. Never a score.
 function whyChips(c) {
@@ -998,7 +1000,6 @@ function whyChips(c) {
   if (al.length && c.kind === "delivery") out.push([S.view.source?.kind === "live" ? `No ${al.join(", ")} by dish name` : `${cap1(al.join(", "))} filtered out`, "ok"]);
   if (al.length && c.kind === "cook") out.push([`Recipe has no ${al.join(", ")}`, "ok"]);
   if (u.diet === "veg" || u.diet === "vegan") out.push([u.diet === "vegan" ? "Vegan plan" : "Vegetarian", ""]);
-  if (c.rating && c.kind === "delivery") out.push([`${Number(c.rating).toFixed(1)}★`, ""]);
   return out.length ? `<ul class="why" aria-label="Why this pick">${out.map(([t, k]) => `<li class="${k}">${esc(t)}</li>`).join("")}</ul>` : "";
 }
 // "Order by 19:45": a ring that empties as the order-by time gets closer (the last 3 hours).
@@ -1308,10 +1309,12 @@ const i18nToday = (day) => day.date === todayIso() ? " · today" : "";
 function pickBtn(x, place, d) {
   const left = d.limits.left_day != null ? Math.min(d.limits.left_week, d.limits.left_day) : d.limits.left_week;
   const cur = d.current?.item === x.name;
-  const note = cur ? ["Current pick", ""] : !x.fits ? [`Over by ${rupee0(Math.max(0, x.price - left))}`, "warn"] : [x.why || "Fits", "ok"];
+  // Every option shown fits unless it says otherwise: only a real reason earns a pill.
+  const why = x.why && !/^fits( your budget)?$/i.test(x.why.trim()) ? x.why : "";
+  const note = cur ? ["Current pick", ""] : !x.fits ? [`Over by ${rupee0(Math.max(0, x.price - left))}`, "warn"] : [why, "ok"];
   return `<button class="pick ${x.fits ? "" : "over"} ${cur ? "current" : ""}" data-pick="${x.item_id}" data-pick-name="${esc(x.name)}">
     ${dishIcon(x.name)}<span class="t"><b>${esc(x.name)}</b><span>${esc(place || "")}${x.instructions?.length ? ` · will ask: “${esc(x.instructions.join("; "))}”` : ""}</span>
-      <span class="pillnote ${note[1]}">${esc(note[0])}</span></span><b class="pr">${rupee0(x.price)}</b></button>`;
+      ${note[0] ? `<span class="pillnote ${note[1]}">${esc(note[0])}</span>` : ""}</span><b class="pr">${rupee0(x.price)}</b></button>`;
 }
 function sheetDialog() {
   const d = S.sheet.data;
@@ -1494,7 +1497,7 @@ function savedScreen() {
 function placeRow(p, { starred, live }) {
   const letter = esc(String(p.name || "?").replace(/^the\s+/i, "").charAt(0).toUpperCase());
   const meta = live ? [p.area, p.rating ? `${p.rating}★` : "", p.eta].filter(Boolean).map(String).map(esc).join(" · ")
-    : [p.rating ? `${Number(p.rating).toFixed(1)}★` : "", p.eta_min ? `about ${p.eta_min} min` : "", p.dishes_fit != null ? `${p.dishes_fit} of ${p.dishes_total} dishes fit you` : ""].filter(Boolean).join(" · ");
+    : [p.rating ? `${Number(p.rating).toFixed(1)}★` : "", p.eta_min ? `${p.eta_min} min` : "", p.dishes_fit != null ? `${p.dishes_fit} of ${p.dishes_total} fit you` : ""].filter(Boolean).join(" · ");
   const star = live ? `data-live-fav="${esc(p.id)}" data-live-name="${esc(p.name)}"` : `data-fav="${p.id}"`;
   return `<div class="mrow" style="cursor:default"><span class="ico lilac" aria-hidden="true" style="border-radius:50%;font-weight:800">${letter}</span>
     <span class="t"><b>${esc(p.name)}</b><span class="s">${meta || (live ? "Saved on Swiggy" : "")}</span></span>
@@ -2423,6 +2426,7 @@ document.addEventListener("error", (e) => {
   const img = e.target;
   if (img && img.tagName === "IMG" && img.classList?.contains("dphoto")) {
     const lg = img.classList.contains("lg");
+    BROKEN_PHOTOS.add(img.getAttribute("src"));
     img.outerHTML = dishIcon(img.dataset.dish || "", { lg });
   }
 }, true);
