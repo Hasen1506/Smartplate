@@ -156,7 +156,7 @@ def refresh(user_id: int) -> dict:
         if dishes:
             rows.append((r, dishes))
     if not rows:
-        raise SwiggyError("Swiggy's menus had no dishes SmartPlate can plan with yet. "
+        raise SwiggyError("Swiggy's menus had no dishes Ziggy can plan with yet. "
                           "Add a favourite restaurant from live search and try again.")
     clear(user_id)
     n_dishes = 0
@@ -265,7 +265,7 @@ def source_for(user_id: int, connected: bool | None = None) -> dict:
                      "address you chose." if row else "Reading real dishes from Swiggy for your address."),
             "address": "Pick a delivery address to see real dishes.",
             "connect": ("Connect Swiggy and pick an address to see real dishes." if config.SWIGGY_REDIRECT_APPROVED
-                        else "Connecting Swiggy from SmartPlate is waiting for Swiggy's approval. "
+                        else "Connecting Swiggy from Ziggy is waiting for Swiggy's approval. "
                              "Until then, plans show home-cooked meals only.")}[needs]
     out = {"kind": kind, "connected": connected, "needs": needs, "stale_address": bool(row),
            "label": "Sample dishes (test data)" if kind == "sample" else "No restaurant dishes yet",

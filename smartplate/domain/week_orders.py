@@ -28,7 +28,7 @@ class OverBudget(ValueError):
         self.budget = budget
 SCHEDULING = {"supported": False,
               "why": "Swiggy's order tool places an order immediately (Cash on Delivery only); it has no "
-                     "scheduled-order option. SmartPlate reminds you at each order time and gets the cart ready."}
+                     "scheduled-order option. Ziggy reminds you at each order time and gets the cart ready."}
 
 
 def _cells(plan_id: int) -> list[dict]:

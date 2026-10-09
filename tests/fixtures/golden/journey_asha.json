@@ -543,7 +543,7 @@
    "item": "Mini Tiffin",
    "menu_price": 125.0,
    "orderable": false,
-   "reason": "SmartPlate cannot verify your ingredient or medical rules from Swiggy's menu, so it won't add this to your cart. Check the dish with the restaurant and order it directly in Swiggy.",
+   "reason": "Ziggy cannot verify your ingredient or medical rules from Swiggy's menu, so it won't add this to your cart. Check the dish with the restaurant and order it directly in Swiggy.",
    "restaurant": "Hotel Saravana Bhavan (Adyar)"
   }
  },

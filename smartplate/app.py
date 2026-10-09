@@ -35,7 +35,7 @@ def _missing(key: str, value) -> tuple:
               if config.storage_status().get("persistent") is False else
               "It may have been deleted.")
     step = ("Create your profile again, or add it with its recovery code."
-            if key == "user_id" else "Reload SmartPlate to open your current plan.")
+            if key == "user_id" else "Reload Ziggy to open your current plan.")
     return jsonify(error=f"{what} is no longer on this server. {reason} {step}", code=code,
                    missing=key, id=value), 404
 
@@ -177,7 +177,7 @@ def create_app() -> Flask:
             # code the UI understands, instead of Flask's generic 500 page (Oct 2026 incident).
             app.logger.warning("Database unavailable on %s: %s: %s", request.path,
                                type(error).__name__, str(error).strip()[:200])
-            response = jsonify(error="SmartPlate can't reach its database right now. "
+            response = jsonify(error="Ziggy can't reach its database right now. "
                                      "Your data is safe; try again in a minute.",
                                code="database_unavailable")
             response.headers['Retry-After'] = '15'
@@ -810,6 +810,10 @@ def create_app() -> Flask:
     def session_rate(session_id):
         body = request.get_json(force=True, silent=True) or {}
         return jsonify(everyday.rate(session_id, body.get("score"), body.get("reasons")))
+
+    @app.get("/api/user/<int:user_id>/saved")
+    def saved_dishes(user_id):
+        return jsonify(everyday.saved(user_id))
 
     @app.get("/api/user/<int:user_id>/learned")
     def learned(user_id):

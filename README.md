@@ -1,4 +1,7 @@
-# SmartPlate — private trial
+# Ziggy — private trial
+
+*Ziggy (Zomato + Swiggy, with a little elephant) is the app; the repository, package and
+API header keep the original SmartPlate name.*
 
 A **scheduling** AI agent for food delivery — the white space the
 [strategic brainstorm](SmartPlate_Brainstorm.html) identified: scheduled +
@@ -22,20 +25,26 @@ worth building, connector or app, who pays, and how do we keep it simple?", see
 
 ## What using it feels like
 
-1. **Set up your profile**: diet and exclusions, meals, budget and optional goal.
-2. **Today** shows the next meal, what it costs including delivery, and **when to
-   order it** (ahead of the rush, with extra time on rainy days). Tap *Order on
-   Swiggy*, *Change* or *I had it*.
-3. **Change** opens a short list from the sample Chennai planner. The sample list
-   is separate from the connected Swiggy restaurant and menu flow.
-4. **Week**: drag a meal onto another day (or tap *Move*) to swap. The selected
-   picks trade places; the solver may adjust other unpinned meals to keep the
-   budget and nutrition constraints.
-5. **Heads-up**: rain, heat, holidays, the fasts you keep, meals that didn't fit
-   the budget, and past meals to confirm.
-6. **Reminders**: *Remind me at order time* attempts a push notification while
-   the web process is awake. Free Render sleeps; notifications are best effort.
-   You can also export order-by times to your phone calendar.
+Three tabs (Today, Week, Saved) and your avatar for everything else (Me). Light, dark
+or your phone's setting, and an optional Zomato-red-to-Swiggy-orange colour mesh.
+
+1. **Get started**: four quick steps (what you eat, how your days go, a weekly budget,
+   a sign-in). Ziggy plans the week while the elephant thinks, then offers to connect
+   Swiggy right away (phone + OTP on Swiggy's own page, then tap your address).
+2. **Today** shows the next meal, why it was picked (in plain words, never a score),
+   its estimated price and **when to order it**. **Add to Swiggy cart** is one tap: the
+   elephant rolls across the button, then Swiggy's real bill appears line by line and
+   *Pay in Swiggy* opens checkout. Ziggy never pays for you.
+3. **Change** (on any meal) opens one sheet: *Better fits*, *Other places* (switch
+   restaurants with one tap) and *Cook*, plus Skip (with Undo), Keep and Swap with
+   another meal.
+4. **Week**: a day strip, the chosen day's meals, the budget at a glance, cooking and
+   the grocery list, and ordering several meals at once.
+5. **Saved**: your places (search Swiggy and tap ♥), dishes you rated Good, and meals
+   you've had, each with *Order again*.
+6. **Heads-up and reminders**: rain, heat, holidays, the fasts you keep, budget
+   warnings, and a nudge at order-by time (push while the web process is awake, or
+   export the times to your calendar).
 7. **Installable and private**: add it to your home screen. A profile you create
    is private; add a sign-in name and password to open it on your other devices.
 8. **Swiggy, once the exact redirect is approved**: choose your saved address,
@@ -61,7 +70,7 @@ Koyeb, Heroku) works the same way; run **one** worker process.
 
 ### Keep your data: free Postgres on Neon
 
-With `DATABASE_URL` set, SmartPlate stores everything (profiles, private-profile keys,
+With `DATABASE_URL` set, Ziggy stores everything (profiles, private-profile keys,
 sign-ins, plans, ratings, receipts, Swiggy links, push subscriptions) in that Postgres
 database instead of the SQLite file, so restarts, spin-downs and redeploys lose nothing.
 Without it the app uses SQLite, as before (local runs, Codespaces, tests).
@@ -115,7 +124,7 @@ For a private persistent pilot, review the separate [production Blueprint](rende
 and [deployment runbook](docs/production-deployment.md) before applying it.
 
 **Swiggy sign-in on a hosted URL requires an exact approved redirect URI.** In
-More → Swiggy connection, copy the callback URL shown for this deployment (for
+Me → Swiggy, copy the callback URL shown for this deployment (for
 example, `https://your-service.onrender.com/swiggy/callback`) and give that exact
 URI to [Swiggy Builders Club](https://mcp.swiggy.com/builders/docs/operate/access/).
 An approval for another hostname or path does not cover this URL. Swiggy creates
@@ -248,7 +257,7 @@ public search for that restaurant and dish, the person orders there, then taps *
 it* to record the planned meal estimate. This does not verify the actual purchase,
 charged amount or nutrition of the food received.
 
-With a sign-in (More → Swiggy connection), SmartPlate reads saved addresses,
+With a sign-in (Me → Swiggy), Ziggy reads saved addresses,
 searches real restaurants, shows menus, maintains favourites and puts an exact
 reviewed dish in the cart. It can place a user-confirmed Cash on Delivery order
 only when `SMARTPLATE_LIVE_ORDERS=on`; otherwise checkout remains in Swiggy.
@@ -262,4 +271,4 @@ background worker places orders. See [the integration notes](docs/vendor/swiggy/
 See [implementation status](docs/implementation-status.md) for the exact pilot
 scope, tested code and remaining recommendations. Private profiles now support
 credential-free data export, explicit deletion and recovery-code/device revocation
-in More → Profiles. Real restaurant menus also support paginated dish search.
+in Me → Account & devices. Real restaurant menus also support paginated dish search.

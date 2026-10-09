@@ -75,7 +75,7 @@ def export(user_id):
 
 def delete(user_id, confirmation):
     if confirmation != "DELETE":
-        raise ValueError("Type DELETE to confirm permanent removal of this SmartPlate profile.")
+        raise ValueError("Type DELETE to confirm permanent removal of this Ziggy profile.")
     with db.cursor() as cur:
         cur.execute("BEGIN IMMEDIATE")
         _private(cur, user_id)

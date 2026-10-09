@@ -233,7 +233,7 @@ def _client_id(meta: dict, redirect_uri: str) -> str:
         raise SwiggyError("This server's public address isn't configured for Swiggy sign-in. "
                           "Set SMARTPLATE_PUBLIC_URL (or SMARTPLATE_ALLOWED_HOSTS) to the app's HTTPS address.")
     if registered >= config.SWIGGY_MAX_CLIENTS:
-        raise SwiggyError("SmartPlate has already registered its Swiggy sign-in addresses. "
+        raise SwiggyError("Ziggy has already registered its Swiggy sign-in addresses. "
                           "Ask the operator to check SMARTPLATE_PUBLIC_URL.")
     reg = meta.get("registration_endpoint")
     if not reg:
@@ -275,7 +275,7 @@ def start(user_id: int, redirect_uri: str, browser_nonce: str | None = None) -> 
     `browser_nonce` is also set as an HttpOnly cookie on the browser that asked;
     the callback is accepted only from a browser presenting it (H-01)."""
     if not private_owner(user_id):
-        raise SwiggyError("Create or sign in to your own private SmartPlate profile before connecting Swiggy. "
+        raise SwiggyError("Create or sign in to your own private Ziggy profile before connecting Swiggy. "
                           "Sample profiles are shared by every visitor.")
     if not redirect_uri.startswith("https://") and "://localhost" not in redirect_uri \
             and "://127.0.0.1" not in redirect_uri:
@@ -310,10 +310,10 @@ def finish(state: str, code: str, browser_nonce: str | None = None) -> int:
         row = cur.execute("SELECT * FROM swiggy_pending WHERE state=?", (state or "",)).fetchone()
         cur.execute("DELETE FROM swiggy_pending WHERE state=?", (state or "",))       # single use
     if not row or dt.datetime.fromisoformat(row["created_ts"]) < clock.now() - PENDING_TTL:
-        raise SwiggyError("This sign-in link expired or was already used. Start again from SmartPlate.")
+        raise SwiggyError("This sign-in link expired or was already used. Start again from Ziggy.")
     expected = row["browser_hash"]
     if not expected or not browser_nonce or not hmac.compare_digest(expected, browser_digest(browser_nonce)):
-        raise SwiggyError("This Swiggy sign-in was started in a different browser. Open SmartPlate on this "
+        raise SwiggyError("This Swiggy sign-in was started in a different browser. Open Ziggy on this "
                           "device and tap Connect Swiggy again.", code="swiggy_browser_mismatch")
     if not code:
         raise SwiggyError("Swiggy didn't return a sign-in code")

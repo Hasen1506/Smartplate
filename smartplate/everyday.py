@@ -529,6 +529,57 @@ def rate(session_id: int, score, reasons: list | None = None) -> dict:
     return {"plan": service.plan_view(plan["id"]), "suggest_favourite": suggest}
 
 
+def saved(user_id: int) -> dict:
+    """What the Saved tab lists besides places: the dishes this person rated Good and the
+    meals they actually had or ordered, newest first. Only real records, never suggestions."""
+    with db.cursor() as cur:
+        likes = cur.execute("SELECT session_id, iso_date FROM ratings WHERE user_id=? AND score > 0 "
+                            "AND session_id IS NOT NULL ORDER BY id DESC LIMIT 200", (user_id,)).fetchall()
+        had = cur.execute(
+            "SELECT s.id, s.day, s.meal, s.status, p.week_start FROM sessions s JOIN plans p ON p.id = s.plan_id "
+            "WHERE p.user_id=? AND s.status IN ('confirmed', 'ordered') "
+            "ORDER BY p.week_start DESC, s.day DESC, s.id DESC LIMIT 20", (user_id,)).fetchall()
+        scores = {r["session_id"]: r["score"] for r in cur.execute(
+            "SELECT session_id, score FROM ratings WHERE user_id=? AND session_id IS NOT NULL", (user_id,)).fetchall()}
+        ids = sorted({r["session_id"] for r in likes} | {r["id"] for r in had})
+        latest = {}
+        for start in range(0, len(ids), 200):              # each meal's latest decision is what was eaten
+            chunk = ids[start:start + 200]
+            rows = cur.execute("SELECT session_id, chosen_kind, item_id, item_name, restaurant_id, restaurant_name, "
+                               "recipe_key, cost FROM decisions WHERE session_id IN (" + ",".join("?" * len(chunk))
+                               + ") ORDER BY id", tuple(chunk)).fetchall()
+            for row in rows:
+                latest[row["session_id"]] = dict(row)
+
+    def dish(d: dict) -> dict:
+        cook = d["chosen_kind"] == "cook"
+        return {"name": d["item_name"], "kind": "cook" if cook else "delivery",
+                "restaurant": None if cook else d["restaurant_name"], "restaurant_id": d["restaurant_id"],
+                "item_id": d["item_id"], "recipe_key": d["recipe_key"], "price": round(float(d["cost"] or 0), 2)}
+
+    liked, seen = [], set()
+    for r in likes:
+        d = latest.get(r["session_id"])
+        if not d or d["chosen_kind"] not in ("delivery", "cook") or not d["item_name"]:
+            continue
+        key = (d["chosen_kind"], d["item_id"] or d["recipe_key"] or d["item_name"])
+        if key in seen:
+            continue
+        seen.add(key)
+        liked.append({**dish(d), "last": r["iso_date"]})
+        if len(liked) == 30:
+            break
+    recent = []
+    for s in had:
+        d = latest.get(s["id"])
+        if not d or not d["item_name"]:
+            continue
+        when = dt.date.fromisoformat(s["week_start"]) + dt.timedelta(days=s["day"])
+        recent.append({**dish(d), "session_id": s["id"], "meal": s["meal"], "date": when.isoformat(),
+                       "status": s["status"], "rated": scores.get(s["id"])})
+    return {"liked": liked, "recent": recent}
+
+
 def more_like(session_id: int) -> dict:
     """"More like this" on a planned dish: remember it (the last few), re-plan the open
     meals with the similarity nudge, and offer the closest safe dishes to pick now."""
@@ -540,7 +591,7 @@ def more_like(session_id: int) -> dict:
         raise ValueError("Dish similarity isn't available right now")
     dish = decision["item_name"]
     if flavour.dish_vector(dish) is None:
-        raise ValueError(f"SmartPlate can't tell yet what {dish} is made of, so it can't find similar dishes")
+        raise ValueError(f"Ziggy can't tell yet what {dish} is made of, so it can't find similar dishes")
     prefs = dict(user["prefs"])
     entries = [m for m in prefs.get("more_like", []) if m.get("name") != dish]
     entries.append({"name": dish, "item_id": decision.get("item_id"), "iso_date": clock.today().isoformat()})

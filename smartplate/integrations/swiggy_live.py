@@ -169,7 +169,7 @@ def _shape(value, depth=0):
 def call(user_id: int, name: str, arguments: dict) -> object:
     """One tools/call. Order placement also requires the explicit deployment gate."""
     if name not in ALLOWED:
-        raise SwiggyError(f"SmartPlate does not support {name}.")
+        raise SwiggyError(f"Ziggy does not support {name}.")
     if name == "place_food_order" and not config.LIVE_ORDERS:
         raise SwiggyError("Real order placement is disabled until Swiggy access and durable storage are approved.")
     try:
@@ -251,7 +251,7 @@ def build_args(tool: dict, values: dict) -> dict:
             args[key] = value
     missing = sorted(required - set(args))
     if missing:
-        raise SwiggyError(f"Swiggy's {tool.get('name')} needs {', '.join(missing)}, which SmartPlate doesn't "
+        raise SwiggyError(f"Swiggy's {tool.get('name')} needs {', '.join(missing)}, which Ziggy doesn't "
                           "know how to fill yet.")
     return args
 
@@ -939,7 +939,7 @@ def cart_preview(session_id: int) -> dict:
     from ..domain import models
     user = models.get_user(user_id)
     if user["allergens"] or user["medical"] or user["diet"] == "vegan":
-        raise SwiggyError("SmartPlate cannot verify your ingredient or medical rules from Swiggy's menu. "
+        raise SwiggyError("Ziggy cannot verify your ingredient or medical rules from Swiggy's menu. "
                           "Open Swiggy and confirm the dish with the restaurant before ordering.")
     conn = _conn(user_id)
     address_id = _address(conn)
@@ -962,7 +962,7 @@ def cart_preview(session_id: int) -> dict:
     if _get(item, "stock") not in (True, 1):
         raise SwiggyError("Swiggy did not confirm this dish is in stock. Check it in Swiggy before ordering.")
     if _has_options(item):
-        raise SwiggyError("This dish needs options or add-ons SmartPlate cannot safely choose. "
+        raise SwiggyError("This dish needs options or add-ons Ziggy cannot safely choose. "
                           "Customize it in Swiggy instead.")
     if user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
         raise SwiggyError("Swiggy did not verify this dish as vegetarian. Check it in Swiggy before ordering.")
@@ -995,7 +995,7 @@ def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
             "cancellation_note": prepared.get("cancellation_note")}
 
 
-SAFETY_NOTE = ("SmartPlate cannot verify your ingredient or medical rules from Swiggy's menu, so it won't add "
+SAFETY_NOTE = ("Ziggy cannot verify your ingredient or medical rules from Swiggy's menu, so it won't add "
                "this to your cart. Check the dish with the restaurant and order it directly in Swiggy.")
 
 
@@ -1070,7 +1070,7 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
     elif _get(item, "stock") not in (True, 1):
         blocked = "Swiggy did not confirm this dish is in stock. Refresh the menu or check it in Swiggy."
     elif _has_options(item):
-        blocked = "This dish needs options that SmartPlate cannot choose yet. Customize it in Swiggy."
+        blocked = "This dish needs options that Ziggy cannot choose yet. Customize it in Swiggy."
     elif user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
         blocked = "Swiggy did not verify this dish as vegetarian. Check it in Swiggy."
     if blocked:
@@ -1250,7 +1250,7 @@ def _prepared_cart(user_id: int) -> tuple[dict, dict, dict]:
         raise _other_address_error(cart, conn, "Your Swiggy cart")
     if (not intent or intent["address_id"] != address_id
             or _cart_mismatch(cart, intent["restaurant_id"], intent["item_id"])):
-        raise SwiggyError("This cart differs from the item SmartPlate prepared. Review or clear it in Swiggy, "
+        raise SwiggyError("This cart differs from the item Ziggy prepared. Review or clear it in Swiggy, "
                           "then select and review an item here again.")
     return conn, intent, cart
 
@@ -1327,7 +1327,7 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     part = _cart_mismatch(view, restaurant_id, preview["item_id"])
     _note_confirm(user_id, part)
     if part:
-        raise SwiggyError(f"SmartPlate could not confirm the {CONFIRM_WORDS[part]} in Swiggy's cart. "
+        raise SwiggyError(f"Ziggy could not confirm the {CONFIRM_WORDS[part]} in Swiggy's cart. "
                           "The item may be in your Swiggy cart: check it there before trying again.")
     with db.cursor() as cur:
         cur.execute("INSERT OR REPLACE INTO swiggy_cart_intents(user_id, address_id, restaurant_id, restaurant_name, "
@@ -1350,7 +1350,7 @@ def _checkout_state(user_id: int) -> dict:
     from ..domain import models
     user = models.get_user(user_id)
     if user["allergens"] or user["medical"] or user["diet"] == "vegan":
-        raise SwiggyError("SmartPlate cannot verify your ingredient or medical rules for a real order. "
+        raise SwiggyError("Ziggy cannot verify your ingredient or medical rules for a real order. "
                           "Review and place it in Swiggy instead.")
     conn, intent, cart = _prepared_cart(user_id)
     address_id = _address(conn)
@@ -1359,13 +1359,13 @@ def _checkout_state(user_id: int) -> dict:
         raise SwiggyError("Review one exact dish in the Swiggy cart before placing an order.")
     item = items[0]
     if not _one(item.get("quantity")) or not _get(item, "name"):
-        raise SwiggyError("SmartPlate could not verify one dish and quantity in the live cart.")
+        raise SwiggyError("Ziggy could not verify one dish and quantity in the live cart.")
     if _flag(_get(item, "stock")) is False:
         raise SwiggyError("The dish is no longer in stock. Refresh your cart.")
     if user["diet"] == "veg" and _flag(_get(item, "veg")) is not True:
         raise SwiggyError("Swiggy did not verify the cart dish as vegetarian. Check it in Swiggy.")
     if item.get("variants") or item.get("addons") or item.get("variations") or item.get("variantsV2"):
-        raise SwiggyError("The cart has customizations that SmartPlate did not review. Check it in Swiggy.")
+        raise SwiggyError("The cart has customizations that Ziggy did not review. Check it in Swiggy.")
     if not cart.get("address_verified"):
         raise SwiggyError("Swiggy did not confirm the cart's delivery address. Refresh your cart or check it in Swiggy.")
     total = cart_total(cart, intent.get("menu_price"))
