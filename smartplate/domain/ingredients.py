@@ -286,7 +286,7 @@ def substitutes(token: str, people: list[dict], k: int = 3, exclude=()) -> dict:
     model = epicure.get()
     if token not in PANTRY:
         return {"available": model is not None, "ingredient": token, "name": name(token), "options": [],
-                "hidden_unsafe": 0, "reason": "SmartPlate has no swaps for this item yet"}
+                "hidden_unsafe": 0, "reason": "Ziggy has no swaps for this item yet"}
     if model is None:
         return {"available": False, "ingredient": token, "name": name(token), "options": [], "hidden_unsafe": 0}
     want = set(roles(token))

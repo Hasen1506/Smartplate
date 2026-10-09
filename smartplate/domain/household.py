@@ -161,7 +161,7 @@ def _managed_member(owner: dict, member_id: int) -> dict:
         raise KeyError("Member not found")
     m = db.row_to_dict(row)
     if not is_managed(m):
-        raise ValueError(f"{m['name']} has their own SmartPlate profile and edits it there")
+        raise ValueError(f"{m['name']} has their own Ziggy profile and edits it there")
     return m
 
 

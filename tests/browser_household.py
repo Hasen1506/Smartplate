@@ -68,8 +68,8 @@ def test_browser_household_split_grocery_and_recap(home, viewport):
             page.goto(k["url"])
             pw.expect(page.get_by_role("navigation", name="Main")).to_be_visible()
             # --- set up the household and add Dev ------------------------------- #
-            page.get_by_role("navigation", name="Main").get_by_role("button", name="You", exact=True).click()
-            page.get_by_role("button", name="Household People you cook and order for").click()
+            page.get_by_role("button", name="Me: settings, money and account", exact=True).click()
+            page.get_by_role("button", name="Household", exact=False).click()
             page.get_by_role("button", name="Create household", exact=True).click()
             pw.expect(page.get_by_text("Household created. Add the people you cook for.")).to_be_visible()
             page.get_by_text("Add someone you cook or order for").click()
@@ -116,18 +116,32 @@ def test_browser_household_split_grocery_and_recap(home, viewport):
             k["client"].post(f"/api/session/{dinner['session_id']}/choose", json={"recipe_key": "dal_rice"}, headers=k["h"])
             page.reload()
             pw.expect(page.get_by_role("navigation", name="Main")).to_be_visible()
-            page.get_by_role("navigation", name="Main").get_by_role("button", name="Plan", exact=True).click()
-            page.get_by_role("navigation", name="Plan").get_by_role("button", name="Cook & groceries").click()
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="Week", exact=True).click()
+            page.get_by_role("button", name="Cooking & groceries", exact=False).click()
             pw.expect(page.get_by_text("needs 120 g for 2 servings").first).to_be_visible()
             page.locator('[data-have="Rice 1kg"]').check()
             pw.expect(page.get_by_role("heading", name="Grocery list · ₹130")).to_be_visible()      # 90 dal + 40 onion
             _no_overflow(page)
             # --- the weekly recap ------------------------------------------------ #
-            page.get_by_role("navigation", name="Main").get_by_role("button", name="You", exact=True).click()
-            page.get_by_role("button", name="This week What you spent and ate, against your plan").click()
-            pw.expect(page.get_by_role("heading", name="This week")).to_be_visible()
+            page.get_by_role("button", name="Me: settings, money and account", exact=True).click()
+            page.get_by_role("button", name="This week & spending", exact=False).click()
+            pw.expect(page.get_by_role("heading", name="This week & spending")).to_be_visible()
             pw.expect(page.get_by_text("From what actually happened", exact=False)).to_be_visible()
             pw.expect(page.get_by_text("Home · who owes what so far")).to_be_visible()
+            _no_overflow(page)
+            # --- Me → Swiggy explains every rule that can stop an order ---------- #
+            page.get_by_role("button", name="Me: settings, money and account", exact=True).click()
+            page.locator('[data-go="more:connection"]').click()
+            pw.expect(page.get_by_role("heading", name="How ordering works")).to_be_visible()
+            pw.expect(page.get_by_text("Nothing has stopped you in the last 7 days.", exact=False)).to_be_visible()
+            page.get_by_text("One restaurant, one cart").click()
+            pw.expect(page.get_by_text("A Swiggy cart holds dishes from one restaurant", exact=False)).to_be_visible()
+            _no_overflow(page)
+            # --- Today: who's eating the next meal, one portion each -------------- #
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="Today").click()
+            who = page.get_by_role("group", name="Who's eating?").first
+            pw.expect(who).to_be_visible()
+            pw.expect(who.get_by_role("button", name="You", exact=True)).to_have_attribute("aria-pressed", "true")
             _no_overflow(page)
             assert not errors
             assert page.evaluate("policyViolations") == []

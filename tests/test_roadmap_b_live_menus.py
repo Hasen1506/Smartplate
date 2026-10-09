@@ -117,5 +117,5 @@ def test_b6_a_failing_swiggy_keeps_the_last_live_catalogue(client, swiggy):
     client.post(f"/api/plan/{pid}/live-menus", json={})
     swiggy.dishes = {"Chef's Special Platter": 30000}           # nothing plannable comes back
     r = client.post(f"/api/plan/{pid}/live-menus", json={})
-    assert r.status_code == 502 and "no dishes SmartPlate can plan" in r.get_json()["error"]
+    assert r.status_code == 502 and "no dishes Ziggy can plan" in r.get_json()["error"]
     assert client.get(f"/api/plan/{pid}").get_json()["source"]["dishes"] == 6

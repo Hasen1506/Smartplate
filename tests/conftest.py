@@ -222,3 +222,13 @@ def swiggy_replay(monkeypatch):
     yield fake
     if fake.record:
         fake.save()
+
+
+def solo(user_id: int) -> None:
+    """Take a seeded profile out of its household, so it orders one portion for itself.
+    Arjun (3) shares 'Flat 3B' with Meera, who is vegan with a dairy allergy: with her
+    eating, every meal is two portions and Ziggy won't fill a Swiggy cart (menus don't
+    list ingredients). Cart and bill tests that are about one person use this."""
+    from smartplate import db
+    with db.cursor() as cur:
+        cur.execute("UPDATE users SET household_id=NULL WHERE id=?", (user_id,))

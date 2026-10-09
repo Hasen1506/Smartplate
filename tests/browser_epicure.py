@@ -4,7 +4,7 @@ A private profile with a dairy allergy and a cook day:
   Cooking & groceries → toor dal is out of stock → pick a replacement → the grocery
   list and the recipe both show it → undo; the "safe with a swap" card;
   a planned restaurant dish → "More like …" → similar picks in the sheet;
-  More → Credits & licences → the CC BY 4.0 attribution.
+  Me → Credits & licences → the CC BY 4.0 attribution.
 Desktop and phone, no console errors, no CSP violations, no horizontal overflow.
 Run explicitly: `pytest tests/browser_epicure.py` (CI does, after installing Chromium).
 """
@@ -81,8 +81,8 @@ def test_browser_out_of_stock_swap_more_like_this_and_credits(kitchen, viewport)
         page, errors = _open(browser, k, viewport)
         try:
             # --- grocery: toor dal is out of stock -------------------------------- #
-            page.get_by_role("navigation", name="Main").get_by_role("button", name="Plan", exact=True).click()
-            page.get_by_role("navigation", name="Plan").get_by_role("button", name="Cook & groceries").click()
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="Week", exact=True).click()
+            page.get_by_role("button", name="Cooking & groceries", exact=False).click()
             pw.expect(page.get_by_role("heading", name="Cooking & groceries")).to_be_visible()
             page.locator('[data-oos="toor_dal"]').click()
             picker = page.get_by_role("group", name="Swap Toor dal")
@@ -93,8 +93,9 @@ def test_browser_out_of_stock_swap_more_like_this_and_credits(kitchen, viewport)
             _no_overflow(page)
             first.click()
             pw.expect(page.get_by_text("Swap saved. Your recipe and grocery list show it.")).to_be_visible()
-            pw.expect(page.locator("table")).to_contain_text(f"Toor dal 500g → {replacement} (out of stock)")
-            pw.expect(page.locator(".tag.swapped").first).to_contain_text(f"{replacement} for Toor dal")
+            groceries = page.locator("section.card", has_text="Grocery list")
+            pw.expect(groceries).to_contain_text(f"Toor dal 500g → {replacement} (out of stock)")
+            pw.expect(page.locator(".chip.on").first).to_contain_text(f"{replacement} for Toor dal")
             saved = k["client"].get(f"/api/plan/{k['plan']}", headers=k["h"]).get_json()
             line = next(b for b in saved["coach"]["basket"]["items"] if b["token"] == "toor_dal")
             assert line["swap"]["name"] == replacement and line["swap"]["reason"] == "out_of_stock"
@@ -113,18 +114,15 @@ def test_browser_out_of_stock_swap_more_like_this_and_credits(kitchen, viewport)
             more = sheet.get_by_role("button", name=f"More like {dish}", exact=True)
             pw.expect(more).to_be_visible()
             more.click()
-            pw.expect(page.get_by_text(f"Got it: more like {dish}. Your open meals were re-planned.")).to_be_visible()
-            pw.expect(sheet.get_by_role("heading", name=f"Like {dish}")).to_be_visible()
+            pw.expect(page.get_by_text(f"More like {dish} from now on. Your open meals were re-planned.")).to_be_visible()
+            pw.expect(sheet.get_by_text(f"Like {dish}", exact=True)).to_be_visible()
             prefs = k["client"].get(f"/api/user/{k['uid']}/plan", headers=k["h"]).get_json()["user"]["prefs"]
             assert prefs["more_like"][-1]["name"] == dish
             sheet.get_by_role("button", name="Close").click()
 
             # --- credits ---------------------------------------------------------- #
-            page.get_by_role("navigation", name="Main").get_by_role("button", name="You", exact=True).click()
-            back = page.get_by_role("button", name="← You")
-            if back.count():
-                back.click()
-            page.get_by_role("link", name="Credits & licences Data and models SmartPlate uses").click()
+            page.get_by_role("button", name="Me: settings, money and account", exact=True).click()
+            page.get_by_role("link", name="Credits & licences").click()
             pw.expect(page.get_by_role("heading", name="Epicure ingredient embeddings")).to_be_visible()
             pw.expect(page.get_by_role("link", name="Creative Commons Attribution 4.0 International (CC BY 4.0)")).to_be_visible()
             _no_overflow(page)

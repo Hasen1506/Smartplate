@@ -110,7 +110,7 @@ def test_sample_profiles_and_joined_profiles_cannot_be_edited_here(app_client):
     with db.cursor() as cur:                                   # a real profile that joined the household
         cur.execute("UPDATE users SET household_id=(SELECT household_id FROM users WHERE id=?) WHERE id=3", (uid,))
     r = c.patch(f"/api/user/{uid}/household/members/3", json={"name": "X"}, headers=h)
-    assert r.status_code == 400 and "own SmartPlate profile" in r.get_json()["error"]
+    assert r.status_code == 400 and "own Ziggy profile" in r.get_json()["error"]
     assert c.post(f"/api/user/{uid}/household", json={"name": "Again"}, headers=h).status_code == 400
 
 

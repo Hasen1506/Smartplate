@@ -2,6 +2,7 @@
 Run explicitly in CI after installing Playwright. Production never imports this.
 """
 import json
+import os
 import time
 from pathlib import Path
 from threading import Thread
@@ -42,6 +43,11 @@ def pilot(seeded, monkeypatch):
     server.server_close()
 
 
+def _launch(playwright):
+    exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+    return playwright.chromium.launch(executable_path=exe) if exe else playwright.chromium.launch()
+
+
 def open_profile(browser, pilot, viewport):
     page = browser.new_page(viewport=viewport, accept_downloads=True)
     page.route("https://fonts.googleapis.com/**", lambda route: route.fulfill(status=200, content_type="text/css", body=""))
@@ -57,7 +63,7 @@ def open_profile(browser, pilot, viewport):
         document.addEventListener('securitypolicyviolation', e => policyViolations.push(e.violatedDirective));
     """)
     page.goto(pilot["url"])
-    pw.expect(page.get_by_role("heading", name="Order from your area")).to_be_visible()
+    pw.expect(page.get_by_role("navigation", name="Main")).to_be_visible()
     return page, errors
 
 
@@ -68,7 +74,7 @@ def no_overflow(page):
 @pytest.mark.parametrize("viewport", [{"width": 1280, "height": 900}, {"width": 390, "height": 844}], ids=["desktop", "phone"])
 def test_browser_live_menu_cart_review_reload_order_and_tracking(pilot, viewport):
     with pw.sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = _launch(playwright)
         page, errors = open_profile(browser, pilot, viewport)
         try:
             # Force a slow response: Review must wait for search to finish rather
@@ -77,21 +83,23 @@ def test_browser_live_menu_cart_review_reload_order_and_tracking(pilot, viewport
                 time.sleep(0.25)
                 route.continue_()
             page.route("**/swiggy/dishes**", slow_dish_search)
-            page.get_by_role("textbox", name="Restaurant or cuisine").fill("Hotel Saravana Bhavan")
-            page.get_by_role("button", name="Search Swiggy", exact=True).click()
-            page.locator('[data-live-fav="r-1"]').click()
-            pw.expect(page.locator('[data-live-fav="r-1"]').first).to_have_attribute("aria-label", "Remove Hotel Saravana Bhavan (Adyar) from favourites")
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="Saved", exact=True).click()
+            page.get_by_role("searchbox", name="Search Swiggy near Home").fill("Hotel Saravana Bhavan")
+            page.get_by_role("button", name="Search", exact=True).click()
+            page.locator('[data-live-fav="r-1"]').first.click()
+            pw.expect(page.locator('[data-live-fav="r-1"]').first).to_have_attribute("aria-label", "Remove Hotel Saravana Bhavan (Adyar)")
             page.locator('[data-live-place="r-1"]').first.click()
-            page.get_by_role("textbox", name="Search this restaurant").fill("tiffin")
-            page.get_by_role("button", name="Find dishes", exact=True).click()
+            menu = page.get_by_role("dialog", name="Hotel Saravana Bhavan (Adyar)")
+            menu.get_by_role("searchbox", name="Search this restaurant").fill("tiffin")
+            menu.get_by_role("button", name="Find dishes", exact=True).click()
             page.locator('[data-live-item="m0"]').click()
-            dialog = page.get_by_role("dialog")
-            pw.expect(dialog.get_by_role("heading", name="Add this exact item?")).to_be_visible()
+            dialog = page.locator('[role=dialog][aria-labelledby="live-review-title"]')
+            pw.expect(dialog.get_by_role("heading", name="Add this to your cart?")).to_be_visible()
             dialog.get_by_role("button", name="Add to Swiggy cart", exact=True).click()
-            pw.expect(page.locator(".cartnote .bill .total")).to_contain_text("₹160")
-            pw.expect(page.locator(".cartnote a.btn", has_text="Open Swiggy checkout")).to_have_attribute(
-                "href", "https://www.swiggy.com/checkout")
-            pw.expect(page.locator(".cartnote .cancel-note")).to_contain_text("cancellation policy applies")
+            cart = page.locator("section", has_text="In your Swiggy cart")
+            pw.expect(cart.locator(".bill .total")).to_contain_text("₹160")
+            pw.expect(cart.get_by_role("link", name="Pay in Swiggy")).to_have_attribute("href", "https://www.swiggy.com/checkout")
+            pw.expect(cart.locator(".cancel-note")).to_contain_text("cancellation policy applies")
             page.reload()
             pw.expect(page.get_by_role("button", name="Review and place order", exact=True)).to_be_visible()
             no_overflow(page)
@@ -100,10 +108,12 @@ def test_browser_live_menu_cart_review_reload_order_and_tracking(pilot, viewport
             pw.expect(dialog).to_contain_text("12 Lake View Rd, Adyar")
             pw.expect(dialog).to_contain_text("Hotel Saravana Bhavan (Adyar)")
             dialog.get_by_role("button", name="Confirm and place order · ₹160", exact=True).click()
-            pw.expect(page.get_by_text("Swiggy order confirmed:", exact=True)).to_be_visible()
+            pw.expect(page.get_by_text("Swiggy order confirmed", exact=True)).to_be_visible()
             assert pilot["fake"].tool_calls().count("place_food_order") == 1
             page.reload()
-            page.get_by_role("button", name="Check recent Swiggy orders", exact=True).click()
+            page.get_by_role("navigation", name="Main").get_by_role("button", name="Saved", exact=True).click()
+            page.get_by_role("button", name="Recent", exact=True).click()
+            page.get_by_role("button", name="Recent Swiggy orders", exact=True).click()
             page.locator('[data-live-track="real-order-17"]').click()
             pw.expect(page.get_by_role("heading", name="Food is being prepared")).to_be_visible()
             pw.expect(page.get_by_text("Arrives in 25 minutes", exact=True)).to_be_visible()
@@ -121,11 +131,12 @@ def test_browser_live_menu_cart_review_reload_order_and_tracking(pilot, viewport
 @pytest.mark.parametrize("viewport", [{"width": 1280, "height": 900}, {"width": 390, "height": 844}], ids=["desktop", "phone"])
 def test_browser_private_export_rotation_and_deletion(pilot, viewport, tmp_path):
     with pw.sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = _launch(playwright)
         page, errors = open_profile(browser, pilot, viewport)
         try:
-            page.get_by_role("button", name="Profile and settings", exact=True).click()
-            pw.expect(page.get_by_role("heading", name="Your data", exact=True)).to_be_visible()
+            page.get_by_role("button", name="Me: settings, money and account", exact=True).click()
+            page.get_by_role("button", name="Account & devices", exact=False).click()
+            pw.expect(page.get_by_text("Your data", exact=True)).to_be_visible()
             no_overflow(page)
             with page.expect_download() as download_event:
                 page.get_by_role("button", name="Download my data", exact=True).click()
@@ -140,10 +151,10 @@ def test_browser_private_export_rotation_and_deletion(pilot, viewport, tmp_path)
             fresh = page.evaluate(f"JSON.parse(localStorage.getItem('smartplate.keys'))[{json.dumps(str(pilot['uid']))}].key")
             assert fresh != pilot["key"]
             assert pilot["client"].get(f"/api/user/{pilot['uid']}/plan").status_code == 401
-            page.get_by_text("Delete my SmartPlate profile", exact=True).click()
+            page.get_by_text("Delete my Ziggy profile", exact=True).click()
             page.locator("#delete-confirmation").fill("DELETE")
             page.get_by_role("button", name="Permanently delete this profile", exact=True).click()
-            pw.expect(page.get_by_role("button", name="Create my private profile", exact=True)).to_be_visible()
+            pw.expect(page.get_by_role("button", name="Get started", exact=True)).to_be_visible()
             assert pilot["client"].get(f"/api/user/{pilot['uid']}/plan").status_code == 404
             assert "place_food_order" not in pilot["fake"].tool_calls()
             assert not errors
