@@ -86,3 +86,20 @@ def test_a_bare_side_is_a_side_wherever_it_is_filed():
     assert live_catalog.section_tags([], ["Recommended"], "Spicy Idli Podi (150 Gm)") == ["side"]
     assert live_catalog.section_tags([], ["Quick meal ( variety rice )"], "Sambar Rice ( 500ml)") == ["main"]
     assert live_catalog.section_tags([], ["North Indian Breakfast"], "Aloo Paratha") == ["breakfast"]
+
+
+def test_meal_sections_are_a_preference_not_a_wall():
+    """A place with two plates still fills a week of lunches: a dosa at lunch costs a
+    little, never more than skipping (CI finding: the hard rule skipped Tuesday's lunch)."""
+    from smartplate.kernel import optimizer
+    dosa = {"tags": ["breakfast"]}
+    meals = {"tags": ["main"]}
+    curry_rice = {"tags": []}
+    lunch = optimizer.meal_fit_pen([dosa, meals, curry_rice], "lunch")
+    assert lunch(meals) == 0.0 < lunch(curry_rice) < lunch(dosa) < optimizer.SKIP_PENALTY["balanced"]
+    no_plates = optimizer.meal_fit_pen([dosa, curry_rice], "lunch")
+    assert no_plates(curry_rice) == 0.0                     # nothing to prefer: no charge
+    breakfast = optimizer.meal_fit_pen([dosa, meals], "breakfast")
+    assert breakfast(dosa) == 0.0 < breakfast(meals) < optimizer.SKIP_PENALTY["balanced"]
+    assert optimizer.meal_fit_pen([meals], "breakfast")(meals) == 0.0
+    assert optimizer.meal_fit_pen([dosa], "dinner")(dosa) == 0.0

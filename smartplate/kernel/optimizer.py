@@ -304,6 +304,26 @@ def meal_suitable(item: dict, meal: str, chosen: bool = False) -> bool:
             and not item.get("name", "").lower().endswith(" sweet"))
 
 
+# What a dish's menu section says about the meal, as a soft preference (smaller than a
+# skip, so a dosa at lunch still beats no lunch when a place has few plates).
+OFF_MEAL_PEN = 1.2          # a tiffin dish at lunch, or a non-tiffin dish at breakfast
+NOT_A_PLATE_PEN = 0.5       # lunch that isn't a whole plate ("Meals", "Thali", rice, bowls)
+
+
+def meal_fit_pen(items: list[dict], meal: str):
+    """item → penalty for how well it fits this meal, from the Swiggy menu sections:
+    breakfast prefers dishes filed as breakfast ("Tiffin", "Dosa") when the places have any;
+    lunch prefers a whole plate and not a tiffin dish. Dinner takes anything."""
+    has = lambda it, tag: tag in (it.get("tags") or [])            # noqa: E731
+    if meal == "breakfast" and any(has(it, "breakfast") for it in items):
+        return lambda it: 0.0 if has(it, "breakfast") else OFF_MEAL_PEN
+    if meal == "lunch":
+        plates = any(has(it, "main") and not has(it, "breakfast") for it in items)
+        return lambda it: (OFF_MEAL_PEN if has(it, "breakfast")
+                           else 0.0 if (has(it, "main") or not plates) else NOT_A_PLATE_PEN)
+    return lambda it: 0.0
+
+
 def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[dict]:
     """All options for one session, hard constraints already applied. Always
     returns at least a 'skip' so the MILP stays feasible."""
@@ -353,28 +373,22 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     elif not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
         safe = [it for it in safe if meal_suitable(it, meal) and it.get("nutrition_known", 1) != 0]
-        if meal == "breakfast":
-            # Dishes the restaurant files as breakfast ("Tiffin", "South Indian Breakfast"),
-            # when the person's places have any: not a dal or a thali at 8 am.
-            morning = [it for it in safe if "breakfast" in (it.get("tags") or [])]
-            safe = morning or safe
-        elif meal == "lunch":
-            # …and the other way round at lunch: tiffin is for mornings and evenings.
-            # A whole plate (Swiggy's "Meals", "Thali", rice and bowls) when there is one.
-            midday = [it for it in safe if "breakfast" not in (it.get("tags") or [])]
-            plates = [it for it in midday if "main" in (it.get("tags") or [])]
-            safe = plates or midday or safe
+        fit = meal_fit_pen(safe, meal)
         safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
         safe = [it for it in safe if it["id"] not in ctx["taste"]["disliked"]]   # "not again" is a lock
-        # keep the most promising few (cheap-but-decent) to bound the MILP
-        safe.sort(key=lambda it: (it["price"] + it["delivery_fee"]) - 40 * (it["item_rating"] / 5))
+        # keep the most promising few (cheap-but-decent, right for the meal) to bound the MILP
+        safe.sort(key=lambda it: (fit(it), (it["price"] + it["delivery_fee"]) - 40 * (it["item_rating"] / 5)))
         favs = ctx["taste"]["favourites"]
         usual = [it for it in safe if not favs or it["restaurant_id"] in favs]
         fresh = [it for it in safe if favs and it["restaurant_id"] not in favs]
 
         def best(pool, n):
-            picked = [_delivery_candidate(user, plan, session, it, ctx) for it in pool[: n * 2]]
-            picked.sort(key=lambda c: c["cost"] - 60 * c["taste"])
+            picked = []
+            for it in pool[: n * 2]:
+                c = _delivery_candidate(user, plan, session, it, ctx)
+                c["meal_pen"] = fit(it)
+                picked.append(c)
+            picked.sort(key=lambda c: (c["meal_pen"], c["cost"] - 60 * c["taste"]))
             return picked[:n]
         slots = ctx.get("delivery_slots", MAX_DELIVERY_CANDIDATES)
         # few usual dishes for many meals: offer enough new ones to fill the week
@@ -440,6 +454,7 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
         + effort
         + cand.get("rating_pen", 0.0)
         + cand.get("learned_pen", 0.0)          # rating reasons: late / spicy / pricey (+), great (−)
+        + cand.get("meal_pen", 0.0)             # a tiffin dish at lunch, a dal at breakfast
         + cand.get("usual_pen", 0.0)             # ↑ objective for novel ⇒ usual picks preferred (when usual-first on)
         - cand.get("novelty_bonus", 0.0)         # ↓ objective ⇒ novel picks preferred (when nudge on)
         + cand["weather_bias"] + cand["festival_bias"],

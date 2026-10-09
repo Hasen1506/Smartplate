@@ -268,8 +268,12 @@ def test_redesign_today_cart_menu_week_me(world, viewport):
             nav.get_by_role("button", name="Week").click()
             expect(page.get_by_role("heading", name="Week of 2 Nov")).to_be_visible()
             assert primaries(page) == [], primaries(page)
-            tue = lambda: w["client"].get(f"/api/plan/{w['plan']}").get_json()["grid"][1]["meals"]   # noqa: E731
-            page.locator('[data-day="1"]').click()
+            grid = lambda: w["client"].get(f"/api/plan/{w['plan']}").get_json()["grid"]   # noqa: E731
+            # the first day after today with a lunch planned (one saved place with four whole-meal
+            # dishes, each at most twice a week, can't fill every lunch and dinner)
+            day = next(i for i in range(1, 7) if grid()[i]["meals"]["lunch"]["kind"] == "delivery")
+            tue = lambda: grid()[day]["meals"]   # noqa: E731
+            page.locator(f'[data-day="{day}"]').click()
             if tue()["dinner"]["kind"] != "cook":
                 page.locator(f'.mrow[data-meal="{tue()["dinner"]["session_id"]}"]').click()
                 page.get_by_role("dialog").get_by_role("button", name="Cook instead", exact=False).click()
