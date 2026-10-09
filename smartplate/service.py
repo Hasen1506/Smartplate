@@ -220,7 +220,10 @@ def plan_view(plan_id: int) -> dict:
         "nutrition": {"week": nut, "daily_avg": daily_nut, "daily_target": targets, "days": planned_days,
                       # pooled dishes Ziggy has no estimate for: left out of the totals, and said so
                       "unknown_meals": sum(1 for d in spend_rows
-                                           if d["chosen_kind"] == "delivery" and not d.get("nutrition"))},
+                                           if (d["chosen_kind"] == "delivery" or ":" in (d.get("recipe_key") or ""))
+                                           and not d.get("nutrition")),
+                      # library dishes chosen to cook: their groceries aren't priced or counted
+                      "unpriced_cooks": sum(1 for d in spend_rows if ":" in (d.get("recipe_key") or ""))},
         "carbon": {"total_kg": carbon_total, "band": carbon.band(carbon_total / max(1, len(spend_rows)))},
         "surge_saved": round(surge_saved, 2),
         "counts": counts,
@@ -359,6 +362,8 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
                     extra["planned_cost"] = round(d["planned_cost"], 2)
             elif d["chosen_kind"] == "cook":
                 extra["cost_basis"] = reverse_mode.COST_BASIS
+                if ":" in (d.get("recipe_key") or ""):      # a dish from the library: nothing priced
+                    extra.update(cost_unknown=True, library=True)
         grid[d["day"]]["meals"][d["meal"]] = {
             "kind": d["chosen_kind"], "item": d["item_name"],
             "restaurant": d.get("restaurant_name") or "",
@@ -366,7 +371,8 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
             "substituted": bool(d.get("substituted")),
             "time_shift": d.get("time_shift"), "reasons": d.get("reasons", []),
             "nutrition": d.get("nutrition", {}), "carbon_kg": d.get("carbon_kg", 0),
-            "nutrition_unknown": d["chosen_kind"] == "delivery" and not d.get("nutrition"),
+            "nutrition_unknown": d["chosen_kind"] in ("delivery", "cook") and not d.get("nutrition")
+                                 and bool(d.get("item_id") or ":" in (d.get("recipe_key") or "")),
             "session_id": d["session_id"], "status": d['session_status'],
             **extra,
         }

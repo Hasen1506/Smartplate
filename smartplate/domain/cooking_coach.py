@@ -42,6 +42,9 @@ def coach(cook_decisions: list[dict], user: dict | None = None, swaps: dict | No
                 "servings": d.get("servings", 1),
                 "ingredients": [{**i, "swap": swapped(i["token"]),
                                  "swappable": can_swap and i["token"] in ingredients.PANTRY} for i in r.get("ingredients", [])],
+                # a dish from the library: its own ingredient names, no priced basket, a link to the method
+                "library": "library" in (r.get("tags") or []), "cost_unknown": bool(r.get("cost_unknown")),
+                "library_ingredients": r.get("library_ingredients") or [], "url": r.get("url"),
             })
     ahead = [{"recipe_key": d["recipe_key"], "servings": d.get("servings", 1)}
              for d in cook_decisions if d.get("recipe_key") and d.get("upcoming", True)]

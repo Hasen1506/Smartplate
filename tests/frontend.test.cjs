@@ -1434,22 +1434,33 @@ test('Picking a meal from anywhere shows a banner, Have-for buttons, and cuisine
   assert.ok(!menu.includes('data-live-item="d1"'));
 });
 
-test('the recipe library credits Wikibooks under CC BY-SA and searches by ingredient', async () => {
+test('cook it: typed dish search, a recipe scaled to who eats, cook along with timers', async () => {
   const { context } = fixture(); await context.bootPromise;
-  vm.runInContext(`S.library = { available: true, total: 2, hidden: 1, license: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/' },
-    recipes: [{ title: 'Tadka <Dal>', url: 'https://en.wikibooks.org/wiki/Cookbook:Tadka_Dal', servings: 4, time: '40 minutes', credit: 'Wikibooks contributors', license: 'CC BY-SA 4.0',
-      ingredients: ['1 cup toor dal', '1 tbsp ghee'], steps: ['Cook the dal.'] },
-      { title: 'Lemon Rice', url: 'https://en.wikibooks.org/wiki/Cookbook:Lemon_Rice', credit: 'Wikibooks contributors', license: 'CC BY-SA 4.0', ingredients: ['rice', 'lemon'], steps: ['Mix.'] }] };`, context);
-  const html = vm.runInContext('recipeLibrary()', context);
-  assert.match(html, /2 recipes from the/);
-  assert.match(html, /CC BY-SA 4.0/);
-  assert.match(html, /1 hidden: their ingredients break your diet or allergies/);
-  assert.match(html, /Tadka &lt;Dal&gt; on Wikibooks/);
-  assert.match(html, /instamart\/search\?custom_back=true&amp;query=toor%20dal"/);
+  vm.runInContext(`S.cook = { sid: null, q: 'pon', results: { total: 1, hidden: 2, dishes: [{ key: 'ak:1', title: 'Ven <Pongal>', about: 'Rice and Lentils',
+      total_min: 30, servings: 2, veg: true, has_steps: false, ingredient_count: 4 }],
+    credits: [{ name: '6000+ Indian Food Recipes Dataset', by: 'Kanishka Jain', license: 'CC BY 4.0', url: 'https://data.mendeley.com/datasets/xsphgmmh7b/1',
+      license_url: 'https://creativecommons.org/licenses/by/4.0/' }] } };`, context);
+  const found = vm.runInContext('cookFinder({})', context);
+  assert.match(found, /Ven &lt;Pongal&gt;/);
+  assert.match(found, /data-dish="ak:1"/);
+  assert.match(found, /2 hidden: they break your diet/);
+  assert.match(found, /Kanishka Jain, <a [^>]*>CC BY 4.0<\/a>/);
+  vm.runInContext(`S.dish = { key: 'ak:1', title: 'Ven Pongal', people: 4, servings: 2, scaled: true, prep_min: 10, cook_min: 20, total_min: 30,
+    ingredients: [{ line: '2 cup Rice', name: 'Rice' }, { line: 'Salt - to taste', name: 'Salt' }], steps: [], allergens: ['dairy'],
+    url: 'https://www.archanaskitchen.com/ven-pongal', source: 'indian6000', credit: '6000+ Indian Food Recipes Dataset', have: { 1: true } };`, context);
+  const sheet = vm.runInContext('dishSheet()', context);
+  assert.match(sheet, /<b>For 4<\/b>/);
+  assert.match(sheet, /recipe serves 2, amounts scaled/);
+  assert.match(sheet, /instamart\/search\?custom_back=true&amp;query=Rice"/);
+  assert.ok(!sheet.includes('query=Salt'), 'nothing to buy for what you have');
+  assert.match(sheet, /Copy the 1 to buy/);
+  assert.match(sheet, /groceries aren't priced and there's no nutrition estimate/);
+  assert.match(sheet, /Archana&#39;s Kitchen/);
+  const steps = vm.runInContext('cookSteps(S.dish)', context);
+  assert.deepEqual(JSON.parse(JSON.stringify(steps.map(x => x.timer || 0))), [0, 600, 1200]);
+  vm.runInContext('S.cookAlong = { dish: S.dish, step: 1, timer: null }', context);
+  const along = vm.runInContext('cookAlongView()', context);
+  assert.match(along, /step 2 of 3/);
+  assert.match(along, /Start 10 min timer/);
   assert.equal(vm.runInContext('ingredientQuery', context)('2 green chillies, slit'), 'green chillies');
-  vm.runInContext("S.libraryQ = 'toor'", context);
-  const found = vm.runInContext('recipeLibrary()', context);
-  assert.ok(found.includes('Tadka') && !found.includes('Lemon Rice'));
-  vm.runInContext("S.library = { available: false, recipes: [] }", context);
-  assert.equal(vm.runInContext('recipeLibrary()', context), '');
 });

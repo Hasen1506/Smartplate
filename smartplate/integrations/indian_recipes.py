@@ -83,6 +83,9 @@ def clean_title(raw: str) -> tuple[str, str | None]:
         raw, about = m.group(1), m.group(2).strip() or None
     title = re.sub(r"\s*-?\s*\brecipes?\b\s*$", "", raw, flags=re.I).strip(" -")
     title = re.sub(r"\s+\brecipe\b\s+", " ", title, flags=re.I)
+    halves = re.split(r"\s+-\s+", title, maxsplit=1)
+    if len(halves) == 2 and halves[0].strip().lower() == halves[1].strip().lower():
+        title = halves[0]                                   # "Pudina Khara Pongal - Pudina Khara Pongal"
     return title or raw, about
 
 

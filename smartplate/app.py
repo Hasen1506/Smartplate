@@ -729,6 +729,29 @@ def create_app() -> Flask:
             raise KeyError("Profile not found")
         return jsonify(recipe_library.for_user(user, request.args.get("q", "")[:60]))
 
+    # Type a dish, get its ingredients (domain/dish_library.py).
+    @app.get("/api/user/<int:user_id>/dishes")
+    def dish_search(user_id):
+        from .domain import dish_library
+        user = models.get_user(user_id)
+        if not user:
+            raise KeyError("Profile not found")
+        meal = request.args.get("meal")
+        return jsonify(dish_library.search(user, request.args.get("q", "")[:60],
+                                           meal if meal in models.MEALS else None))
+
+    @app.get("/api/user/<int:user_id>/dishes/<key>")
+    def dish_detail(user_id, key):
+        from .domain import dish_library
+        user = models.get_user(user_id)
+        if not user:
+            raise KeyError("Profile not found")
+        people = request.args.get("people", "")
+        d = dish_library.get(user, key[:40], int(people) if people.isdigit() else None)
+        if not d:
+            raise KeyError("Dish not found")
+        return jsonify(d)
+
     # Meal pools (domain/meal_pools.py): the dishes a person wants for each meal.
     @app.get("/api/user/<int:user_id>/pools")
     def pools_view(user_id):

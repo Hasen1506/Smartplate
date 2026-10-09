@@ -477,7 +477,7 @@ function resetProfileState() {
   for (const key of ["exec", "receipts", "recap", "orderReview", "sheet", "moving", "places", "calendar", "account", "swiggy",
     "swAddrs", "carts", "acctDraft", "liveResults", "liveFavourites", "liveBrowseMenu", "liveOrderReview", "liveCart",
     "checkoutReview", "placedOrder", "liveOrderStatus", "liveOrderHistory", "liveCartError", "liveCartEmpty", "saved",
-    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "library", "libraryQ"]) S[key] = null;
+    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "cook", "dish", "cookAlong"]) S[key] = null;
   S.welcome = false; S.tab = "today"; S.more = null; S.connectSheet = false; S.addrSheet = false; S.ask = false;
 }
 async function switchUser(id) {
@@ -890,7 +890,7 @@ function render() {
     + (S.sheet ? sheetDialog() : "") + (S.addrSheet ? addressSheet() : "") + (S.connectSheet ? connectSheet() : "")
     + (S.liveBrowseMenu || S.liveLoading ? menuSheet() : "")
     + (S.orderReview ? orderReviewDialog() : "") + (S.liveOrderReview ? liveOrderReviewDialog() : "")
-    + (S.checkoutReview ? checkoutReviewDialog() : "");
+    + (S.checkoutReview ? checkoutReviewDialog() : "") + (S.dish ? dishSheet() : "") + (S.cookAlong ? cookAlongView() : "");
   // A sheet slides up once, when it opens; re-renders while it is open don't replay that.
   const open = [...(document.querySelectorAll?.(".sheet-bg[data-ov]") || [])];
   open.forEach(el => { if (!S.openSheets?.has(el.dataset.ov)) el.classList.add("enter"); });
@@ -1143,7 +1143,9 @@ function nextUpCard(nu) {
       <h2 class="h2">${esc(c.item)}</h2>
       <span class="muted" style="font-size:14px">${isCook ? "Cook at home" : esc(c.restaurant)}${!isCook && c.rating ? ` · ${Number(c.rating).toFixed(1)}★` : ""}</span></div>${heart}</div>
     ${carted ? "" : whyChips({ ...c, meal: nu.meal })}
-    ${carted ? "" : `<div class="price-line"><span class="money">${c.real_bill ? real(c.cost) : est(c.cost)}</span><span class="fine">${(c.portions || 1) > 1 ? `for ${c.portions} · ` : ""}${isCook ? esc(c.cost_basis || "grocery estimate") : c.real_bill ? "Swiggy's bill" : "Swiggy shows the exact bill"}</span></div>`}
+    ${carted ? "" : c.cost_unknown ? `<div class="price-line"><span class="fine">Groceries not priced: Ziggy has no prices for this dish's ingredients.</span></div>`
+      : `<div class="price-line"><span class="money">${c.real_bill ? real(c.cost) : est(c.cost)}</span><span class="fine">${(c.portions || 1) > 1 ? `for ${c.portions} · ` : ""}${isCook ? esc(c.cost_basis || "grocery estimate") : c.real_bill ? "Swiggy's bill" : "Swiggy shows the exact bill"}</span></div>`}
+    ${isCook && c.library && !carted ? `<button class="secondary" data-dish="${esc(c.recipe_key)}" data-dish-sid="${c.session_id}">Ingredients &amp; cook along</button>` : ""}
     ${carted ? "" : whoEats(c)}
     ${reasons.length && !carted ? `<details class="why-more"><summary>Why this?</summary><ul>${reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul></details>` : ""}
     ${cta}
@@ -1431,7 +1433,7 @@ function mealRow(m, meal) {
   const fee = m.kind === "delivery" && m.real_bill ? " · real Swiggy bill"
     : m.kind === "delivery" && m.delivery_fee ? ` · delivery ₹${Math.round(m.delivery_fee.amount)} ${m.delivery_fee.estimated ? "est." : "from your bill"}` : "";
   const sub = m.kind === "delivery" ? `${esc(m.restaurant)}${fee}${m.order?.order_at && !locked && !past ? ` · order by ${esc(m.order.order_at)}` : ""}`
-    : m.kind === "cook" ? (m.recipe_key ? "Cook at home · grocery estimate" : "From your fridge") : "";
+    : m.kind === "cook" ? (m.cost_unknown ? "Cook at home · groceries not priced" : m.recipe_key ? "Cook at home · grocery estimate" : "From your fridge") : "";
   const name = off && !food ? "Skipped" : m.item;
   const why = (m.reasons || [])[0];
   const subText = food ? sub : esc(why && why !== name ? why : past ? "This meal's time has passed" : "");
@@ -1480,7 +1482,7 @@ function weekScreen() {
     <section class="card tight rise3" aria-label="${esc(day.day)}">
       <h3 class="k" style="padding:14px 0 2px">${esc(day.day)} ${esc(fmtDate(day.date))}${i18nToday(day)}${fest}${ctx.your_fast ? ` · ${esc(ctx.your_fast)} fast` : ""}${liveWx ? ` · ${esc(WX_ICON[ctx.weather] || "")} ${Math.round(ctx.temp_c)}°` : ""}</h3>
       ${MEALS.filter(m => day.meals[m]).map(m => mealRow(day.meals[m], m)).join("") || `<p class="fine" style="padding:12px 0">Nothing planned.</p>`}</section>` : `<p class="fine rise2">Nothing planned this week yet.</p>`}
-    ${cooks ? `<button class="linkcard rise3" data-week-view="groceries"><span class="ico leaf">${ICON.bag}</span><span class="t"><b>Cooking &amp; groceries</b><span>${cooks} cook meal${cooks === 1 ? "" : "s"} · grocery list ${rupee(v.coach.basket.total)}</span></span>${ICON.right}</button>` : ""}
+    <button class="linkcard rise3" data-week-view="groceries"><span class="ico leaf">${ICON.bag}</span><span class="t"><b>${cooks ? "Cooking &amp; groceries" : "Cook something"}</b><span>${cooks ? `${cooks} cook meal${cooks === 1 ? "" : "s"} · grocery list ${rupee(v.coach.basket.total)}` : "Type any dish: ingredients, Instamart, cook along"}</span></span>${ICON.right}</button>
     ${swiggyReady() || (S.meta.swiggy_provider === "simulated" && S.meta.fixture_data) ? `<button class="linkcard rise3" data-week-view="orders"><span class="ico">${ICON.cart}</span><span class="t"><b>Order several meals</b><span>Pick meals and days, check each real cart</span></span>${ICON.right}</button>` : ""}
     <button class="ghost" data-act="newweek">Plan next week</button>`;
 }
@@ -1522,14 +1524,14 @@ function sheetDialog() {
       <h2 class="h2" id="sheet-title">Change ${esc(s.meal)}</h2>${d.current ? `<p class="muted">Now: ${esc(d.current.item)}</p>` : ""}</div>
       <button class="icon-btn" data-close-sheet="1" aria-label="Close">${ICON.close}</button></div>
     ${d.timing_tip ? `<p class="fine">${esc(d.timing_tip)}</p>` : ""}
-    <div class="seg" role="group" aria-label="Show"><button data-sheet-tab="fits" aria-pressed="${tab === "fits"}">Better fits</button><button data-sheet-tab="places" aria-pressed="${tab === "places"}">Other places</button>${d.cook.length ? `<button data-sheet-tab="cook" aria-pressed="${tab === "cook"}">Cook</button>` : ""}</div>
+    <div class="seg" role="group" aria-label="Show"><button data-sheet-tab="fits" aria-pressed="${tab === "fits"}">Better fits</button><button data-sheet-tab="places" aria-pressed="${tab === "places"}">Other places</button><button data-sheet-tab="cook" aria-pressed="${tab === "cook"}">Cook</button></div>
     ${tab === "fits" ? `${poolPicks.length ? `<p class="k">Your ${esc(s.meal)} pool</p><div class="stack" style="gap:8px">${poolPicks.map(x => pickBtn(x, x.restaurant, d)).join("")}</div><p class="k">Other dishes from your places</p>` : ""}${moreLikeBlock(d, s)}<div class="stack" style="gap:8px">${fits.map(x => pickBtn(x, x.restaurant, d)).join("") || `<p class="fine">Nothing else nearby fits your rules for this meal. Cook, or skip it.</p>`}</div>` : ""}
     ${tab === "places" ? `<div class="chips scroll" role="group" aria-label="Restaurants">${places.map(p => `<button class="chip" data-sheet-place="${esc(p)}" aria-pressed="${p === place}">${d.usual.some(g => g.restaurant === p) ? "♥ " : ""}${esc(p)}</button>`).join("")}</div>
       ${(() => { const g = d.usual.find(x => x.restaurant === place); return g ? `<p class="fine">${Number(g.rating).toFixed(1)}★ · about ${g.eta_min} min${g.more ? ` · ${g.more} more on their menu` : ""}</p>` : ""; })()}
       <div class="stack" style="gap:8px">${all.filter(x => x.restaurant === place).map(x => pickBtn(x, x.restaurant, d)).join("") || `<p class="fine">No places nearby fit your rules for this meal.</p>`}</div>
       ${liveFav && swiggyReady() ? `<button class="secondary" data-live-place="${esc(liveFav.id)}" data-live-name="${esc(liveFav.name)}">See ${esc(liveFav.name)}'s full menu</button>` : ""}` : ""}
     ${swiggyReady() && tab !== "cook" ? `<div class="two"><button class="secondary" data-pick-anywhere="${s.id}">Any place near you</button><button class="secondary" data-edit-pool="${esc(s.meal)}">Edit ${esc(s.meal)} pool</button></div>` : ""}
-    ${tab === "cook" ? `<div class="stack" style="gap:8px">${d.cook.map(c => `<button class="pick" data-cook="${esc(c.recipe_key)}">${dishIcon(c.name, { cook: true })}<span class="t"><b>${esc(c.name)}</b><span>Cook at home · on your grocery list</span></span><b class="pr">${rupee0(c.price)}</b></button>`).join("")}</div>` : ""}
+    ${tab === "cook" ? `${cookFinder({ sid: s.id, meal: s.meal })}${d.cook.length ? `<p class="k">Ziggy's priced home meals</p><div class="stack" style="gap:8px">${d.cook.map(c => `<button class="pick" data-cook="${esc(c.recipe_key)}">${dishIcon(c.name, { cook: true })}<span class="t"><b>${esc(c.name)}</b><span>Cook at home · on your grocery list</span></span><b class="pr">${rupee0(c.price)}</b></button>`).join("")}</div>` : ""}` : ""}
     ${eatersBlock(s)}
     <div class="two">${cook && tab !== "cook" && cell?.kind !== "cook" ? `<button class="secondary" data-cook="${esc(cook.recipe_key)}">Cook instead · ${rupee0(cook.price)}</button>` : `<button class="secondary" data-choose-auto="${s.id}">Let Ziggy choose</button>`}
       <button class="secondary" data-sess="${s.id}:skipped">Skip this meal</button></div>
@@ -1581,10 +1583,12 @@ function cookingPanel() {
   const ing = (i) => i.swap
     ? `<span class="chip on" style="cursor:default">${esc(i.swap.name)} <small>for ${esc(i.name)}</small> <button class="x" data-unswap="${esc(i.token)}" aria-label="Use ${esc(i.name)} again">${ICON.close}</button></span>`
     : (i.swappable ? `<button class="chip" data-swap-ing="${esc(i.token)}" title="Swap ${esc(i.name)}">${esc(i.name)} ⇄</button>` : `<span class="chip" style="cursor:default">${esc(i.name)}</span>`);
-  const recipes = c.recipes.map(r => `<div class="card"><p class="k">${esc(r.session)} · ${rupee(r.cost)}${r.servings > 1 ? ` a serving · ${r.servings} eating` : ""}</p>
+  const recipes = c.recipes.map(r => `<div class="card"><p class="k">${esc(r.session)} · ${r.cost_unknown ? "groceries not priced" : `${rupee(r.cost)}${r.servings > 1 ? ` a serving · ${r.servings} eating` : ""}`}</p>
     <h3 class="h3">${esc(r.name)}</h3>
     ${r.ingredients?.length ? `<div class="chips">${r.ingredients.map(ing).join("")}</div>` : ""}
-    <ol style="margin-left:18px;display:grid;gap:4px">${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol></div>`).join("") || `<div class="empty">No cook days this week. Set how often you cook in Me → Food &amp; budget.</div>`;
+    ${r.library ? `<div class="chips">${r.library_ingredients.map(i => `<a class="chip" href="${esc(instamartUrl(i))}" target="_blank" rel="noopener" title="Find ${esc(i)} on Instamart">${esc(i)}</a>`).join("")}</div>
+      <div class="row"><button class="small secondary" data-dish="${esc(r.key)}">Ingredients &amp; cook along</button>${r.url ? `<a class="small btn ghost" href="${esc(r.url)}" target="_blank" rel="noopener">Method ${ICON.out}</a>` : ""}</div>` : ""}
+    ${r.steps.length ? `<ol style="margin-left:18px;display:grid;gap:4px">${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}</div>`).join("") || `<div class="empty">No cook days this week. Set how often you cook in Me → Food &amp; budget.</div>`;
   const unit = (b) => b.unit === "g" ? (b.need >= 1000 ? `${(b.need / 1000).toFixed(1).replace(/\.0$/, "")} kg` : `${b.need} g`) : `${b.need} ${b.unit}`;
   const label = (b) => b.swap ? `<s>${esc(b.name)}</s> → <b>${esc(b.swap.name)}</b>${b.swap.reason === "out_of_stock" ? " <small>(out of stock)</small>" : ""}`
     : (b.have ? `<s>${esc(b.name)}</s>` : esc(b.name));
@@ -1598,6 +1602,7 @@ function cookingPanel() {
   const swapped = c.basket.items.some(b => b.swap);
   const safe = (c.safe_with_swap || []).map(f => `<li><b>${esc(f.name)}</b>: ${f.swaps.map(x => `use ${esc(x.to_name)} instead of ${esc(x.from_name)}`).join(", ")}</li>`).join("");
   return `<h1 class="h1">Cooking &amp; groceries</h1><p class="sub">${esc(c.headline)}</p>
+    <div class="card">${cookFinder({})}</div>
     ${S.swapPick ? swapPicker() : ""}
     <section class="card tight"><h3 class="k" style="padding:14px 0 2px">Grocery list · ${rupee(c.basket.total)}</h3>
       ${basket || `<p class="fine" style="padding:12px 0">Nothing left to buy for this week's cooking.</p>`}
@@ -1606,24 +1611,7 @@ function cookingPanel() {
       <p class="fine" style="padding:8px 0 14px">For the cook meals still ahead${S.view.household ? ", for everyone eating each one" : ""}, rounded up to whole packs. Tick what you already have.${swapped ? " Prices are for the original items." : ""}</p></section>
     ${recipes}
     ${safe ? `<div class="card"><p class="k">Also safe with a swap</p><ul class="fine" style="margin-left:18px">${safe}</ul>
-      <p class="fine">These recipes are left out of your plan as written. With these swaps nobody's allergies or diet are broken.</p></div>` : ""}
-    ${recipeLibrary()}`;
-}
-// Wikibooks Cookbook recipes (CC BY-SA 4.0), credited and linked. Browse-only: the
-// Cookbook gives no prices or nutrition, so Ziggy doesn't plan them or invent either.
-function recipeLibrary() {
-  const L = S.library;
-  if (!L || !L.available) return "";
-  const q = (S.libraryQ || "").toLowerCase();
-  const list = L.recipes.filter(r => !q || r.title.toLowerCase().includes(q) || r.ingredients.some(i => i.toLowerCase().includes(q)));
-  return `<section class="stack" aria-labelledby="lib-h"><div><h2 class="h2" id="lib-h">Recipe library</h2>
-      <p class="fine">${L.total} recipe${L.total === 1 ? "" : "s"} from the <a href="https://en.wikibooks.org/wiki/Cookbook:Table_of_Contents" target="_blank" rel="noopener">Wikibooks Cookbook</a>, by Wikibooks contributors, <a href="${esc(L.license?.url || "https://creativecommons.org/licenses/by-sa/4.0/")}" target="_blank" rel="noopener">${esc(L.license?.name || "CC BY-SA 4.0")}</a>.${L.hidden ? ` ${L.hidden} hidden: their ingredients break your diet or allergies.` : ""} No prices or nutrition yet, so they aren't planned for you.</p></div>
-    <label class="sr" for="lib-q">Search recipes</label><input id="lib-q" type="search" placeholder="Search by dish or ingredient" value="${esc(S.libraryQ || "")}" maxlength="60">
-    <div class="stack" style="gap:8px">${list.slice(0, 30).map(r => `<details class="card recipe"><summary><span class="t"><b>${esc(r.title)}</b><span class="fine">${[r.servings ? `serves ${r.servings}` : "", r.time || "", `${r.ingredients.length} ingredients`].filter(Boolean).map(esc).join(" · ")}</span></span></summary>
-        <p class="k">Ingredients</p><ul class="ingr">${r.ingredients.map(i => `<li><span>${esc(i)}</span><a class="small btn ghost" href="${esc(instamartUrl(ingredientQuery(i)))}" target="_blank" rel="noopener" aria-label="Find ${esc(ingredientQuery(i))} on Instamart">Instamart ${ICON.out}</a></li>`).join("")}</ul>
-        <p class="k">Steps</p><ol class="steps">${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol>
-        <p class="fine">From <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)} on Wikibooks</a> (${esc(r.credit)}, ${esc(r.license)}). Check ingredients yourself: allergy hints come only from the words listed.</p></details>`).join("")
-      || `<p class="fine">No recipe matches “${esc(S.libraryQ)}”.</p>`}</div></section>`;
+      <p class="fine">These recipes are left out of your plan as written. With these swaps nobody's allergies or diet are broken.</p></div>` : ""}`;
 }
 // A recipe line ("1 cup toor dal, washed") as a shop search ("toor dal").
 function ingredientQuery(line) {
@@ -1637,6 +1625,164 @@ function ingredientQuery(line) {
 function instamartUrl(name) {
   const q = String(name || "").replace(/\s*\(\d+\)\s*$/, "").replace(/\s*\d+(\.\d+)?\s*(g|kg|ml|l)\b/gi, "").trim();
   return `https://www.swiggy.com/instamart/search?custom_back=true&query=${encodeURIComponent(q)}`;
+}
+/* ---- cook it: type a dish, get its ingredients, cook along ---- */
+// What Ziggy can cook from: 6,000+ Indian dishes (names, ingredients, times; a link to the
+// method) and Wikibooks Cookbook recipes when imported. Nothing priced, nothing invented.
+const COOK_SHOW = 8;
+function cookFinder(ctx = {}) {
+  const c = S.cook || {};
+  const here = c.sid === (ctx.sid || null);
+  const res = here ? c.results : null;
+  const q = here ? c.q || "" : "";
+  const rows = (res?.dishes || []).slice(0, COOK_SHOW).map(d => `<button class="pick dishrow" data-dish="${esc(d.key)}">
+      <span class="vegdot ${d.veg ? "veg" : "nonveg"}" aria-label="${d.veg ? "Vegetarian" : "Not vegetarian"}"></span>
+      <span class="t"><b>${esc(d.title)}</b><span>${[d.about, d.total_min ? `${d.total_min} min` : "", d.servings ? `serves ${d.servings}` : "", `${d.ingredient_count} ingredients`, d.has_steps ? "steps" : ""].filter(Boolean).map(esc).join(" · ")}</span></span></button>`).join("");
+  const credit = (res?.credits || []).map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a> (${esc(x.by)}, <a href="${esc(x.license_url)}" target="_blank" rel="noopener">${esc(x.license)}</a>)`).join(" and ");
+  return `<section class="stack cookfind" aria-labelledby="cook-h-${ctx.sid || "x"}">
+    <div><h3 class="k" id="cook-h-${ctx.sid || "x"}">${ctx.meal ? `Cook something for ${esc(ctx.meal)}` : "What do you want to cook?"}</h3></div>
+    <label class="sr" for="cook-q">Type a dish to cook</label>
+    <input id="cook-q" type="search" placeholder="Type a dish: pongal, rajma, paneer…" value="${esc(q)}" maxlength="60" autocomplete="off" data-cook-sid="${ctx.sid || ""}" data-cook-meal="${esc(ctx.meal || "")}">
+    ${c.loading && here ? `<div class="skeleton"><i></i><i></i></div>` : ""}
+    ${res && !c.loading ? (rows ? `<div class="stack" style="gap:6px">${rows}</div>` : `<p class="fine">No dish matches “${esc(q)}”${res.hidden ? `, or every match breaks your rules (${res.hidden} hidden)` : ""}.</p>`) : ""}
+    ${res && res.total > COOK_SHOW ? `<p class="fine">${res.total} matches: type more to narrow them.</p>` : ""}
+    ${res?.hidden && rows ? `<p class="fine">${res.hidden} hidden: they break your diet, allergies or medical rules (read from their ingredients).</p>` : ""}
+    ${credit ? `<p class="fine">From ${credit}.</p>` : ""}</section>`;
+}
+async function cookSearch(q, sid, meal) {
+  S.cook = { ...(S.cook || {}), q, sid: sid || null, meal: meal || null };
+  if (q.trim().length < 2) { S.cook.results = null; render(); refocus("cook-q"); return; }
+  const mine = (S.cook.n = (S.cook.n || 0) + 1);
+  S.cook.loading = !S.cook.results; render(); refocus("cook-q");
+  const r = await api(`/api/user/${S.userId}/dishes?q=${encodeURIComponent(q)}${meal ? `&meal=${encodeURIComponent(meal)}` : ""}`);
+  if (mine !== S.cook.n) return;                 // a newer keystroke already asked
+  S.cook = { ...S.cook, results: r, loading: false }; render(); refocus("cook-q");
+}
+function refocus(id) {
+  const el = document.getElementById(id);
+  if (el && document.activeElement !== el) { el.focus(); el.setSelectionRange?.(el.value.length, el.value.length); }
+}
+function eatersFor(sid) {
+  const cell = sid ? cellOf(Number(sid)) : null;
+  return cell?.portions || (S.view.household?.people || []).length || 1;
+}
+async function openDish(key, people) {
+  const sid = S.cook?.sid || S.sheet?.sid || null;
+  const n = people || S.dish?.people || eatersFor(sid);
+  S.dish = { loading: true, key, sid, people: n }; render();
+  const d = await api(`/api/user/${S.userId}/dishes/${encodeURIComponent(key)}?people=${n}`);
+  S.dish = { ...d, sid, have: S.dish?.key === key ? S.dish.have || {} : {} }; render();
+}
+function dishSheet() {
+  const d = S.dish;
+  if (d.loading) return `<div class="sheet-bg" data-ov="dish" data-close-dish="1"><section class="sheet" role="dialog" aria-modal="true" aria-busy="true" aria-label="Opening recipe"><span class="grab"></span><div class="skeleton"><i></i><i></i><i></i></div></section></div>`;
+  const have = d.have || {};
+  const need = d.ingredients.filter((_, i) => !have[i]);
+  const sess = d.sid ? sessionLabel(d.sid) : null;
+  const upcoming = d.sid ? [] : openMeals().slice(0, 6);
+  const times = [d.prep_min ? `prep ${d.prep_min} min` : "", d.cook_min ? `cook ${d.cook_min} min` : "", d.total_min ? `${d.total_min} min in all` : ""].filter(Boolean).join(" · ");
+  return `<div class="sheet-bg" data-ov="dish" data-close-dish="1"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="dish-title">
+    <span class="grab" aria-hidden="true"></span>
+    <div class="sheet-head"><div><p class="eyebrow">${esc([d.cuisine, d.course].filter(Boolean).join(" · ") || "Recipe")}</p>
+      <h2 class="h2" id="dish-title">${esc(d.title)}</h2>${d.about ? `<p class="muted">${esc(d.about)}</p>` : ""}</div>
+      <button class="icon-btn" data-close-dish="1" aria-label="Close">${ICON.close}</button></div>
+    ${times ? `<p class="fine">${esc(times)}</p>` : ""}
+    <div class="row" style="justify-content:space-between;align-items:center"><span><b>For ${d.people}</b> <span class="fine">${d.servings ? `(recipe serves ${d.servings}${d.scaled ? ", amounts scaled" : ""})` : "(amounts as written)"}</span></span>
+      <span class="stepper sm"><button type="button" data-dish-people="-1" aria-label="One fewer person" ${d.people <= 1 ? "disabled" : ""}>${ICON.minus}</button><button type="button" data-dish-people="1" aria-label="One more person" ${d.people >= 20 ? "disabled" : ""}>${ICON.plus}</button></span></div>
+    <p class="k">Ingredients · tick what you have</p>
+    <ul class="ingr checklist">${d.ingredients.map((i, n) => `<li><label class="check"><input type="checkbox" data-have-ing="${n}" ${have[n] ? "checked" : ""}> <span ${have[n] ? 'class="done"' : ""}>${esc(i.line)}</span></label>
+      ${have[n] ? "" : `<a class="small btn ghost" href="${esc(instamartUrl(i.name))}" target="_blank" rel="noopener" aria-label="Find ${esc(i.name)} on Instamart">Instamart ${ICON.out}</a>`}</li>`).join("")}</ul>
+    ${need.length ? `<div class="row"><button class="small secondary" data-act="copy-dish-list">Copy the ${need.length} to buy</button></div>` : `<p class="fine">You have everything.</p>`}
+    ${(d.allergens || []).length ? `<p class="fine">Its ingredients mention: ${esc(d.allergens.join(", ").replace(/_/g, " "))}. Check labels yourself.</p>` : ""}
+    <button class="primary" data-act="cook-along">Cook along</button>
+    ${sess ? `<button class="secondary" data-dish-for="${d.sid}">Cook this for ${esc(sess)}</button>`
+      : upcoming.length ? `<p class="k">Cook it for</p><div class="chips">${upcoming.map(m => `<button class="chip" data-dish-for="${m.session_id}">${esc(m.label)}</button>`).join("")}</div>` : ""}
+    <p class="fine">Planned as a home-cooked meal: groceries aren't priced and there's no nutrition estimate for it.</p>
+    <p class="fine">${d.url ? `Full method: <a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.source === "wikibooks" ? "Wikibooks" : "Archana's Kitchen")} ${ICON.out}</a>. ` : ""}${esc(d.credit || "")}.</p>
+  </section></div>`;
+}
+function sessionLabel(sid) {
+  const m = openMeals(true).find(x => x.session_id === Number(sid));
+  return m ? m.label : "this meal";
+}
+// Meals still ahead that a dish could go into: "Sat lunch".
+function openMeals(all = false) {
+  const out = [];
+  for (const d of S.view.grid || []) for (const meal of ["breakfast", "lunch", "dinner"]) {
+    const m = d.meals?.[meal];
+    if (!m || m.status === "past" || ["ordered", "confirmed"].includes(m.status)) continue;
+    if (!all && m.status !== "active") continue;
+    out.push({ session_id: m.session_id, label: `${d.day_name || d.label || d.day} ${meal}` });
+  }
+  return out;
+}
+async function cookFor(sid) {
+  const d = S.dish;
+  adoptView(await api(`/api/session/${sid}/choose`, "POST", { recipe_key: d.key }));
+  const label = sessionLabel(sid);
+  S.dish = null; S.sheet = null; S.cook = null;
+  toast(`${d.title} for ${label}. It's in your week as a home-cooked meal.`); render();
+}
+// Cook along: one step at a time, big type, timers. With no written steps (most library
+// dishes), the steps are: gather the ingredients, prep, cook, and the method link.
+function cookSteps(d) {
+  if (d.steps?.length) return d.steps.map(t => ({ text: t }));
+  const out = [{ gather: true, text: "Get everything out" }];
+  if (d.prep_min) out.push({ text: `Prep: wash, chop and measure`, timer: d.prep_min * 60 });
+  if (d.cook_min) out.push({ text: `Cook`, timer: d.cook_min * 60, method: true });
+  if (!d.prep_min && !d.cook_min) out.push({ text: "Cook", method: true });
+  return out;
+}
+function cookAlongView() {
+  const a = S.cookAlong, d = a.dish, steps = cookSteps(d), st = steps[a.step];
+  const left = a.timer ? Math.max(0, a.timer.until ? Math.round((a.timer.until - Date.now()) / 1000) : a.timer.left) : null;
+  const mmss = (x) => `${Math.floor(x / 60)}:${String(x % 60).padStart(2, "0")}`;
+  const have = d.have || {};
+  return `<div class="sheet-bg cookalong" data-ov="cookalong"><section class="sheet full" role="dialog" aria-modal="true" aria-labelledby="ca-title">
+    <div class="sheet-head"><div><p class="eyebrow">${esc(d.title)} · step ${a.step + 1} of ${steps.length}</p>
+      <h2 class="h1" id="ca-title">${esc(st.text)}</h2></div>
+      <button class="icon-btn" data-act="cook-along-close" aria-label="Stop cooking along">${ICON.close}</button></div>
+    ${st.gather ? `<ul class="ingr checklist big">${d.ingredients.map((i, n) => `<li><label class="check"><input type="checkbox" data-have-ing="${n}" ${have[n] ? "checked" : ""}> <span ${have[n] ? 'class="done"' : ""}>${esc(i.line)}</span></label></li>`).join("")}</ul>` : ""}
+    ${st.timer ? `<div class="timer" role="timer" aria-live="off"><span class="money" style="font-size:56px">${mmss(left ?? st.timer)}</span>
+      <div class="row" style="justify-content:center">${a.timer?.until ? `<button class="secondary" data-act="timer-pause">Pause</button>` : `<button class="secondary" data-act="timer-start">${a.timer && left < st.timer ? "Resume" : `Start ${Math.round(st.timer / 60)} min timer`}</button>`}
+        ${a.timer ? `<button class="ghost small" data-act="timer-reset">Reset</button>` : ""}</div></div>` : ""}
+    ${st.method && d.url ? `<p class="fine">The written method is on <a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.source === "wikibooks" ? "Wikibooks" : "Archana's Kitchen")} ${ICON.out}</a>.</p>` : ""}
+    <div class="two"><button class="secondary" data-act="cook-prev" ${a.step === 0 ? "disabled" : ""}>Back</button>
+      ${a.step < steps.length - 1 ? `<button class="primary" data-act="cook-next">Next</button>` : `<button class="primary" data-act="cook-along-close">Done</button>`}</div>
+  </section></div>`;
+}
+async function startCookAlong() {
+  S.cookAlong = { dish: S.dish, step: 0, timer: null };
+  S.dish = null;
+  try { S.wake = await navigator.wakeLock?.request?.("screen"); } catch (_) { S.wake = null; }   // keep the screen on
+  render();
+}
+function stopCookAlong() {
+  const back = S.cookAlong?.dish;
+  clearInterval(S.cookTick); S.cookAlong = null;
+  try { S.wake?.release?.(); } catch (_) { /* already released */ }
+  S.wake = null; S.dish = back || null; render();
+}
+function cookTimer(action) {
+  const a = S.cookAlong, st = cookSteps(a.dish)[a.step];
+  clearInterval(S.cookTick);
+  if (action === "start") {
+    const left = a.timer ? a.timer.left : st.timer;
+    a.timer = { left, until: Date.now() + left * 1000 };
+    S.cookTick = setInterval(() => {
+      const rem = Math.round((a.timer.until - Date.now()) / 1000);
+      if (rem <= 0) { clearInterval(S.cookTick); a.timer = { left: 0 }; toast(`${st.text}: time's up`); try { navigator.vibrate?.([300, 120, 300]); } catch (_) { /* no vibration */ } }
+      if (S.cookAlong === a) render();
+    }, 1000);
+  } else if (action === "pause") {
+    a.timer = { left: Math.max(0, Math.round((a.timer.until - Date.now()) / 1000)) };
+  } else a.timer = null;
+  render();
+}
+function cookStep(delta) {
+  const a = S.cookAlong;
+  clearInterval(S.cookTick); a.timer = null;
+  a.step = Math.max(0, Math.min(cookSteps(a.dish).length - 1, a.step + delta)); render();
 }
 function groceryText() {
   const items = (S.view.coach?.basket?.items || []).filter(b => !b.have);
@@ -2636,6 +2782,14 @@ function wire() {
   on("[data-cook]", "click", (e) => guard(() => choose(S.sheet.sid, { recipe_key: e.currentTarget.dataset.cook }, "Cook at home. It's on your grocery list.")));
   on("[data-choose-auto]", "click", (e) => guard(() => choose(e.currentTarget.dataset.chooseAuto, { action: "auto" }, "Ziggy will choose this one")));
   on("[data-move]", "click", (e) => { S.moving = Number(e.currentTarget.dataset.move); S.sheet = null; S.tab = "week"; S.weekView = null; render(); });
+  on("[data-close-dish]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.dish = null; render(); } });
+  on("[data-dish]", "click", (e) => { const t = e.currentTarget; if (t.dataset.dishSid) S.cook = { sid: Number(t.dataset.dishSid) }; guard(() => openDish(t.dataset.dish), "Open the recipe"); });
+  on("[data-dish-people]", "click", (e) => { const n = Math.max(1, Math.min(20, S.dish.people + Number(e.currentTarget.dataset.dishPeople))); guard(() => openDish(S.dish.key, n), "Change how many eat"); });
+  on("[data-have-ing]", "change", (e) => { const d = S.dish || S.cookAlong?.dish; if (!d) return; d.have = { ...(d.have || {}), [e.currentTarget.dataset.haveIng]: e.currentTarget.checked }; render(); });
+  on("[data-dish-for]", "click", (e) => { const sid = Number(e.currentTarget.dataset.dishFor); guard(() => cookFor(sid), "Cook it for this meal"); });
+  const cookQ = document.getElementById("cook-q");
+  if (cookQ) cookQ.oninput = () => { const v = cookQ.value, sid = Number(cookQ.dataset.cookSid) || null, meal = cookQ.dataset.cookMeal || null;
+    clearTimeout(S.cookT); S.cookT = setTimeout(() => guard(() => cookSearch(v, sid, meal), "Search dishes"), 220); };
   on("[data-close-sheet]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.sheet = null; render(); } });
   on("[data-meal]", "click", (e) => onMealTap(e.currentTarget.dataset.meal));
   on("[data-oq-cart]", "click", (e) => { const sid = e.currentTarget.dataset.oqCart; guard(() => liveAction("order-week", sid)); });
@@ -2714,6 +2868,17 @@ function wire() {
     "hh-edit-cancel": async () => { S.hhEdit = null; render(); },
     "hh-leave": () => householdCall("/leave", "POST", {}, "Stopped sharing. Your plan uses your own rules again."),
     "swap-cancel": async () => { S.swapPick = null; render(); },
+    "cook-along": startCookAlong,
+    "cook-along-close": async () => stopCookAlong(),
+    "cook-next": async () => cookStep(1), "cook-prev": async () => cookStep(-1),
+    "timer-start": async () => cookTimer("start"), "timer-pause": async () => cookTimer("pause"),
+    "timer-reset": async () => cookTimer("reset"),
+    "copy-dish-list": async () => {
+      const d = S.dish, have = d.have || {};
+      const text = d.ingredients.filter((_, i) => !have[i]).map(i => `- ${i.line}`).join("\n");
+      try { await navigator.clipboard.writeText(`${d.title} (for ${d.people})\n${text}`); toast("Copied. Paste it into Instamart or a note."); }
+      catch { throw new Error("Couldn't copy here. Select the list and copy it instead"); }
+    },
     "copy-groceries": async () => {
       const text = groceryText();
       try { await navigator.clipboard.writeText(text); toast("Grocery list copied. Paste it into Instamart or a note."); }
@@ -2736,8 +2901,6 @@ function wire() {
   on("[data-edit-pool]", "click", () => { S.savedTab = "meals"; guard(() => goTab("saved"), "Open your meal pools"); });
   on("[data-have-dish]", "click", (e) => { const t = e.currentTarget; guard(() => haveForMeal(t.dataset.haveDish, t.dataset.haveName), `Have “${t.dataset.haveName}”`); });
   wirePoolDrag();
-  const libQ = document.getElementById("lib-q");
-  if (libQ) libQ.oninput = () => { S.libraryQ = libQ.value; clearTimeout(S.libT); S.libT = setTimeout(() => { render(); const el = document.getElementById("lib-q"); el?.focus(); el?.setSelectionRange?.(el.value.length, el.value.length); }, 250); };
   on("[data-live-track]", "click", (e) => { const id = e.currentTarget.dataset.liveTrack; guard(() => trackLiveOrder(id), "Track order"); });
   const liveSearch = document.getElementById("live-search");
   if (liveSearch) liveSearch.onsubmit = (e) => { e.preventDefault(); const q = document.getElementById("live-query").value; guard(() => searchLivePlaces(q), `Search Swiggy for “${q}”`); };
@@ -2772,7 +2935,6 @@ function onMealTap(sid) {
 }
 async function goWeekView(view) {
   S.weekView = view; S.tab = "week";
-  if (view === "groceries" && !S.library) S.library = await api(`/api/user/${S.userId}/recipes`).catch(() => null);
   if (view === "orders") {
     S.exec = await api(`/api/plan/${S.planId}/orders`);
     S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`).catch(() => null);
@@ -2801,10 +2963,12 @@ async function goTab(tab, sub = null) {
   if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);
 }
 
-const anyDialog = () => S.orderReview || S.liveOrderReview || S.checkoutReview || S.sheet || S.addrSheet || S.connectSheet || S.liveBrowseMenu;
+const anyDialog = () => S.orderReview || S.liveOrderReview || S.checkoutReview || S.sheet || S.addrSheet || S.connectSheet || S.liveBrowseMenu || S.dish || S.cookAlong;
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && (anyDialog() || S.moving)) {
-    if (S.liveOrderReview) S.liveOrderReview = null;
+    if (S.cookAlong) { stopCookAlong(); return; }
+    if (S.dish) S.dish = null;
+    else if (S.liveOrderReview) S.liveOrderReview = null;
     else if (S.checkoutReview) S.checkoutReview = null;
     else { S.orderReview = null; S.sheet = null; S.moving = null; S.addrSheet = false; S.connectSheet = false; S.liveBrowseMenu = null; }
     render();

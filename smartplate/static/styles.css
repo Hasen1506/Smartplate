@@ -513,3 +513,19 @@ details.recipe summary .t{display:flex;flex-direction:column;gap:2px;flex:1;min-
 ul.ingr{list-style:none;margin:0;padding:0;display:grid;gap:4px}
 ul.ingr li{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:14px;border-bottom:1px solid var(--line);padding:4px 0}
 ol.steps{margin:0 0 0 18px;display:grid;gap:6px;font-size:14.5px}
+
+/* Cook it: dish search, recipe sheet, cook along */
+.cookfind input[type=search]{width:100%}
+.pick.dishrow{align-items:flex-start;text-align:left}
+.pick.dishrow .t span{white-space:normal}
+.vegdot{flex:none;width:14px;height:14px;margin-top:4px;border:2px solid var(--leaf-ink);border-radius:3px;position:relative}
+.vegdot::after{content:"";position:absolute;inset:2px;border-radius:50%;background:var(--leaf-ink)}
+.vegdot.nonveg{border-color:var(--bad)}.vegdot.nonveg::after{background:var(--bad)}
+.stepper.sm{gap:8px}.stepper.sm button{width:40px;height:40px}
+ul.ingr.checklist li{min-height:var(--tap)}
+ul.ingr.checklist .check{min-height:0;flex:1}
+ul.ingr .done{text-decoration:line-through;color:var(--ink2)}
+ul.ingr.big li{font-size:17px}
+.sheet.full{max-height:100dvh;min-height:70dvh}
+.cookalong .h1{font-size:28px;line-height:1.2}
+.timer{display:grid;gap:10px;justify-items:center;padding:12px 0}

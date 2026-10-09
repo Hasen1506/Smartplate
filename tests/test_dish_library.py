@@ -78,6 +78,9 @@ def test_ingredients_scale_to_how_many_eat(library):
     assert d["ingredients"][0]["name"] == "Rice" and "CC BY 4.0" in d["credit"]
     assert dish_library.scale_line("Salt - to taste", Fraction(2)) == "Salt - to taste"
     assert dish_library.scale_line("1/2 cup dal", Fraction(3)) == "1 1/2 cup dal"
+    assert dish_library.scale_line("1/4 cup dal", Fraction(1, 4)) == "a little under 1/8 cup dal"
+    assert dish_library.scale_line("1/4 cup dal", Fraction(1, 2)) == "1/8 cup dal"
+    assert ir.clean_title("Pudina Pongal Recipe - Pudina Pongal") == ("Pudina Pongal", None)
 
 
 def test_a_library_dish_is_a_home_cook_recipe_without_made_up_numbers(library):
@@ -86,3 +89,27 @@ def test_a_library_dish_is_a_home_cook_recipe_without_made_up_numbers(library):
     assert r["name"] == "Ven Pongal" and r["cost"] == 0 and r["cost_unknown"] and r["nutrition_unknown"]
     assert reverse_mode.unsafe_reason(user(allergens=["dairy"]), r)
     assert reverse_mode.unsafe_reason(user(), r) is None
+
+
+def test_cook_a_typed_dish_for_a_meal(gt, library):
+    from smartplate.app import create_app
+    c = create_app().test_client()
+    made = c.post("/api/profiles", json={"name": "Asha", "diet": "veg", "weekly_budget": 3000,
+                                         "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "order"},
+                                         "cook": "never", "allergens": [], "medical": [], "favourites": []})
+    uid = made.get_json()["user"]["id"]
+    c.environ_base["HTTP_X_SMARTPLATE_KEY"] = made.get_json()["access_key"]
+    found = c.get(f"/api/user/{uid}/dishes?q=pongal").get_json()
+    assert [d["title"] for d in found["dishes"]] == ["Ven Pongal"]
+    key = found["dishes"][0]["key"]
+    assert c.get(f"/api/user/{uid}/dishes?q=egg").get_json()["hidden"] == 1               # veg profile
+    detail = c.get(f"/api/user/{uid}/dishes/{key}?people=4").get_json()                    # serves 2
+    assert detail["people"] == 4 and detail["ingredients"][0]["line"] == "2 cup Rice"
+    plan = c.get(f"/api/user/{uid}/plan").get_json()
+    cell = next(m for d in plan["grid"] for m in d["meals"].values() if m.get("status") == "active")
+    r = c.post(f"/api/session/{cell['session_id']}/choose", json={"recipe_key": key})
+    assert r.status_code == 200, r.get_json()
+    got = next(m for d in r.get_json()["grid"] for m in d["meals"].values() if m.get("session_id") == cell["session_id"])
+    assert got["kind"] == "cook" and got["item"] == "Cook: Ven Pongal" and got["pinned"]
+    assert got["cost"] == 0 and got["cost_unknown"] and got["nutrition_unknown"]
+    assert r.get_json()["nutrition"]["unpriced_cooks"] == 1

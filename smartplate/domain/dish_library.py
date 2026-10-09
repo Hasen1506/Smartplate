@@ -169,7 +169,10 @@ def _parse(q: str) -> Fraction:
 
 
 def _show(x: Fraction) -> str:
-    x = x.limit_denominator(4) if x.denominator > 4 else x
+    """Kitchen amounts: halves to eighths, never "0" (a tiny amount reads "a little under 1/8")."""
+    if 0 < x < Fraction(1, 8):
+        return "a little under 1/8"
+    x = x.limit_denominator(8) if x.denominator > 8 else x
     whole, rest = divmod(x.numerator, x.denominator)
     if rest == 0:
         return str(whole)

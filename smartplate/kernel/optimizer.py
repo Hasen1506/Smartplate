@@ -277,9 +277,10 @@ def _cook_candidate(user, session, ctx, recipe=None):
     r = recipe or reverse_mode.cook_candidate(user, session["meal"])
     if not r:
         return None
-    nutri = nutrition.penalty(user, session["meal"], r, tol=ctx["nutri_tol"])
+    unknown = bool(r.get("nutrition_unknown"))   # a library dish: no nutrition figures to weigh
+    nutri = 0.0 if unknown else nutrition.penalty(user, session["meal"], r, tol=ctx["nutri_tol"])
     n = portions(user, session, ctx)
-    return {
+    cand = {
         "kind": "cook", "recipe_key": r["key"], "item_name": f"Cook: {r['name']}", "portions": n,
         "restaurant_name": "Home kitchen", "rating": 5.0, "cost": round(float(r["cost"]) * n, 2),
         "surge_mult": 1.0, "time_shift": None, "taste": 0.62, "sentiment": {"score": 0, "n": 0, "label": ""},
@@ -289,6 +290,9 @@ def _cook_candidate(user, session, ctx, recipe=None):
         "nutrition": {k: r.get(k, 0) for k in ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")},
         "tags": ["home"],
     }
+    if unknown:
+        cand.update(health=0.0, nutrition={}, nutrition_unknown=True, cost_unknown=bool(r.get("cost_unknown")))
+    return cand
 
 
 def meal_suitable(item: dict, meal: str, chosen: bool = False) -> bool:
