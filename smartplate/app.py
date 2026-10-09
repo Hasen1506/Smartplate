@@ -702,6 +702,13 @@ def create_app() -> Flask:
         return jsonify(swiggy_live.search_live_dishes(user_id, request.args.get("restaurant_id", ""),
             request.args.get("restaurant_name", ""), request.args.get("query", ""), int(offset)))
 
+    @app.post("/api/user/<int:user_id>/swiggy/photos")
+    def swiggy_photos(user_id):
+        ids = (request.get_json(silent=True) or {}).get("item_ids")
+        if not isinstance(ids, list) or len(ids) > 12:
+            raise ValueError("Send up to 12 dish ids")
+        return jsonify({"photos": swiggy_live.dish_photos(user_id, ids)})
+
     @app.post("/api/user/<int:user_id>/swiggy/live-cart/preview")
     def swiggy_live_cart_preview(user_id):
         body = request.get_json()
@@ -801,6 +808,10 @@ def create_app() -> Flask:
     @app.post("/api/session/<int:session_id>/choose")
     def session_choose(session_id):
         return jsonify(everyday.choose(session_id, request.get_json()))
+
+    @app.post("/api/plan/<int:plan_id>/eat-now")
+    def plan_eat_now(plan_id):
+        return jsonify(everyday.eat_now(plan_id, request.get_json(silent=True)))
 
     @app.post("/api/session/<int:session_id>/confirm")
     def session_confirm(session_id):

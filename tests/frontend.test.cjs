@@ -1311,3 +1311,50 @@ test('the setup wizard saves a sign-in so the profile opens on another device', 
   assert.match(html, /So you can open Ziggy on any device/);
   await assert.rejects(vm.runInContext("onboardNav('next')", context), /sign-in name/);
 });
+
+test('Today offers other dishes for the same meal one tap away, fitting ones first, never the current one', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  const picks = vm.runInContext(`quickPicks({
+    usual: [{ restaurant: 'A', dishes: [{ item_id: 1, name: 'Now', current: true, fits: true }, { item_id: 2, name: 'Pricey', fits: false }] },
+            { restaurant: 'B', dishes: [{ item_id: 3, name: 'Idli', fits: true }, { item_id: 4, name: 'Vada', fits: true }] }],
+    new: [{ item_id: 5, name: 'Dosa', restaurant: 'C', fits: true }], cook: [] }).map(x => x.name)`, context);
+  assert.deepEqual([...picks], ['Idli', 'Dosa', 'Vada', 'Pricey']);
+  vm.runInContext(`S.quick = { sid: 7, key: 'k', data: { usual: [{ restaurant: '<B>', dishes: [{ item_id: 3, name: 'Idli', price: 90, fits: true, image: 'https://media-assets.swiggy.com/i.jpg' }] }], new: [],
+    cook: [{ recipe_key: 'dal_rice', name: 'Dal + rice', price: 45 }] } }`, context);
+  const strip = vm.runInContext("quickStrip({ session_id: 7, kind: 'delivery' })", context);
+  assert.match(strip, /role="group" aria-labelledby="quick-7"/);
+  assert.match(strip, /data-quick="3"[^]*<img class="dphoto lg" src="https:\/\/media-assets\.swiggy\.com\/i\.jpg"/);
+  assert.match(strip, /data-quick-cook="dal_rice"[^]*Cook at home/);
+  assert.ok(!strip.includes('<B>'));
+  assert.doesNotMatch(vm.runInContext("quickStrip({ session_id: 7, kind: 'cook' })", context), /data-quick-cook/);
+  assert.equal(vm.runInContext("quickStrip({ session_id: 8, kind: 'delivery' })", context), '');
+});
+
+test('Hungry now shows only when the meal whose time it is has nothing planned today', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  const today = vm.runInContext('todayIso()', context);
+  vm.runInContext(`S.view.source = { kind: 'live' }; mealNow = () => 'lunch';
+    S.view.grid = [{ day: 'Mon', date: '${today}', meals: { dinner: { kind: 'delivery', status: 'active' } } }]`, context);
+  assert.match(vm.runInContext('hungryCard(null)', context), /Lunch isn't in your week[^]*data-hungry="lunch"/);
+  vm.runInContext("S.view.grid[0].meals.lunch = { kind: 'skip', status: 'skipped' }", context);
+  assert.match(vm.runInContext('hungryCard(null)', context), /You skipped lunch/);
+  vm.runInContext("S.view.grid[0].meals.lunch = { kind: 'delivery', status: 'active' }", context);
+  assert.equal(vm.runInContext('hungryCard(null)', context), '');
+  vm.runInContext("mealNow = () => null", context);                                // late at night
+  assert.equal(vm.runInContext('hungryCard(null)', context), '');
+});
+
+test('the grocery list hands each line to Instamart search without pack sizes, and the wide-screen panel shows the balance', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  assert.equal(vm.runInContext("instamartUrl('Toor dal 500g')", context), 'https://www.swiggy.com/instamart/search?custom_back=true&query=Toor%20dal');
+  assert.equal(vm.runInContext("instamartUrl('Eggs (6)')", context), 'https://www.swiggy.com/instamart/search?custom_back=true&query=Eggs');
+  vm.runInContext(`S.view.nutrition = { daily_avg: { kcal: 900, protein_g: 70 }, daily_target: { kcal: 1800, protein_g: 55 } };
+    S.view.grid = [{ day: 'Mon', date: '2026-09-14', meals: { lunch: { kind: 'delivery', status: 'active' } } }]; S.tab = 'today'`, context);
+  const aside = vm.runInContext('balanceAside()', context);
+  assert.match(aside, /<aside class="aside" aria-label="Your week at a glance"/);
+  assert.match(aside, /₹500 left/);
+  assert.match(aside, /class="nut low"[^]*Calories[^]*class="nut high"[^]*Protein/);
+  assert.match(aside, /data-glance-day="0" aria-label="Mon 14 Sept?: lunch order"/);
+  vm.runInContext("S.tab = 'more'", context);
+  assert.equal(vm.runInContext('balanceAside()', context), '');
+});

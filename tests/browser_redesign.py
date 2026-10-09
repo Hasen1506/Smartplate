@@ -107,6 +107,7 @@ def _open(browser, w, viewport):
     """)
     page.goto(w["url"])
     expect(page.get_by_role("navigation", name="Main")).to_be_visible()
+    page.wait_for_load_state("networkidle")              # Today's other picks load after the first paint
     return page, errors
 
 
@@ -177,9 +178,30 @@ def test_redesign_today_cart_menu_week_me(world, viewport):
             expect(hero).to_be_visible()
             assert "Fit" not in hero.inner_text()                                           # no opaque score
             expect(hero.get_by_role("list", name="Why this pick")).to_be_visible()
-            expect(hero.locator(".dicon")).to_be_visible()                                  # dish identity
+            expect(hero.locator(".dish-row .dicon")).to_be_visible()                        # dish identity
             assert primaries(page) == ["Add to Swiggy cart"], primaries(page)
             assert hero.locator(".est").count() >= 1                                         # the plan price is an estimate
+            # other dishes for the same meal, one tap away (no sheet): the tap swaps the meal
+            quick = hero.get_by_role("group", name="Or have instead")
+            expect(quick.locator(".qpick").first).to_be_visible()
+            assert 1 <= quick.locator(".qpick").count() <= 5
+            first = quick.locator("[data-quick]").first
+            other = first.get_attribute("data-quick-name")
+            assert other != hero.locator("h2").inner_text()
+            first.click()
+            expect(page.locator(".toast")).to_contain_text(f"{other} it is")
+            expect(page.locator('section[aria-label="Next meal"] h2')).to_have_text(other)
+            hero = page.locator('section[aria-label="Next meal"]')
+            # Hungry now: the week leaves breakfast out (rhythm), and it's breakfast time
+            expect(page.get_by_role("region", name="Hungry now")).to_contain_text("Breakfast isn't in your week")
+            # a computer shows the week's balance beside the meals; a phone doesn't
+            aside = page.get_by_role("complementary", name="Your week at a glance")
+            if viewport["width"] >= 1180:
+                expect(aside).to_contain_text("left")
+                expect(aside.locator(".nut")).to_have_count(4)
+                expect(aside.locator("[data-glance-day]")).to_have_count(7)
+            else:
+                expect(aside).to_be_hidden()
             assert page.evaluate(CONTRAST_JS) == []
             no_overflow(page)
             shot("today")
@@ -268,6 +290,8 @@ def test_redesign_today_cart_menu_week_me(world, viewport):
             shot("week")
             page.get_by_role("button", name="Cooking & groceries", exact=False).click()
             expect(page.get_by_role("heading", name="Cooking & groceries")).to_be_visible()
+            shop = page.get_by_role("link", name="Find", exact=False).first                 # Instamart hand-off per line
+            assert shop.get_attribute("href").startswith("https://www.swiggy.com/instamart/search?")
             no_overflow(page)
 
             # --- Me: everything else, grouped; theme and colour in one tap ------------------------ #
@@ -294,6 +318,15 @@ def test_redesign_today_cart_menu_week_me(world, viewport):
                 expect(page.locator("legend", has_text=legend)).to_be_visible()
             no_overflow(page)
             shot("settings")
+
+            # --- Hungry now: breakfast in two taps, even though the week leaves it out --------------- #
+            nav.get_by_role("button", name="Today").click()
+            page.get_by_role("region", name="Hungry now").get_by_role("button", name="Get breakfast").click()
+            expect(page.locator(".toast")).to_contain_text("Breakfast is in")
+            hero = page.locator('section[aria-label="Next meal"]')
+            expect(hero.locator(".eyebrow").first).to_contain_text("Breakfast")
+            assert w["client"].get(f"/api/plan/{w['plan']}").get_json()["grid"][0]["meals"]["breakfast"]["kind"] in ("delivery", "cook")
+            expect(page.get_by_role("region", name="Hungry now")).to_have_count(0)
 
             assert not errors, errors
             assert page.evaluate("policyViolations") == []

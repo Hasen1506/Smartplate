@@ -240,6 +240,13 @@ def plan_view(plan_id: int) -> dict:
             for cell in day["meals"].values():
                 cell["eaters"] = eat.get(cell["session_id"], [])
         view["household"].pop("_members")
+    # Swiggy's own photo of a planned dish, once Swiggy has shown it (search_menu)
+    from .integrations import swiggy_live
+    cells = [c for day in grid for c in day["meals"].values() if c["kind"] == "delivery" and c.get("item_id")]
+    photos = swiggy_live.known_photos(user["id"], [c["item_id"] for c in cells]) if cells else {}
+    for c in cells:
+        if photos.get(c["item_id"]):
+            c["image"] = photos[c["item_id"]]
     from . import everyday
     view["next_up"] = everyday.next_up(view, at)
     view["heads_up"] = everyday.heads_up(view, user, plan, decisions, at)

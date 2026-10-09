@@ -375,6 +375,10 @@ def options(session_id: int) -> dict:
                  key=lambda d: (not d["fits"], d["score"]))[:SHORTLIST_NEW]
     for g in groups:
         g.pop("_best")
+    from .integrations import swiggy_live
+    photos = swiggy_live.known_photos(user["id"], [d["item_id"] for g in groups for d in g["dishes"]])
+    for d in [d for g in groups for d in g["dishes"]] + new:
+        d["image"] = photos.get(d["item_id"])
     cook_all = [r for r in reverse_mode.RECIPES if r["key"] in reverse_mode.RECIPE_BY_MEAL.get(session["meal"], [])]
     cooks = [r for r in cook_all if reverse_mode.unsafe_reason(user, r) is None]   # allergy/medical/diet: hard
     return {
@@ -439,6 +443,51 @@ def choose(session_id: int, body: dict) -> dict:
                     (db.jd(pin) if pin else None, session_id))
     optimizer.optimize(plan["id"])
     return service.plan_view(plan["id"])
+
+
+def eat_now(plan_id: int, body: dict) -> dict:
+    """Hungry now: today's `meal` goes into the plan even if the week skips it (a meal the
+    rhythm leaves out, or one skipped earlier), so it can be ordered in two taps. The
+    rest of the week re-balances around it."""
+    plan = models.get_plan(plan_id)
+    if not plan:
+        raise KeyError("Plan not found")
+    meal = (body or {}).get("meal")
+    if meal not in models.MEALS:
+        raise ValueError("Choose breakfast, lunch or dinner")
+    at = optimizer.now()
+    day = (at.date() - dt.date.fromisoformat(plan["week_start"])).days
+    if not 0 <= day < 7:
+        raise ValueError("This plan isn't for this week. Plan this week first")
+    ts = scheduler.trigger_ts(plan["week_start"], day, meal)
+    if dt.datetime.fromisoformat(ts) + scheduler.PAST_GRACE < at:
+        raise ValueError(f"It's past {meal} time today. Pick your next meal instead")
+    session = next((s for s in models.sessions_for_plan(plan_id) if s["day"] == day and s["meal"] == meal), None)
+    with db.cursor() as cur:
+        if session is None:
+            cur.execute("INSERT INTO sessions(plan_id, day, meal, scheduled_ts, status) VALUES (?,?,?,?, 'active')",
+                        (plan_id, day, meal, ts))
+            sid = cur.lastrowid
+        elif session["status"] in ("ordered", "confirmed"):
+            raise ValueError(f"Today's {meal} is already ordered")
+        else:
+            sid = session["id"]
+            cur.execute("UPDATE sessions SET status='active', note='' WHERE id=?", (sid,))
+    optimizer.optimize(plan_id)
+    decision = next((d for d in models.decisions_for_plan(plan_id) if d["session_id"] == sid), None)
+    if not decision or decision["chosen_kind"] not in ("delivery", "cook"):
+        # The week would still skip it (variety, budget): the person said they're hungry, so
+        # keep the best safe dish that fits what's left, else the first safe recipe.
+        o = options(sid)
+        dishes = sorted([x for g in o["usual"] for x in g["dishes"]] + o["new"], key=lambda x: x["score"])
+        dish = next((x for x in dishes if x["fits"]), None)
+        pin = ({"kind": "delivery", "item_id": dish["item_id"]} if dish
+               else {"kind": "cook", "recipe_key": o["cook"][0]["recipe_key"]} if o["cook"] else None)
+        if pin:
+            with db.cursor() as cur:
+                cur.execute("UPDATE sessions SET pinned=? WHERE id=?", (db.jd(pin), sid))
+            optimizer.optimize(plan_id)
+    return {"session_id": sid, "plan": service.plan_view(plan_id)}
 
 
 def _choice_of(session: dict, decision: dict | None) -> dict:

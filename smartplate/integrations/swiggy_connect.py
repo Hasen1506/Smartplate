@@ -65,6 +65,14 @@ CREATE TABLE IF NOT EXISTS swiggy_menus (        -- live menus, cached briefly (
     fetched_ts TEXT NOT NULL,
     PRIMARY KEY (user_id, restaurant)
 );
+CREATE TABLE IF NOT EXISTS swiggy_photos (       -- Swiggy's own dish photo, seen in a search_menu reply
+    user_id INTEGER NOT NULL,
+    restaurant_id TEXT NOT NULL,                 -- Swiggy restaurant id
+    dish TEXT NOT NULL,                          -- normalised dish name (browse and search ids can differ)
+    image TEXT,                                  -- NULL: Swiggy showed no photo when last checked
+    checked_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, restaurant_id, dish)
+);
 CREATE TABLE IF NOT EXISTS swiggy_favourites (
     user_id INTEGER NOT NULL,
     address_id TEXT NOT NULL,
@@ -470,6 +478,7 @@ def disconnect(user_id: int) -> dict:
         cur.execute("DELETE FROM swiggy_connections WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_pending WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (user_id,))
+        cur.execute("DELETE FROM swiggy_photos WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
     return {"connected": False}

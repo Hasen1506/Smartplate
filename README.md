@@ -34,12 +34,20 @@ or your phone's setting, and an optional Zomato-red-to-Swiggy-orange colour mesh
 2. **Today** shows the next meal, why it was picked (in plain words, never a score),
    its estimated price and **when to order it**. **Add to Swiggy cart** is one tap: the
    elephant rolls across the button, then Swiggy's real bill appears line by line and
-   *Pay in Swiggy* opens checkout. Ziggy never pays for you.
+   *Pay in Swiggy* opens checkout. Ziggy never pays for you. Right under it, **Or have
+   instead** shows up to four other dishes for the same meal (and a cook-at-home
+   option) with Swiggy's own photos: one tap swaps the meal, no sheet.
+   **Hungry now?** appears when it's mealtime and the week leaves that meal out (or
+   you skipped it): one tap puts a dish that fits into today, the next adds it to
+   the cart, and the rest of the week re-balances.
 3. **Change** (on any meal) opens one sheet: *Better fits*, *Other places* (switch
    restaurants with one tap) and *Cook*, plus Skip (with Undo), Keep and Swap with
    another meal.
 4. **Week**: a day strip, the chosen day's meals, the budget at a glance, cooking and
-   the grocery list, and ordering several meals at once.
+   the grocery list (each line opens Instamart's search; *Copy list* for pasting),
+   and ordering several meals at once. On a computer, a side panel shows the week's
+   balance: money left, nutrition a day against your own targets, the order / cook /
+   skip mix, a day-by-day glance and the household split.
 5. **Saved**: your places (search Swiggy and tap ♥), dishes you rated Good, and meals
    you've had, each with *Order again*.
 6. **Heads-up and reminders**: rain, heat, holidays, the fasts you keep, budget

@@ -187,7 +187,7 @@ const DISH_SVG = {
   egg: '<path d="M12 3c4 0 7 6 7 10.5a7 7 0 0 1-14 0C5 9 8 3 12 3z"/><circle cx="12" cy="14" r="2.6"/>',
   curry: '<path d="M3 11h18a9 9 0 0 1-18 0z"/><path d="M6.5 11c1.2-1.6 2.8-1.6 4 0s2.8 1.6 4 0 2.3-1.6 3 0"/><path d="M10 3.5c-.7 1 .7 2 0 3M14 3.5c-.7 1 .7 2 0 3"/>',
   grill: '<path d="M4 20L20 4"/><rect x="6.5" y="9.5" width="5" height="5" rx="1.2" transform="rotate(45 9 12)"/><rect x="11.5" y="4.5" width="5" height="5" rx="1.2" transform="rotate(45 14 7)"/>',
-  thali: '<circle cx="12" cy="12" r="9"/><circle cx="8.3" cy="9.2" r="2.1"/><circle cx="15.7" cy="9.2" r="2.1"/><path d="M7.5 15.2h9"/>',
+  thali: '<circle cx="12" cy="12" r="9.5"/><circle cx="7.4" cy="10" r="2"/><circle cx="12" cy="7.3" r="2"/><circle cx="16.6" cy="10" r="2"/><path d="M7 15.3c1.4-1.9 8.6-1.9 10 0-1.6 2-8.4 2-10 0z"/>',
   bowl: '<path d="M3 12h18a9 9 0 0 1-18 0z"/><path d="M8 12c-.2-3 1.6-5.5 4.5-6.5M12.5 12c.5-2.6 2.6-4.3 5.5-4.4"/>',
   snack: '<path d="M12 4l9 15H3z"/><path d="M8.2 13.5h7.6"/>',
   cook: '<path d="M4 10h14v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M18 12h3M2.5 10h17"/><path d="M8 3.5c-.7 1 .7 2 0 3M12.5 3.5c-.7 1 .7 2 0 3"/>',
@@ -203,6 +203,25 @@ function dishIcon(name, { cook = false, image = null, lg = false } = {}) {
   if (image && !BROKEN_PHOTOS.has(image)) return `<img class="dphoto${lg ? " lg" : ""}" src="${esc(image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-dish="${esc(name)}">`;
   const [kind, hue] = dishKind(name, cook);
   return `<span class="dicon${lg ? " lg" : ""}" style="--h:${hue}" data-kind="${kind}" aria-hidden="true"><svg viewBox="0 0 24 24">${DISH_SVG[kind]}</svg></span>`;
+}
+
+// A dish's photo: Swiggy's own, from the plan (seen before) or fetched for what Today shows.
+const photoOf = (x) => x?.image || (x?.item_id != null ? (S.photos || {})[x.item_id] : null) || null;
+// Today asks Swiggy for the photos of the dishes it shows (the server caches them; a dish
+// Swiggy shows no photo for keeps its icon). Only with live menus and a Swiggy sign-in.
+async function loadPhotos(items) {
+  if (S.view?.source?.kind !== "live" || !swiggyReady()) return;
+  S.photos = S.photos || {}; S.photoAsked = S.photoAsked || new Set();
+  const ids = items.filter(x => x && x.item_id != null && !x.image && !S.photoAsked.has(x.item_id))
+    .map(x => x.item_id).slice(0, 6);
+  if (!ids.length) return;
+  ids.forEach(i => S.photoAsked.add(i));
+  try {
+    const r = await api(`/api/user/${S.userId}/swiggy/photos`, "POST", { item_ids: ids });
+    let got = false;
+    for (const [k, v] of Object.entries(r.photos || {})) if (v) { S.photos[k] = v; got = true; }
+    if (got) render();
+  } catch { /* the icons stay */ }
 }
 
 async function downloadPrivate(path, filename, mime) {
@@ -527,6 +546,7 @@ async function setSession(sid, status, { undo = true } = {}) {
 async function openSheet(sid) {
   S.sheet = { sid: Number(sid), data: null, tab: "fits", place: null }; render();
   S.sheet.data = await api(`/api/session/${sid}/options`); render();
+  loadPhotos(quickPicks(S.sheet.data));
 }
 async function choose(sid, body, msg) {
   adoptView(await api(`/api/session/${sid}/choose`, "POST", body));
@@ -858,7 +878,7 @@ function render() {
   const viewKey = [S.tab, S.more, S.weekView, S.savedTab].join("|");
   const arrive = viewKey !== S.viewKey; S.viewKey = viewKey;
   app.innerHTML = storageBanner() + offlineBar() + `<div class="shell">${navBar()}<div class="col">${topbar()}`
-    + `<main class="main${arrive ? " anim" : ""}" id="main">${errbar() + tabBody()}</main></div></div>`
+    + `<div class="body"><main class="main${arrive ? " anim" : ""}" id="main">${errbar() + tabBody()}</main>${balanceAside()}</div></div></div>`
     + (S.sheet ? sheetDialog() : "") + (S.addrSheet ? addressSheet() : "") + (S.connectSheet ? connectSheet() : "")
     + (S.liveBrowseMenu || S.liveLoading ? menuSheet() : "")
     + (S.orderReview ? orderReviewDialog() : "") + (S.liveOrderReview ? liveOrderReviewDialog() : "")
@@ -869,6 +889,7 @@ function render() {
   S.openSheets = new Set(open.map(el => el.dataset.ov));
   S.fresh = null;
   wire();
+  queueQuick();
 }
 // Offline: say so, and how old the plan on screen is. Nothing is cached as if it were live.
 function offlineBar() {
@@ -932,6 +953,48 @@ function navBar() {
   return `<nav class="nav" aria-label="Main"><div class="brand-rail">${mark()}<span class="wordmark">ziggy</span></div>${TABS.map(([k, l, i]) =>
     `<button class="tab" data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${i}<span>${l}</span></button>`).join("")}</nav>`;
 }
+/* ================================================================ WIDE SCREENS
+   Beside the meals on a computer: the week's balance (money, nutrition against the
+   person's own targets, how the week is made up, a day-by-day glance, the household
+   split). All read from the plan; nothing here is new data. Hidden on phones. */
+const NUTRIENTS = [["Calories", "kcal", ""], ["Protein", "protein_g", " g"], ["Carbs", "carbs_g", " g"], ["Fat", "fat_g", " g"]];
+function balanceAside() {
+  if (!S.view?.plan || S.tab === "more") return "";
+  const v = S.view, b = v.budget || {}, n = v.nutrition || {}, avg = n.daily_avg || {}, t = n.daily_target || {};
+  const cap = b.budget || 0, spend = b.spend || 0, left = cap - spend, pct = cap ? Math.min(1, spend / cap) : 0;
+  const C = 2 * Math.PI * 42;
+  const donut = `<svg viewBox="0 0 100 100" class="donut" aria-hidden="true"><circle cx="50" cy="50" r="42" class="d-bg"/>
+    <circle cx="50" cy="50" r="42" class="d-fg${left < 0 ? " over" : ""}" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - pct)).toFixed(1)}" transform="rotate(-90 50 50)"/></svg>`;
+  const bars = NUTRIENTS.filter(([, k]) => t[k]).map(([label, k, u]) => {
+    const val = avg[k] || 0, ratio = val / t[k];
+    const tone = ratio < 0.8 ? "low" : ratio > 1.15 ? "high" : "ok";
+    return `<div class="nut ${tone}"><div class="nb-h"><span>${label}</span><span><b>${Math.round(val)}</b>${u} of ${Math.round(t[k])}${u}</span></div>
+      <div class="nb-t" role="img" aria-label="${label}: ${Math.round(ratio * 100)}% of your daily target"><i style="width:${Math.min(100, ratio * 100).toFixed(0)}%"></i></div></div>`;
+  }).join("");
+  const cnt = v.counts || {}, mix = [["Order", cnt.delivery || 0, "o"], ["Cook", cnt.cook || 0, "c"], ["Skip", cnt.skip || 0, "s"]];
+  const total = mix.reduce((a, [, x]) => a + x, 0) || 1;
+  const today = todayIso();
+  const glance = (v.grid || []).map((d, i) => `<button class="gday${d.date === today ? " now" : ""}" data-glance-day="${i}" aria-label="${esc(d.day)} ${esc(fmtDate(d.date))}: ${MEALS.map(m => {
+      const c = d.meals[m]; return c ? `${m} ${c.kind === "delivery" ? "order" : c.kind}` : null; }).filter(Boolean).join(", ") || "nothing planned"}">
+      <span>${esc(d.day.slice(0, 2))}</span>${MEALS.map(m => { const c = d.meals[m]; if (!c) return `<i class="none"></i>`;
+        const k = ["ordered", "confirmed"].includes(c.status) ? "done" : c.kind === "delivery" ? "o" : c.kind === "cook" ? "c" : "s";
+        return `<i class="${k}"></i>`; }).join("")}</button>`).join("");
+  const hh = v.household;
+  return `<aside class="aside" aria-label="Your week at a glance">
+    <section class="card"><p class="k">This week</p>
+      <div class="money-row">${donut}<div class="t"><b class="h3">${left >= 0 ? `${rupee0(left)} left` : `${rupee0(-left)} over`}</b>
+        <span class="muted">${rupee0(spend)} planned of ${rupee0(cap)}</span>
+        ${b.daily_cap ? `<span class="fine">Daily cap ${rupee0(b.daily_cap)}</span>` : ""}</div></div>
+      <div class="mix" role="img" aria-label="${mix.map(([l, x]) => `${l} ${x}`).join(", ")}">${mix.filter(([, x]) => x).map(([, x, k]) => `<i class="${k}" style="flex:${x / total}"></i>`).join("")}</div>
+      <div class="mix-key">${mix.map(([l, x, k]) => `<span><i class="${k}"></i>${l} ${x}</span>`).join("")}</div></section>
+    ${bars ? `<section class="card"><p class="k">Nutrition · a day, on average</p>${bars}
+      <p class="fine">From the meals in your plan${v.source?.kind === "live" ? ", estimated from dish names" : ""}. Skipped meals add nothing.</p></section>` : ""}
+    <section class="card"><p class="k">Day by day</p><div class="glance">${glance}</div>
+      <div class="mix-key"><span><i class="o"></i>Order</span><span><i class="c"></i>Cook</span><span><i class="done"></i>Had</span></div></section>
+    ${hh?.split?.length ? `<section class="card"><p class="k">${esc(hh.name || "Household")} · split so far</p>
+      <table>${hh.split.map(x => `<tr><td>${esc(x.member)}</td><td class="num">${rupee(x.share)}</td></tr>`).join("")}</table></section>` : ""}
+  </aside>`;
+}
 function tabBody() {
   if (S.tab === "week") return weekScreen();
   if (S.tab === "saved") return savedScreen();
@@ -947,6 +1010,7 @@ function todayScreen() {
   return `<div class="rise"><h1 class="h1">${greeting()}${first}</h1>
       <p class="muted">${left >= 0 ? `${rupee0(left)} left this week` : `${rupee0(-left)} over this week's budget`} · <button class="link" data-tab="week" style="min-height:0;font-size:inherit;color:inherit">see the week</button></p></div>
     ${realDishesState()}
+    ${hungryCard(nu)}
     ${nu ? nextUpCard(nu) : v.source?.kind === "none" ? "" : `<section class="empty rise2">${mascot()}<h2 class="h2">Nothing left to plan this week.</h2><button class="primary" data-act="newweek">Plan next week</button></section>`}
     ${S.ask ? askReminders() : ""}
     ${liveCartBlock()}
@@ -1016,7 +1080,7 @@ function nextUpCard(nu) {
   const c = nu.cell, when = `${nu.when} · ${cap1(nu.meal)}`;
   const isCook = c.kind === "cook";
   if (c.status === "confirmed" || c.status === "ordered") {
-    return `<section class="card hero rise2" aria-label="Next meal"><div class="dish-row">${dishIcon(c.item, { cook: isCook, lg: true })}<div class="t"><span class="eyebrow">${esc(when)}</span>
+    return `<section class="card hero rise2" aria-label="Next meal"><div class="dish-row">${dishIcon(c.item, { cook: isCook, lg: true, image: photoOf(c) })}<div class="t"><span class="eyebrow">${esc(when)}</span>
       <h2 class="h2">${esc(c.item)}</h2><span class="muted">${c.status === "ordered" ? "Ordered" : "You had this"} · ${cellMoney(c)}</span></div></div>
       ${rateRow(c)}${learnedChips()}</section>`;
   }
@@ -1036,13 +1100,14 @@ function nextUpCard(nu) {
     ? `<button class="heart" data-fav="${c.restaurant_id}" aria-pressed="${!!c.usual}" aria-label="${c.usual ? "Remove" : "Save"} ${esc(c.restaurant)} ${c.usual ? "from" : "to"} your places">${ICON.heart}</button>` : "";
   return `<section class="card hero rise2 ${esc(c.kind)}" aria-label="Next meal">
     <div class="hero-head"><span class="eyebrow">${esc(when)}${sampleDish ? " · sample dish" : ""}</span>${!isCook && !carted ? orderTimer(order) : ""}</div>
-    <div class="dish-row">${dishIcon(c.item, { cook: isCook, lg: true })}<div class="t">
+    <div class="dish-row">${dishIcon(c.item, { cook: isCook, lg: true, image: photoOf(c) })}<div class="t">
       <h2 class="h2">${esc(c.item)}</h2>
       <span class="muted" style="font-size:14px">${isCook ? "Cook at home" : esc(c.restaurant)}${!isCook && c.rating ? ` · ${Number(c.rating).toFixed(1)}★` : ""}</span></div>${heart}</div>
     ${carted ? "" : whyChips(c)}
     ${carted ? "" : `<div class="price-line"><span class="money">${c.real_bill ? real(c.cost) : est(c.cost)}</span><span class="fine">${isCook ? esc(c.cost_basis || "grocery estimate") : c.real_bill ? "Swiggy's bill" : "Swiggy shows the exact bill"}</span></div>`}
     ${reasons.length && !carted ? `<details class="why-more"><summary>Why this?</summary><ul>${reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul></details>` : ""}
     ${cta}
+    ${carted ? "" : quickStrip(c)}
     ${carted ? "" : `<div class="two"><button class="secondary" data-sheet="${c.session_id}">${ICON.swap}Change</button>
       <button class="secondary" data-sess="${c.session_id}:skipped">Skip ${esc(nu.meal)}</button></div>
       ${isCook ? "" : `<button class="ghost small" data-confirm="${c.session_id}">Already had it? Mark as had</button>`}`}
@@ -1138,6 +1203,77 @@ function trackingCard() {
     <p class="muted">${esc(t.subtitle || t.message || "Swiggy did not return a current delivery update.")}</p>${t.eta ? `<p>${esc(t.eta)}</p>` : ""}</section>`;
 }
 // The rest of today, or tomorrow when today is done: one tap opens the same Change sheet.
+/* Today, for people who decide when they're hungry: other dishes for the same meal one tap
+   away (no sheet), and any meal whose time it is now, even one the week leaves out. */
+const quickKey = (c) => `${c.session_id}:${c.kind}:${c.item_id ?? c.recipe_key ?? ""}`;
+function queueQuick() {
+  if (S.tab !== "today" || !S.view || S.offline) return;
+  const c = S.view.next_up?.cell;
+  if (!c || c.status !== "active" || !["delivery", "cook"].includes(c.kind) || (S.carts || {})[c.session_id]) return;
+  const key = quickKey(c);
+  if (S.quick?.key === key) return;
+  S.quick = { key, sid: c.session_id, data: null };
+  setTimeout(() => loadQuick(key), 0);
+}
+async function loadQuick(key) {
+  let data = null;
+  try { data = await api(`/api/session/${S.quick.sid}/options`); } catch { /* the strip just stays away */ }
+  if (S.quick?.key !== key) return;
+  S.quick.data = data || { failed: true };
+  render();
+  loadPhotos([S.view.next_up?.cell, ...quickPicks(S.quick.data)]);
+}
+// Up to four dishes: the best of each place first (variety), dishes that fit the budget first.
+function quickPicks(d) {
+  if (!d || d.failed) return [];
+  const groups = d.usual || [];
+  const firsts = groups.filter(g => g.dishes[0]).map(g => ({ ...g.dishes[0], restaurant: g.restaurant }));
+  const rest = groups.flatMap(g => g.dishes.slice(1).map(x => ({ ...x, restaurant: g.restaurant })));
+  const all = [...firsts, ...(d.new || []), ...rest].filter(x => !x.current);
+  return [...all.filter(x => x.fits), ...all.filter(x => !x.fits)].slice(0, 4);
+}
+function quickStrip(c) {
+  const q = S.quick;
+  if (!q || q.sid !== c.session_id) return "";
+  if (!q.data) return `<div class="quick-wrap" aria-busy="true"><p class="k">Or have instead</p><div class="quick">${'<span class="qpick ghosted"></span>'.repeat(3)}</div></div>`;
+  const picks = quickPicks(q.data);
+  const cook = c.kind !== "cook" ? (q.data.cook || [])[0] : null;
+  if (!picks.length && !cook) return "";
+  return `<div class="quick-wrap"><p class="k" id="quick-${c.session_id}">Or have instead</p>
+    <div class="quick" role="group" aria-labelledby="quick-${c.session_id}">
+    ${picks.map(x => `<button class="qpick${x.fits ? "" : " over"}" data-quick="${x.item_id}" data-quick-name="${esc(x.name)}"
+      aria-label="${esc(`${x.name}, ${x.restaurant}, about ${rupee0(x.price)}${x.fits ? "" : ", over budget"}`)}">
+      ${dishIcon(x.name, { image: photoOf(x), lg: true })}<b>${esc(x.name)}</b><span class="muted">${esc(x.restaurant)}</span>
+      <span class="pr">≈${rupee0(x.price)}${x.fits ? "" : ` <i>over</i>`}</span></button>`).join("")}
+    ${cook ? `<button class="qpick" data-quick-cook="${esc(cook.recipe_key)}" data-quick-name="${esc(cook.name)}" aria-label="${esc(`Cook ${cook.name} at home, about ${rupee0(cook.price)}`)}">
+      ${dishIcon(cook.name, { cook: true, lg: true })}<b>${esc(cook.name)}</b><span class="muted">Cook at home</span><span class="pr">≈${rupee0(cook.price)}</span></button>` : ""}
+    </div></div>`;
+}
+// The meal whose time it is: until 90 minutes after its planned time (10:30, 14:30, 22:00).
+function mealNow() {
+  const d = new Date(), m = d.getHours() * 60 + d.getMinutes();
+  return m < 630 ? "breakfast" : m < 870 ? "lunch" : m < 1320 ? "dinner" : null;
+}
+function hungryCard(nu) {
+  const meal = mealNow(), v = S.view, today = todayIso();
+  if (!meal || !v.source || v.source.kind === "none" || S.offline) return "";
+  if (nu && nu.date === today && nu.meal === meal) return "";
+  const day = (v.grid || []).find(d => d.date === today);
+  if (!day) return "";
+  const cell = day.meals[meal];
+  if (cell && cell.status !== "skipped" && cell.kind !== "skip") return "";     // planned, carted or had
+  return `<section class="hungry rise2" aria-label="Hungry now">${mascot("", "")}<div class="t"><b>Hungry now?</b>
+    <span class="muted">${cell ? `You skipped ${meal}` : `${cap1(meal)} isn't in your week`}. Get one in two taps.</span></div>
+    <button class="secondary small" data-hungry="${meal}">Get ${meal}</button></section>`;
+}
+async function eatNow(meal) {
+  const r = await api(`/api/plan/${S.planId}/eat-now`, "POST", { meal });
+  adoptView(r.plan);
+  const nu = S.view.next_up;
+  if (!nu || nu.cell.session_id !== r.session_id) { await openSheet(r.session_id); return; }
+  toast(`${cap1(meal)} is in. Add it to your cart or pick another below.`); render();
+}
+
 function laterList(nu) {
   if (!nu) return "";
   const day = S.view.grid[nu.day_index];
@@ -1255,7 +1391,7 @@ function mealRow(m, meal) {
     : m.kind === "cook" ? (m.recipe_key ? "Cook at home · grocery estimate" : "From your fridge") : esc((m.reasons || [])[0] || "Skipped");
   const name = off && !food ? "Skipped" : m.item;
   return `<button class="mrow ${off ? "off" : ""} ${target ? "target" : ""}" data-meal="${m.session_id}" aria-label="${esc(cap1(meal))}: ${esc(name)}${target ? ". Tap to swap here" : ""}">
-    ${food ? dishIcon(m.item, { cook: m.kind === "cook" }) : `<span class="dicon" style="--h:0" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></span>`}
+    ${food ? dishIcon(m.item, { cook: m.kind === "cook", image: photoOf(m) }) : `<span class="dicon" style="--h:0" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></span>`}
     <span class="t"><span class="lbl">${esc(cap1(meal))}</span><b>${esc(name)} ${m.pinned ? `<span class="tag" title="Kept: re-plans leave it">${ICON.pin}kept</span>` : ""}${m.usual === false && m.kind === "delivery" ? '<span class="tag hot">new</span>' : ""}${status}</b>
       <span class="s">${sub}</span></span>
     <span class="p"${m.cost_basis ? ` title="${esc(m.cost_basis)}"` : ""}>${food && m.cost ? cellMoney(m) : ""}</span></button>`;
@@ -1313,7 +1449,7 @@ function pickBtn(x, place, d) {
   const why = x.why && !/^fits( your budget)?$/i.test(x.why.trim()) ? x.why : "";
   const note = cur ? ["Current pick", ""] : !x.fits ? [`Over by ${rupee0(Math.max(0, x.price - left))}`, "warn"] : [why, "ok"];
   return `<button class="pick ${x.fits ? "" : "over"} ${cur ? "current" : ""}" data-pick="${x.item_id}" data-pick-name="${esc(x.name)}">
-    ${dishIcon(x.name)}<span class="t"><b>${esc(x.name)}</b><span>${esc(place || "")}${x.instructions?.length ? ` · will ask: “${esc(x.instructions.join("; "))}”` : ""}</span>
+    ${dishIcon(x.name, { image: photoOf(x) })}<span class="t"><b>${esc(x.name)}</b><span>${esc(place || "")}${x.instructions?.length ? ` · will ask: “${esc(x.instructions.join("; "))}”` : ""}</span>
       ${note[0] ? `<span class="pillnote ${note[1]}">${esc(note[0])}</span>` : ""}</span><b class="pr">${rupee0(x.price)}</b></button>`;
 }
 function sheetDialog() {
@@ -1395,6 +1531,7 @@ function cookingPanel() {
       <span class="s">${esc(b.recipe)} · needs ${esc(unit(b))} for ${b.servings} serving${b.servings === 1 ? "" : "s"}</span></span>
     <span class="stack" style="gap:2px;align-items:flex-end"><span class="p">${b.have ? "—" : rupee(b.price)}</span>
       <label class="check" style="min-height:32px"><input type="checkbox" data-have="${esc(b.name)}" ${b.have ? "checked" : ""}> Have it</label>
+      ${b.have ? "" : `<a class="small btn ghost" href="${esc(instamartUrl(b.swap ? b.swap.name : b.name))}" target="_blank" rel="noopener" aria-label="Find ${esc(b.swap ? b.swap.name : b.name)} on Instamart">Instamart ${ICON.out}</a>`}
       ${b.swap ? `<button class="small ghost" data-unswap="${esc(b.token)}">Undo</button>`
         : (b.swappable && !b.have ? `<button class="small ghost" data-oos="${esc(b.token)}">Out of stock?</button>` : "")}</span></div>`).join("");
   const swapped = c.basket.items.some(b => b.swap);
@@ -1403,10 +1540,22 @@ function cookingPanel() {
     ${S.swapPick ? swapPicker() : ""}
     <section class="card tight"><h3 class="k" style="padding:14px 0 2px">Grocery list · ${rupee(c.basket.total)}</h3>
       ${basket || `<p class="fine" style="padding:12px 0">Nothing left to buy for this week's cooking.</p>`}
+      ${c.basket.items.some(b => !b.have) ? `<div class="row" style="padding-top:10px"><button class="small secondary" data-act="copy-groceries">Copy list</button>
+        <a class="small btn secondary" href="https://www.swiggy.com/instamart" target="_blank" rel="noopener">Open Instamart ${ICON.out}</a></div>` : ""}
       <p class="fine" style="padding:8px 0 14px">For the cook meals still ahead${S.view.household ? ", for everyone eating each one" : ""}, rounded up to whole packs. Tick what you already have.${swapped ? " Prices are for the original items." : ""}</p></section>
     ${recipes}
     ${safe ? `<div class="card"><p class="k">Also safe with a swap</p><ul class="fine" style="margin-left:18px">${safe}</ul>
       <p class="fine">These recipes are left out of your plan as written. With these swaps nobody's allergies or diet are broken.</p></div>` : ""}`;
+}
+// Instamart hand-off: Swiggy's public Instamart search for one grocery line (pack size left
+// out so it matches any brand). Ziggy doesn't fill an Instamart cart.
+function instamartUrl(name) {
+  const q = String(name || "").replace(/\s*\(\d+\)\s*$/, "").replace(/\s*\d+(\.\d+)?\s*(g|kg|ml|l)\b/gi, "").trim();
+  return `https://www.swiggy.com/instamart/search?custom_back=true&query=${encodeURIComponent(q)}`;
+}
+function groceryText() {
+  const items = (S.view.coach?.basket?.items || []).filter(b => !b.have);
+  return items.map(b => `- ${b.qty > 1 ? `${b.qty} × ` : ""}${b.swap ? b.swap.name : b.name}`).join("\n");
 }
 function swapPicker() {
   const p = S.swapPick, d = p.data;
@@ -2213,6 +2362,7 @@ function wire() {
   on("[data-go]", "click", (e) => { const [t, sub] = e.currentTarget.dataset.go.split(":"); guard(() => goTab(t, sub || null)); });
   on("[data-week-view]", "click", (e) => { const v = e.currentTarget.dataset.weekView || null; guard(() => goWeekView(v)); });
   on("[data-day]", "click", (e) => { S.weekDay = Number(e.currentTarget.dataset.day); render(); });
+  on("[data-glance-day]", "click", (e) => { S.weekDay = Number(e.currentTarget.dataset.glanceDay); S.tab = "week"; S.weekView = null; S.more = null; render(); });
   on("[data-saved-tab]", "click", (e) => { S.savedTab = e.currentTarget.dataset.savedTab; render(); });
   on("[data-sheet-tab]", "click", (e) => { S.sheet.tab = e.currentTarget.dataset.sheetTab; render(); });
   on("[data-sheet-place]", "click", (e) => { S.sheet.place = e.currentTarget.dataset.sheetPlace; render(); });
@@ -2235,6 +2385,11 @@ function wire() {
   on("[data-fav]", "click", (e) => guard(() => toggleFav(e.currentTarget.dataset.fav), "Save this place"));
   on("[data-pick]", "click", (e) => guard(() => choose(S.sheet.sid, { item_id: Number(e.currentTarget.dataset.pick) },
     `${e.currentTarget.dataset.pickName} it is. The rest of the week re-balanced.`)));
+  on("[data-quick]", "click", (e) => { const t = e.currentTarget; guard(() => choose(S.quick.sid, { item_id: Number(t.dataset.quick) },
+    `${t.dataset.quickName} it is. The rest of the week re-balanced.`)); });
+  on("[data-quick-cook]", "click", (e) => { const t = e.currentTarget; guard(() => choose(S.quick.sid, { recipe_key: t.dataset.quickCook },
+    `Cook ${t.dataset.quickName} at home. It's on your grocery list.`)); });
+  on("[data-hungry]", "click", (e) => guard(() => eatNow(e.currentTarget.dataset.hungry)));
   on("[data-cook]", "click", (e) => guard(() => choose(S.sheet.sid, { recipe_key: e.currentTarget.dataset.cook }, "Cook at home. It's on your grocery list.")));
   on("[data-choose-auto]", "click", (e) => guard(() => choose(e.currentTarget.dataset.chooseAuto, { action: "auto" }, "Ziggy will choose this one")));
   on("[data-move]", "click", (e) => { S.moving = Number(e.currentTarget.dataset.move); S.sheet = null; S.tab = "week"; S.weekView = null; render(); });
@@ -2311,6 +2466,11 @@ function wire() {
     "hh-edit-cancel": async () => { S.hhEdit = null; render(); },
     "hh-leave": () => householdCall("/leave", "POST", {}, "Stopped sharing. Your plan uses your own rules again."),
     "swap-cancel": async () => { S.swapPick = null; render(); },
+    "copy-groceries": async () => {
+      const text = groceryText();
+      try { await navigator.clipboard.writeText(text); toast("Grocery list copied. Paste it into Instamart or a note."); }
+      catch { throw new Error("Couldn't copy here. Select the list and copy it instead"); }
+    },
   };
   on("[data-act]", "click", (e) => { e.preventDefault(); const a = e.currentTarget.dataset.act, f = acts[a]; if (f) guard(f, ACT_LABELS[a]); });
   const deleteForm = document.getElementById("delete-profile");

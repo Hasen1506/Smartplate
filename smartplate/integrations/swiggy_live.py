@@ -305,6 +305,98 @@ def _image(record: dict) -> str | None:
     return None
 
 
+# Photos Swiggy showed are remembered per restaurant + dish name, so a planned dish (read
+# from get_restaurant_menu, which has none) can show the restaurant's own photo. A miss is
+# remembered for a day so the same dish is not searched again on every visit.
+PHOTO_TTL = dt.timedelta(days=7)
+PHOTO_MISS_TTL = dt.timedelta(hours=24)
+PHOTO_LOOKUPS = 4          # scoped search_menu calls one photos request may make
+
+
+def remember_photos(user_id: int, restaurant_id, items: list[dict], *, misses=()) -> None:
+    """Keep the photo of every dish in a Swiggy reply; `misses` are dish names Swiggy
+    showed without one."""
+    now = clock.now().isoformat(timespec="seconds")
+    rows = [(user_id, str(restaurant_id), _name(it["name"]), it["image"], now)
+            for it in items if it.get("image") and it.get("name")]
+    rows += [(user_id, str(restaurant_id), _name(n), None, now) for n in misses]
+    if not rows or not restaurant_id:
+        return
+    with db.cursor() as cur:
+        for row in rows:
+            cur.execute("INSERT OR REPLACE INTO swiggy_photos(user_id, restaurant_id, dish, image, checked_ts) "
+                        "VALUES (?,?,?,?,?)", row)
+
+
+def _live_dishes(user_id: int, item_ids) -> dict:
+    """Local menu item id → (Swiggy restaurant id, dish name) for the user's live dishes."""
+    ids = sorted({int(i) for i in item_ids if isinstance(i, int) and not isinstance(i, bool)})
+    if not ids:
+        return {}
+    from ..domain import live_catalog
+    marks = ",".join("?" * len(ids))
+    with db.cursor() as cur:
+        rows = cur.execute(f"SELECT m.id, m.name, r.provider_id FROM menu_items m JOIN restaurants r "
+                           f"ON r.id = m.restaurant_id WHERE m.id IN ({marks}) AND r.city=? AND r.source='live' "
+                           f"AND r.provider_id IS NOT NULL", (*ids, live_catalog.city_key(user_id))).fetchall()
+    return {r["id"]: (str(r["provider_id"]), r["name"]) for r in rows}
+
+
+def _cached_photos(user_id: int, dishes: dict) -> dict:
+    """item id → photo URL, or None for a fresh miss; ids never checked are left out."""
+    if not dishes:
+        return {}
+    with db.cursor() as cur:
+        rows = cur.execute("SELECT restaurant_id, dish, image, checked_ts FROM swiggy_photos WHERE user_id=?",
+                           (user_id,)).fetchall()
+    now = clock.now()
+    seen = {}
+    for r in rows:
+        age = now - dt.datetime.fromisoformat(r["checked_ts"])
+        if age <= (PHOTO_TTL if r["image"] else PHOTO_MISS_TTL):
+            seen[(r["restaurant_id"], r["dish"])] = r["image"]
+    out = {}
+    for item_id, (rid, name) in dishes.items():
+        if (rid, _name(name)) in seen:
+            out[item_id] = seen[(rid, _name(name))]
+    return out
+
+
+def known_photos(user_id: int, item_ids) -> dict:
+    """Photos already seen for these local menu item ids (no Swiggy call)."""
+    return {k: v for k, v in _cached_photos(user_id, _live_dishes(user_id, item_ids)).items() if v}
+
+
+def dish_photos(user_id: int, item_ids) -> dict:
+    """Swiggy's own photo for each dish (local menu item ids): from the cache, else a scoped
+    search_menu for at most PHOTO_LOOKUPS unchecked dishes. Never raises for Swiggy errors:
+    a dish without a photo keeps its icon."""
+    dishes = _live_dishes(user_id, item_ids)
+    out = _cached_photos(user_id, dishes)
+    todo = [i for i in dishes if i not in out][:PHOTO_LOOKUPS]
+    if not todo:
+        return {str(k): v for k, v in out.items()}
+    try:
+        conn = _conn(user_id)
+        tool = _tool(conn, "search_menu")
+        if not _find((tool.get("input_schema") or {}).get("properties") or {}, "restaurant_scope"):
+            raise SwiggyError("search_menu cannot be scoped to one restaurant")
+        address_id = _address(conn)
+        for item_id in todo:
+            rid, name = dishes[item_id]
+            data = call(user_id, "search_menu", build_args(tool, {
+                "query": name[:80], "address": address_id, "restaurant_scope": rid}))
+            rows = [r for r in records(data, "menu_item_id", "name")
+                    if _get(r, "restaurant_id") is None or str(_get(r, "restaurant_id")) == rid]
+            seen = [{"name": str(_get(r, "name")), "image": _image(r)} for r in rows]
+            hit = next((s["image"] for s in seen if _name(s["name"]) == _name(name) and s["image"]), None)
+            remember_photos(user_id, rid, seen, misses=() if hit else (name,))
+            out[item_id] = hit
+    except (SwiggyError, ValueError) as exc:
+        logging.getLogger(__name__).info("dish photos: %s", exc)
+    return {str(k): v for k, v in out.items()}
+
+
 def _categories(record: dict) -> list[str]:
     cats = record.get("categories") if isinstance(record, dict) else None
     if isinstance(cats, str):
@@ -788,6 +880,7 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
         for c in item["categories"]:
             if c not in categories:
                 categories.append(c)
+    remember_photos(user_id, restaurant_id, items)
     total = body.get("totalItems") if isinstance(body, dict) else None
     return {"restaurant": place, "address": conn.get("address_label") or _address(conn),
             "items": items, "categories": categories, "hidden_nonveg": hidden,
@@ -838,6 +931,7 @@ def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, q
                       "in_stock": _flag(_get(row, "stock")), "has_options": _has_options(row),
                       "categories": _categories(row), "bestseller": row.get("isBestseller") is True,
                       "image": _image(row), "name_allergens": _name_allergens(name, veg)})
+    remember_photos(user_id, restaurant_id, items)
     more = body.get("hasMore") is True
     next_offset = body.get("nextOffset") if more else None
     if more and (not isinstance(next_offset, int) or isinstance(next_offset, bool) or not offset < next_offset <= 10000):
@@ -972,6 +1066,7 @@ def cart_preview(session_id: int) -> dict:
                "item": str(_get(item, "name")), "item_id": item_id, "address_id": address_id}
     fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price")},
                                             sort_keys=True).encode()).hexdigest()
+    remember_photos(user_id, place["id"], [{"name": cell["item"], "image": _image(item)}])
     return {**details, "address": conn.get("address_label") or "Selected Swiggy address",
             "menu_price": rupees(item, menu_unit(records(data, "menu_item_id", "name"))),
             "price_estimated": price_estimated(item), "image": _image(item), "fingerprint": fingerprint}
