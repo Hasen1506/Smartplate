@@ -346,6 +346,7 @@ MIGRATIONS = [
     ("menu_items", "source", "TEXT NOT NULL DEFAULT 'sample'"),
     ("menu_items", "provider_item_id", "TEXT"),                         # Swiggy menu item id (live rows)
     ("menu_items", "nutrition_estimated", "INTEGER NOT NULL DEFAULT 0"),
+    ("menu_items", "nutrition_known", "INTEGER NOT NULL DEFAULT 1"),   # 0: a pooled dish with no estimate
     ("community_templates", "author_user_id", "INTEGER"),
     ("users", "observances", "TEXT NOT NULL DEFAULT '[]'"),
     ("users", "prefs", "TEXT NOT NULL DEFAULT '{}'"),

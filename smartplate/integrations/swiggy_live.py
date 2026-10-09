@@ -806,9 +806,12 @@ def search_live_restaurants(user_id: int, query: str) -> dict:
         if rid in seen:
             continue
         seen.add(rid)
+        cuisines = row.get("cuisines")
         found.append({"id": rid, "name": str(_get(row, "name")), "rating": _get(row, "rating"),
                       "eta": _get(row, "eta"), "area": _get(row, "area"),
-                      "availability": _get(row, "availability"), "distance": _get(row, "distance")})
+                      "availability": _get(row, "availability"), "distance": _get(row, "distance"),
+                      "cuisines": [str(c)[:40] for c in cuisines if isinstance(c, str)][:6]
+                                  if isinstance(cuisines, list) else []})
     return {"address": conn.get("address_label") or address_id, "address_id": address_id,
             "query": query, "restaurants": found}
 

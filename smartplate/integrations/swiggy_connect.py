@@ -87,6 +87,19 @@ CREATE TABLE IF NOT EXISTS swiggy_favourites (
     restaurant_name TEXT NOT NULL,
     PRIMARY KEY (user_id, address_id, restaurant_id)
 );
+CREATE TABLE IF NOT EXISTS swiggy_meal_pools (   -- the dishes a person wants for each meal (domain/meal_pools.py)
+    user_id INTEGER NOT NULL,
+    address_id TEXT NOT NULL,
+    meal TEXT NOT NULL,
+    restaurant_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    restaurant_name TEXT NOT NULL,
+    name TEXT NOT NULL,
+    price REAL,
+    veg INTEGER,
+    added_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, address_id, meal, restaurant_id, item_id)
+);
 CREATE TABLE IF NOT EXISTS swiggy_order_attempts (
     user_id INTEGER NOT NULL,
     fingerprint TEXT NOT NULL,

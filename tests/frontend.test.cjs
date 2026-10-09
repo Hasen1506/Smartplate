@@ -235,7 +235,7 @@ test('eligible profiles add the planned dish to the Swiggy cart in one tap, and 
 
 test('connected Saved uses real Swiggy IDs and no sample restaurant cards', async () => {
   const { context } = fixture(); await context.bootPromise;
-  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'addr-home', label: 'Home' } };
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'addr-home', label: 'Home' } }; S.savedTab = 'places';
     S.places = [{ id: 1, name: 'Sample Diner', favourite: true }];
     S.liveFavourites = [{ id: 'rest-42', name: '<Real Place>' }];
     S.liveBrowseMenu = { restaurant: { id: 'rest-42', name: '<Real Place>' }, address: 'Home', fetched: 'today',
@@ -244,7 +244,7 @@ test('connected Saved uses real Swiggy IDs and no sample restaurant cards', asyn
   assert.match(html, /data-live-place="rest-42"/);
   assert.match(html, /data-live-item="item-7"/);
   assert.match(html, /Price in cart/);
-  assert.match(html, /Search restaurants on Swiggy/);
+  assert.match(html, /Search restaurants or dishes on Swiggy/);
   assert.ok(!html.includes('Sample Diner') && !html.includes('<Real Place>') && !html.includes('<Dish>'));
 });
 
@@ -1389,4 +1389,67 @@ test('Who is eating chips show the household with the current eaters pressed', a
   assert.match(html, /aria-pressed="false" data-eater="9:3">&lt;Arjun&gt;</);
   vm.runInContext('S.view.household = null', context);
   assert.equal(vm.runInContext('whoEats', context)({ session_id: 9, eaters: [2] }), '');
+});
+
+test('My meals shows each meal pool, the plan places as a palette, and tap fallbacks for dragging', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'a1', label: 'Home' } };
+    S.pools = { address: 'Home', max_per_meal: 20, meals: { breakfast: [{ restaurant_id: 'r1', restaurant_name: 'Annapoorna', item_id: 'i1',
+      name: '<Pongal>', veg: true, price: 90, on_menu: true, nutrition_known: true }], lunch: [], dinner: [{ restaurant_id: 'r1',
+      restaurant_name: 'Annapoorna', item_id: 'i9', name: 'Gone Dish', veg: true, price: 50, on_menu: false }] },
+      places: [{ id: 'r1', name: 'Annapoorna', saved: true }, { id: 'r2', name: 'Green Bowl', saved: false }] };
+    S.poolOpen = 'r1'; S.poolMenus = { r1: { items: [{ id: 'i1', name: '<Pongal>', price: 90, veg: true, categories: ['Tiffin'] },
+      { id: 'i2', name: 'Family Pack', price: 900, veg: true, has_options: true }] } };`, context);
+  const html = vm.runInContext('poolsBoard()', context);
+  assert.match(html, /data-drop="breakfast"/);
+  assert.match(html, /&lt;Pongal&gt;/);
+  assert.ok(!html.includes('<Pongal>'));
+  assert.match(html, /not on today's menu/);
+  assert.match(html, /aria-label="Move &lt;Pongal&gt; to lunch"/);
+  assert.match(html, /aria-pressed="true" aria-label="In breakfast: &lt;Pongal&gt;"/);
+  assert.match(html, /1 dishes with sizes or add-ons aren't shown/);
+  assert.match(html, /places Ziggy found near you/);
+  assert.match(html, /Green Bowl/);
+});
+
+test('Picking a meal from anywhere shows a banner, Have-for buttons, and cuisine filters from Swiggy', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'a1', label: 'Home' } }; S.pools = { meals: { breakfast: [], lunch: [], dinner: [] } };
+    S.pickFor = { sid: 7, meal: 'dinner', day: 'Mon' };
+    S.liveResults = { browse: true, address: 'Home', query: 'meals', restaurants: [
+      { id: 'r1', name: 'Dhaba', cuisines: ['North Indian'], eta: 40 }, { id: 'r2', name: 'Wok', cuisines: ['Chinese'], eta: '30' }] };
+    S.liveBrowseMenu = { restaurant: { id: 'r1', name: 'Dhaba' }, address: 'Home', fetched: 'today',
+      items: [{ id: 'd1', name: 'Dal Makhani', price: 190, veg: true, in_stock: true }, { id: 'd2', name: 'Thali', price: 230, veg: true, has_options: true }] };`, context);
+  const saved = vm.runInContext('savedScreen()', context);
+  assert.match(saved, /Choosing Mon dinner/);
+  assert.match(saved, /Places Swiggy lists near Home · 2/);
+  assert.match(saved, /data-cuisine="North Indian"/);
+  assert.match(saved, /40 min/);
+  vm.runInContext("S.cuisine = 'Chinese'", context);
+  const filtered = vm.runInContext('liveResultsBlock()', context);
+  assert.ok(filtered.includes('Wok') && !filtered.includes('Dhaba'));
+  const menu = vm.runInContext('menuSheet()', context);
+  assert.match(menu, /data-have-dish="d1"[^>]*>Have for dinner/);
+  assert.match(menu, /data-have-dish="d2"[^>]*disabled/);
+  assert.ok(!menu.includes('data-live-item="d1"'));
+});
+
+test('the recipe library credits Wikibooks under CC BY-SA and searches by ingredient', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`S.library = { available: true, total: 2, hidden: 1, license: { name: 'CC BY-SA 4.0', url: 'https://creativecommons.org/licenses/by-sa/4.0/' },
+    recipes: [{ title: 'Tadka <Dal>', url: 'https://en.wikibooks.org/wiki/Cookbook:Tadka_Dal', servings: 4, time: '40 minutes', credit: 'Wikibooks contributors', license: 'CC BY-SA 4.0',
+      ingredients: ['1 cup toor dal', '1 tbsp ghee'], steps: ['Cook the dal.'] },
+      { title: 'Lemon Rice', url: 'https://en.wikibooks.org/wiki/Cookbook:Lemon_Rice', credit: 'Wikibooks contributors', license: 'CC BY-SA 4.0', ingredients: ['rice', 'lemon'], steps: ['Mix.'] }] };`, context);
+  const html = vm.runInContext('recipeLibrary()', context);
+  assert.match(html, /2 recipes from the/);
+  assert.match(html, /CC BY-SA 4.0/);
+  assert.match(html, /1 hidden: their ingredients break your diet or allergies/);
+  assert.match(html, /Tadka &lt;Dal&gt; on Wikibooks/);
+  assert.match(html, /instamart\/search\?custom_back=true&amp;query=toor%20dal"/);
+  assert.equal(vm.runInContext('ingredientQuery', context)('2 green chillies, slit'), 'green chillies');
+  vm.runInContext("S.libraryQ = 'toor'", context);
+  const found = vm.runInContext('recipeLibrary()', context);
+  assert.ok(found.includes('Tadka') && !found.includes('Lemon Rice'));
+  vm.runInContext("S.library = { available: false, recipes: [] }", context);
+  assert.equal(vm.runInContext('recipeLibrary()', context), '');
 });

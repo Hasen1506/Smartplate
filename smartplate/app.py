@@ -7,7 +7,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
-from .domain import epicure, flavour, learning, live_catalog, models, sentiment, week_orders
+from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, week_orders
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
 from .kernel import agent_brain
@@ -691,6 +691,9 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy/restaurants")
     def swiggy_live_restaurants(user_id):
+        if request.args.get("browse") == "1":      # every place Swiggy lists for the address
+            found = swiggy_live.search_live_restaurants(user_id, live_catalog.DEFAULT_QUERY)
+            return jsonify({**found, "browse": True})
         return jsonify(swiggy_live.search_live_restaurants(user_id, request.args.get("query", "")))
 
     @app.get("/api/user/<int:user_id>/swiggy/favourites")
@@ -715,6 +718,34 @@ def create_app() -> Flask:
             raise ValueError("Invalid menu page")
         return jsonify(swiggy_live.search_live_dishes(user_id, request.args.get("restaurant_id", ""),
             request.args.get("restaurant_name", ""), request.args.get("query", ""), int(offset)))
+
+    @app.get("/api/user/<int:user_id>/recipes")
+    def recipe_library_view(user_id):
+        from .domain import recipe_library
+        user = models.get_user(user_id)
+        if not user:
+            raise KeyError("Profile not found")
+        return jsonify(recipe_library.for_user(user, request.args.get("q", "")[:60]))
+
+    # Meal pools (domain/meal_pools.py): the dishes a person wants for each meal.
+    @app.get("/api/user/<int:user_id>/pools")
+    def pools_view(user_id):
+        return jsonify(meal_pools.view(user_id))
+
+    @app.post("/api/user/<int:user_id>/pools")
+    def pools_add(user_id):
+        body = request.get_json(silent=True) or {}
+        ratelimit.check(f"pools:{user_id}", 60, 3600)
+        if body.get("from_meal"):
+            return jsonify(meal_pools.move(user_id, body.get("from_meal"), body.get("meal"),
+                                           body.get("restaurant_id"), body.get("item_id")))
+        return jsonify(meal_pools.add(user_id, body.get("meal"), body.get("restaurant_id"),
+                                      str(body.get("restaurant_name") or ""), body.get("item_id")))
+
+    @app.post("/api/user/<int:user_id>/pools/remove")
+    def pools_remove(user_id):
+        body = request.get_json(silent=True) or {}
+        return jsonify(meal_pools.remove(user_id, body.get("meal"), body.get("restaurant_id"), body.get("item_id")))
 
     @app.get("/api/user/<int:user_id>/swiggy/rules")
     def swiggy_rules_view(user_id):
@@ -822,6 +853,10 @@ def create_app() -> Flask:
     @app.get("/api/session/<int:session_id>/options")
     def session_options(session_id):
         return jsonify(everyday.options(session_id))
+
+    @app.post("/api/session/<int:session_id>/choose-live")
+    def session_choose_live(session_id):
+        return jsonify(everyday.choose_live(session_id, request.get_json(silent=True) or {}))
 
     @app.post("/api/session/<int:session_id>/choose")
     def session_choose(session_id):

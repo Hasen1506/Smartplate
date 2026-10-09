@@ -48,12 +48,19 @@ or your phone's setting, and an optional Zomato-red-to-Swiggy-orange colour mesh
    restaurants with one tap) and *Cook*, plus Skip (with Undo), Keep and Swap with
    another meal.
 4. **Week**: a day strip, the chosen day's meals, the budget at a glance, cooking and
-   the grocery list (each line opens Instamart's search; *Copy list* for pasting),
+   the grocery list (each line opens Instamart's search; *Copy list* for pasting), a
+   recipe library from the Wikibooks Cookbook (CC BY-SA 4.0, credited; read and shop,
+   not auto-planned because it has no prices),
    and ordering several meals at once. On a computer, a side panel shows the week's
    balance: money left, nutrition a day against your own targets, the order / cook /
    skip mix, a day-by-day glance and the household split.
-5. **Saved**: your places (search Swiggy and tap ♥), dishes you rated Good, and meals
-   you've had, each with *Order again*.
+5. **Saved**: **My meals** first. Drag dishes from your places' real Swiggy menus into a
+   breakfast, lunch or dinner pool (or tap B, L, D). Each meal is then planned only from
+   its pool, inside the budget, and one favourite may repeat every day. Then your places
+   (search Swiggy and tap ♥, or see every place Swiggy lists near your address, filtered
+   by its own cuisine labels), dishes you rated Good, and meals you've had, each with
+   *Order again*. From any meal's Change sheet, **Any place near you** opens any
+   restaurant's full menu with *Have for dinner*.
 6. **Heads-up and reminders**: rain, heat, holidays, the fasts you keep, budget
    warnings, and a nudge at order-by time (push while the web process is awake, or
    export the times to your calendar).

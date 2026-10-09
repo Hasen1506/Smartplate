@@ -474,3 +474,42 @@ ul.issues{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:8px;font-siz
 .who{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;margin:2px 0 4px}
 .who .k{margin:0}
 .who .chips{gap:6px}
+
+/* Meal pools (Saved → My meals): drop zones per meal, dishes dragged in from real menus */
+.pools{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+body.dragging,body.dragging *{user-select:none;-webkit-user-select:none;cursor:grabbing}
+.pool{padding:14px;border:1.5px solid var(--line);transition:border-color .15s,background .15s}
+.pool.over{border-color:var(--accent);background:var(--accent-soft)}
+.pool .h3{margin:0;font-size:16px}
+.plist,.pmenu{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
+.pempty{border:1.5px dashed var(--line2);border-radius:12px;padding:14px;text-align:center;color:var(--ink2);font-size:13.5px}
+.pchip,.pdish{display:flex;align-items:center;gap:8px;min-height:52px;padding:6px 8px;border-radius:12px;background:var(--raised)}
+.pdish{background:transparent;border-bottom:1px solid var(--line);border-radius:0}
+.pchip.off{opacity:.65}
+.pchip .t,.pdish .t{flex:1;min-width:0;display:flex;flex-direction:column}
+.pchip .t b,.pdish .t b{font-size:14px;line-height:1.25}
+.pchip .t span,.pdish .t>span{font-size:12.5px;color:var(--ink2)}
+.grip{flex:none;display:grid;place-items:center;width:28px;min-height:44px;cursor:grab;color:var(--ink2);touch-action:none;
+  user-select:none;-webkit-user-select:none;letter-spacing:-2px;font-weight:800}
+.pmove{display:inline-flex;align-items:center;gap:4px;flex:none}
+.lmrow .pmove{margin-top:4px}
+button.mini{min-height:32px;min-width:32px;padding:0 8px;border-radius:10px;font-size:12.5px;font-weight:800}
+button.mini[aria-pressed="true"]{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+button.mini svg{width:14px;height:14px}
+.drag-ghost{position:fixed;left:0;top:0;z-index:100;pointer-events:none;opacity:.92;box-shadow:0 12px 30px rgba(0,0,0,.25);
+  background:var(--card);border-radius:12px}
+.pplace{padding:0 14px}
+.pplace-head{display:flex;align-items:center;justify-content:space-between;width:100%;border:0;background:transparent;padding:0;min-height:52px;text-align:left}
+.pplace-head[aria-expanded="true"] svg{transform:rotate(90deg)}
+.pick-banner{border-color:var(--accent-line);background:var(--accent-soft)}
+.dropbar{position:fixed;left:0;right:0;bottom:0;z-index:99;display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+  background:var(--card);border-top:1px solid var(--line);box-shadow:0 -10px 30px rgba(0,0,0,.12)}
+.dropbar .dz{flex:1;display:grid;place-items:center;min-height:64px;border:2px dashed var(--line2);border-radius:14px;font-weight:800}
+.dropbar .dz.over{border-color:var(--accent);border-style:solid;background:var(--accent-soft);color:var(--accent)}
+/* With a sheet or dialog open, toasts move to the top so they never cover its buttons. */
+body:has(.sheet-bg) .toast{bottom:auto;top:calc(env(safe-area-inset-top) + 14px)}
+/* Recipe library (Wikibooks Cookbook) */
+details.recipe summary .t{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+ul.ingr{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+ul.ingr li{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:14px;border-bottom:1px solid var(--line);padding:4px 0}
+ol.steps{margin:0 0 0 18px;display:grid;gap:6px;font-size:14.5px}

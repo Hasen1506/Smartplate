@@ -17,7 +17,7 @@ const S = {
   cartBudget: {}, pendingResume: null, lastLive: null, liveCartErrorCode: null, carts: null,
   sheet: null, hhEdit: null, swapPick: null, moving: null, onboard: null, places: null, calendar: null,
   welcome: false, signin: false, account: null, planning: false, connectSheet: false, addrSheet: false,
-  weekDay: null, weekView: null, savedTab: "places", saved: null, menuCat: null, liveLoading: null, loadedAt: null,
+  weekDay: null, weekView: null, savedTab: null, saved: null, menuCat: null, liveLoading: null, loadedAt: null,
   adding: null, ask: false, handedOff: null,
   offline: typeof navigator !== "undefined" && navigator.onLine === false,
   filters: { veg: false, budget: false, stock: false, flagged: false, fast: false },
@@ -477,7 +477,7 @@ function resetProfileState() {
   for (const key of ["exec", "receipts", "recap", "orderReview", "sheet", "moving", "places", "calendar", "account", "swiggy",
     "swAddrs", "carts", "acctDraft", "liveResults", "liveFavourites", "liveBrowseMenu", "liveOrderReview", "liveCart",
     "checkoutReview", "placedOrder", "liveOrderStatus", "liveOrderHistory", "liveCartError", "liveCartEmpty", "saved",
-    "weekDay", "weekView", "orderQueue", "handedOff"]) S[key] = null;
+    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "library", "libraryQ"]) S[key] = null;
   S.welcome = false; S.tab = "today"; S.more = null; S.connectSheet = false; S.addrSheet = false; S.ask = false;
 }
 async function switchUser(id) {
@@ -659,6 +659,7 @@ function forgetAddressState() {
   S.swAddrs = null; S.liveResults = null; S.liveBrowseMenu = null; S.liveCart = null;
   S.liveCartEmpty = null; S.liveCartError = null; S.liveCartErrorCode = null; S.checkoutReview = null;
   S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null; S.liveOrderReview = null;
+  S.pools = null; S.poolMenus = null; S.pickFor = null;            // pools and dish ids belong to one address
 }
 async function chooseAddress(addressId) {
   S.swiggy = await api(`/api/user/${S.userId}/swiggy/address`, "POST", { address_id: addressId });
@@ -1039,10 +1040,19 @@ function todayScreen() {
     ${realDishesState()}
     ${hungryCard(nu)}
     ${nu ? nextUpCard(nu) : v.source?.kind === "none" ? "" : `<section class="empty rise2">${mascot()}<h2 class="h2">Nothing left to plan this week.</h2><button class="primary" data-act="newweek">Plan next week</button></section>`}
+    ${poolsNudge()}
     ${S.ask ? askReminders() : ""}
     ${liveCartBlock()}
     ${laterList(nu)}
     ${headsUp()}`;
+}
+// Until the person says what they eat for each meal, Ziggy is guessing from whole menus.
+function poolsNudge() {
+  const v = S.view;
+  if (v.source?.kind !== "live" || !v.pools || Object.keys(v.pools).length || store.get(`smartplate.poolsNudge.${S.userId}`)) return "";
+  return `<section class="card nudge rise3" aria-labelledby="nudge-h"><h2 class="h3" id="nudge-h">Tell Ziggy what you eat</h2>
+    <p class="sub">Right now Ziggy picks from whole menus. Drag the dishes you'd actually have into breakfast, lunch and dinner, and every meal comes from your own list.</p>
+    <div class="row"><button class="secondary small" data-edit-pool="breakfast">Set up my meals</button><button class="ghost small" data-act="pools-nudge-off">Not now</button></div></section>`;
 }
 /* Where real restaurant dishes stand. Never filler: no live menus means an honest empty
    state with the one next step (connect, choose an address), a skeleton while Ziggy
@@ -1080,13 +1090,15 @@ function realDishesState() {
 function whyChips(c) {
   const u = S.view.user || {}, b = S.view.budget || {}, out = [];
   if (c.pinned) out.push(["Your pick", "ok"]);
-  if (c.usual) out.push(["Your usual place", ""]);
+  if (c.pooled) out.push([`From your ${c.meal || "meal"} pool`, "ok"]);
+  else if (c.usual) out.push(["Your usual place", ""]);
   if (c.kind === "delivery" || c.kind === "cook") {
     if ((b.budget || 0) >= (b.spend || 0)) out.push(["Week stays in budget", "ok"]);
     else out.push(["Week is over budget", "warn"]);
   }
   const p = c.nutrition?.protein_g;
-  if (p >= 15) out.push([`≈${Math.round(p)} g protein (estimate)`, ""]);
+  if (c.nutrition_unknown) out.push(["No nutrition estimate for this dish", ""]);
+  else if (p >= 15) out.push([`≈${Math.round(p)} g protein (estimate)`, ""]);
   const al = (u.allergens || []).map(a => a.replace("_", " "));
   if (al.length && c.kind === "delivery") out.push([S.view.source?.kind === "live" ? `No ${al.join(", ")} by dish name` : `${cap1(al.join(", "))} filtered out`, "ok"]);
   if (al.length && c.kind === "cook") out.push([`Recipe has no ${al.join(", ")}`, "ok"]);
@@ -1130,7 +1142,7 @@ function nextUpCard(nu) {
     <div class="dish-row">${dishIcon(c.item, { cook: isCook, lg: true, image: photoOf(c) })}<div class="t">
       <h2 class="h2">${esc(c.item)}</h2>
       <span class="muted" style="font-size:14px">${isCook ? "Cook at home" : esc(c.restaurant)}${!isCook && c.rating ? ` · ${Number(c.rating).toFixed(1)}★` : ""}</span></div>${heart}</div>
-    ${carted ? "" : whyChips(c)}
+    ${carted ? "" : whyChips({ ...c, meal: nu.meal })}
     ${carted ? "" : `<div class="price-line"><span class="money">${c.real_bill ? real(c.cost) : est(c.cost)}</span><span class="fine">${(c.portions || 1) > 1 ? `for ${c.portions} · ` : ""}${isCook ? esc(c.cost_basis || "grocery estimate") : c.real_bill ? "Swiggy's bill" : "Swiggy shows the exact bill"}</span></div>`}
     ${carted ? "" : whoEats(c)}
     ${reasons.length && !carted ? `<details class="why-more"><summary>Why this?</summary><ul>${reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul></details>` : ""}
@@ -1257,8 +1269,11 @@ function quickPicks(d) {
   const groups = d.usual || [];
   const firsts = groups.filter(g => g.dishes[0]).map(g => ({ ...g.dishes[0], restaurant: g.restaurant }));
   const rest = groups.flatMap(g => g.dishes.slice(1).map(x => ({ ...x, restaurant: g.restaurant })));
-  const all = [...firsts, ...(d.new || []), ...rest].filter(x => !x.current);
-  return [...all.filter(x => x.fits), ...all.filter(x => !x.fits)].slice(0, 4);
+  const pooled = (d.pool || []).filter(x => !x.current);
+  const ids = new Set(pooled.map(x => x.item_id));
+  const all = [...firsts, ...(d.new || []), ...rest].filter(x => !x.current && !ids.has(x.item_id));
+  // The meal's own pool first; with a pool, other dishes come only after it.
+  return [...pooled, ...all.filter(x => x.fits), ...all.filter(x => !x.fits)].slice(0, 4);
 }
 function quickStrip(c) {
   const q = S.quick;
@@ -1271,7 +1286,7 @@ function quickStrip(c) {
     <div class="quick" role="group" aria-labelledby="quick-${c.session_id}">
     ${picks.map(x => `<button class="qpick${x.fits ? "" : " over"}" data-quick="${x.item_id}" data-quick-name="${esc(x.name)}"
       aria-label="${esc(`${x.name}, ${x.restaurant}, about ${rupee0(x.price)}${x.fits ? "" : ", over budget"}`)}">
-      ${dishIcon(x.name, { image: photoOf(x), lg: true })}<b>${esc(x.name)}</b><span class="muted">${esc(x.restaurant)}</span>
+      ${dishIcon(x.name, { image: photoOf(x), lg: true })}<b>${esc(x.name)}</b><span class="muted">${x.pooled ? "Your pool · " : ""}${esc(x.restaurant)}</span>
       <span class="pr">≈${rupee0(x.price)}${x.fits ? "" : ` <i>over</i>`}</span></button>`).join("")}
     ${cook ? `<button class="qpick" data-quick-cook="${esc(cook.recipe_key)}" data-quick-name="${esc(cook.name)}" aria-label="${esc(`Cook ${cook.name} at home, about ${rupee0(cook.price)}`)}">
       ${dishIcon(cook.name, { cook: true, lg: true })}<b>${esc(cook.name)}</b><span class="muted">Cook at home</span><span class="pr">≈${rupee0(cook.price)}</span></button>` : ""}
@@ -1416,12 +1431,14 @@ function mealRow(m, meal) {
   const fee = m.kind === "delivery" && m.real_bill ? " · real Swiggy bill"
     : m.kind === "delivery" && m.delivery_fee ? ` · delivery ₹${Math.round(m.delivery_fee.amount)} ${m.delivery_fee.estimated ? "est." : "from your bill"}` : "";
   const sub = m.kind === "delivery" ? `${esc(m.restaurant)}${fee}${m.order?.order_at && !locked && !past ? ` · order by ${esc(m.order.order_at)}` : ""}`
-    : m.kind === "cook" ? (m.recipe_key ? "Cook at home · grocery estimate" : "From your fridge") : esc((m.reasons || [])[0] || "Skipped");
+    : m.kind === "cook" ? (m.recipe_key ? "Cook at home · grocery estimate" : "From your fridge") : "";
   const name = off && !food ? "Skipped" : m.item;
+  const why = (m.reasons || [])[0];
+  const subText = food ? sub : esc(why && why !== name ? why : past ? "This meal's time has passed" : "");
   return `<button class="mrow ${off ? "off" : ""} ${target ? "target" : ""}" data-meal="${m.session_id}" aria-label="${esc(cap1(meal))}: ${esc(name)}${target ? ". Tap to swap here" : ""}">
     ${food ? dishIcon(m.item, { cook: m.kind === "cook", image: photoOf(m) }) : `<span class="dicon" style="--h:0" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></span>`}
-    <span class="t"><span class="lbl">${esc(cap1(meal))}</span><b>${esc(name)} ${m.pinned ? `<span class="tag" title="Kept: re-plans leave it">${ICON.pin}kept</span>` : ""}${m.usual === false && m.kind === "delivery" ? '<span class="tag hot">new</span>' : ""}${status}</b>
-      <span class="s">${sub}</span></span>
+    <span class="t"><span class="lbl">${esc(cap1(meal))}</span><b>${esc(name)} ${m.pinned ? `<span class="tag" title="Kept: re-plans leave it">${ICON.pin}kept</span>` : ""}${m.usual === false && m.kind === "delivery" && !m.pooled ? '<span class="tag hot">new</span>' : ""}${status}</b>
+      <span class="s">${subText}</span></span>
     <span class="p"${m.cost_basis ? ` title="${esc(m.cost_basis)}"` : ""}>${food && m.cost ? cellMoney(m) : ""}</span></button>`;
 }
 // What the plan's restaurant dishes come from: live Swiggy menus, or the honest empty state.
@@ -1486,29 +1503,32 @@ function sheetDialog() {
   const s = d.session, L = d.limits;
   const left = L.left_day != null ? Math.min(L.left_week, L.left_day) : L.left_week;
   const all = [...d.usual.flatMap(g => g.dishes.map(x => ({ ...x, restaurant: g.restaurant }))), ...d.new];
-  const fits = [...all].sort((a, b) => (b.fits - a.fits) || (a.current ? -1 : 0)).filter(x => !x.current).slice(0, 5);
+  const poolIds = new Set((d.pool || []).map(x => x.item_id));
+  const fits = [...all].filter(x => !poolIds.has(x.item_id)).sort((a, b) => (b.fits - a.fits) || (a.current ? -1 : 0)).filter(x => !x.current).slice(0, 5);
+  const poolPicks = (d.pool || []).filter(x => !x.current);
   const places = [...new Set(all.map(x => x.restaurant))];
   const place = S.sheet.place && places.includes(S.sheet.place) ? S.sheet.place : places[0];
   const tab = S.sheet.tab || "fits";
   const liveFav = (S.liveFavourites || []).find(f => f.name === place);
   const hidden = [d.hidden.not_safe ? `${d.hidden.not_safe} not safe for your allergies or diet` : "",
-    d.hidden.not_a_meal ? `${d.hidden.not_a_meal} treats hidden as standalone meals` : "",
+    d.hidden.not_a_meal ? `${d.hidden.not_a_meal} sides and treats not planned as a meal by themselves` : "",
     d.hidden.below_rating ? `${d.hidden.below_rating} below your ${Number(S.view.user.rating_floor).toFixed(1)}★ minimum` : "",
     d.hidden.not_again ? `${d.hidden.not_again} you said “not again” to` : ""].filter(Boolean).join(" · ");
   const cell = cellOf(s.id);
   const cook = d.cook[0];
   return `<div class="sheet-bg" data-ov="sheet" data-close-sheet="1"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
     <span class="grab" aria-hidden="true"></span>
-    <div class="sheet-head"><div><p class="eyebrow">${esc(s.day)} ${esc(fmtDate(s.date))} · ${rupee0(left)} left${L.left_day != null ? " today" : " this week"}${(d.portions || 1) > 1 ? ` · prices for ${d.portions}` : ""}</p>
+    <div class="sheet-head"><div><p class="eyebrow">${esc(s.day)} ${esc(fmtDate(s.date))} · ${rupee0(left)} to spend on this meal${L.left_day != null ? " (today's cap)" : ""}${(d.portions || 1) > 1 ? ` · prices for ${d.portions}` : ""}</p>
       <h2 class="h2" id="sheet-title">Change ${esc(s.meal)}</h2>${d.current ? `<p class="muted">Now: ${esc(d.current.item)}</p>` : ""}</div>
       <button class="icon-btn" data-close-sheet="1" aria-label="Close">${ICON.close}</button></div>
     ${d.timing_tip ? `<p class="fine">${esc(d.timing_tip)}</p>` : ""}
     <div class="seg" role="group" aria-label="Show"><button data-sheet-tab="fits" aria-pressed="${tab === "fits"}">Better fits</button><button data-sheet-tab="places" aria-pressed="${tab === "places"}">Other places</button>${d.cook.length ? `<button data-sheet-tab="cook" aria-pressed="${tab === "cook"}">Cook</button>` : ""}</div>
-    ${tab === "fits" ? `${moreLikeBlock(d, s)}<div class="stack" style="gap:8px">${fits.map(x => pickBtn(x, x.restaurant, d)).join("") || `<p class="fine">Nothing else nearby fits your rules for this meal. Cook, or skip it.</p>`}</div>` : ""}
+    ${tab === "fits" ? `${poolPicks.length ? `<p class="k">Your ${esc(s.meal)} pool</p><div class="stack" style="gap:8px">${poolPicks.map(x => pickBtn(x, x.restaurant, d)).join("")}</div><p class="k">Other dishes from your places</p>` : ""}${moreLikeBlock(d, s)}<div class="stack" style="gap:8px">${fits.map(x => pickBtn(x, x.restaurant, d)).join("") || `<p class="fine">Nothing else nearby fits your rules for this meal. Cook, or skip it.</p>`}</div>` : ""}
     ${tab === "places" ? `<div class="chips scroll" role="group" aria-label="Restaurants">${places.map(p => `<button class="chip" data-sheet-place="${esc(p)}" aria-pressed="${p === place}">${d.usual.some(g => g.restaurant === p) ? "♥ " : ""}${esc(p)}</button>`).join("")}</div>
       ${(() => { const g = d.usual.find(x => x.restaurant === place); return g ? `<p class="fine">${Number(g.rating).toFixed(1)}★ · about ${g.eta_min} min${g.more ? ` · ${g.more} more on their menu` : ""}</p>` : ""; })()}
       <div class="stack" style="gap:8px">${all.filter(x => x.restaurant === place).map(x => pickBtn(x, x.restaurant, d)).join("") || `<p class="fine">No places nearby fit your rules for this meal.</p>`}</div>
       ${liveFav && swiggyReady() ? `<button class="secondary" data-live-place="${esc(liveFav.id)}" data-live-name="${esc(liveFav.name)}">See ${esc(liveFav.name)}'s full menu</button>` : ""}` : ""}
+    ${swiggyReady() && tab !== "cook" ? `<div class="two"><button class="secondary" data-pick-anywhere="${s.id}">Any place near you</button><button class="secondary" data-edit-pool="${esc(s.meal)}">Edit ${esc(s.meal)} pool</button></div>` : ""}
     ${tab === "cook" ? `<div class="stack" style="gap:8px">${d.cook.map(c => `<button class="pick" data-cook="${esc(c.recipe_key)}">${dishIcon(c.name, { cook: true })}<span class="t"><b>${esc(c.name)}</b><span>Cook at home · on your grocery list</span></span><b class="pr">${rupee0(c.price)}</b></button>`).join("")}</div>` : ""}
     ${eatersBlock(s)}
     <div class="two">${cook && tab !== "cook" && cell?.kind !== "cook" ? `<button class="secondary" data-cook="${esc(cook.recipe_key)}">Cook instead · ${rupee0(cook.price)}</button>` : `<button class="secondary" data-choose-auto="${s.id}">Let Ziggy choose</button>`}
@@ -1586,7 +1606,31 @@ function cookingPanel() {
       <p class="fine" style="padding:8px 0 14px">For the cook meals still ahead${S.view.household ? ", for everyone eating each one" : ""}, rounded up to whole packs. Tick what you already have.${swapped ? " Prices are for the original items." : ""}</p></section>
     ${recipes}
     ${safe ? `<div class="card"><p class="k">Also safe with a swap</p><ul class="fine" style="margin-left:18px">${safe}</ul>
-      <p class="fine">These recipes are left out of your plan as written. With these swaps nobody's allergies or diet are broken.</p></div>` : ""}`;
+      <p class="fine">These recipes are left out of your plan as written. With these swaps nobody's allergies or diet are broken.</p></div>` : ""}
+    ${recipeLibrary()}`;
+}
+// Wikibooks Cookbook recipes (CC BY-SA 4.0), credited and linked. Browse-only: the
+// Cookbook gives no prices or nutrition, so Ziggy doesn't plan them or invent either.
+function recipeLibrary() {
+  const L = S.library;
+  if (!L || !L.available) return "";
+  const q = (S.libraryQ || "").toLowerCase();
+  const list = L.recipes.filter(r => !q || r.title.toLowerCase().includes(q) || r.ingredients.some(i => i.toLowerCase().includes(q)));
+  return `<section class="stack" aria-labelledby="lib-h"><div><h2 class="h2" id="lib-h">Recipe library</h2>
+      <p class="fine">${L.total} recipe${L.total === 1 ? "" : "s"} from the <a href="https://en.wikibooks.org/wiki/Cookbook:Table_of_Contents" target="_blank" rel="noopener">Wikibooks Cookbook</a>, by Wikibooks contributors, <a href="${esc(L.license?.url || "https://creativecommons.org/licenses/by-sa/4.0/")}" target="_blank" rel="noopener">${esc(L.license?.name || "CC BY-SA 4.0")}</a>.${L.hidden ? ` ${L.hidden} hidden: their ingredients break your diet or allergies.` : ""} No prices or nutrition yet, so they aren't planned for you.</p></div>
+    <label class="sr" for="lib-q">Search recipes</label><input id="lib-q" type="search" placeholder="Search by dish or ingredient" value="${esc(S.libraryQ || "")}" maxlength="60">
+    <div class="stack" style="gap:8px">${list.slice(0, 30).map(r => `<details class="card recipe"><summary><span class="t"><b>${esc(r.title)}</b><span class="fine">${[r.servings ? `serves ${r.servings}` : "", r.time || "", `${r.ingredients.length} ingredients`].filter(Boolean).map(esc).join(" · ")}</span></span></summary>
+        <p class="k">Ingredients</p><ul class="ingr">${r.ingredients.map(i => `<li><span>${esc(i)}</span><a class="small btn ghost" href="${esc(instamartUrl(ingredientQuery(i)))}" target="_blank" rel="noopener" aria-label="Find ${esc(ingredientQuery(i))} on Instamart">Instamart ${ICON.out}</a></li>`).join("")}</ul>
+        <p class="k">Steps</p><ol class="steps">${r.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol>
+        <p class="fine">From <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)} on Wikibooks</a> (${esc(r.credit)}, ${esc(r.license)}). Check ingredients yourself: allergy hints come only from the words listed.</p></details>`).join("")
+      || `<p class="fine">No recipe matches “${esc(S.libraryQ)}”.</p>`}</div></section>`;
+}
+// A recipe line ("1 cup toor dal, washed") as a shop search ("toor dal").
+function ingredientQuery(line) {
+  return String(line || "").split(/[,(;]/)[0]
+    .replace(/^[\d\s\/½¼¾.-]+/, "")
+    .replace(/^(cups?|tbsp|tablespoons?|tsp|teaspoons?|g|kg|grams?|ml|l|litres?|liters?|pinch(es)?|handful|bunch(es)?|pieces?|cloves?|inch(es)?|sprigs?|cans?|packets?|nos?\.?)\b\s*(of\s+)?/i, "")
+    .trim() || String(line || "");
 }
 // Instamart hand-off: Swiggy's public Instamart search for one grocery line (pack size left
 // out so it matches any brand). Ziggy doesn't fill an Instamart cart.
@@ -1671,22 +1715,161 @@ function orderReviewDialog() {
 async function loadSaved() {
   const jobs = [api(`/api/user/${S.userId}/saved`).then(r => { S.saved = r; })];
   if (swiggyReady() && !S.liveFavourites) jobs.push(api(`/api/user/${S.userId}/swiggy/favourites`).then(r => { S.liveFavourites = r; }));
+  if (swiggyReady()) jobs.push(api(`/api/user/${S.userId}/pools`).then(r => { S.pools = r; }));
   if (!swiggyReady() && !S.places) jobs.push(api(`/api/restaurants?user_id=${S.userId}`).then(r => { S.places = r; }));
   await Promise.all(jobs);
 }
 function savedScreen() {
-  const tab = S.savedTab || "places";
   const live = swiggyReady();
+  const tab = S.savedTab || (live ? "meals" : "places");
   return `<h1 class="h1 rise">Saved</h1>
+    ${S.pickFor ? pickBanner() : ""}
     ${live ? `<form id="live-search" class="rise" role="search"><label class="sr" for="live-query">Search Swiggy near ${esc(S.swiggy.address.label)}</label>
-      <div class="row" style="flex-wrap:nowrap"><input id="live-query" type="search" enterkeyhint="search" placeholder="Search restaurants on Swiggy" maxlength="80" required><button class="secondary" aria-label="Search">${ICON.search}</button></div></form>` : ""}
+      <div class="row" style="flex-wrap:nowrap"><input id="live-query" type="search" enterkeyhint="search" placeholder="Search restaurants or dishes on Swiggy" maxlength="80" required><button class="secondary" aria-label="Search">${ICON.search}</button></div></form>
+      ${S.liveResults ? "" : `<button class="link rise" data-act="browse-nearby" style="min-height:0">Or see every place Swiggy lists near ${esc(S.swiggy.address.label)}</button>`}` : ""}
     ${S.liveResults ? liveResultsBlock() : ""}
-    <div class="seg rise2" role="group" aria-label="Show"><button data-saved-tab="places" aria-pressed="${tab === "places"}">Places</button><button data-saved-tab="dishes" aria-pressed="${tab === "dishes"}">Dishes</button><button data-saved-tab="recent" aria-pressed="${tab === "recent"}">Recent</button></div>
-    ${tab === "places" ? savedPlaces() : tab === "dishes" ? savedDishes() : savedRecent()}`;
+    <div class="seg rise2" role="group" aria-label="Show">${live ? `<button data-saved-tab="meals" aria-pressed="${tab === "meals"}">My meals</button>` : ""}<button data-saved-tab="places" aria-pressed="${tab === "places"}">Places</button><button data-saved-tab="dishes" aria-pressed="${tab === "dishes"}">Dishes</button><button data-saved-tab="recent" aria-pressed="${tab === "recent"}">Recent</button></div>
+    ${tab === "meals" && live ? poolsBoard() : tab === "dishes" ? savedDishes() : tab === "recent" ? savedRecent() : savedPlaces()}`;
+}
+// Picking a dish for one meal from anywhere nearby (opened from the Change sheet).
+function pickBanner() {
+  const p = S.pickFor;
+  return `<div class="note pick-banner rise" role="status"><span class="ic">${ICON.place}</span><span style="flex:1"><b>Choosing ${esc(p.day)} ${esc(p.meal)}.</b> Open any restaurant's menu and tap <b>Have for ${esc(p.meal)}</b>.</span>
+    <button class="small ghost" data-act="pick-cancel">Cancel</button></div>`;
+}
+
+/* ---- meal pools: what you'd have for each meal, dragged in from your places' real menus ---- */
+const POOL_MEALS = ["breakfast", "lunch", "dinner"];
+function inPool(meal, rid, iid) { return !!S.pools?.meals?.[meal]?.some(d => d.restaurant_id === rid && d.item_id === iid); }
+function poolChip(meal, d) {
+  const others = POOL_MEALS.filter(m => m !== meal);
+  return `<li class="pchip ${d.on_menu === false ? "off" : ""}" data-drag='${esc(JSON.stringify({ from: meal, rid: d.restaurant_id, iid: d.item_id, name: d.name }))}'>
+    <span class="grip" aria-hidden="true">⋮⋮</span>
+    <span class="t"><b>${d.veg === true ? '<span class="vegmark" role="img" aria-label="Veg"></span>' : d.veg === false ? '<span class="vegmark nonveg" role="img" aria-label="Non-veg"></span>' : ""}${esc(d.name)}</b>
+      <span>${esc(d.restaurant_name)}${d.price != null ? ` · ${rupee0(d.price)}` : ""}${d.on_menu === false ? " · not on today's menu" : d.nutrition_known === false ? " · no nutrition estimate" : ""}</span></span>
+    <span class="pmove">${others.map(m => `<button class="mini" data-pool-move="${meal}:${m}" data-rid="${esc(d.restaurant_id)}" data-iid="${esc(d.item_id)}" data-name="${esc(d.name)}" aria-label="Move ${esc(d.name)} to ${m}">${cap1(m).charAt(0)}</button>`).join("")}
+    <button class="mini" data-pool-remove="${meal}" data-rid="${esc(d.restaurant_id)}" data-iid="${esc(d.item_id)}" data-name="${esc(d.name)}" aria-label="Remove ${esc(d.name)} from ${meal}">${ICON.close}</button></span></li>`;
+}
+function poolsBoard() {
+  const P = S.pools;
+  if (!P) return `<div class="skeleton"><i></i><i></i><i></i></div>`;
+  const favs = P.places || [];
+  const planned = new Set((S.view.user?.meals) || POOL_MEALS);
+  return `<section class="rise3 stack" aria-labelledby="pools-h"><div><h2 class="h2" id="pools-h">What you'd have for each meal</h2>
+      <p class="sub">Drag dishes from your places into a meal. Ziggy then orders that meal only from its pool, inside your budget (your home-cook days still count). A meal with no pool is planned from all your places.</p></div>
+    <div class="pools">${POOL_MEALS.map(m => { const list = P.meals[m] || [];
+      return `<section class="pool card" data-drop="${m}" aria-label="${cap1(m)} pool"><div class="row" style="justify-content:space-between"><h3 class="h3">${cap1(m)}</h3><span class="tag">${list.length ? `${list.length} dish${list.length > 1 ? "es" : ""}` : planned.has(m) ? "Any of your places" : "Not planned"}</span></div>
+        <ul class="plist">${list.map(d => poolChip(m, d)).join("") || `<li class="pempty">Drop dishes here</li>`}</ul></section>`; }).join("")}</div>
+    <div><h2 class="h2">From your places</h2><p class="fine">Real menus for ${esc(P.address || "your address")}. Drag a dish onto a meal, or tap B, L or D.</p></div>
+    ${favs.some(f => !f.saved) ? `<p class="fine">${favs.some(f => f.saved) ? "Your saved places first, then the" : "You haven't saved any places yet. These are the"} places Ziggy found near you. Adding a dish saves its place.</p>` : ""}
+    ${favs.length ? favs.map(f => poolPlace(f)).join("") : `<p class="fine">Search Swiggy above, or see every place nearby, then open a menu.</p>`}
+  </section>`;
+}
+function poolPlace(f) {
+  const open = S.poolOpen === f.id, menu = S.poolMenus?.[f.id];
+  return `<section class="card tight pplace"><button class="pplace-head" data-pool-place="${esc(f.id)}" data-live-name="${esc(f.name)}" aria-expanded="${open}"><span><b>${esc(f.name)}</b>${f.saved ? ' <span class="tag">Saved</span>' : ""}</span>${ICON.right}</button>
+    ${!open ? "" : !menu ? `<div class="skeleton" aria-busy="true"><i></i><i></i></div>`
+      : `<ul class="pmenu">${menu.items.filter(i => !i.has_options).map(i => `<li class="pdish ${i.in_stock === false ? "unavail" : ""}" data-drag='${esc(JSON.stringify({ rid: f.id, rname: f.name, iid: i.id, name: i.name }))}'>
+          <span class="grip" aria-hidden="true">⋮⋮</span><span class="t"><b>${i.veg === true ? '<span class="vegmark" role="img" aria-label="Veg"></span>' : i.veg === false ? '<span class="vegmark nonveg" role="img" aria-label="Non-veg"></span>' : ""}${esc(i.name)}</b><span>${livePrice(i.price)}${(i.categories || [])[0] ? ` · ${esc(i.categories[0])}` : ""}</span></span>
+          <span class="pmove">${POOL_MEALS.map(m => `<button class="mini" data-pool-add="${m}" data-rid="${esc(f.id)}" data-rname="${esc(f.name)}" data-iid="${esc(i.id)}" data-name="${esc(i.name)}" aria-pressed="${inPool(m, f.id, i.id)}" aria-label="${inPool(m, f.id, i.id) ? "In" : "Add to"} ${m}: ${esc(i.name)}">${cap1(m).charAt(0)}</button>`).join("")}</span></li>`).join("")}</ul>
+        ${menu.items.some(i => i.has_options) ? `<p class="fine">${menu.items.filter(i => i.has_options).length} dishes with sizes or add-ons aren't shown: those are set up in Swiggy.</p>` : ""}`}
+  </section>`;
+}
+// From a meal's Change sheet: every place Swiggy lists nearby, any dish on their full menus.
+async function pickAnywhere(sid) {
+  const s = S.sheet?.data?.session;
+  S.pickFor = { sid, meal: s?.meal || "meal", day: s?.day || "" };
+  S.savedTab = "places";
+  await goTab("saved");
+  S.liveResults = await api(`/api/user/${S.userId}/swiggy/restaurants?browse=1`); S.cuisine = null;
+  render();
+}
+async function haveForMeal(itemId, name) {
+  const p = S.pickFor, menu = S.liveBrowseMenu;
+  adoptView(await api(`/api/session/${p.sid}/choose-live`, "POST", { restaurant_id: menu.restaurant.id,
+    restaurant_name: menu.restaurant.name, item_id: itemId }));
+  S.pickFor = null; S.liveBrowseMenu = null; S.liveResults = null;
+  await goTab("today");
+  toast(`${name} from ${menu.restaurant.name} is your ${p.day} ${p.meal}. The week re-balanced around it.`);
+}
+async function togglePoolPlace(id, name) {
+  if (S.poolOpen === id) { S.poolOpen = null; render(); return; }
+  S.poolOpen = id; render();
+  if (!S.poolMenus?.[id]) {
+    const menu = await api(`/api/user/${S.userId}/swiggy/live-menu?restaurant_id=${encodeURIComponent(id)}&restaurant_name=${encodeURIComponent(name)}`);
+    S.poolMenus = { ...(S.poolMenus || {}), [id]: menu }; render();
+  }
+}
+async function poolAdd(meal, rid, rname, iid, name) {
+  if (inPool(meal, rid, iid)) return poolRemove(meal, rid, iid, name);
+  S.pools = await api(`/api/user/${S.userId}/pools`, "POST", { meal, restaurant_id: rid, restaurant_name: rname, item_id: iid });
+  S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
+  await reloadPlan();
+  toast(`${name} is in your ${meal} pool. Your ${meal === "lunch" ? "lunches" : `${meal}s`} now come from it.`);
+}
+async function poolMove(from, to, rid, iid, name) {
+  S.pools = await api(`/api/user/${S.userId}/pools`, "POST", { meal: to, from_meal: from, restaurant_id: rid, item_id: iid });
+  await reloadPlan();
+  toast(`${name} moved to ${to}`);
+}
+async function poolRemove(meal, rid, iid, name) {
+  S.pools = await api(`/api/user/${S.userId}/pools/remove`, "POST", { meal, restaurant_id: rid, item_id: iid });
+  await reloadPlan();
+  toast(`${name} removed from ${meal}`);
+}
+// Drag and drop for mouse and touch alike (pointer events): hold a dish by its grip, move
+// it onto a meal. The B/L/D buttons do the same for keyboards and screen readers.
+function wirePoolDrag() {
+  document.querySelectorAll("[data-drag] .grip").forEach(grip => grip.addEventListener("pointerdown", (e) => {
+    const src = grip.closest("[data-drag]");
+    const data = JSON.parse(src.dataset.drag);
+    e.preventDefault();
+    grip.setPointerCapture?.(e.pointerId);              // keep the pointer: no text selection, no native drag
+    document.body.classList.add("dragging");
+    const ghost = src.cloneNode(true);
+    ghost.classList.add("drag-ghost");
+    const box = src.getBoundingClientRect();
+    ghost.style.width = `${box.width}px`;
+    document.body.appendChild(ghost);
+    const dx = e.clientX - box.left, dy = e.clientY - box.top;
+    // The meals stay within reach wherever the dish is: a drop bar pinned to the bottom.
+    const bar = document.createElement("div");
+    bar.className = "dropbar";
+    bar.setAttribute("aria-hidden", "true");
+    bar.innerHTML = POOL_MEALS.filter(m => m !== data.from).map(m => `<div class="dz" data-drop="${m}">${cap1(m)}</div>`).join("");
+    document.body.appendChild(bar);
+    let zone = null, lastY = e.clientY;
+    const edge = setInterval(() => {                    // scroll when held near the top or bottom
+      if (lastY < 70) window.scrollBy(0, -14);
+      else if (lastY > innerHeight - 150 && lastY < innerHeight - 90) window.scrollBy(0, 14);
+    }, 30);
+    const move = (ev) => {
+      lastY = ev.clientY;
+      ghost.style.transform = `translate(${ev.clientX - dx}px, ${ev.clientY - dy}px)`;
+      ghost.style.visibility = "hidden";
+      const under = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.("[data-drop]");
+      ghost.style.visibility = "";
+      if (under !== zone) { zone?.classList.remove("over"); zone = under; zone?.classList.add("over"); }
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
+      clearInterval(edge); bar.remove(); document.body.classList.remove("dragging");
+      ghost.remove(); zone?.classList.remove("over");
+      const to = zone?.dataset.drop;
+      if (!to || to === data.from) return;
+      if (data.from) guard(() => poolMove(data.from, to, data.rid, data.iid, data.name), `Move “${data.name}” to ${to}`);
+      else guard(() => poolAdd(to, data.rid, data.rname, data.iid, data.name), `Add “${data.name}” to ${to}`);
+    };
+    move(e);
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
+  }));
 }
 function placeRow(p, { starred, live }) {
   const letter = esc(String(p.name || "?").replace(/^the\s+/i, "").charAt(0).toUpperCase());
-  const meta = live ? [p.area, p.rating ? `${p.rating}★` : "", p.eta].filter(Boolean).map(String).map(esc).join(" · ")
+  const eta = live && p.eta != null ? (/^\d+$/.test(String(p.eta)) ? `${p.eta} min` : String(p.eta)) : "";
+  const meta = live ? [p.area, p.rating ? `${p.rating}★` : "", eta].filter(Boolean).map(String).map(esc).join(" · ")
     : [p.rating ? `${Number(p.rating).toFixed(1)}★` : "", p.eta_min ? `${p.eta_min} min` : "", p.dishes_fit != null ? `${p.dishes_fit} of ${p.dishes_total} fit you` : ""].filter(Boolean).join(" · ");
   const star = live ? `data-live-fav="${esc(p.id)}" data-live-name="${esc(p.name)}"` : `data-fav="${p.id}"`;
   return `<div class="mrow" style="cursor:default"><span class="ico lilac" aria-hidden="true" style="border-radius:50%;font-weight:800">${letter}</span>
@@ -1753,13 +1936,15 @@ function liveResultsBlock() {
   const results = S.liveResults.restaurants || [];
   const starred = new Set((S.liveFavourites || []).map(x => x.id));
   const fastOk = (r) => !S.filters.fast || (etaMinutes(r.eta) != null && etaMinutes(r.eta) <= FAST_MIN);
-  const shown = results.filter(fastOk);
+  const cuisineOk = (r) => !S.cuisine || (r.cuisines || []).includes(S.cuisine);
+  const shown = results.filter(r => fastOk(r) && cuisineOk(r));
   const anyEta = results.some(r => etaMinutes(r.eta) != null);
-  return `<section class="stack" aria-label="Swiggy results"><div class="row" style="justify-content:space-between"><p class="k">Swiggy results for ${esc(S.liveResults.query)}</p>
+  const cuisines = [...new Set(results.flatMap(r => r.cuisines || []))];     // Swiggy's own labels, never a fixed list
+  return `<section class="stack" aria-label="Swiggy results"><div class="row" style="justify-content:space-between"><p class="k">${S.liveResults.browse ? `Places Swiggy lists near ${esc(S.liveResults.address || "you")} · ${results.length}` : `Swiggy results for ${esc(S.liveResults.query)}`}</p>
       <button class="small ghost" data-act="clear-results">Clear</button></div>
-    ${anyEta ? `<div class="chips">${filterChip("fast", `Fast (≤${FAST_MIN} min)`)}</div>` : ""}
+    ${anyEta || cuisines.length > 1 ? `<div class="chips scroll">${anyEta ? filterChip("fast", `Fast (≤${FAST_MIN} min)`) : ""}${cuisines.length > 1 ? cuisines.map(c => `<button class="chip" data-cuisine="${esc(c)}" aria-pressed="${S.cuisine === c}">${esc(c)}</button>`).join("") : ""}</div>` : ""}
     <div class="card tight">${shown.length ? shown.map(r => placeRow(r, { starred: starred.has(r.id), live: true })).join("")
-      : results.length ? `<p class="fine" style="padding:14px 0">None of these say they deliver within ${FAST_MIN} minutes. Turn off “Fast” to see all ${results.length}.</p>` : `<p class="fine" style="padding:14px 0">No live restaurants returned for this address and search.</p>`}</div></section>`;
+      : results.length ? `<p class="fine" style="padding:14px 0">None of these match your filters. Turn them off to see all ${results.length}.</p>` : `<p class="fine" style="padding:14px 0">No live restaurants returned for this address and search.</p>`}</div></section>`;
 }
 // A restaurant's live menu: Swiggy's own categories, veg marks, bestsellers, real photos when
 // Swiggy sends them, and allergen flags read from dish names (Swiggy menus list none).
@@ -1795,8 +1980,10 @@ function menuSheet() {
       ${dishIcon(i.name, { image: i.image })}
       <div class="t"><b>${i.veg === true ? '<span class="vegmark" role="img" aria-label="Veg"></span>' : i.veg === false ? '<span class="vegmark nonveg" role="img" aria-label="Non-veg"></span>' : ""}${esc(i.name)}</b>
         <span>${livePrice(i.price, i.price_estimated)}</span>
-        <span class="row" style="gap:4px">${i.bestseller ? '<span class="tag hot">Bestseller</span>' : ""}${out ? '<span class="tag">unavailable</span>' : ""}${i.has_options ? '<span class="tag">options in Swiggy</span>' : ""}${fl.map(a => `<span class="tag warn">Name suggests ${esc(a.replace("_", " "))}</span>`).join("")}</span></div>
-      <button class="small secondary" data-live-item="${esc(i.id)}" data-live-item-name="${esc(i.name)}" ${out ? "disabled" : ""}>Add</button></div>`;
+        <span class="row" style="gap:4px">${i.bestseller ? '<span class="tag hot">Bestseller</span>' : ""}${out ? '<span class="tag">unavailable</span>' : ""}${i.has_options ? '<span class="tag">options in Swiggy</span>' : ""}${fl.map(a => `<span class="tag warn">Name suggests ${esc(a.replace("_", " "))}</span>`).join("")}</span>
+        ${i.has_options ? "" : `<span class="pmove" role="group" aria-label="Meal pools"><span class="fine">Pool</span>${POOL_MEALS.map(m => `<button class="mini" data-pool-add="${m}" data-rid="${esc(menu.restaurant.id)}" data-rname="${esc(menu.restaurant.name)}" data-iid="${esc(i.id)}" data-name="${esc(i.name)}" aria-pressed="${inPool(m, menu.restaurant.id, i.id)}" aria-label="${inPool(m, menu.restaurant.id, i.id) ? "In" : "Add to"} ${m} pool: ${esc(i.name)}">${cap1(m).charAt(0)}</button>`).join("")}</span>`}</div>
+      ${S.pickFor ? `<button class="small" data-have-dish="${esc(i.id)}" data-have-name="${esc(i.name)}" ${out || i.has_options ? "disabled" : ""}>Have for ${esc(S.pickFor.meal)}</button>`
+        : `<button class="small secondary" data-live-item="${esc(i.id)}" data-live-item-name="${esc(i.name)}" ${out ? "disabled" : ""}>Add</button>`}</div>`;
   };
   const hiddenByFilter = menu.items.length - items.length;
   const starred = (S.liveFavourites || []).some(x => x.id === menu.restaurant.id);
@@ -2496,7 +2683,10 @@ function wire() {
     "addr-open": openAddresses,
     "swiggy-refresh-addresses": refreshSwiggyAddresses,
     "close-live-browse": async () => { S.liveBrowseMenu = null; render(); },
-    "clear-results": async () => { S.liveResults = null; render(); },
+    "clear-results": async () => { S.liveResults = null; S.cuisine = null; render(); },
+    "browse-nearby": async () => { S.liveResults = await api(`/api/user/${S.userId}/swiggy/restaurants?browse=1`); S.cuisine = null; render(); },
+    "pick-cancel": async () => { S.pickFor = null; render(); },
+    "pools-nudge-off": async () => { store.set(`smartplate.poolsNudge.${S.userId}`, "1"); render(); },
     "swiggy-disconnect": disconnectSwiggy,
     "rules-open": async () => { await goTab("more", "connection"); document.getElementById("rules")?.scrollIntoView?.({ block: "start" }); },
     "signin-open": async () => { S.signin = true; S.connectSheet = false; S.error = null; if (S.view) { S.welcome = true; } render(); document.getElementById("si-login")?.focus(); },
@@ -2521,6 +2711,17 @@ function wire() {
   on("[data-live-fav]", "click", (e) => { const t = e.currentTarget; guard(() => toggleLiveFavourite(t.dataset.liveFav, t.dataset.liveName), `Save “${t.dataset.liveName}”`); });
   on("[data-live-place]", "click", (e) => { const t = e.currentTarget; guard(() => liveAction("live-place", t.dataset.livePlace, t.dataset.liveName, t.dataset.liveDish), `Open the menu for “${t.dataset.liveName}”`); });
   on("[data-live-item]", "click", (e) => { const t = e.currentTarget; guard(() => reviewLiveItem(t.dataset.liveItem, t.dataset.liveItemName), `Review “${t.dataset.liveItemName}”`); });
+  on("[data-pool-place]", "click", (e) => { const t = e.currentTarget; guard(() => togglePoolPlace(t.dataset.poolPlace, t.dataset.liveName), `Open “${t.dataset.liveName}”`); });
+  on("[data-pool-add]", "click", (e) => { const t = e.currentTarget, d = t.dataset; guard(() => poolAdd(d.poolAdd, d.rid, d.rname, d.iid, d.name), `Add “${d.name}” to ${d.poolAdd}`); });
+  on("[data-pool-move]", "click", (e) => { const d = e.currentTarget.dataset, [from, to] = d.poolMove.split(":"); guard(() => poolMove(from, to, d.rid, d.iid, d.name), `Move “${d.name}” to ${to}`); });
+  on("[data-pool-remove]", "click", (e) => { const d = e.currentTarget.dataset; guard(() => poolRemove(d.poolRemove, d.rid, d.iid, d.name), `Remove “${d.name}”`); });
+  on("[data-cuisine]", "click", (e) => { const c = e.currentTarget.dataset.cuisine; S.cuisine = S.cuisine === c ? null : c; render(); });
+  on("[data-pick-anywhere]", "click", (e) => { const sid = Number(e.currentTarget.dataset.pickAnywhere); guard(() => pickAnywhere(sid), "Browse places near you"); });
+  on("[data-edit-pool]", "click", () => { S.savedTab = "meals"; guard(() => goTab("saved"), "Open your meal pools"); });
+  on("[data-have-dish]", "click", (e) => { const t = e.currentTarget; guard(() => haveForMeal(t.dataset.haveDish, t.dataset.haveName), `Have “${t.dataset.haveName}”`); });
+  wirePoolDrag();
+  const libQ = document.getElementById("lib-q");
+  if (libQ) libQ.oninput = () => { S.libraryQ = libQ.value; clearTimeout(S.libT); S.libT = setTimeout(() => { render(); const el = document.getElementById("lib-q"); el?.focus(); el?.setSelectionRange?.(el.value.length, el.value.length); }, 250); };
   on("[data-live-track]", "click", (e) => { const id = e.currentTarget.dataset.liveTrack; guard(() => trackLiveOrder(id), "Track order"); });
   const liveSearch = document.getElementById("live-search");
   if (liveSearch) liveSearch.onsubmit = (e) => { e.preventDefault(); const q = document.getElementById("live-query").value; guard(() => searchLivePlaces(q), `Search Swiggy for “${q}”`); };
@@ -2555,6 +2756,7 @@ function onMealTap(sid) {
 }
 async function goWeekView(view) {
   S.weekView = view; S.tab = "week";
+  if (view === "groceries" && !S.library) S.library = await api(`/api/user/${S.userId}/recipes`).catch(() => null);
   if (view === "orders") {
     S.exec = await api(`/api/plan/${S.planId}/orders`);
     S.orderQueue = await api(`/api/plan/${S.planId}/order-queue`).catch(() => null);

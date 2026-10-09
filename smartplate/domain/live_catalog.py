@@ -65,6 +65,10 @@ ALLERGEN_WORDS = {"peanut": "peanut", "groundnut": "peanut", "cashew": "tree_nut
                   "ghee": "dairy", "curd": "dairy", "cream": "dairy", "egg": "egg", "prawn": "shellfish",
                   "fish": "fish", "soya": "soy", "wheat": "gluten", "maida": "gluten", "sesame": "sesame"}
 NONVEG_WORDS = r"chicken|mutton|lamb|fish|meen|prawn|shrimp|crab|egg|omelet|keema|kheema|beef|pork"
+# Swiggy's own menu sections that hold sides, breads, drinks and sweets, not a whole meal.
+# A dish filed there isn't planned as a meal by itself, unless the person pools it.
+SIDE_SECTIONS = re.compile(r"\b(breads?|rotis?|sides?|accompaniments?|beverages?|drinks?|juices?|shakes?|desserts?|"
+                           r"sweets?|extras?|add[- ]?ons?|raitas?|papads?|condiments?|dips?|ice creams?)\b", re.I)
 TAG_WORDS = {"biryani": "heavy", "meals": "comfort", "thali": "comfort", "salad": "light", "idli": "light"}
 
 
@@ -83,6 +87,17 @@ def estimate(name: str, veg) -> dict | None:
             tags = sorted({t for w, t in TAG_WORDS.items() if w in low} | ({"dessert"} if values.get("dessert") else set()))
             return {**out, "allergens": sorted(allergens_), "veg": 1 if veg_flag else 0, "tags": tags}
     return None
+
+
+def unestimated(name: str, veg) -> dict:
+    """A dish the person put in a meal pool whose name matches no template: planned with
+    NO nutrition figures (nutrition_known = 0), never made-up ones. Allergen words and
+    the veg mark are still read from the name and Swiggy's flag."""
+    low = name.lower()
+    veg_flag = bool(veg) if veg is not None else not re.search(NONVEG_WORDS, low)
+    return {"kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0, "sugar_g": 0, "nutrition_known": 0,
+            "allergens": sorted({a for w, a in ALLERGEN_WORDS.items() if w in low}),
+            "veg": 1 if veg_flag else 0, "tags": []}
 
 
 # --------------------------------------------------------------------------- #
@@ -117,10 +132,19 @@ def clear(user_id: int) -> None:
 
 
 def _places(user_id: int) -> list[dict]:
+    """Where the plan's dishes come from: every restaurant in a meal pool, then the saved
+    places (or, with neither, the best-rated results of a live search)."""
     from ..integrations import swiggy_live
+    from . import meal_pools
+    pooled = meal_pools.restaurants(user_id)
     favs = swiggy_live.live_favourites(user_id)
-    if favs:
-        return favs[:MAX_PLACES]
+    if pooled or favs:
+        out, seen = [], set()
+        for p in pooled + favs[:MAX_PLACES]:
+            if p["id"] not in seen and len(out) < MAX_PLACES + meal_pools.MAX_PLACES:
+                seen.add(p["id"])
+                out.append(p)
+        return out
     found = swiggy_live.search_live_restaurants(user_id, DEFAULT_QUERY)["restaurants"]
     found = [r for r in found if str(r.get("availability") or "OPEN").upper() != "CLOSED"]
     found.sort(key=lambda r: -float(r.get("rating") or 0))
@@ -132,8 +156,10 @@ def refresh(user_id: int) -> dict:
     (409 when not connected) and keeps the previous catalogue when Swiggy fails."""
     from ..integrations import swiggy_live
     from ..integrations.swiggy_connect import SwiggyError
+    from . import meal_pools
     address_id = _address_id(user_id)
     places = _places(user_id)
+    pooled = meal_pools.keys(user_id)
     menus, skipped = [], []
     for place in places:
         try:
@@ -150,8 +176,12 @@ def refresh(user_id: int) -> dict:
             if it.get("in_stock") is False or not it.get("price"):
                 continue
             est = estimate(it["name"], it.get("veg"))
+            if not est and (str(r["id"]), str(it["id"])) in pooled:
+                est = unestimated(it["name"], it.get("veg"))      # their pick: planned, nutrition unknown
             if not est:
                 continue
+            if any(SIDE_SECTIONS.search(c) for c in it.get("categories") or []):
+                est = {**est, "tags": sorted(set(est["tags"]) | {"side"})}
             dishes.append({**est, "name": it["name"], "price": float(it["price"]), "provider_item_id": it["id"]})
         if dishes:
             rows.append((r, dishes))
@@ -162,27 +192,72 @@ def refresh(user_id: int) -> dict:
     n_dishes = 0
     with db.cursor() as cur:
         for r, dishes in rows:
-            try:
-                rating = float(r.get("rating") or 4.0)
-            except (TypeError, ValueError):
-                rating = 4.0
-            cur.execute("INSERT INTO restaurants(name, city, rating, cuisines, delivery_fee, eta_min, is_open, flaky, "
-                        "source, provider_id) VALUES (?,?,?,?,?,?,1,0,'live',?)",
-                        (r["name"], city_key(user_id), rating, "[]", LIVE_DELIVERY_FEE_ESTIMATE, 35, str(r["id"])))
-            rid = cur.lastrowid
+            rid, rating = _insert_restaurant(cur, user_id, r)
             for d in dishes:
-                cur.execute("INSERT INTO menu_items(restaurant_id, name, price, cuisine, kcal, protein_g, carbs_g, "
-                            "fat_g, sugar_g, veg, allergens, tags, carbon_kg, item_rating, popularity, reviews, "
-                            "source, provider_item_id, nutrition_estimated) "
-                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'[]','live',?,1)",
-                            (rid, d["name"], d["price"], "mixed", d["kcal"], d["protein_g"], d["carbs_g"],
-                             d["fat_g"], d["sugar_g"], d["veg"], db.jd(d["allergens"]), db.jd(d["tags"]),
-                             1.0, rating, 0.5, d["provider_item_id"]))
+                _insert_dish(cur, rid, rating, d)
                 n_dishes += 1
         cur.execute("INSERT INTO live_catalog_state(user_id, fetched_ts, restaurants, dishes, address_id) "
                     "VALUES (?,?,?,?,?)",
                     (user_id, clock.now().isoformat(timespec="minutes"), len(rows), n_dishes, address_id))
     return {**source_for(user_id), "skipped": skipped}
+
+
+def _rating(r: dict) -> float:
+    try:
+        return float(r.get("rating") or 4.0)
+    except (TypeError, ValueError):
+        return 4.0
+
+
+def _insert_restaurant(cur, user_id: int, r: dict) -> tuple[int, float]:
+    rating = _rating(r)
+    cur.execute("INSERT INTO restaurants(name, city, rating, cuisines, delivery_fee, eta_min, is_open, flaky, "
+                "source, provider_id) VALUES (?,?,?,?,?,?,1,0,'live',?)",
+                (r["name"], city_key(user_id), rating, "[]", LIVE_DELIVERY_FEE_ESTIMATE, 35, str(r["id"])))
+    return cur.lastrowid, rating
+
+
+def _insert_dish(cur, rid: int, rating: float, d: dict) -> int:
+    cur.execute("INSERT INTO menu_items(restaurant_id, name, price, cuisine, kcal, protein_g, carbs_g, "
+                "fat_g, sugar_g, veg, allergens, tags, carbon_kg, item_rating, popularity, reviews, "
+                "source, provider_item_id, nutrition_estimated, nutrition_known) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'[]','live',?,1,?)",
+                (rid, d["name"], d["price"], "mixed", d["kcal"], d["protein_g"], d["carbs_g"],
+                 d["fat_g"], d["sugar_g"], d["veg"], db.jd(d["allergens"]), db.jd(d["tags"]),
+                 1.0, rating, 0.5, d["provider_item_id"], d.get("nutrition_known", 1)))
+    return cur.lastrowid
+
+
+def add_dish(user_id: int, restaurant: dict, item: dict) -> int:
+    """Put one dish the person picked from a live menu into their live catalogue (for the
+    current address) and return its local id. Reads the whole catalogue first when there
+    is none yet. The dish keeps Swiggy's price; nutrition is estimated from its name, or
+    left unknown when no template fits."""
+    from ..integrations.swiggy_connect import SwiggyError
+    if not has_live(user_id):
+        refresh(user_id)
+    if not item.get("price"):
+        raise SwiggyError("Swiggy didn't show a price for this dish. Pick another or order it in Swiggy.")
+    city = city_key(user_id)
+    with db.cursor() as cur:
+        row = cur.execute("SELECT m.id FROM menu_items m JOIN restaurants r ON r.id=m.restaurant_id "
+                          "WHERE r.city=? AND r.provider_id=? AND m.provider_item_id=?",
+                          (city, str(restaurant["id"]), str(item["id"]))).fetchone()
+        if row:
+            return row["id"]
+        place = cur.execute("SELECT id, rating FROM restaurants WHERE city=? AND provider_id=?",
+                            (city, str(restaurant["id"]))).fetchone()
+        if place:
+            rid, rating = place["id"], place["rating"]
+        else:
+            rid, rating = _insert_restaurant(cur, user_id, restaurant)
+        est = estimate(item["name"], item.get("veg")) or unestimated(item["name"], item.get("veg"))
+        if any(SIDE_SECTIONS.search(c) for c in item.get("categories") or []):
+            est = {**est, "tags": sorted(set(est["tags"]) | {"side"})}
+        local = _insert_dish(cur, rid, rating, {**est, "name": item["name"], "price": float(item["price"]),
+                                                "provider_item_id": str(item["id"])})
+        cur.execute("UPDATE live_catalog_state SET dishes = dishes + 1 WHERE user_id=?", (user_id,))
+    return local
 
 
 # --------------------------------------------------------------------------- #

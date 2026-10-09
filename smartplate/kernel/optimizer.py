@@ -19,7 +19,7 @@ import pulp
 
 from .. import clock, config, db
 from ..domain import (allergens, carbon, fatigue, festivals, flavour, health, household, learning, leftovers,
-                      models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
+                      meal_pools, models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
 from ..integrations import calendar_sync
 from . import explainability, scheduler
 
@@ -150,7 +150,8 @@ def build_context(user: dict, plan: dict) -> dict:
     if learned["cost_mult"] != 1:                 # "too pricey" taps: cheaper picks weigh more
         weights = {**weights, "cost": round(weights["cost"] * learned["cost_mult"], 4)}
     menu = models.menu_for_user(user)
-    if any(it.get("source") == "live" for it in menu):
+    live = any(it.get("source") == "live" for it in menu)
+    if live:
         # The live catalogue is the user's own places (their live favourites, or what they
         # searched): every one is a usual place, none a "new" discovery.
         sig = {**sig, "favourites": {it["restaurant_id"] for it in menu}}
@@ -159,6 +160,9 @@ def build_context(user: dict, plan: dict) -> dict:
         "menu": menu,
         # A household plan feeds everyone eating a meal: one portion each (portions()).
         "members": models.get_household_members(user["household_id"]) if user.get("household_id") else [],
+        # The person's own breakfast / lunch / dinner pools (domain/meal_pools): a meal
+        # with a pool is planned only from it.
+        "pools": meal_pools.for_planner(user["id"]) if live else {},
         # Epicure flavour signals ("more like this", cuisine tilt); {} when neither is set
         "flavour": flavour.context(user, menu),
         "festivals": festivals.for_week(plan["week_start"]),
@@ -233,8 +237,10 @@ def _delivery_candidate(user, plan, session, item, ctx):
     if fbonus:
         taste_score = round(taste_score + fbonus, 4)
     discovery = bool(ctx["taste"]["favourites"]) and item["restaurant_id"] not in ctx["taste"]["favourites"]
-    nutri = nutrition.penalty(user, meal, item, tol=ctx["nutri_tol"])
-    hp = health.protein_penalty(user, item)
+    known = item.get("nutrition_known", 1) != 0
+    # A pooled dish with no estimate carries no nutrition term, rather than a made-up one.
+    nutri = nutrition.penalty(user, meal, item, tol=ctx["nutri_tol"]) if known else 0.0
+    hp = health.protein_penalty(user, item) if known else 0.0
     cpen = carbon.penalty(item)
     # usual-first (§5.2): a familiar pick is the "usual"; a novel one pays a small soft
     # premium when USUAL_FIRST is on, so the planner keeps the user's usuals unless a
@@ -259,7 +265,10 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "carbon_kg": carbon.estimate(item), "weather_cond": cond,
         "weather_bias": weather.taste_bias(cond, item),
         "festival_bias": festivals.taste_bias(ctx["festivals"].get(day), item),
-        "nutrition": {k: item.get(k, 0) for k in ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")},
+        "nutrition": ({k: item.get(k, 0) for k in ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")}
+                      if known else {}),
+        "nutrition_unknown": not known,
+        "pooled": item["id"] in ((ctx.get("pools") or {}).get(meal) or {}).get("ids", ()),
         "tags": item.get("tags", []), "flavour_why": fwhy,
     }
 
@@ -283,8 +292,10 @@ def _cook_candidate(user, session, ctx, recipe=None):
 
 
 def meal_suitable(item: dict, meal: str) -> bool:
-    """Keep treats visible in the catalogue without planning them as whole meals."""
-    return ("dessert" not in item.get("tags", []) and item.get("cuisine") != "dessert"
+    """Keep treats and sides (Swiggy menu sections like Breads or Beverages) visible in the
+    catalogue without planning them as whole meals by themselves."""
+    return ("dessert" not in item.get("tags", []) and "side" not in item.get("tags", [])
+            and item.get("cuisine") != "dessert"
             and not item.get("name", "").lower().endswith(" sweet"))
 
 
@@ -326,9 +337,17 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     scheduled_min = models.MEAL_WINDOWS[meal][1]
     fasting = health.in_fasting_window(user, scheduled_min)
     cands = []
-    if not fasting:
+    pool = (ctx.get("pools") or {}).get(meal)
+    if not fasting and pool:
+        # The person's own pool for this meal: only its dishes, hard rules still apply.
+        # (Their pick, so the treat filter and rating floor don't second-guess it.)
+        safe = [it for it in allergens.safe_items(user, ctx["menu"])
+                if it["id"] in pool["ids"] and it["id"] not in ctx["taste"]["disliked"]]
+        safe.sort(key=lambda it: it["price"] + it["delivery_fee"])
+        cands = [_delivery_candidate(user, plan, session, it, ctx) for it in safe]
+    elif not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
-        safe = [it for it in safe if meal_suitable(it, meal)]
+        safe = [it for it in safe if meal_suitable(it, meal) and it.get("nutrition_known", 1) != 0]
         safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
         safe = [it for it in safe if it["id"] not in ctx["taste"]["disliked"]]   # "not again" is a lock
         # keep the most promising few (cheap-but-decent) to bound the MILP
@@ -354,6 +373,11 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     if not ctx["menu"]:
         # No restaurant dishes at all (no live Swiggy menus yet): say so, not "budget".
         skip_reason = "No real restaurant dishes yet — connect Swiggy and pick an address."
+    elif pool and not any(c["kind"] == "delivery" for c in cands):
+        skip_reason = (f"Nothing in your {meal} pool is on Swiggy's menu right now, or safe for your rules. "
+                       f"Add another dish to your {meal} pool.")
+    elif pool:
+        skip_reason = f"Your {meal} pool didn't fit the budget this time — skipped."
     if fasting:
         skip_reason = "Inside your fasting window — kept clear (cook/skip only)."
     skip = _skip(forced=False, reason=skip_reason)
@@ -634,10 +658,20 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
         cook_room = min(cookable, max(0, _cook_cap(user) - sum(1 for c in pinned.values() if c["kind"] == "cook")))
         uncovered = len(active) - usual_room - cook_room
         prob += pulp.lpSum(discovery_vars) <= max(n_new, uncovered)
+    # A small pool is the person saying "this is what I eat": its dishes may repeat as
+    # often as the pool's meals need (one dish in a breakfast pool → every breakfast).
+    item_cap = {}
+    for meal_name, pool in (ctx.get("pools") or {}).items():
+        n_meal = sum(1 for s in active if s["meal"] == meal_name)
+        if pool["ids"] and n_meal:
+            need = math.ceil(n_meal / len(pool["ids"]))
+            for item_id in pool["ids"]:
+                item_cap[item_id] = max(item_cap.get(item_id, repeat), need)
     for item_id, vlist in item_vars.items():                    # variety: cap repeats per dish —
         pinned_n = sum(1 for c in pinned.values() if c.get("item_id") == item_id)   # pins count too
-        if len(vlist) + pinned_n > repeat:
-            prob += pulp.lpSum(vlist) <= max(0, repeat - pinned_n)
+        cap_n = item_cap.get(item_id, repeat)
+        if len(vlist) + pinned_n > cap_n:
+            prob += pulp.lpSum(vlist) <= max(0, cap_n - pinned_n)
     for (item_id, day), vlist in item_day_vars.items():
         pinned_same = sum(1 for sid, c in pinned.items() if c.get("item_id") == item_id
                           and next(s["day"] for s in sessions if s["id"] == sid) == day)

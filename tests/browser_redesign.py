@@ -237,6 +237,8 @@ def test_redesign_today_cart_menu_week_me(world, viewport):
 
             # --- Saved → the full live menu: categories, a filter, photo → icon fallback ---------- #
             nav.get_by_role("button", name="Saved").click()
+            expect(page.get_by_role("heading", name="What you'd have for each meal")).to_be_visible()   # My meals first
+            page.get_by_role("button", name="Places", exact=True).click()
             page.locator('[data-live-place="r-1"]').first.click()
             menu = page.locator("section.livemenu")
             expect(menu).to_contain_text("6 current dishes")

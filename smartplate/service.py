@@ -217,7 +217,10 @@ def plan_view(plan_id: int) -> dict:
                                          "health_targets", "nutrition_targets", "carbon_pref", "prefs")},
                  "favourites": sorted(sig["favourites"]), "meals": profile.meals_planned(user)},
         "budget": env,
-        "nutrition": {"week": nut, "daily_avg": daily_nut, "daily_target": targets, "days": planned_days},
+        "nutrition": {"week": nut, "daily_avg": daily_nut, "daily_target": targets, "days": planned_days,
+                      # pooled dishes Ziggy has no estimate for: left out of the totals, and said so
+                      "unknown_meals": sum(1 for d in spend_rows
+                                           if d["chosen_kind"] == "delivery" and not d.get("nutrition"))},
         "carbon": {"total_kg": carbon_total, "band": carbon.band(carbon_total / max(1, len(spend_rows)))},
         "surge_saved": round(surge_saved, 2),
         "counts": counts,
@@ -254,6 +257,9 @@ def plan_view(plan_id: int) -> dict:
     view["heads_up"] = everyday.heads_up(view, user, plan, decisions, at)
     view["learned"] = learning.chips(user["id"])
     view["source"] = live_catalog.source_for(user["id"])
+    if view["source"].get("kind") == "live":
+        from .domain import meal_pools
+        view["pools"] = {m: p["size"] for m, p in meal_pools.for_planner(user["id"]).items()}
     return view
 
 
@@ -329,6 +335,8 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
     etas = {}
     with db.cursor() as cur:
         etas = {r["id"]: r["eta_min"] for r in cur.execute("SELECT id, eta_min FROM restaurants")}
+    from .domain import meal_pools
+    pools = meal_pools.for_planner(user["id"]) if user and plan is not None else {}
     for d in decisions:
         extra = {}
         if plan is not None:
@@ -337,7 +345,8 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
                      "item_id": d.get("item_id"), "recipe_key": d.get("recipe_key"),
                      "rating_given": ratings.get(d["session_id"]),
                      "reasons_given": reasons.get(d["session_id"], []),
-                     "usual": bool(sig and d.get("restaurant_id") in sig["favourites"])}
+                     "usual": bool(sig and d.get("restaurant_id") in sig["favourites"]),
+                     "pooled": d.get("item_id") in (pools.get(d["meal"]) or {}).get("ids", ())}
             if d["chosen_kind"] == "delivery":
                 cond = (wx or {}).get(d["day"], {}).get("condition", "clear")
                 extra["order"] = timing.order_plan(d["meal"], eta_min=etas.get(d.get("restaurant_id")),
@@ -357,6 +366,7 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
             "substituted": bool(d.get("substituted")),
             "time_shift": d.get("time_shift"), "reasons": d.get("reasons", []),
             "nutrition": d.get("nutrition", {}), "carbon_kg": d.get("carbon_kg", 0),
+            "nutrition_unknown": d["chosen_kind"] == "delivery" and not d.get("nutrition"),
             "session_id": d["session_id"], "status": d['session_status'],
             **extra,
         }

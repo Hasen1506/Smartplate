@@ -326,7 +326,9 @@ def options(session_id: int) -> dict:
 
     menu = ctx["menu"]
     safe_all = allergens.safe_items(user, menu)
-    safe = [it for it in safe_all if optimizer.meal_suitable(it, session["meal"])]
+    pooled_ids = ((ctx.get("pools") or {}).get(session["meal"]) or {}).get("ids", set())
+    # Dishes with no nutrition estimate are offered only where the person pooled them.
+    safe = [it for it in safe_all if optimizer.meal_suitable(it, session["meal"]) and it.get("nutrition_known", 1) != 0]
     floor = float(user["rating_floor"])
     rated_ok = [it for it in safe if it["restaurant_rating"] >= floor]
     disliked = ctx["taste"]["disliked"]
@@ -379,6 +381,11 @@ def options(session_id: int) -> dict:
     photos = swiggy_live.known_photos(user["id"], [d["item_id"] for g in groups for d in g["dishes"]])
     for d in [d for g in groups for d in g["dishes"]] + new:
         d["image"] = photos.get(d["item_id"])
+    pool_dishes = sorted((dish(it) | {"restaurant": it["restaurant_name"], "restaurant_id": it["restaurant_id"], "pooled": True}
+                          for it in safe_all if it["id"] in pooled_ids and it["id"] not in disliked),
+                         key=lambda d: (not d["fits"], d["price"]))
+    for d in pool_dishes:
+        d["image"] = photos.get(d["item_id"])
     n = optimizer.portions(user, session, ctx)
     cook_all = [r for r in reverse_mode.RECIPES if r["key"] in reverse_mode.RECIPE_BY_MEAL.get(session["meal"], [])]
     cooks = [r for r in cook_all if reverse_mode.unsafe_reason(user, r) is None]   # allergy/medical/diet: hard
@@ -388,6 +395,8 @@ def options(session_id: int) -> dict:
         "limits": limits,
         "usual": usual[:SHORTLIST_PLACES], "usual_more": max(0, len(usual) - SHORTLIST_PLACES),
         "new": new, "has_favourites": bool(favs),
+        # The person's own pool for this meal (domain/meal_pools); [] when the meal has none.
+        "pool": pool_dishes, "has_pool": bool((ctx.get("pools") or {}).get(session["meal"])),
         "portions": n,
         "cook": [{"recipe_key": r["key"], "name": r["name"], "price": round(r["cost"] * n, 2), "kcal": r["kcal"],
                   "protein_g": r["protein_g"]} for r in cooks],
@@ -409,6 +418,30 @@ def _editable(session: dict, *, allow_past=False) -> None:
         raise ValueError("This meal is already ordered or confirmed")
     if not allow_past and scheduler.is_past(session, optimizer.now()):
         raise ValueError("This meal's time has passed — mark it as had or skipped instead")
+
+
+def choose_live(session_id: int, body: dict) -> dict:
+    """Have a dish from ANY restaurant's live Swiggy menu (found by live search) for this
+    meal: the exact dish is checked on the restaurant's menu for the delivery address,
+    added to the person's live catalogue, then chosen like any other pick."""
+    from .domain import live_catalog
+    from .integrations import swiggy_live
+    from .integrations.swiggy_connect import SwiggyError
+    session, plan, user = _session_bundle(session_id)
+    _editable(session)
+    rid, iid = str(body.get("restaurant_id") or ""), str(body.get("item_id") or "")
+    if not rid or not iid:
+        raise ValueError("Pick a dish from a restaurant's Swiggy menu")
+    menu = swiggy_live.live_menu(user["id"], rid, str(body.get("restaurant_name") or ""))
+    item = next((i for i in menu["items"] if i["id"] == iid), None)
+    if not item:
+        raise SwiggyError(f"That dish isn't on {menu['restaurant']['name']}'s Swiggy menu for your address now.")
+    if item.get("in_stock") is False:
+        raise SwiggyError("That dish is out of stock right now. Pick another.")
+    if item.get("has_options"):
+        raise SwiggyError("This dish has options (sizes or add-ons). Choose them in Swiggy, or pick another dish.")
+    local = live_catalog.add_dish(user["id"], menu["restaurant"], item)
+    return choose(session_id, {"item_id": local})
 
 
 def choose(session_id: int, body: dict) -> dict:
