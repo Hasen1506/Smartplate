@@ -31,6 +31,8 @@ import time
 import urllib.parse
 import urllib.request
 
+from ..domain import food_words
+
 API = "https://en.wikibooks.org/w/api.php"
 SITE = "https://en.wikibooks.org/wiki/"
 LICENSE = {"name": "CC BY-SA 4.0", "url": "https://creativecommons.org/licenses/by-sa/4.0/",
@@ -42,14 +44,6 @@ DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 
 INGREDIENT_HEADS = re.compile(r"^ingredients?\b", re.I)
 STEP_HEADS = re.compile(r"^(procedure|directions?|method|preparation|instructions?|steps?)\b", re.I)
-NONVEG = re.compile(r"\b(chicken|mutton|lamb|goat|beef|pork|fish|prawns?|shrimps?|crab|eggs?|meat|keema|anchov\w*)\b", re.I)
-ANIMAL = re.compile(r"\b(milk|curd|yogh?urt|ghee|butter|paneer|cream|cheese|honey|khoa|khoya)\b", re.I)
-ALLERGEN_WORDS = {"peanut": "peanut", "groundnut": "peanut", "cashew": "tree_nut", "almond": "tree_nut",
-                  "pistachio": "tree_nut", "walnut": "tree_nut", "milk": "dairy", "curd": "dairy", "yogurt": "dairy",
-                  "yoghurt": "dairy", "ghee": "dairy", "butter": "dairy", "paneer": "dairy", "cream": "dairy",
-                  "cheese": "dairy", "egg": "egg", "wheat": "gluten", "maida": "gluten", "atta": "gluten",
-                  "semolina": "gluten", "rava": "gluten", "sooji": "gluten", "soy": "soy", "sesame": "sesame",
-                  "til": "sesame", "fish": "fish", "prawn": "shellfish", "shrimp": "shellfish", "crab": "shellfish"}
 
 
 # --------------------------------------------------------------------------- #
@@ -107,9 +101,8 @@ def parse(title: str, wikitext: str, revision: int | None = None) -> dict | None
     if not ingredients or not steps:
         return None
     meta = _summary(wikitext)
-    words = " ".join(ingredients).lower()
     name = title.split(":", 1)[-1]
-    veg = not NONVEG.search(words)
+    f = food_words.flags(ingredients)
     servings = re.search(r"\d+", meta.get("servings", "") or meta.get("yield", ""))
     return {
         "key": "wb:" + re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_"),
@@ -117,8 +110,7 @@ def parse(title: str, wikitext: str, revision: int | None = None) -> dict | None
         "servings": int(servings.group(0)) if servings else None,
         "time": meta.get("time") or None,
         "ingredients": ingredients[:60], "steps": steps[:60],
-        "veg": veg, "vegan": veg and not ANIMAL.search(words),
-        "allergens": sorted({a for w, a in ALLERGEN_WORDS.items() if re.search(rf"\b{w}", words)}),
+        "veg": f["veg"] and not f["egg"], "vegan": f["vegan"], "allergens": f["allergens"],
         "license": LICENSE["name"], "credit": "Wikibooks contributors",
     }
 
