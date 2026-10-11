@@ -47,15 +47,25 @@ ASSETS = {"app.js": "text/javascript", "styles.css": "text/css",
 SWIGGY_UI_COOKIE = "sp_swiggy_ui"     # which front end started a Swiggy sign-in (fixed values only)
 
 
+_ASSET_CACHE: dict = {}
+
+
 def _fingerprinted_assets() -> dict:
+    # Read, hash and gzip each asset once per process (and again only if the file changes):
+    # create_app runs per test, and four assets at gzip level 9 made every app ~20% slower.
     import gzip
     import hashlib
     out = {}
     for name, mime in ASSETS.items():
-        with open(os.path.join(STATIC_DIR, name), "rb") as f:
-            raw = f.read()
-        out[name] = {"raw": raw, "gzip": gzip.compress(raw, 9, mtime=0), "mime": mime,
-                     "hash": hashlib.sha256(raw).hexdigest()[:12]}
+        path = os.path.join(STATIC_DIR, name)
+        st = os.stat(path)
+        key = (name, st.st_mtime_ns, st.st_size)
+        if key not in _ASSET_CACHE:
+            with open(path, "rb") as f:
+                raw = f.read()
+            _ASSET_CACHE[key] = {"raw": raw, "gzip": gzip.compress(raw, 9, mtime=0), "mime": mime,
+                                 "hash": hashlib.sha256(raw).hexdigest()[:12]}
+        out[name] = _ASSET_CACHE[key]
     return out
 
 
