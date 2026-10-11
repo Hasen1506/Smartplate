@@ -379,7 +379,7 @@ const ACT_LABELS = {
   "refresh-live-cart": "Refresh Swiggy cart", "resolve-live-attempt": "Resolve the order attempt",
   "more-live-dishes": "Load more dishes", "restore-live-menu": "Browse the menu", "more-places": "Load more places",
   "live-menus": "Plan from Swiggy menus", "swiggy-refresh-addresses": "Refresh addresses",
-  "swiggy-connect": "Connect Swiggy", newweek: "Plan a new week", reopt: "Re-plan", "save-budget": "Re-plan", "try-different": "Try different dishes", budget: "Change budget", exec: "Review orders",
+  "swiggy-connect": "Connect Swiggy", newweek: "Plan a new week", reopt: "Re-plan", "save-budget": "Re-plan", "ol-cart": "Check it in Swiggy", "order-list": "Order list", "try-different": "Try different dishes", budget: "Change budget", exec: "Review orders",
   "addr-open": "Load your Swiggy addresses",
 };
 function liveAction(kind, ...args) { S.lastLive = { kind, args }; return RESUME[kind].run(...args); }
@@ -477,7 +477,7 @@ function resetProfileState() {
   for (const key of ["exec", "receipts", "recap", "orderReview", "sheet", "moving", "places", "calendar", "account", "swiggy",
     "swAddrs", "carts", "acctDraft", "liveResults", "liveFavourites", "liveBrowseMenu", "liveOrderReview", "liveCart",
     "checkoutReview", "placedOrder", "liveOrderStatus", "liveOrderHistory", "liveCartError", "liveCartEmpty", "saved",
-    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "cook", "dish", "cookAlong", "budgetSheet"]) S[key] = null;
+    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "cook", "dish", "cookAlong", "budgetSheet", "olist"]) S[key] = null;
   S.welcome = false; S.tab = "today"; S.more = null; S.connectSheet = false; S.addrSheet = false; S.ask = false;
 }
 async function switchUser(id) {
@@ -748,7 +748,7 @@ async function addLiveItemToCart() {
   try {
     S.liveCart = await api(`/api/user/${S.userId}/swiggy/live-cart`, "POST", {
       restaurant_id: r.restaurant_id, restaurant_name: r.restaurant, item_id: r.item_id,
-      item_name: r.item, expected_fingerprint: r.fingerprint });
+      item_name: r.item, expected_fingerprint: r.fingerprint, quantity: r.quantity || 1 });
     S.placedOrder = null; S.liveOrderStatus = null; S.liveCartError = null;
   } finally { S.liveOrderReview = null; }
   S.liveBrowseMenu = null; S.tab = "today";
@@ -1452,6 +1452,7 @@ function sourceLine(src) {
 function weekScreen() {
   if (S.weekView === "groceries") return `<button class="back secondary" data-week-view="">${ICON.back}Week</button>${cookingPanel()}`;
   if (S.weekView === "orders") return `<button class="back secondary" data-week-view="">${ICON.back}Week</button>${ordersPanel()}`;
+  if (S.weekView === "list") return `<button class="back secondary" data-week-view="">${ICON.back}Week</button>${orderListPanel()}`;
   const v = S.view, b = v.budget || {};
   const days = v.grid || [];
   const ti = days.findIndex(d => d.date === todayIso());
@@ -1483,11 +1484,86 @@ function weekScreen() {
     <section class="card tight rise3" aria-label="${esc(day.day)}">
       <h3 class="k" style="padding:14px 0 2px">${esc(day.day)} ${esc(fmtDate(day.date))}${i18nToday(day)}${fest}${ctx.your_fast ? ` · ${esc(ctx.your_fast)} fast` : ""}${liveWx ? ` · ${esc(WX_ICON[ctx.weather] || "")} ${Math.round(ctx.temp_c)}°` : ""}</h3>
       ${MEALS.filter(m => day.meals[m]).map(m => mealRow(day.meals[m], m)).join("") || `<p class="fine" style="padding:12px 0">Nothing planned.</p>`}</section>` : `<p class="fine rise2">Nothing planned this week yet.</p>`}
+    <button class="linkcard rise3" data-act="order-list"><span class="ico">${ICON.cart}</span><span class="t"><b>Order list</b><span>Every dish from your places: price, how many, one tap to have it</span></span>${ICON.right}</button>
     <button class="linkcard rise3" data-week-view="groceries"><span class="ico leaf">${ICON.bag}</span><span class="t"><b>${cooks ? "Cooking &amp; groceries" : "Cook something"}</b><span>${cooks ? `${cooks} cook meal${cooks === 1 ? "" : "s"} · grocery list ${rupee(v.coach.basket.total)}` : "Type any dish: ingredients, Instamart, cook along"}</span></span>${ICON.right}</button>
     ${swiggyReady() || (S.meta.swiggy_provider === "simulated" && S.meta.fixture_data) ? `<button class="linkcard rise3" data-week-view="orders"><span class="ico">${ICON.cart}</span><span class="t"><b>Order several meals</b><span>Pick meals and days, check each real cart</span></span>${ICON.right}</button>` : ""}
     <button class="ghost" data-act="newweek">Plan next week</button>`;
 }
 const i18nToday = (day) => day.date === todayIso() ? " · today" : "";
+
+/* ---- the order list: dish × price × quantity from your places, no feed ---- */
+const OL_SHOW = 30;
+async function openOrderList(sid = null, meal = null) {
+  const cell = sid ? cellOf(Number(sid)) : null;
+  S.olist = { sid: sid ? Number(sid) : null, meal: meal || null, q: "", veg: false, show: OL_SHOW, pick: null, loading: true };
+  S.sheet = null; S.weekView = "list"; S.tab = "week"; render();
+  await loadOrderList();
+  if (cell && S.olist) S.olist.qty = cell.portions || 1;
+  if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);
+}
+async function loadOrderList() {
+  const o = S.olist;
+  const qs = o.sid ? `session_id=${o.sid}` : o.meal ? `meal=${o.meal}` : "";
+  const data = await api(`/api/user/${S.userId}/order-list${qs ? `?${qs}` : ""}`);
+  S.olist = { ...S.olist, data, meal: data.meal, loading: false };
+  render();
+}
+function olRows() {
+  const o = S.olist, words = (o.q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  const rows = (o.data?.dishes || []).filter(d => (!o.veg || d.veg)
+    && words.every(w => `${d.name} ${d.restaurant}`.toLowerCase().includes(w)));
+  // "meal" should find Veg Meals before every dish of a place called "… Homely Meals"
+  const inName = d => words.every(w => d.name.toLowerCase().includes(w));
+  return words.length ? [...rows.filter(inName), ...rows.filter(d => !inName(d))] : rows;
+}
+function olLine(d, o) {
+  const picked = o.pick === d.id, qty = picked ? o.qty || 1 : 1;
+  const note = [d.restaurant, d.pooled.length ? `in your ${d.pooled.join(" & ")} pool` : "", d.side ? "side or treat" : ""].filter(Boolean).join(" · ");
+  return `<li class="olrow ${picked ? "on" : ""}"><button class="olpick" data-ol-pick="${d.id}" aria-pressed="${picked}">
+      <span class="vegdot ${d.veg ? "veg" : "nonveg"}" aria-label="${d.veg ? "Vegetarian" : "Not vegetarian"}"></span>
+      <span class="t"><b>${esc(d.name)}</b><span>${esc(note)}</span></span><b class="pr">${rupee0(d.price)}</b></button>
+    ${picked ? `<div class="olqty"><span class="stepper sm"><button type="button" data-ol-qty="-1" aria-label="One fewer" ${qty <= 1 ? "disabled" : ""}>${ICON.minus}</button><b aria-live="polite">${qty}</b><button type="button" data-ol-qty="1" aria-label="One more" ${qty >= (o.data?.max_quantity || 8) ? "disabled" : ""}>${ICON.plus}</button></span>
+      <span>${rupee0(d.price)} × ${qty} = <b>${rupee0(d.price * qty)}</b> + delivery ${d.fee_estimated ? "≈" : ""}${rupee0(d.delivery_fee)}</span></div>` : ""}</li>`;
+}
+function orderListPanel() {
+  const o = S.olist || {}, data = o.data;
+  const head = `<h1 class="h1">Order list</h1><p class="muted">Every dish from your saved places and meal pools, with Swiggy's price. Type to narrow it, pick one, set how many.</p>`;
+  if (o.loading || !data) return `${head}<div class="skeleton" aria-busy="true"><i></i><i></i><i></i></div>`;
+  const rows = olRows(), shown = rows.slice(0, o.show || OL_SHOW);
+  const pick = (data.dishes || []).find(d => d.id === o.pick);
+  const qty = o.qty || 1;
+  const total = pick ? pick.price * qty + (pick.delivery_fee || 0) : 0;
+  const left = data.limits ? (data.limits.left_day != null ? Math.min(data.limits.left_week, data.limits.left_day) : data.limits.left_week) : null;
+  const meals = openMeals().filter(m => !data.meal || m.label.endsWith(data.meal)).slice(0, 4);
+  const live = swiggyReady() && pick?.restaurant_id && pick?.provider_item_id;
+  return `${head}
+    ${data.session_label ? `<p class="k">For ${esc(data.session_label)}${left != null ? ` · ${rupee0(left)} left for it` : ""}</p>` : `<div class="chips" role="group" aria-label="Meal">${["", "breakfast", "lunch", "dinner"].map(m => `<button class="chip" data-ol-meal="${m}" aria-pressed="${(data.meal || "") === m}">${m ? cap1(m) : "Any meal"}</button>`).join("")}</div>`}
+    <div class="row" style="gap:8px"><label class="sr" for="ol-q">Filter dishes or places</label><input id="ol-q" type="search" placeholder="Filter: dosa, biryani, a place…" value="${esc(o.q || "")}" maxlength="40" autocomplete="off" style="flex:1">
+      <button class="chip" data-act="ol-veg" aria-pressed="${!!o.veg}">Veg only</button></div>
+    <p class="fine">${rows.length} dish${rows.length === 1 ? "" : "es"}${data.places.length ? ` from ${data.places.length} place${data.places.length === 1 ? "" : "s"}` : ""}${data.hidden ? ` · ${data.hidden} hidden: they break your rules` : ""}</p>
+    ${shown.length ? `<ul class="olist" aria-label="Dishes">${shown.map(d => olLine(d, o)).join("")}</ul>` : `<p class="fine">${data.dishes.length ? "Nothing matches. Clear the filter." : "No dishes yet: save a place or add dishes to a meal pool."}</p>`}
+    ${rows.length > shown.length ? `<button class="ghost" data-act="ol-more">Show ${Math.min(OL_SHOW, rows.length - shown.length)} more of ${rows.length - shown.length}</button>` : ""}
+    ${pick ? `<section class="card olbar" aria-label="Your pick">
+      <div class="row" style="justify-content:space-between;align-items:baseline;flex-wrap:nowrap"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${esc(pick.name)}</b> × ${qty}</span><b class="money">≈${rupee0(total)}</b></div>
+      <p class="fine">With delivery${pick.fee_estimated ? " (estimated)" : ""}; Swiggy's bill is exact.${left != null ? ` ${total <= left ? `Fits the ${rupee0(left)} left for this meal.` : `${rupee0(total - left)} over what's left for this meal.`}` : ""}</p>
+      ${o.sid ? `<button class="primary" data-ol-have="${o.sid}">Have it for ${esc(data.session_label)}</button>`
+        : meals.length ? `<p class="k">Have it for</p><div class="chips">${meals.map(m => `<button class="chip" data-ol-have="${m.session_id}">${esc(m.label)}</button>`).join("")}</div>` : ""}
+      ${live ? `<button class="${o.sid ? "secondary" : "primary"}" data-act="ol-cart">Add ${qty} to Swiggy cart</button>` : ""}
+    </section>` : ""}`;
+}
+async function olHave(sid) {
+  const o = S.olist, d = o.data.dishes.find(x => x.id === o.pick);
+  adoptView(await api(`/api/session/${sid}/choose`, "POST", { item_id: d.id }));
+  const label = sessionLabel(sid) || "that meal";
+  S.olist = null; S.weekView = null; render();
+  toast(`${d.name} for ${label}`);
+}
+async function olCart() {
+  const o = S.olist, d = o.data.dishes.find(x => x.id === o.pick);
+  S.liveOrderReview = await api(`/api/user/${S.userId}/swiggy/live-cart/preview`, "POST",
+    { restaurant_id: d.restaurant_id, restaurant_name: d.restaurant, item_id: d.provider_item_id, item_name: d.name, quantity: o.qty || 1 });
+  render();
+}
 
 /* ---- budget in place, and "Try different dishes": both re-plan the week, both undo ---- */
 const BUDGET_STEP = 250;
@@ -1583,6 +1659,7 @@ function sheetDialog() {
       ${(() => { const g = d.usual.find(x => x.restaurant === place); return g ? `<p class="fine">${Number(g.rating).toFixed(1)}★ · about ${g.eta_min} min${g.more ? ` · ${g.more} more on their menu` : ""}</p>` : ""; })()}
       <div class="stack" style="gap:8px">${all.filter(x => x.restaurant === place).map(x => pickBtn(x, x.restaurant, d)).join("") || `<p class="fine">No places nearby fit your rules for this meal.</p>`}</div>
       ${liveFav && swiggyReady() ? `<button class="secondary" data-live-place="${esc(liveFav.id)}" data-live-name="${esc(liveFav.name)}">See ${esc(liveFav.name)}'s full menu</button>` : ""}` : ""}
+    ${tab !== "cook" ? `<button class="secondary" data-ol-open="${s.id}">Every dish as a list</button>` : ""}
     ${swiggyReady() && tab !== "cook" ? `<div class="two"><button class="secondary" data-pick-anywhere="${s.id}">Any place near you</button><button class="secondary" data-edit-pool="${esc(s.meal)}">Edit ${esc(s.meal)} pool</button></div>` : ""}
     ${tab === "cook" ? `${cookFinder({ sid: s.id, meal: s.meal })}${d.cook.length ? `<p class="k">Ziggy's priced home meals</p><div class="stack" style="gap:8px">${d.cook.map(c => `<button class="pick" data-cook="${esc(c.recipe_key)}">${dishIcon(c.name, { cook: true })}<span class="t"><b>${esc(c.name)}</b><span>Cook at home · on your grocery list</span></span><b class="pr">${rupee0(c.price)}</b></button>`).join("")}</div>` : ""}` : ""}
     ${eatersBlock(s)}
@@ -2223,7 +2300,7 @@ function liveOrderReviewDialog() {
     <div class="sheet-head"><div><p class="eyebrow">Fresh from Swiggy</p><h2 class="h2" id="live-review-title">${r.orderable === false ? "Check this dish" : "Add this to your cart?"}</h2></div>
       <button class="icon-btn" data-close-live-review="1" aria-label="Close live item review">${ICON.close}</button></div>
     <div class="dish-row">${dishIcon(r.item, { image: r.image, lg: true })}<div class="t"><b class="h3">${esc(r.item)}</b><span class="muted">${esc(r.restaurant)} · to ${esc(r.address)}</span></div>
-      <b>${r.menu_price == null ? "Price in cart" : livePrice(r.menu_price)}</b></div>
+      <b>${r.menu_price == null ? "Price in cart" : (r.quantity || 1) > 1 ? `${r.quantity} × ${livePrice(r.menu_price)}` : livePrice(r.menu_price)}</b></div>
     <p class="fine">Swiggy shows the exact total, with fees and taxes, once it's in your cart.</p>
     ${r.orderable === false ? `<div class="fine" role="note">${esc(r.reason)}${ruleWhy(r.rule)}</div>
       <a class="btn primary" href="${esc(r.handoff_url)}" target="_blank" rel="noopener">Open in Swiggy ${ICON.out}</a>
@@ -2836,6 +2913,13 @@ function wire() {
   on("[data-choose-auto]", "click", (e) => guard(() => choose(e.currentTarget.dataset.chooseAuto, { action: "auto" }, "Ziggy will choose this one")));
   on("[data-move]", "click", (e) => { S.moving = Number(e.currentTarget.dataset.move); S.sheet = null; S.tab = "week"; S.weekView = null; render(); });
   on("[data-close-dish]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.dish = null; render(); } });
+  on("[data-ol-open]", "click", (e) => guard(() => openOrderList(e.currentTarget.dataset.olOpen), "Order list"));
+  on("[data-ol-meal]", "click", (e) => { S.olist = { ...S.olist, meal: e.currentTarget.dataset.olMeal || null, pick: null, show: OL_SHOW, loading: true }; render(); guard(loadOrderList, "Order list"); });
+  on("[data-ol-pick]", "click", (e) => { const id = Number(e.currentTarget.dataset.olPick); S.olist.pick = S.olist.pick === id ? null : id; S.olist.qty = S.olist.qty || 1; render(); });
+  on("[data-ol-qty]", "click", (e) => { S.olist.qty = Math.min(S.olist.data?.max_quantity || 8, Math.max(1, (S.olist.qty || 1) + Number(e.currentTarget.dataset.olQty))); render(); });
+  on("[data-ol-have]", "click", (e) => guard(() => olHave(Number(e.currentTarget.dataset.olHave)), "Have it"));
+  const olq = document.getElementById("ol-q");
+  if (olq) olq.oninput = () => { S.olist.q = olq.value; S.olist.show = OL_SHOW; render(); refocus("ol-q"); };
   on("[data-close-budget]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.budgetSheet = null; render(); } });
   on("[data-budget-step]", "click", (e) => {
     S.budgetSheet.value = Math.min(100000, Math.max(250, (Number(S.budgetSheet.value) || 0) + Number(e.currentTarget.dataset.budgetStep))); render(); });
@@ -2897,7 +2981,10 @@ function wire() {
   const acts = {
     "download-profile": () => downloadPrivate(`/api/user/${S.userId}/data.json`, "ziggy-profile.json", "application/json"),
     reopt: reoptimize, exec: reviewOrders, "confirm-exec": execute,
-    budget: async () => openBudget(), "save-budget": saveBudget, "try-different": tryDifferent,
+    budget: async () => openBudget(),
+    "order-list": () => openOrderList(), "ol-cart": olCart,
+    "ol-veg": async () => { S.olist.veg = !S.olist.veg; S.olist.show = OL_SHOW; render(); },
+    "ol-more": async () => { S.olist.show = (S.olist.show || OL_SHOW) + OL_SHOW; render(); }, "save-budget": saveBudget, "try-different": tryDifferent,
     "confirm-live-cart": addLiveItemToCart,
     "review-live-checkout": reviewLiveCheckout, "place-live-order": placeLiveOrder,
     "track-live-order": trackLiveOrder, "live-order-history": loadLiveOrderHistory,

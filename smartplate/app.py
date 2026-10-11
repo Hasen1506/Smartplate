@@ -753,6 +753,14 @@ def create_app() -> Flask:
         return jsonify(d)
 
     # Meal pools (domain/meal_pools.py): the dishes a person wants for each meal.
+    @app.get("/api/user/<int:user_id>/order-list")
+    def order_list_view(user_id):
+        from .domain import order_list
+        sid = request.args.get("session_id")
+        if sid is not None and not sid.isdigit():
+            raise ValueError("session_id must be a meal id")
+        return jsonify(order_list.view(user_id, request.args.get("meal") or None, int(sid) if sid else None))
+
     @app.get("/api/user/<int:user_id>/pools")
     def pools_view(user_id):
         return jsonify(meal_pools.view(user_id))
@@ -788,7 +796,7 @@ def create_app() -> Flask:
         body = request.get_json()
         return jsonify(swiggy_live.live_cart_preview(user_id, str(body.get("restaurant_id") or ""),
                           str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
-                          str(body.get("item_name") or "")))
+                          str(body.get("item_name") or ""), body.get("quantity", 1)))
 
     @app.post("/api/user/<int:user_id>/swiggy/live-cart")
     def swiggy_live_fill_cart(user_id):
@@ -796,7 +804,8 @@ def create_app() -> Flask:
         try:
             return jsonify(swiggy_live.fill_live_cart(user_id, str(body.get("restaurant_id") or ""),
                           str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
-                          str(body.get("item_name") or ""), body.get("expected_fingerprint")))
+                          str(body.get("item_name") or ""), body.get("expected_fingerprint"),
+                          body.get("quantity", 1)))
         except swiggy_live.CartChanged as exc:
             return jsonify(error="cart_changed", message=str(exc)), 409
 

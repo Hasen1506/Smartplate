@@ -1197,8 +1197,20 @@ def _safety_blocked(user: dict) -> bool:
     return bool(user["allergens"] or user["medical"] or user["diet"] == "vegan")
 
 
+def _quantity(value) -> int:
+    try:
+        q = int(value if value is not None else 1)
+    except (TypeError, ValueError):
+        raise ValueError("Quantity must be a whole number") from None
+    if isinstance(value, bool) or q < 1:
+        raise ValueError("Quantity must be at least 1")
+    if q > MAX_PORTIONS:
+        raise SwiggyError(f"{q} of one dish is a large order. Add it in Swiggy, where you can see every option.")
+    return q
+
+
 def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
-                      item_id: str, item_name: str) -> dict:
+                      item_id: str, item_name: str, quantity=1) -> dict:
     """Review an item chosen from a real menu, without a seeded plan or fuzzy match.
 
     Always answers with a review (dish, current price, address). For profiles whose
@@ -1206,6 +1218,7 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
     `orderable: False` with a Swiggy hand-off instead of an error, so the Review button
     never dead-ends."""
     from ..domain import models, timing
+    quantity = _quantity(quantity)
     user = models.get_user(user_id)
     if not user:
         raise ValueError("Profile not found")
@@ -1252,9 +1265,11 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
     _note_sample(user_id, "search_menu.item_match", {"by": matched_by})
     details = {"user_id": user_id, "address_id": address_id, "restaurant_id": restaurant_id,
                "restaurant": place["name"], "item_id": str(_get(item, "menu_item_id")),
-               "item": str(_get(item, "name"))}
+               "item": str(_get(item, "name")), "quantity": quantity}
+    price = rupees(item, menu_unit(rows))
     review = {**details, "address": conn.get("address_label") or address_id,
-              "menu_price": rupees(item, menu_unit(rows)), "price_estimated": price_estimated(item),
+              "menu_price": price, "menu_total": None if price is None else round(price * quantity, 2),
+              "price_estimated": price_estimated(item),
               "image": _image(item), "handoff_url": timing.swiggy_handoff(place["name"], str(_get(item, "name")))}
     blocked = None
     if _safety_blocked(user):
@@ -1491,10 +1506,10 @@ def current_live_cart(user_id: int) -> dict:
 
 
 def fill_live_cart(user_id: int, restaurant_id: str, restaurant_name: str,
-                   item_id: str, item_name: str, expected_fingerprint: str | None) -> dict:
+                   item_id: str, item_name: str, expected_fingerprint: str | None, quantity=1) -> dict:
     if not expected_fingerprint:
         raise CartChanged("Review the exact live Swiggy item before adding it to your cart.")
-    preview = live_cart_preview(user_id, restaurant_id, restaurant_name, item_id, item_name)
+    preview = live_cart_preview(user_id, restaurant_id, restaurant_name, item_id, item_name, quantity)
     if not preview["orderable"]:
         raise SwiggyError(preview["reason"])
     if preview["fingerprint"] != expected_fingerprint:

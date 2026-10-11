@@ -1490,3 +1490,29 @@ test('budget changes in place with a per-meal figure, and Try different dishes c
   assert.equal(post.options.method, 'POST');
   assert.equal(vm.runInContext('S.view.try_different.changed', context), 3);
 });
+
+test('order list: plain rows, name matches first, quantity × price against what is left, cart review with the quantity', async () => {
+  const review = { item: 'Veg Meals', restaurant: 'Annapoorna', address: 'Home', menu_price: 180, quantity: 2, orderable: true, fingerprint: 'f' };
+  const { context, calls } = fixture({ '/api/user/2/swiggy/live-cart/preview': review });
+  await context.bootPromise;
+  vm.runInContext(`S.swiggy = { connected: true, address: { id: 'a' } };
+    S.olist = { sid: 7, q: 'meal', show: 30, qty: 2, pick: 2, data: { meal: 'lunch', session_label: 'Sat lunch',
+      limits: { left_week: 300, left_day: null }, hidden: 3, places: ['Annapoorna', 'Homely Meals Co'], max_quantity: 8, dishes: [
+      { id: 1, name: 'Dal <Tadka>', price: 150, delivery_fee: 30, fee_estimated: true, restaurant: 'Homely Meals Co', restaurant_id: 'r9', provider_item_id: 'i1', veg: true, side: false, pooled: [], fits_meal: true },
+      { id: 2, name: 'Veg Meals', price: 180, delivery_fee: 30, fee_estimated: false, restaurant: 'Annapoorna', restaurant_id: 'r1', provider_item_id: 'i2', veg: true, side: false, pooled: ['lunch'], fits_meal: true }] } };`, context);
+  const names = vm.runInContext('olRows().map(d => d.name)', context);
+  assert.deepEqual(JSON.parse(JSON.stringify(names)), ['Veg Meals', 'Dal <Tadka>']);            // the dish name match first
+  const html = vm.runInContext('orderListPanel()', context);
+  assert.match(html, /For Sat lunch · ₹300 left for it/);
+  assert.match(html, /Dal &lt;Tadka&gt;/);
+  assert.match(html, /₹180 × 2 = <b>₹360<\/b> \+ delivery ₹30/);
+  assert.match(html, /≈₹390/);
+  assert.match(html, /₹90 over what's left for this meal/);
+  assert.match(html, /3 hidden: they break your rules/);
+  assert.match(html, /data-ol-have="7">Have it for Sat lunch/);
+  assert.match(html, /Add 2 to Swiggy cart/);
+  await vm.runInContext('olCart()', context);
+  const sent = JSON.parse(calls.find(c => c.url === '/api/user/2/swiggy/live-cart/preview').options.body);
+  assert.deepEqual(sent, { restaurant_id: 'r1', restaurant_name: 'Annapoorna', item_id: 'i2', item_name: 'Veg Meals', quantity: 2 });
+  assert.match(vm.runInContext('liveOrderReviewDialog()', context), /2 × /);
+});
