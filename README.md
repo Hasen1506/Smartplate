@@ -75,6 +75,15 @@ or your phone's setting, and an optional Zomato-red-to-Swiggy-orange colour mesh
    (Swiggy's own and Ziggy's safety rules), marks the ones that stopped you in the
    last 7 days and keeps the last few problems.
 
+## Ziggy v3 (experiment): tonight's meal
+
+`/v3` (or `/?ui=v3`) opens a second, smaller front end for one job: tonight's meal inside
+your weekly budget and diet rules, one tap to a real Swiggy cart, with money left this week
+from real bills. Everything else is in the classic app, linked from v3's **More**. The
+account is saved last, by email. Code: `smartplate/static/v3/`; tests: `tests/browser_v3.py`,
+`tests/frontend_v3.test.cjs`, `tests/test_ui_v3.py`. Remove the folder and the two routes
+to drop it.
+
 ## Try it in your browser
 
 **Host your own copy (free, about 5 minutes):**

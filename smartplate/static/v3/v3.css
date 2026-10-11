@@ -1,0 +1,106 @@
+/* Ziggy v3 (experiment): layout for the "tonight" front end. Colours, type, buttons, cards,
+   chips, sheets and the elephant all come from /static/styles.css (the Dark v2 language);
+   this file only adds what the new screens need. One primary per screen. */
+
+.v3 .col{min-width:0}
+
+/* money left: the one number that follows you, top right */
+.v3-left{min-height:44px;padding:4px 14px;border-radius:999px;flex-direction:column;align-items:flex-end;gap:0;line-height:1.1;
+  background:var(--leaf-soft);border-color:var(--leaf-line);color:var(--leaf-ink)}
+.v3-left b{font-family:var(--display);font-size:17px;font-variant-numeric:tabular-nums}
+.v3-left span{font-size:11.5px;font-weight:600}
+.v3-left.over{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)}
+.v3 .topbar .addr{max-width:46vw}
+
+/* first run */
+.v3-welcome .mascot{--s:104px}
+.v3-welcome .hero-h{font-size:clamp(36px,10.5vw,50px)}
+.v3-setup fieldset{gap:12px}
+.v3-diet button{min-height:50px;font-size:15.5px;font-weight:700}
+.v3-diet .dot{width:18px;height:18px;border-radius:5px}
+.v3-diet .dot::after{width:7px;height:7px}
+.v3-budget{display:flex;align-items:center;gap:6px;padding:6px 16px;border-radius:18px;background:var(--card);border:1.5px solid var(--line)}
+.v3-budget:focus-within{border-color:var(--ink)}
+.v3-rs{font-size:34px;color:var(--ink2)}
+.v3-budget input{border:0;background:transparent;font-size:38px;min-height:60px;padding:0;font-family:var(--display);font-weight:800}
+.v3-budget input:focus{outline:none}
+.v3-connect .mascot{--s:96px}
+
+/* Tonight */
+.v3-hero{gap:14px}
+.v3-hero .dish-row h1{font-size:26px}
+.v3-orderby{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:14px;background:var(--raised);font-size:14.5px}
+.v3-orderby .small{min-height:36px;padding:0 10px;gap:6px}
+.v3-orderby svg{width:17px;height:17px}
+.v3-on{display:inline-flex;align-items:center;gap:6px;color:var(--leaf-ink);font-weight:700}
+.v3-on svg{width:15px;height:15px}
+.v3-alts{display:flex;flex-direction:column;gap:8px;padding-top:4px}
+.v3-alt{justify-content:flex-start;gap:12px;min-height:64px;padding:8px 12px 8px 8px;border-radius:16px;background:var(--raised);border-color:transparent;text-align:left;font-weight:400;width:100%}
+.v3-alt:hover{border-color:var(--line2)}
+.v3-alt .dicon,.v3-alt .dphoto{width:46px;height:46px;border-radius:13px}
+.v3-alt .dicon svg{width:22px;height:22px}
+.v3-alt .t{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
+.v3-alt .t b{font-size:15.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v3-alt .t span{font-size:13px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v3-alt .pr{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:14px;flex:none}
+.v3-alt .pr .up,.v3-alt .pr .dn{font-size:12px;font-weight:700}
+.v3-alt .pr .up{color:var(--amber)}
+.v3-alt .pr .dn{color:var(--leaf-ink)}
+.v3-alt.over{opacity:.75}
+.v3-links{display:flex;justify-content:center;gap:4px 24px;flex-wrap:wrap}
+.v3-links .link{font-size:14.5px;color:var(--ink2)}
+.v3-after{font-size:15px}
+.v3-after b{font-variant-numeric:tabular-nums}
+.v3-next{justify-content:flex-start;flex-wrap:wrap;gap:4px 10px;min-height:60px;padding:10px 16px;border-radius:var(--r);background:var(--card);
+  box-shadow:var(--shadow);border-color:transparent;text-align:left;font-weight:400}
+.v3-next .k{width:100%}
+.v3-next > span:nth-child(2){flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v3-next .pr{display:inline-flex;align-items:center;gap:4px}
+.v3-next .pr svg{width:16px;height:16px;color:var(--ink2)}
+
+/* Week: money, reconciled */
+.v3-money{gap:14px}
+.v3-big{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.v3-big .money{font-size:44px;line-height:1;color:var(--leaf-ink)}
+.v3-big .money.bad{color:var(--bad)}
+.v3-bar{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--raised);gap:2px}
+.v3-bar i{display:block;height:100%}
+.v3-bar i[style="width:0%"]{display:none}
+.v3-bar .r,.v3-key .r{background:var(--ink)}
+.v3-bar .e,.v3-key .e{background:var(--ink2)}
+.v3-bar .p,.v3-key .p{background:var(--accent)}
+.v3-key .u{background:transparent;border:1.5px dashed var(--ink2)}
+.v3-key{display:grid;gap:6px}
+.v3-key div{display:flex;justify-content:space-between;gap:10px;font-size:14.5px}
+.v3-key dt{display:flex;align-items:center;gap:8px;color:var(--ink2)}
+.v3-key dt i{display:inline-block;width:10px;height:10px;border-radius:3px}
+.v3-key dd{font-weight:700}
+.v3-settle{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)}
+.v3-settle .t{display:flex;flex-direction:column;flex:1;min-width:0}
+.v3-sec{margin-top:6px}
+.v3-day{display:flex;flex-direction:column;gap:6px}
+.v3-mrow{text-align:left;font-weight:400;background:transparent;border-radius:0;justify-content:flex-start}
+.v3-mrow .p{flex:none}
+
+/* More */
+.v3 .set{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;padding:0;border:0;
+  border-bottom:1px solid var(--line);border-radius:0;background:transparent;text-align:left;font-weight:600;font-size:15.5px;text-decoration:none}
+.v3 .set:last-child{border-bottom:0}
+.v3 .set > span:last-child{display:inline-flex;align-items:center;gap:6px;color:var(--ink2);font-weight:500;font-size:14px;min-width:0;text-align:right}
+.v3 .set > span:last-child > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46vw}
+.v3 .set svg{width:16px;height:16px;flex:none}
+
+/* wide screens: the same single column, centred, with the side rail */
+@media (min-width:900px){
+  .v3 .topbar{padding-left:max(32px,calc((100% - 576px) / 2));padding-right:max(32px,calc((100% - 576px) / 2))}
+  .v3 .topbar .addr{max-width:300px}
+  .v3 .set > span:last-child > span{max-width:280px}
+}
+.v3-diet button[aria-pressed="true"]{box-shadow:0 0 0 1.5px var(--ink) inset,0 2px 8px -2px rgba(0,0,0,.22)}
+.v3-account{border:1.5px solid var(--accent-line)}
+.v3 input[type=email]{min-height:48px;padding:0 14px;border-radius:14px;border:1.5px solid var(--line);background:var(--card);font-size:16px;font-weight:400;width:100%;color:var(--ink)}
+.v3 input[type=email]:focus{outline:none;border-color:var(--ink)}
+.v3 input::placeholder{color:var(--ink2);opacity:.8}
+.v3-orderby{flex-wrap:nowrap}
+.v3-orderby > span:first-child{flex:1;min-width:0}
+.v3-orderby .small{flex:none}
