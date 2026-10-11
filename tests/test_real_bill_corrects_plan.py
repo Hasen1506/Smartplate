@@ -19,6 +19,7 @@ from smartplate import config, db
 from smartplate.app import create_app
 from smartplate.domain import allergens, live_catalog, models
 from smartplate.integrations import swiggy_connect, swiggy_live
+from conftest import solo
 
 BILLS = json.load(open(os.path.join(os.path.dirname(__file__), "fixtures", "swiggy_cart_bills.json")))
 PLACE = "Hotel Saravana Bhavan (Adyar)"
@@ -54,6 +55,7 @@ class BilledCart(FakeLive):
 def client(gt):
     app = create_app()
     app.config["TESTING"] = True
+    solo(3)                      # Arjun orders for himself here (conftest.solo)
     return app.test_client()
 
 

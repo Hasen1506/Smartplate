@@ -1,0 +1,34 @@
+name: Import Wikibooks recipes
+# Run by hand (Actions → Import Wikibooks recipes → Run workflow). It reads the Wikibooks
+# Cookbook (CC BY-SA 4.0) and pushes a snapshot to its own branch, for review in a pull
+# request. The app never calls Wikibooks itself.
+on:
+  workflow_dispatch:
+    inputs:
+      category:
+        description: Wikibooks category to import
+        default: "Category:Indian recipes"
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Import
+        env:
+          CATEGORY: ${{ inputs.category }}
+        run: python -m smartplate.integrations.wikibooks_recipes --category "$CATEGORY"
+      - name: Push the snapshot to a branch
+        run: |
+          branch="recipes/wikibooks-$(date -u +%Y%m%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add smartplate/data/wikibooks_recipes.json
+          git commit -m "Recipes: Wikibooks Cookbook snapshot (CC BY-SA 4.0)"
+          git push origin "$branch"
+          echo "Open a pull request from $branch to review the recipes." >> "$GITHUB_STEP_SUMMARY"

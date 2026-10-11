@@ -1,0 +1,26 @@
+{{Recipe summary
+| category = Indian recipes
+| servings = 4
+| time = 40 minutes
+| difficulty = 2
+}}
+{{recipe}} | [[Cookbook:Cuisine of India|Cuisine of India]]
+
+'''Tadka dal''' is a test page written for Ziggy's importer tests.<ref>Not a real citation.</ref>
+
+== Ingredients ==
+* 1 [[Cookbook:Cup|cup]] [[Cookbook:Pigeon Pea|toor dal]]
+* 3 cups water
+* 1 tbsp [[Cookbook:Ghee|ghee]]
+* 1 tsp cumin seeds
+* ''2'' green chillies, slit
+
+== Procedure ==
+# Rinse the dal and cook it in the water until soft.
+# Heat the ghee, add the cumin and chillies.
+# Pour over the dal and simmer for 5 minutes.
+
+== Notes, tips, and variations ==
+* Use oil instead of ghee for a vegan dal.
+
+[[Category:Indian recipes]]

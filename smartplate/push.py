@@ -161,7 +161,7 @@ def test_message(user_id: int, sender=None) -> dict:
     ok = 0
     for sub in subs:
         code = sender(sub["endpoint"], sub["p256dh"], sub["auth"],
-                      {"title": "SmartPlate reminders are on", "body": "You'll get a nudge at each order-by time.",
+                      {"title": "Ziggy reminders are on", "body": "You'll get a nudge at each order-by time.",
                        "url": "/?tab=today", "tag": "smartplate-test"},
                       private_b64u=vapid_private(), contact=config.PUSH_CONTACT)
         ok += 200 <= code < 300

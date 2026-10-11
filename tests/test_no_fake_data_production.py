@@ -194,7 +194,7 @@ def test_no_live_pick_possible_says_why_and_never_fakes_one(prod, swiggy):
     swiggy.dishes = {"Chef's Special Platter": 30000}                # nothing SmartPlate can plan with
     pid = client.get(f"/api/user/{uid}/plan").get_json()["plan"]["id"]
     r = client.post(f"/api/plan/{pid}/live-menus", json={})
-    assert r.status_code == 502 and "no dishes SmartPlate can plan" in r.get_json()["error"]
+    assert r.status_code == 502 and "no dishes Ziggy can plan" in r.get_json()["error"]
     view = client.get(f"/api/plan/{pid}").get_json()
     assert not [c for d in view["grid"] for c in d["meals"].values() if c["kind"] == "delivery"]
 

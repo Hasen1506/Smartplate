@@ -11,6 +11,7 @@ from test_swiggy_live import FakeLive, _connect
 from smartplate import config
 from smartplate.app import create_app
 from smartplate.integrations import swiggy_connect, swiggy_live
+from conftest import solo
 
 
 class FeeCart(FakeLive):
@@ -31,6 +32,7 @@ class FeeCart(FakeLive):
 def client(seeded):
     app = create_app()
     app.config["TESTING"] = True
+    solo(3)                      # Arjun orders for himself here (conftest.solo)
     return app.test_client()
 
 

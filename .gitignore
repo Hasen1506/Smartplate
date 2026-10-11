@@ -12,3 +12,4 @@ smartplate-trial.log
 !.env.example
 swiggy-contract.local.json
 /data/epicure/
+test-artifacts/

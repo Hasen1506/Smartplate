@@ -9,6 +9,7 @@ from smartplate import config, db
 from smartplate.app import create_app
 from smartplate.integrations import swiggy_connect, swiggy_live
 from smartplate.integrations.swiggy_connect import SwiggyError
+from conftest import solo
 
 # Input schemas as Swiggy's public Food reference documents them
 # (https://mcp.swiggy.com/builders/docs/reference/food/<tool>/, read 2026-10-08).
@@ -57,7 +58,7 @@ class FakeLive(FakeSwiggy):
 
     def __init__(self):
         super().__init__()
-        self.cart, self.dishes = None, {}
+        self.cart, self.dishes, self.qty = None, {}, 1
         self.stock, self.has_variants, self.has_addons, self.is_veg = True, False, False, True
         self.search_error = None
         self.order_uncertain = False
@@ -122,18 +123,18 @@ class FakeLive(FakeSwiggy):
                        "totalItems": len(items), "hasMore": False})
         if name == "update_food_cart":
             item = args["cartItems"][0]
-            assert item["quantity"] == 1 and args["restaurantId"] == "r-1"
+            assert 1 <= item["quantity"] <= 8 and args["restaurantId"] == "r-1"   # one portion per eater
             assert item["menu_item_id"] in {f"m{i}" for i in range(len(self.dishes))}, "cart takes menu_item_id"
-            self.cart = item["menu_item_id"]
+            self.cart, self.qty = item["menu_item_id"], item["quantity"]
             return ok({"statusCode": 0, "statusMessage": "Cart updated"})
         if name == "get_food_cart":
             if self.cart is None:
                 return {"structuredContent": {"success": True, "data": {"addressId": args["addressId"], "data": {"items": []}}}}
-            price = next(p for i, (n, p) in enumerate(self.dishes.items()) if f"m{i}" == self.cart) / 100
+            price = next(p for i, (n, p) in enumerate(self.dishes.items()) if f"m{i}" == self.cart) / 100 * self.qty
             name = next(n for i, (n, p) in enumerate(self.dishes.items()) if f"m{i}" == self.cart)
             return {"structuredContent": {"success": True, "data": {"addressId": args["addressId"], "data": {
                 "restaurant": {"id": "r-1", "name": "Hotel Saravana Bhavan (Adyar)"},
-                "items": [{"menu_item_id": self.cart, "name": name, "quantity": 1, "subtotal": price,
+                "items": [{"menu_item_id": self.cart, "name": name, "quantity": self.qty, "subtotal": price,
                            "total": price, "final_price": price, "is_veg": self.is_veg, "in_stock": self.stock}],
                 "pricing": {"item_total": price, "delivery_charge": 35, "to_pay": price + 35}}}}}
         if name == "get_payment_options":
@@ -168,6 +169,7 @@ class FakeLive(FakeSwiggy):
 def client(seeded):
     app = create_app()
     app.config["TESTING"] = True
+    solo(3)                      # Arjun orders for himself here (conftest.solo)
     return app.test_client()
 
 

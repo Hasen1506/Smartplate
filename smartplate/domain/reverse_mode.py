@@ -72,12 +72,19 @@ RECIPE_BY_MEAL = {
 
 
 def recipe(key: str) -> dict | None:
+    """A built-in recipe, or a dish from the library (domain/dish_library) a person chose
+    to cook: that one has no priced basket or nutrition (cost_unknown, nutrition_unknown)."""
+    if ":" in (key or ""):
+        from . import dish_library
+        return dish_library.as_recipe(key)
     return next((r for r in RECIPES if r["key"] == key), None)
 
 
 def unsafe_reason(user: dict, r: dict) -> str | None:
     """The same hard allergen / medical / diet rules delivery dishes get (allergens.violates)."""
-    from . import allergens
+    from . import allergens, dish_library
+    if "library" in (r.get("tags") or []):
+        return dish_library.blocked(user, dish_library.raw(r["key"]) or {})
     return allergens.violates(user, r)
 
 

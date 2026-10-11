@@ -1,10 +1,10 @@
 """Production mode in real Chromium at 375 px and 1280 px (Oct 8, 2026 live cart test).
 
 No fixture data (config.FIXTURE_DATA off, as on Render): a fresh profile with no Swiggy
-sees an honest empty state, never a sample dish. Connected with an address, Today shows a
-skeleton, reads real dishes from Swiggy by itself and picks one; Review → Add is two taps
-to the cart, which shows Swiggy's bill to the paisa with Swiggy's labels and the real
-checkout link. A fake Swiggy MCP server stands in for Swiggy; nothing real is touched.
+sees an honest empty state with Connect Swiggy, never a sample dish. Connected with an
+address, Today shows a skeleton, reads real dishes from Swiggy by itself and picks one;
+"Add to Swiggy cart" is ONE tap to the cart, which shows Swiggy's bill to the paisa with
+Swiggy's labels and the real checkout link. A fake Swiggy MCP server stands in for Swiggy; nothing real is touched.
 """
 import json
 import os
@@ -95,7 +95,7 @@ def _open(browser, w, viewport):
 
 @pytest.mark.parametrize("viewport", [{"width": 375, "height": 812}, {"width": 1280, "height": 900}],
                          ids=["phone-375", "desktop-1280"])
-def test_live_only_today_two_taps_to_the_real_bill(prod_world, viewport):
+def test_live_only_today_one_tap_to_the_real_bill(prod_world, viewport):
     w = prod_world
     shots = os.environ.get("SMARTPLATE_SHOTS")
     with pw.sync_playwright() as playwright:
@@ -106,9 +106,10 @@ def test_live_only_today_two_taps_to_the_real_bill(prod_world, viewport):
         try:
             # 1. No Swiggy yet: an honest empty state; nothing sample anywhere
             page.goto(w["url"])
-            expect(page.get_by_role("heading", name="Connect Swiggy and pick an address to see real dishes")).to_be_visible()
+            expect(page.get_by_role("heading", name="Plan from real places near you")).to_be_visible()
+            expect(page.locator("main").get_by_role("button", name="Connect Swiggy")).to_be_visible()
             assert "sample" not in page.locator("main").inner_text().lower()
-            assert page.locator(".meal.delivery, section.hero-card.delivery").count() == 0
+            assert page.locator("section.hero.delivery").count() == 0
             assert page.evaluate(CONTRAST_JS) == []
             no_overflow(page)
             shot("empty")
@@ -136,24 +137,20 @@ def test_live_only_today_two_taps_to_the_real_bill(prod_world, viewport):
             interactive_s = time.monotonic() - started
             assert "sample" not in page.locator("main").inner_text().lower()
             expect(hero.locator(".est")).to_have_count(1)                     # the plan price is ≈ est.
-            assert primaries(page) == ["Review & add to Swiggy cart"], primaries(page)
+            assert primaries(page) == ["Add to Swiggy cart"], primaries(page)
             no_overflow(page)
             shot("today")
 
-            # 3. Two taps to the cart: Review, then Add
-            hero.get_by_role("button", name="Review & add to Swiggy cart").click()          # tap 1
-            dialog = page.get_by_role("dialog")
-            expect(dialog.get_by_role("heading", name="Add to your Swiggy cart?")).to_be_visible()
-            shot("review")
-            dialog.get_by_role("button", name="Add to Swiggy cart", exact=True).click()     # tap 2
+            # 3. One tap to the cart
+            hero.get_by_role("button", name="Add to Swiggy cart").click()
             hero = page.locator('section[aria-label="Next meal"]')
             expect(hero).to_contain_text("Added to your Swiggy cart")
-            bill = hero.locator(".billcard")
+            bill = hero.locator(".bill-card")
             expect(bill).to_contain_text("GST & Other Charges")
             expect(bill).to_contain_text("₹21.58")                            # exact paise, Swiggy's label
             expect(bill).not_to_contain_text("₹22")
             expect(bill).to_contain_text("Swiggy rounds the total to the rupee")
-            expect(hero.get_by_role("link", name="Open Swiggy checkout ↗")).to_have_attribute(
+            expect(hero.get_by_role("link", name="Pay in Swiggy")).to_have_attribute(
                 "href", "https://www.swiggy.com/checkout")
             expect(hero.locator(".cancel-note")).to_contain_text("cancellation policy applies")
             assert "place_food_order" not in w["fake"].tool_calls()

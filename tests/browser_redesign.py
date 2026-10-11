@@ -1,12 +1,13 @@
-"""Dark redesign (8 Oct 2026), in real Chromium at 375 px and 1280 px.
+"""Ziggy, in real Chromium at 375 px and 1280 px.
 
 A connected, non-vegetarian profile with no allergies (so its cart can be filled) plans its
 week from one live restaurant (a fake Swiggy MCP server; nothing real is touched). Checks:
-three destinations (bottom tabs on a phone, a sidebar on a computer), the address pill,
-one saffron primary per screen, the main flow in two taps ("Review & add to Swiggy cart" →
-"Add to Swiggy cart" → Swiggy's real bill on Today), the full live menu with Swiggy's
-categories, a one-tap filter, a photo that fails to load falling back to its dish icon,
-one-tap Order/Cook, Pin and On/Off on the week, no horizontal scroll, and WCAG AA text contrast.
+three tabs (bottom bar on a phone, a side rail on a computer), the address pill, one
+primary per screen, the main flow in ONE tap ("Add to Swiggy cart" → Swiggy's real bill on
+Today), the address sheet, the full live menu from Saved with Swiggy's categories, a
+one-tap filter, a photo that fails to load falling back to its dish icon, the Change sheet
+(cook instead, keep, skip with undo), Me, light and dark themes and the Zomato-to-Swiggy
+colour mesh, no horizontal scroll, and WCAG AA text contrast.
 Run explicitly in CI after installing Playwright: `pytest tests/browser_redesign.py`.
 """
 import json
@@ -105,7 +106,8 @@ def _open(browser, w, viewport):
         document.addEventListener('securitypolicyviolation', e => policyViolations.push(e.violatedDirective));
     """)
     page.goto(w["url"])
-    expect(page.get_by_role("heading", name="Order from your area")).to_be_visible()
+    expect(page.get_by_role("navigation", name="Main")).to_be_visible()
+    page.wait_for_load_state("networkidle")              # Today's other picks load after the first paint
     return page, errors
 
 
@@ -122,7 +124,7 @@ CONTRAST_JS = r"""() => {
     return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
   const over = (top, under) => { const a = top[3]; return [0,1,2].map(i => top[i] * a + under[i] * (1 - a)).concat(1); };
   const bgOf = el => { const chain = []; for (let n = el; n && n.nodeType === 1; n = n.parentElement) chain.push(n);
-    let bg = [10, 10, 11, 1];
+    let bg = [255, 255, 255, 1];
     for (const n of chain.reverse()) { const c = parse(getComputedStyle(n).backgroundColor); if (c && c[3] > 0) bg = over(c, bg); }
     return bg; };
   const dimmed = el => { for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
@@ -146,13 +148,13 @@ CONTRAST_JS = r"""() => {
 
 
 def primaries(page):
-    """Saffron buttons visible on the screen itself (dialogs are their own screen)."""
+    """Primary buttons visible on the screen itself (dialogs are their own screen)."""
     return page.evaluate("""() => [...document.querySelectorAll('main .primary, .topbar .primary, .nav .primary')]
         .filter(b => b.getClientRects().length && !b.closest('[role=dialog]')).map(b => b.textContent.trim())""")
 
 
 @pytest.mark.parametrize("viewport", [{"width": 375, "height": 812}, {"width": 1280, "height": 900}], ids=["phone-375", "desktop-1280"])
-def test_redesign_today_cart_menu_week_you(world, viewport):
+def test_redesign_today_cart_menu_week_me(world, viewport):
     w = world
     with pw.sync_playwright() as playwright:
         browser = _launch(playwright)
@@ -160,50 +162,67 @@ def test_redesign_today_cart_menu_week_you(world, viewport):
         shots = os.environ.get("SMARTPLATE_SHOTS")
         shot = (lambda name: page.screenshot(path=f"{shots}/{viewport['width']}-{name}.png", full_page=True)) if shots else (lambda name: None)
         try:
-            # --- shell: three destinations, same on phone and web; address pill ------------- #
+            # --- shell: three tabs, same on phone and web; address pill; avatar for Me ------ #
             nav = page.get_by_role("navigation", name="Main")
-            assert nav.get_by_role("button").all_inner_texts() == ["Today", "Plan", "You"]
+            assert [t.strip() for t in nav.get_by_role("button").all_inner_texts()] == ["Today", "Week", "Saved"]
             box = nav.bounding_box()
-            if viewport["width"] >= 1024:
-                assert box["x"] == 0 and box["height"] >= 800 and box["width"] < 300      # sidebar
+            if viewport["width"] >= 900:
+                assert box["x"] == 0 and box["height"] >= 800 and box["width"] < 300      # side rail
             else:
                 assert box["y"] > 700 and box["width"] == viewport["width"]               # bottom tabs
             pill = page.get_by_role("button", name="Delivering to Home", exact=False)
             expect(pill).to_be_visible()
 
-            # --- Today: one pick, plain-word reasons, one primary, real reasons ---------------- #
+            # --- Today: one pick, plain-word reasons, one primary --------------------------- #
             hero = page.locator('section[aria-label="Next meal"]')
             expect(hero).to_be_visible()
             assert "Fit" not in hero.inner_text()                                           # no opaque score
             expect(hero.get_by_role("list", name="Why this pick")).to_be_visible()
-            expect(hero.locator(".dicon")).to_be_visible()                                  # dish identity
-            assert primaries(page) == ["Review & add to Swiggy cart"], primaries(page)
+            expect(hero.locator(".dish-row .dicon")).to_be_visible()                        # dish identity
+            assert primaries(page) == ["Add to Swiggy cart"], primaries(page)
             assert hero.locator(".est").count() >= 1                                         # the plan price is an estimate
+            # other dishes for the same meal, one tap away (no sheet): the tap swaps the meal
+            quick = hero.get_by_role("group", name="Or have instead")
+            expect(quick.locator(".qpick").first).to_be_visible()
+            assert 1 <= quick.locator(".qpick").count() <= 5
+            first = quick.locator("[data-quick]").first
+            other = first.get_attribute("data-quick-name")
+            assert other != hero.locator("h2").inner_text()
+            first.click()
+            expect(page.locator(".toast")).to_contain_text(f"{other} it is")
+            expect(page.locator('section[aria-label="Next meal"] h2')).to_have_text(other)
+            hero = page.locator('section[aria-label="Next meal"]')
+            # Hungry now: the week leaves breakfast out (rhythm), and it's breakfast time
+            expect(page.get_by_role("region", name="Hungry now")).to_contain_text("Breakfast isn't in your week")
+            # a computer shows the week's balance beside the meals; a phone doesn't
+            aside = page.get_by_role("complementary", name="Your week at a glance")
+            if viewport["width"] >= 1180:
+                expect(aside).to_contain_text("left")
+                expect(aside.locator(".nut")).to_have_count(4)
+                expect(aside.locator("[data-glance-day]")).to_have_count(7)
+            else:
+                expect(aside).to_be_hidden()
             assert page.evaluate(CONTRAST_JS) == []
             no_overflow(page)
             shot("today")
 
-            # --- the main flow: two taps to the real bill -------------------------------------- #
-            hero.get_by_role("button", name="Review & add to Swiggy cart").click()          # tap 1
-            dialog = page.get_by_role("dialog")
-            expect(dialog.get_by_role("heading", name="Add to your Swiggy cart?")).to_be_visible()
-            expect(dialog.locator(".est")).to_have_count(1)                                 # a menu price is an estimate
-            dialog.get_by_role("button", name="Add to Swiggy cart", exact=True).click()     # tap 2
+            # --- the main flow: one tap to the real bill ------------------------------------- #
+            hero.get_by_role("button", name="Add to Swiggy cart").click()
             hero = page.locator('section[aria-label="Next meal"]')
-            bill = hero.locator(".billcard")
+            bill = hero.locator(".bill-card")
             expect(bill).to_contain_text("Swiggy's bill")
             expect(bill).to_contain_text("To Pay")
             expect(hero).to_contain_text("Added to your Swiggy cart")
-            checkout = hero.get_by_role("link", name="Open Swiggy checkout ↗")
+            checkout = hero.get_by_role("link", name="Pay in Swiggy")
             expect(checkout).to_have_attribute("href", "https://www.swiggy.com/checkout")
             expect(hero.locator(".cancel-note")).to_contain_text("cancellation policy applies")
             assert "update_food_cart" in w["fake"].tool_calls() and "place_food_order" not in w["fake"].tool_calls()
             expect(hero).to_contain_text("Plan estimate")
             # the next step is paying in Swiggy: it becomes the one primary; the cart isn't shown twice
-            assert primaries(page) == ["Open Swiggy checkout ↗"], primaries(page)
-            assert page.get_by_text("Added to your Swiggy cart", exact=False).count() == 1
-            assert page.get_by_text("In your Swiggy cart:", exact=False).count() == 0     # the cart is shown once
-            expect(page.locator("main")).not_to_contain_text("cart for Home · 12 Lake View Rd, Adyar is empty")
+            assert primaries(page) == ["Pay in Swiggy"], primaries(page)
+            assert page.locator("main").get_by_text("Added to your Swiggy cart", exact=False).count() == 1
+            assert page.get_by_text("In your Swiggy cart", exact=False).count() == 0
+            expect(page.locator("main")).not_to_contain_text("is empty")
             assert page.evaluate(CONTRAST_JS) == []
             shot("bill")
 
@@ -214,8 +233,12 @@ def test_redesign_today_cart_menu_week_you(world, viewport):
             expect(sheet).to_contain_text("Address not listed?")
             shot("address")
             sheet.get_by_role("button", name="Close").click()
+            expect(page.get_by_role("dialog")).to_have_count(0)
 
-            # --- the full live menu: categories, a filter, photo → icon fallback ------------------ #
+            # --- Saved → the full live menu: categories, a filter, photo → icon fallback ---------- #
+            nav.get_by_role("button", name="Saved").click()
+            expect(page.get_by_role("heading", name="What you'd have for each meal")).to_be_visible()   # My meals first
+            page.get_by_role("button", name="Places", exact=True).click()
             page.locator('[data-live-place="r-1"]').first.click()
             menu = page.locator("section.livemenu")
             expect(menu).to_contain_text("6 current dishes")
@@ -232,55 +255,84 @@ def test_redesign_today_cart_menu_week_you(world, viewport):
             expect(page.locator("section.livemenu .lmrow")).to_have_count(5)
             expect(page.locator("section.livemenu")).to_contain_text("1 hidden by your filters")
             page.locator("section.livemenu").get_by_role("button", name="Veg only").click()
-            page.get_by_role("textbox", name="Search this restaurant").fill("ghee")
+            page.get_by_role("searchbox", name="Search this restaurant").fill("ghee")
             page.get_by_role("button", name="Find dishes", exact=True).click()
             row = page.locator("section.livemenu .lmrow").filter(has_text="Ghee Roast Dosa")
             expect(row.locator('.dicon[data-kind="dosa"]')).to_be_visible()                 # blocked photo → icon
             assert page.evaluate(CONTRAST_JS) == []
             no_overflow(page)
             shot("menu")
+            page.get_by_role("button", name="Close menu").click()
 
-            # --- Plan: one-tap On/Off, Order/Cook, Pin -------------------------------------------- #
-            page.get_by_role("navigation", name="Main").get_by_role("button", name="Plan").click()
+            # --- Week: a day strip; one tap opens the Change sheet ------------------------------ #
+            nav.get_by_role("button", name="Week").click()
             expect(page.get_by_role("heading", name="Week of 2 Nov")).to_be_visible()
-            assert primaries(page) == ["↻ Re-plan"], primaries(page)
-            tue = lambda: w["client"].get(f"/api/plan/{w['plan']}").get_json()["grid"][1]["meals"]   # noqa: E731
-            day = page.locator('section.day[aria-label="Tue"]')
+            assert primaries(page) == [], primaries(page)
+            grid = lambda: w["client"].get(f"/api/plan/{w['plan']}").get_json()["grid"]   # noqa: E731
+            # the first day after today with a lunch planned (one saved place with four whole-meal
+            # dishes, each at most twice a week, can't fill every lunch and dinner)
+            day = next(i for i in range(1, 7) if grid()[i]["meals"]["lunch"]["kind"] == "delivery")
+            tue = lambda: grid()[day]["meals"]   # noqa: E731
+            page.locator(f'[data-day="{day}"]').click()
             if tue()["dinner"]["kind"] != "cook":
-                day.get_by_role("group", name="Dinner quick changes").get_by_role("button", name="Cook", exact=True).click()
-                expect(page.locator(".toast")).to_contain_text("Cook:")
+                page.locator(f'.mrow[data-meal="{tue()["dinner"]["session_id"]}"]').click()
+                page.get_by_role("dialog").get_by_role("button", name="Cook instead", exact=False).click()
+                expect(page.locator(".toast")).to_contain_text("Cook at home")
                 assert tue()["dinner"]["kind"] == "cook"
-            day = page.locator('section.day[aria-label="Tue"]')
-            day.get_by_role("group", name="Lunch quick changes").get_by_role("button", name="Pin this meal so re-plans keep it").click()
-            expect(page.locator(".toast")).to_contain_text("Pinned")
+            lunch = tue()["lunch"]["session_id"]
+            page.locator(f'.mrow[data-meal="{lunch}"]').click()
+            page.get_by_role("dialog").get_by_role("button", name="Keep it, don't re-plan").click()
+            expect(page.locator(".toast")).to_contain_text("Kept")
             assert tue()["lunch"]["pinned"] is True
-            day = page.locator('section.day[aria-label="Tue"]')
-            day.get_by_role("group", name="Lunch quick changes").get_by_role("button", name="Lunch on. Tap to skip it").click()
-            expect(page.locator(".toast")).to_contain_text("Skipped")
+            page.locator(f'.mrow[data-meal="{lunch}"]').click()
+            page.get_by_role("dialog").get_by_role("button", name="Skip this meal").click()
+            expect(page.locator(".toast")).to_contain_text("skipped")
             assert tue()["lunch"]["status"] == "skipped"
-            day = page.locator('section.day[aria-label="Tue"]')
-            day.get_by_role("group", name="Lunch quick changes").get_by_role("button", name="Lunch off. Tap to plan it again").click()
-            expect(page.locator(".toast")).to_contain_text("Back in the plan")
+            page.locator(".toast").get_by_role("button", name="Undo").click()
+            expect(page.locator(".toast")).to_contain_text("back in the plan")
+            assert tue()["lunch"]["status"] != "skipped"
             assert page.evaluate(CONTRAST_JS) == []
             no_overflow(page)
-            shot("plan")
-            page.get_by_role("navigation", name="Plan").get_by_role("button", name="Cook & groceries").click()
+            shot("week")
+            page.get_by_role("button", name="Cooking & groceries", exact=False).click()
             expect(page.get_by_role("heading", name="Cooking & groceries")).to_be_visible()
+            shop = page.get_by_role("link", name="Find", exact=False).first                 # Instamart hand-off per line
+            assert shop.get_attribute("href").startswith("https://www.swiggy.com/instamart/search?")
             no_overflow(page)
 
-            # --- You: grouped, insights and expenses inside ---------------------------------------- #
-            page.get_by_role("navigation", name="Main").get_by_role("button", name="You").click()
-            expect(page.get_by_role("heading", name="You", exact=True)).to_be_visible()
-            for item in ("This week", "Expenses", "Nutrition & insights", "Settings", "Swiggy connection"):
-                expect(page.locator(".mitem b", has_text=item).first).to_be_visible()
+            # --- Me: everything else, grouped; theme and colour in one tap ------------------------ #
+            page.get_by_role("button", name="Me: settings, money and account").click()
+            for item in ("Food & budget", "Swiggy", "This week & spending", "Nutrition", "Household", "Account & devices"):
+                expect(page.locator("button.set", has_text=item).first).to_be_visible()
             assert page.evaluate(CONTRAST_JS) == []
             no_overflow(page)
-            shot("you")
+            shot("me")
+            page.get_by_role("group", name="Appearance").get_by_role("button", name="Dark").click()
+            assert page.evaluate("document.documentElement.dataset.theme") == "dark"
+            page.wait_for_timeout(600)                                                      # let the colour fade finish
+            assert page.evaluate(CONTRAST_JS.replace("[255, 255, 255, 1]", "[0, 0, 0, 1]")) == []
+            page.get_by_role("group", name="Colour").get_by_role("button", name="Zomato × Swiggy").click()
+            assert page.evaluate("document.documentElement.dataset.palette") == "mesh"
+            shot("me-dark-mesh")
+            page.reload()
+            expect(page.get_by_role("navigation", name="Main")).to_be_visible()
+            assert page.evaluate("[document.documentElement.dataset.theme, document.documentElement.dataset.palette]") == ["dark", "mesh"]
+            page.get_by_role("button", name="Me: settings, money and account").click()
+            page.get_by_role("group", name="Appearance").get_by_role("button", name="Light").click()
             page.locator('[data-go="more:settings"]').click()
             for legend in ("Food rules (always applied)", "Money", "What to plan"):
                 expect(page.locator("legend", has_text=legend)).to_be_visible()
             no_overflow(page)
             shot("settings")
+
+            # --- Hungry now: breakfast in two taps, even though the week leaves it out --------------- #
+            nav.get_by_role("button", name="Today").click()
+            page.get_by_role("region", name="Hungry now").get_by_role("button", name="Get breakfast").click()
+            expect(page.locator(".toast")).to_contain_text("Breakfast is in")
+            hero = page.locator('section[aria-label="Next meal"]')
+            expect(hero.locator(".eyebrow").first).to_contain_text("Breakfast")
+            assert w["client"].get(f"/api/plan/{w['plan']}").get_json()["grid"][0]["meals"]["breakfast"]["kind"] in ("delivery", "cook")
+            expect(page.get_by_role("region", name="Hungry now")).to_have_count(0)
 
             assert not errors, errors
             assert page.evaluate("policyViolations") == []

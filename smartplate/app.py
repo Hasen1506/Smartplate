@@ -7,9 +7,9 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
-from .domain import epicure, flavour, learning, live_catalog, models, sentiment, week_orders
+from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, week_orders
 from .domain.checkout import CheckoutConflict
-from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp
+from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
 from .kernel import agent_brain
 from .runtime import initialize, user_lock
 
@@ -35,7 +35,7 @@ def _missing(key: str, value) -> tuple:
               if config.storage_status().get("persistent") is False else
               "It may have been deleted.")
     step = ("Create your profile again, or add it with its recovery code."
-            if key == "user_id" else "Reload SmartPlate to open your current plan.")
+            if key == "user_id" else "Reload Ziggy to open your current plan.")
     return jsonify(error=f"{what} is no longer on this server. {reason} {step}", code=code,
                    missing=key, id=value), 404
 
@@ -147,22 +147,36 @@ def create_app() -> Flask:
         app.logger.exception("Unhandled TypeError on %s", request.path)
         return jsonify(error="Something went wrong on our side. Try again."), 500
 
+    def swiggy_owner():
+        """The profile a Swiggy route acts for, so its problem log can be kept."""
+        owners = [o for o in access.owners_of(request.view_args or {}, None, None) if o is not None]
+        return owners[0] if owners else None
+
     @app.errorhandler(ratelimit.TooMany)
     def too_many(error):
+        if '/swiggy' in request.path:
+            swiggy_rules.note(swiggy_owner(), swiggy_connect.SwiggyError(str(error), code="swiggy_rate_limited"))
+            response = jsonify(error=str(error), rule=swiggy_rules.BY_ID["rate_limit"])
+            response.headers['Retry-After'] = str(error.wait_s)
+            return response, 429
         response = jsonify(error=str(error))
         response.headers['Retry-After'] = str(error.wait_s)
         return response, 429
 
     @app.errorhandler(swiggy_connect.SwiggyError)
     def swiggy_error(error):
+        # Every Swiggy problem names the rule behind it (plain words + what to do) and is
+        # kept on the profile, so "why did this fail?" always has an answer.
+        swiggy_rules.note(swiggy_owner(), error)
+        rule = swiggy_rules.explain(error)
         if error.code in swiggy_connect.NOT_CONNECTED_CODES:
             # The user's own sign-in is missing or no longer accepted: a state they fix
             # by connecting, not an upstream failure (502 pages ops and misleads monitoring).
             uid = (request.view_args or {}).get("user_id")
-            return jsonify(error=error.code, code=error.code, message=str(error),
+            return jsonify(error=error.code, code=error.code, message=str(error), rule=rule,
                            action={"label": "Connect Swiggy", "act": "swiggy-connect"},
                            connect_url=f"/api/user/{uid}/swiggy/connect" if uid else None), 409
-        response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after)
+        response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after, rule=rule)
         if error.retry_after is not None:
             response.headers['Retry-After'] = str(error.retry_after)
         if error.code == 'swiggy_cart_other_address':
@@ -177,7 +191,7 @@ def create_app() -> Flask:
             # code the UI understands, instead of Flask's generic 500 page (Oct 2026 incident).
             app.logger.warning("Database unavailable on %s: %s: %s", request.path,
                                type(error).__name__, str(error).strip()[:200])
-            response = jsonify(error="SmartPlate can't reach its database right now. "
+            response = jsonify(error="Ziggy can't reach its database right now. "
                                      "Your data is safe; try again in a minute.",
                                code="database_unavailable")
             response.headers['Retry-After'] = '15'
@@ -677,7 +691,12 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy/restaurants")
     def swiggy_live_restaurants(user_id):
-        return jsonify(swiggy_live.search_live_restaurants(user_id, request.args.get("query", "")))
+        offset = request.args.get("offset", "0")
+        offset = int(offset) if offset.isdigit() else 0
+        if request.args.get("browse") == "1":      # every place Swiggy lists for the address
+            found = swiggy_live.search_live_restaurants(user_id, live_catalog.DEFAULT_QUERY, offset)
+            return jsonify({**found, "browse": True})
+        return jsonify(swiggy_live.search_live_restaurants(user_id, request.args.get("query", ""), offset))
 
     @app.get("/api/user/<int:user_id>/swiggy/favourites")
     def swiggy_live_favourites(user_id):
@@ -701,6 +720,68 @@ def create_app() -> Flask:
             raise ValueError("Invalid menu page")
         return jsonify(swiggy_live.search_live_dishes(user_id, request.args.get("restaurant_id", ""),
             request.args.get("restaurant_name", ""), request.args.get("query", ""), int(offset)))
+
+    @app.get("/api/user/<int:user_id>/recipes")
+    def recipe_library_view(user_id):
+        from .domain import recipe_library
+        user = models.get_user(user_id)
+        if not user:
+            raise KeyError("Profile not found")
+        return jsonify(recipe_library.for_user(user, request.args.get("q", "")[:60]))
+
+    # Type a dish, get its ingredients (domain/dish_library.py).
+    @app.get("/api/user/<int:user_id>/dishes")
+    def dish_search(user_id):
+        from .domain import dish_library
+        user = models.get_user(user_id)
+        if not user:
+            raise KeyError("Profile not found")
+        meal = request.args.get("meal")
+        return jsonify(dish_library.search(user, request.args.get("q", "")[:60],
+                                           meal if meal in models.MEALS else None))
+
+    @app.get("/api/user/<int:user_id>/dishes/<key>")
+    def dish_detail(user_id, key):
+        from .domain import dish_library
+        user = models.get_user(user_id)
+        if not user:
+            raise KeyError("Profile not found")
+        people = request.args.get("people", "")
+        d = dish_library.get(user, key[:40], int(people) if people.isdigit() else None)
+        if not d:
+            raise KeyError("Dish not found")
+        return jsonify(d)
+
+    # Meal pools (domain/meal_pools.py): the dishes a person wants for each meal.
+    @app.get("/api/user/<int:user_id>/pools")
+    def pools_view(user_id):
+        return jsonify(meal_pools.view(user_id))
+
+    @app.post("/api/user/<int:user_id>/pools")
+    def pools_add(user_id):
+        body = request.get_json(silent=True) or {}
+        ratelimit.check(f"pools:{user_id}", 60, 3600)
+        if body.get("from_meal"):
+            return jsonify(meal_pools.move(user_id, body.get("from_meal"), body.get("meal"),
+                                           body.get("restaurant_id"), body.get("item_id")))
+        return jsonify(meal_pools.add(user_id, body.get("meal"), body.get("restaurant_id"),
+                                      str(body.get("restaurant_name") or ""), body.get("item_id")))
+
+    @app.post("/api/user/<int:user_id>/pools/remove")
+    def pools_remove(user_id):
+        body = request.get_json(silent=True) or {}
+        return jsonify(meal_pools.remove(user_id, body.get("meal"), body.get("restaurant_id"), body.get("item_id")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/rules")
+    def swiggy_rules_view(user_id):
+        return jsonify(swiggy_rules.overview(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/photos")
+    def swiggy_photos(user_id):
+        ids = (request.get_json(silent=True) or {}).get("item_ids")
+        if not isinstance(ids, list) or len(ids) > 12:
+            raise ValueError("Send up to 12 dish ids")
+        return jsonify({"photos": swiggy_live.dish_photos(user_id, ids)})
 
     @app.post("/api/user/<int:user_id>/swiggy/live-cart/preview")
     def swiggy_live_cart_preview(user_id):
@@ -798,9 +879,17 @@ def create_app() -> Flask:
     def session_options(session_id):
         return jsonify(everyday.options(session_id))
 
+    @app.post("/api/session/<int:session_id>/choose-live")
+    def session_choose_live(session_id):
+        return jsonify(everyday.choose_live(session_id, request.get_json(silent=True) or {}))
+
     @app.post("/api/session/<int:session_id>/choose")
     def session_choose(session_id):
         return jsonify(everyday.choose(session_id, request.get_json()))
+
+    @app.post("/api/plan/<int:plan_id>/eat-now")
+    def plan_eat_now(plan_id):
+        return jsonify(everyday.eat_now(plan_id, request.get_json(silent=True)))
 
     @app.post("/api/session/<int:session_id>/confirm")
     def session_confirm(session_id):
@@ -810,6 +899,10 @@ def create_app() -> Flask:
     def session_rate(session_id):
         body = request.get_json(force=True, silent=True) or {}
         return jsonify(everyday.rate(session_id, body.get("score"), body.get("reasons")))
+
+    @app.get("/api/user/<int:user_id>/saved")
+    def saved_dishes(user_id):
+        return jsonify(everyday.saved(user_id))
 
     @app.get("/api/user/<int:user_id>/learned")
     def learned(user_id):

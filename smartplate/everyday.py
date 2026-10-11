@@ -326,7 +326,9 @@ def options(session_id: int) -> dict:
 
     menu = ctx["menu"]
     safe_all = allergens.safe_items(user, menu)
-    safe = [it for it in safe_all if optimizer.meal_suitable(it, session["meal"])]
+    pooled_ids = ((ctx.get("pools") or {}).get(session["meal"]) or {}).get("ids", set())
+    # Dishes with no nutrition estimate are offered only where the person pooled them.
+    safe = [it for it in safe_all if optimizer.meal_suitable(it, session["meal"]) and it.get("nutrition_known", 1) != 0]
     floor = float(user["rating_floor"])
     rated_ok = [it for it in safe if it["restaurant_rating"] >= floor]
     disliked = ctx["taste"]["disliked"]
@@ -375,6 +377,16 @@ def options(session_id: int) -> dict:
                  key=lambda d: (not d["fits"], d["score"]))[:SHORTLIST_NEW]
     for g in groups:
         g.pop("_best")
+    from .integrations import swiggy_live
+    photos = swiggy_live.known_photos(user["id"], [d["item_id"] for g in groups for d in g["dishes"]])
+    for d in [d for g in groups for d in g["dishes"]] + new:
+        d["image"] = photos.get(d["item_id"])
+    pool_dishes = sorted((dish(it) | {"restaurant": it["restaurant_name"], "restaurant_id": it["restaurant_id"], "pooled": True}
+                          for it in safe_all if it["id"] in pooled_ids and it["id"] not in disliked),
+                         key=lambda d: (not d["fits"], d["price"]))
+    for d in pool_dishes:
+        d["image"] = photos.get(d["item_id"])
+    n = optimizer.portions(user, session, ctx)
     cook_all = [r for r in reverse_mode.RECIPES if r["key"] in reverse_mode.RECIPE_BY_MEAL.get(session["meal"], [])]
     cooks = [r for r in cook_all if reverse_mode.unsafe_reason(user, r) is None]   # allergy/medical/diet: hard
     return {
@@ -383,7 +395,10 @@ def options(session_id: int) -> dict:
         "limits": limits,
         "usual": usual[:SHORTLIST_PLACES], "usual_more": max(0, len(usual) - SHORTLIST_PLACES),
         "new": new, "has_favourites": bool(favs),
-        "cook": [{"recipe_key": r["key"], "name": r["name"], "price": r["cost"], "kcal": r["kcal"],
+        # The person's own pool for this meal (domain/meal_pools); [] when the meal has none.
+        "pool": pool_dishes, "has_pool": bool((ctx.get("pools") or {}).get(session["meal"])),
+        "portions": n,
+        "cook": [{"recipe_key": r["key"], "name": r["name"], "price": round(r["cost"] * n, 2), "kcal": r["kcal"],
                   "protein_g": r["protein_g"]} for r in cooks],
         "hidden": {"not_safe": len(menu) - len(safe_all), "cook_not_safe": len(cook_all) - len(cooks), "not_a_meal": len(safe_all) - len(safe),
                    "below_rating": len(safe) - len(rated_ok),
@@ -405,6 +420,30 @@ def _editable(session: dict, *, allow_past=False) -> None:
         raise ValueError("This meal's time has passed — mark it as had or skipped instead")
 
 
+def choose_live(session_id: int, body: dict) -> dict:
+    """Have a dish from ANY restaurant's live Swiggy menu (found by live search) for this
+    meal: the exact dish is checked on the restaurant's menu for the delivery address,
+    added to the person's live catalogue, then chosen like any other pick."""
+    from .domain import live_catalog
+    from .integrations import swiggy_live
+    from .integrations.swiggy_connect import SwiggyError
+    session, plan, user = _session_bundle(session_id)
+    _editable(session)
+    rid, iid = str(body.get("restaurant_id") or ""), str(body.get("item_id") or "")
+    if not rid or not iid:
+        raise ValueError("Pick a dish from a restaurant's Swiggy menu")
+    menu = swiggy_live.live_menu(user["id"], rid, str(body.get("restaurant_name") or ""))
+    item = next((i for i in menu["items"] if i["id"] == iid), None)
+    if not item:
+        raise SwiggyError(f"That dish isn't on {menu['restaurant']['name']}'s Swiggy menu for your address now.")
+    if item.get("in_stock") is False:
+        raise SwiggyError("That dish is out of stock right now. Pick another.")
+    if item.get("has_options"):
+        raise SwiggyError("This dish has options (sizes or add-ons). Choose them in Swiggy, or pick another dish.")
+    local = live_catalog.add_dish(user["id"], menu["restaurant"], item)
+    return choose(session_id, {"item_id": local})
+
+
 def choose(session_id: int, body: dict) -> dict:
     session, plan, user = _session_bundle(session_id)
     _editable(session)
@@ -412,7 +451,7 @@ def choose(session_id: int, body: dict) -> dict:
         item = next((it for it in models.menu_for_user(user) if it["id"] == body["item_id"]), None)
         if not item:
             raise ValueError("That dish isn't available right now")
-        if not optimizer.meal_suitable(item, session["meal"]):
+        if not optimizer.meal_suitable(item, session["meal"], chosen=True):
             raise ValueError("That item is a treat, not a complete meal. Choose a meal instead.")
         reason = allergens.violates(user, item)
         if reason:
@@ -439,6 +478,51 @@ def choose(session_id: int, body: dict) -> dict:
                     (db.jd(pin) if pin else None, session_id))
     optimizer.optimize(plan["id"])
     return service.plan_view(plan["id"])
+
+
+def eat_now(plan_id: int, body: dict) -> dict:
+    """Hungry now: today's `meal` goes into the plan even if the week skips it (a meal the
+    rhythm leaves out, or one skipped earlier), so it can be ordered in two taps. The
+    rest of the week re-balances around it."""
+    plan = models.get_plan(plan_id)
+    if not plan:
+        raise KeyError("Plan not found")
+    meal = (body or {}).get("meal")
+    if meal not in models.MEALS:
+        raise ValueError("Choose breakfast, lunch or dinner")
+    at = optimizer.now()
+    day = (at.date() - dt.date.fromisoformat(plan["week_start"])).days
+    if not 0 <= day < 7:
+        raise ValueError("This plan isn't for this week. Plan this week first")
+    ts = scheduler.trigger_ts(plan["week_start"], day, meal)
+    if dt.datetime.fromisoformat(ts) + scheduler.PAST_GRACE < at:
+        raise ValueError(f"It's past {meal} time today. Pick your next meal instead")
+    session = next((s for s in models.sessions_for_plan(plan_id) if s["day"] == day and s["meal"] == meal), None)
+    with db.cursor() as cur:
+        if session is None:
+            cur.execute("INSERT INTO sessions(plan_id, day, meal, scheduled_ts, status) VALUES (?,?,?,?, 'active')",
+                        (plan_id, day, meal, ts))
+            sid = cur.lastrowid
+        elif session["status"] in ("ordered", "confirmed"):
+            raise ValueError(f"Today's {meal} is already ordered")
+        else:
+            sid = session["id"]
+            cur.execute("UPDATE sessions SET status='active', note='' WHERE id=?", (sid,))
+    optimizer.optimize(plan_id)
+    decision = next((d for d in models.decisions_for_plan(plan_id) if d["session_id"] == sid), None)
+    if not decision or decision["chosen_kind"] not in ("delivery", "cook"):
+        # The week would still skip it (variety, budget): the person said they're hungry, so
+        # keep the best safe dish that fits what's left, else the first safe recipe.
+        o = options(sid)
+        dishes = sorted([x for g in o["usual"] for x in g["dishes"]] + o["new"], key=lambda x: x["score"])
+        dish = next((x for x in dishes if x["fits"]), None)
+        pin = ({"kind": "delivery", "item_id": dish["item_id"]} if dish
+               else {"kind": "cook", "recipe_key": o["cook"][0]["recipe_key"]} if o["cook"] else None)
+        if pin:
+            with db.cursor() as cur:
+                cur.execute("UPDATE sessions SET pinned=? WHERE id=?", (db.jd(pin), sid))
+            optimizer.optimize(plan_id)
+    return {"session_id": sid, "plan": service.plan_view(plan_id)}
 
 
 def _choice_of(session: dict, decision: dict | None) -> dict:
@@ -529,6 +613,57 @@ def rate(session_id: int, score, reasons: list | None = None) -> dict:
     return {"plan": service.plan_view(plan["id"]), "suggest_favourite": suggest}
 
 
+def saved(user_id: int) -> dict:
+    """What the Saved tab lists besides places: the dishes this person rated Good and the
+    meals they actually had or ordered, newest first. Only real records, never suggestions."""
+    with db.cursor() as cur:
+        likes = cur.execute("SELECT session_id, iso_date FROM ratings WHERE user_id=? AND score > 0 "
+                            "AND session_id IS NOT NULL ORDER BY id DESC LIMIT 200", (user_id,)).fetchall()
+        had = cur.execute(
+            "SELECT s.id, s.day, s.meal, s.status, p.week_start FROM sessions s JOIN plans p ON p.id = s.plan_id "
+            "WHERE p.user_id=? AND s.status IN ('confirmed', 'ordered') "
+            "ORDER BY p.week_start DESC, s.day DESC, s.id DESC LIMIT 20", (user_id,)).fetchall()
+        scores = {r["session_id"]: r["score"] for r in cur.execute(
+            "SELECT session_id, score FROM ratings WHERE user_id=? AND session_id IS NOT NULL", (user_id,)).fetchall()}
+        ids = sorted({r["session_id"] for r in likes} | {r["id"] for r in had})
+        latest = {}
+        for start in range(0, len(ids), 200):              # each meal's latest decision is what was eaten
+            chunk = ids[start:start + 200]
+            rows = cur.execute("SELECT session_id, chosen_kind, item_id, item_name, restaurant_id, restaurant_name, "
+                               "recipe_key, cost FROM decisions WHERE session_id IN (" + ",".join("?" * len(chunk))
+                               + ") ORDER BY id", tuple(chunk)).fetchall()
+            for row in rows:
+                latest[row["session_id"]] = dict(row)
+
+    def dish(d: dict) -> dict:
+        cook = d["chosen_kind"] == "cook"
+        return {"name": d["item_name"], "kind": "cook" if cook else "delivery",
+                "restaurant": None if cook else d["restaurant_name"], "restaurant_id": d["restaurant_id"],
+                "item_id": d["item_id"], "recipe_key": d["recipe_key"], "price": round(float(d["cost"] or 0), 2)}
+
+    liked, seen = [], set()
+    for r in likes:
+        d = latest.get(r["session_id"])
+        if not d or d["chosen_kind"] not in ("delivery", "cook") or not d["item_name"]:
+            continue
+        key = (d["chosen_kind"], d["item_id"] or d["recipe_key"] or d["item_name"])
+        if key in seen:
+            continue
+        seen.add(key)
+        liked.append({**dish(d), "last": r["iso_date"]})
+        if len(liked) == 30:
+            break
+    recent = []
+    for s in had:
+        d = latest.get(s["id"])
+        if not d or not d["item_name"]:
+            continue
+        when = dt.date.fromisoformat(s["week_start"]) + dt.timedelta(days=s["day"])
+        recent.append({**dish(d), "session_id": s["id"], "meal": s["meal"], "date": when.isoformat(),
+                       "status": s["status"], "rated": scores.get(s["id"])})
+    return {"liked": liked, "recent": recent}
+
+
 def more_like(session_id: int) -> dict:
     """"More like this" on a planned dish: remember it (the last few), re-plan the open
     meals with the similarity nudge, and offer the closest safe dishes to pick now."""
@@ -540,7 +675,7 @@ def more_like(session_id: int) -> dict:
         raise ValueError("Dish similarity isn't available right now")
     dish = decision["item_name"]
     if flavour.dish_vector(dish) is None:
-        raise ValueError(f"SmartPlate can't tell yet what {dish} is made of, so it can't find similar dishes")
+        raise ValueError(f"Ziggy can't tell yet what {dish} is made of, so it can't find similar dishes")
     prefs = dict(user["prefs"])
     entries = [m for m in prefs.get("more_like", []) if m.get("name") != dish]
     entries.append({"name": dish, "item_id": decision.get("item_id"), "iso_date": clock.today().isoformat()})

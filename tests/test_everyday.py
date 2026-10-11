@@ -247,6 +247,40 @@ def test_not_again_excludes_dish_from_future_plans(client):
     assert client.post(f"/api/session/{sid}/rate", json={"score": 5}).status_code == 400
 
 
+def test_saved_lists_liked_dishes_and_meals_had_newest_first(client):
+    """The Saved tab: dishes rated Good (once each) and meals actually had, from real records."""
+    assert client.get("/api/user/1/saved").get_json() == {"liked": [], "recent": []}
+    v = client.get("/api/plan/1").get_json()
+    deliveries = [c for _, _, c in _cells(v) if c["kind"] == "delivery" and c["status"] == "active"]
+    first, second = deliveries[0], next(c for c in deliveries[1:] if c["item"] != deliveries[0]["item"])
+    for cell in (first, second):
+        assert client.post(f"/api/session/{cell['session_id']}/confirm", json={}).status_code == 200
+    assert client.post(f"/api/session/{first['session_id']}/rate", json={"score": 1}).status_code == 200
+    assert client.post(f"/api/session/{second['session_id']}/rate", json={"score": -1}).status_code == 200
+    saved = client.get("/api/user/1/saved").get_json()
+    assert [x["name"] for x in saved["liked"]] == [first["item"]]                 # "not again" is never saved
+    liked = saved["liked"][0]
+    assert liked["kind"] == "delivery" and liked["restaurant"] == first["restaurant"]
+    assert liked["price"] == pytest.approx(first["cost"])
+    recent = {x["session_id"]: x for x in saved["recent"]}
+    assert set(recent) == {first["session_id"], second["session_id"]}
+    assert recent[first["session_id"]]["rated"] == 1 and recent[second["session_id"]]["rated"] == -1
+    assert all(x["status"] == "confirmed" for x in saved["recent"])
+    dates = [x["date"] for x in saved["recent"]]
+    assert dates == sorted(dates, reverse=True)
+
+
+def test_saved_is_private_to_its_profile(seeded):
+    app = create_app()
+    c = app.test_client()
+    created = c.post("/api/profiles", json={"name": "Private", "diet": "veg", "weekly_budget": 2000,
+                                            "meals": ["dinner"]}).get_json()
+    uid = created["user"]["id"]
+    assert c.get(f"/api/user/{uid}/saved").status_code == 401
+    ok = c.get(f"/api/user/{uid}/saved", headers={"X-SmartPlate-Key": created["access_key"]})
+    assert ok.status_code == 200 and ok.get_json() == {"liked": [], "recent": []}
+
+
 def test_like_from_new_place_suggests_adding_it(client):
     taste.set_favourites(1, [6])                                                            # only Saravana
     optimizer.optimize(1)

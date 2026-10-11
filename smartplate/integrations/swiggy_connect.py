@@ -65,12 +65,40 @@ CREATE TABLE IF NOT EXISTS swiggy_menus (        -- live menus, cached briefly (
     fetched_ts TEXT NOT NULL,
     PRIMARY KEY (user_id, restaurant)
 );
+CREATE TABLE IF NOT EXISTS swiggy_photos (       -- Swiggy's own dish photo, seen in a search_menu reply
+    user_id INTEGER NOT NULL,
+    restaurant_id TEXT NOT NULL,                 -- Swiggy restaurant id
+    dish TEXT NOT NULL,                          -- normalised dish name (browse and search ids can differ)
+    image TEXT,                                  -- NULL: Swiggy showed no photo when last checked
+    checked_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, restaurant_id, dish)
+);
+CREATE TABLE IF NOT EXISTS swiggy_issues (       -- recent problems and the rule behind each (swiggy_rules.py)
+    user_id INTEGER NOT NULL,
+    ts TEXT NOT NULL,
+    rule TEXT NOT NULL,
+    message TEXT NOT NULL,
+    PRIMARY KEY (user_id, ts)
+);
 CREATE TABLE IF NOT EXISTS swiggy_favourites (
     user_id INTEGER NOT NULL,
     address_id TEXT NOT NULL,
     restaurant_id TEXT NOT NULL,
     restaurant_name TEXT NOT NULL,
     PRIMARY KEY (user_id, address_id, restaurant_id)
+);
+CREATE TABLE IF NOT EXISTS swiggy_meal_pools (   -- the dishes a person wants for each meal (domain/meal_pools.py)
+    user_id INTEGER NOT NULL,
+    address_id TEXT NOT NULL,
+    meal TEXT NOT NULL,
+    restaurant_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    restaurant_name TEXT NOT NULL,
+    name TEXT NOT NULL,
+    price REAL,
+    veg INTEGER,
+    added_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, address_id, meal, restaurant_id, item_id)
 );
 CREATE TABLE IF NOT EXISTS swiggy_order_attempts (
     user_id INTEGER NOT NULL,
@@ -104,6 +132,7 @@ COLUMNS = [                                      # added after gate 1 shipped
     ("swiggy_order_attempts", "resolved_ts", "TEXT"),
     ("swiggy_order_attempts", "to_pay", "REAL"),
     ("swiggy_cart_intents", "menu_price", "REAL"),
+    ("swiggy_cart_intents", "quantity", "INTEGER"),          # portions for a household meal; NULL = 1
 ]
 CLIENT_VERSION = "2025-06-18"          # protocol we offer; the server's reply is what we record
 PENDING_TTL = dt.timedelta(minutes=15)
@@ -233,7 +262,7 @@ def _client_id(meta: dict, redirect_uri: str) -> str:
         raise SwiggyError("This server's public address isn't configured for Swiggy sign-in. "
                           "Set SMARTPLATE_PUBLIC_URL (or SMARTPLATE_ALLOWED_HOSTS) to the app's HTTPS address.")
     if registered >= config.SWIGGY_MAX_CLIENTS:
-        raise SwiggyError("SmartPlate has already registered its Swiggy sign-in addresses. "
+        raise SwiggyError("Ziggy has already registered its Swiggy sign-in addresses. "
                           "Ask the operator to check SMARTPLATE_PUBLIC_URL.")
     reg = meta.get("registration_endpoint")
     if not reg:
@@ -275,7 +304,7 @@ def start(user_id: int, redirect_uri: str, browser_nonce: str | None = None) -> 
     `browser_nonce` is also set as an HttpOnly cookie on the browser that asked;
     the callback is accepted only from a browser presenting it (H-01)."""
     if not private_owner(user_id):
-        raise SwiggyError("Create or sign in to your own private SmartPlate profile before connecting Swiggy. "
+        raise SwiggyError("Create or sign in to your own private Ziggy profile before connecting Swiggy. "
                           "Sample profiles are shared by every visitor.")
     if not redirect_uri.startswith("https://") and "://localhost" not in redirect_uri \
             and "://127.0.0.1" not in redirect_uri:
@@ -310,10 +339,10 @@ def finish(state: str, code: str, browser_nonce: str | None = None) -> int:
         row = cur.execute("SELECT * FROM swiggy_pending WHERE state=?", (state or "",)).fetchone()
         cur.execute("DELETE FROM swiggy_pending WHERE state=?", (state or "",))       # single use
     if not row or dt.datetime.fromisoformat(row["created_ts"]) < clock.now() - PENDING_TTL:
-        raise SwiggyError("This sign-in link expired or was already used. Start again from SmartPlate.")
+        raise SwiggyError("This sign-in link expired or was already used. Start again from Ziggy.")
     expected = row["browser_hash"]
     if not expected or not browser_nonce or not hmac.compare_digest(expected, browser_digest(browser_nonce)):
-        raise SwiggyError("This Swiggy sign-in was started in a different browser. Open SmartPlate on this "
+        raise SwiggyError("This Swiggy sign-in was started in a different browser. Open Ziggy on this "
                           "device and tap Connect Swiggy again.", code="swiggy_browser_mismatch")
     if not code:
         raise SwiggyError("Swiggy didn't return a sign-in code")
@@ -470,6 +499,8 @@ def disconnect(user_id: int) -> dict:
         cur.execute("DELETE FROM swiggy_connections WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_pending WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_menus WHERE user_id=?", (user_id,))
+        cur.execute("DELETE FROM swiggy_photos WHERE user_id=?", (user_id,))
+        cur.execute("DELETE FROM swiggy_issues WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
         cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
     return {"connected": False}

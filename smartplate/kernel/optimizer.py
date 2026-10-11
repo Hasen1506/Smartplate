@@ -18,8 +18,8 @@ import math
 import pulp
 
 from .. import clock, config, db
-from ..domain import (allergens, carbon, fatigue, festivals, flavour, health, learning, leftovers,
-                      models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
+from ..domain import (allergens, carbon, fatigue, festivals, flavour, health, household, learning, leftovers,
+                      meal_pools, models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
 from ..integrations import calendar_sync
 from . import explainability, scheduler
 
@@ -150,13 +150,19 @@ def build_context(user: dict, plan: dict) -> dict:
     if learned["cost_mult"] != 1:                 # "too pricey" taps: cheaper picks weigh more
         weights = {**weights, "cost": round(weights["cost"] * learned["cost_mult"], 4)}
     menu = models.menu_for_user(user)
-    if any(it.get("source") == "live" for it in menu):
+    live = any(it.get("source") == "live" for it in menu)
+    if live:
         # The live catalogue is the user's own places (their live favourites, or what they
         # searched): every one is a usual place, none a "new" discovery.
         sig = {**sig, "favourites": {it["restaurant_id"] for it in menu}}
     return {
         "learned": learned,
         "menu": menu,
+        # A household plan feeds everyone eating a meal: one portion each (portions()).
+        "members": models.get_household_members(user["household_id"]) if user.get("household_id") else [],
+        # The person's own breakfast / lunch / dinner pools (domain/meal_pools): a meal
+        # with a pool is planned only from it.
+        "pools": meal_pools.for_planner(user["id"]) if live else {},
         # Epicure flavour signals ("more like this", cuisine tilt); {} when neither is set
         "flavour": flavour.context(user, menu),
         "festivals": festivals.for_week(plan["week_start"]),
@@ -176,6 +182,14 @@ def build_context(user: dict, plan: dict) -> dict:
     }
 
 
+def portions(user: dict, session: dict, ctx: dict) -> int:
+    """How many portions a meal needs: one for each household member eating it (the
+    meal's ticks, else who usually eats it), one for a person planning alone. Nutrition
+    stays per person; cost and the Swiggy cart scale with this."""
+    members = ctx.get("members") or []
+    return max(1, len(household.eaters(session, members, user))) if members else 1
+
+
 def _wx(ctx: dict, day) -> dict:
     return ctx["weather"].get(day) or {"condition": "clear", "temp_c": 30.0}
 
@@ -193,7 +207,8 @@ def _delivery_candidate(user, plan, session, item, ctx):
     day, meal = session["day"], session["meal"]
     item, learned_pen = learning.adjust(item, ctx.get("learned"))
     cond = _wx(ctx, day)["condition"]
-    base_cost = item["price"] + item["delivery_fee"]
+    n = portions(user, session, ctx)
+    base_cost = item["price"] * n + item["delivery_fee"]          # one delivery fee, a portion each
 
     # Surge + optional time-shift (calendar-aware) -------------------------- #
     if surge.applies(item):
@@ -222,8 +237,10 @@ def _delivery_candidate(user, plan, session, item, ctx):
     if fbonus:
         taste_score = round(taste_score + fbonus, 4)
     discovery = bool(ctx["taste"]["favourites"]) and item["restaurant_id"] not in ctx["taste"]["favourites"]
-    nutri = nutrition.penalty(user, meal, item, tol=ctx["nutri_tol"])
-    hp = health.protein_penalty(user, item)
+    known = item.get("nutrition_known", 1) != 0
+    # A pooled dish with no estimate carries no nutrition term, rather than a made-up one.
+    nutri = nutrition.penalty(user, meal, item, tol=ctx["nutri_tol"]) if known else 0.0
+    hp = health.protein_penalty(user, item) if known else 0.0
     cpen = carbon.penalty(item)
     # usual-first (§5.2): a familiar pick is the "usual"; a novel one pays a small soft
     # premium when USUAL_FIRST is on, so the planner keeps the user's usuals unless a
@@ -234,7 +251,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "kind": "delivery",
         "restaurant_id": item["restaurant_id"], "restaurant_name": item["restaurant_name"],
         "item_id": item["id"], "item_name": item["name"], "rating": item["restaurant_rating"],
-        "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3),
+        "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3), "portions": n,
         "delivery_fee": item["delivery_fee"], "delivery_fee_estimated": item.get("delivery_fee_estimated"),
         "time_shift": time_shift, "flaky": item.get("flaky", 0), "rating_pen": _rating_pen(user, item),
         "is_usual": (not discovery) if ctx["taste"]["favourites"] else not fatigue.is_novel(item, history),
@@ -248,7 +265,10 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "carbon_kg": carbon.estimate(item), "weather_cond": cond,
         "weather_bias": weather.taste_bias(cond, item),
         "festival_bias": festivals.taste_bias(ctx["festivals"].get(day), item),
-        "nutrition": {k: item.get(k, 0) for k in ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")},
+        "nutrition": ({k: item.get(k, 0) for k in ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")}
+                      if known else {}),
+        "nutrition_unknown": not known,
+        "pooled": item["id"] in ((ctx.get("pools") or {}).get(meal) or {}).get("ids", ()),
         "tags": item.get("tags", []), "flavour_why": fwhy,
     }
 
@@ -257,10 +277,12 @@ def _cook_candidate(user, session, ctx, recipe=None):
     r = recipe or reverse_mode.cook_candidate(user, session["meal"])
     if not r:
         return None
-    nutri = nutrition.penalty(user, session["meal"], r, tol=ctx["nutri_tol"])
-    return {
-        "kind": "cook", "recipe_key": r["key"], "item_name": f"Cook: {r['name']}",
-        "restaurant_name": "Home kitchen", "rating": 5.0, "cost": float(r["cost"]),
+    unknown = bool(r.get("nutrition_unknown"))   # a library dish: no nutrition figures to weigh
+    nutri = 0.0 if unknown else nutrition.penalty(user, session["meal"], r, tol=ctx["nutri_tol"])
+    n = portions(user, session, ctx)
+    cand = {
+        "kind": "cook", "recipe_key": r["key"], "item_name": f"Cook: {r['name']}", "portions": n,
+        "restaurant_name": "Home kitchen", "rating": 5.0, "cost": round(float(r["cost"]) * n, 2),
         "surge_mult": 1.0, "time_shift": None, "taste": 0.62, "sentiment": {"score": 0, "n": 0, "label": ""},
         "nutri": nutri, "health": health.protein_penalty(user, r), "carbon_pen": carbon.penalty(r),
         "cook_effort": _cook_effort(user, session["meal"]),
@@ -268,12 +290,38 @@ def _cook_candidate(user, session, ctx, recipe=None):
         "nutrition": {k: r.get(k, 0) for k in ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")},
         "tags": ["home"],
     }
+    if unknown:
+        cand.update(health=0.0, nutrition={}, nutrition_unknown=True, cost_unknown=bool(r.get("cost_unknown")))
+    return cand
 
 
-def meal_suitable(item: dict, meal: str) -> bool:
-    """Keep treats visible in the catalogue without planning them as whole meals."""
-    return ("dessert" not in item.get("tags", []) and item.get("cuisine") != "dessert"
+def meal_suitable(item: dict, meal: str, chosen: bool = False) -> bool:
+    """Keep treats and sides (Swiggy menu sections like Breads or Beverages) visible in the
+    catalogue without planning them as whole meals by themselves. A dish the person chose
+    themselves (`chosen`) may be a side: a curry for dinner is their call."""
+    return ("dessert" not in item.get("tags", []) and (chosen or "side" not in item.get("tags", []))
+            and item.get("cuisine") != "dessert"
             and not item.get("name", "").lower().endswith(" sweet"))
+
+
+# What a dish's menu section says about the meal, as a soft preference (smaller than a
+# skip, so a dosa at lunch still beats no lunch when a place has few plates).
+OFF_MEAL_PEN = 1.2          # a tiffin dish at lunch, or a non-tiffin dish at breakfast
+NOT_A_PLATE_PEN = 0.5       # lunch that isn't a whole plate ("Meals", "Thali", rice, bowls)
+
+
+def meal_fit_pen(items: list[dict], meal: str):
+    """item → penalty for how well it fits this meal, from the Swiggy menu sections:
+    breakfast prefers dishes filed as breakfast ("Tiffin", "Dosa") when the places have any;
+    lunch prefers a whole plate and not a tiffin dish. Dinner takes anything."""
+    has = lambda it, tag: tag in (it.get("tags") or [])            # noqa: E731
+    if meal == "breakfast" and any(has(it, "breakfast") for it in items):
+        return lambda it: 0.0 if has(it, "breakfast") else OFF_MEAL_PEN
+    if meal == "lunch":
+        plates = any(has(it, "main") and not has(it, "breakfast") for it in items)
+        return lambda it: (OFF_MEAL_PEN if has(it, "breakfast")
+                           else 0.0 if (has(it, "main") or not plates) else NOT_A_PLATE_PEN)
+    return lambda it: 0.0
 
 
 def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[dict]:
@@ -314,20 +362,33 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     scheduled_min = models.MEAL_WINDOWS[meal][1]
     fasting = health.in_fasting_window(user, scheduled_min)
     cands = []
-    if not fasting:
+    pool = (ctx.get("pools") or {}).get(meal)
+    if not fasting and pool:
+        # The person's own pool for this meal: only its dishes, hard rules still apply.
+        # (Their pick, so the treat filter and rating floor don't second-guess it.)
+        safe = [it for it in allergens.safe_items(user, ctx["menu"])
+                if it["id"] in pool["ids"] and it["id"] not in ctx["taste"]["disliked"]]
+        safe.sort(key=lambda it: it["price"] + it["delivery_fee"])
+        cands = [_delivery_candidate(user, plan, session, it, ctx) for it in safe]
+    elif not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
-        safe = [it for it in safe if meal_suitable(it, meal)]
+        safe = [it for it in safe if meal_suitable(it, meal) and it.get("nutrition_known", 1) != 0]
+        fit = meal_fit_pen(safe, meal)
         safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
         safe = [it for it in safe if it["id"] not in ctx["taste"]["disliked"]]   # "not again" is a lock
-        # keep the most promising few (cheap-but-decent) to bound the MILP
-        safe.sort(key=lambda it: (it["price"] + it["delivery_fee"]) - 40 * (it["item_rating"] / 5))
+        # keep the most promising few (cheap-but-decent, right for the meal) to bound the MILP
+        safe.sort(key=lambda it: (fit(it), (it["price"] + it["delivery_fee"]) - 40 * (it["item_rating"] / 5)))
         favs = ctx["taste"]["favourites"]
         usual = [it for it in safe if not favs or it["restaurant_id"] in favs]
         fresh = [it for it in safe if favs and it["restaurant_id"] not in favs]
 
         def best(pool, n):
-            picked = [_delivery_candidate(user, plan, session, it, ctx) for it in pool[: n * 2]]
-            picked.sort(key=lambda c: c["cost"] - 60 * c["taste"])
+            picked = []
+            for it in pool[: n * 2]:
+                c = _delivery_candidate(user, plan, session, it, ctx)
+                c["meal_pen"] = fit(it)
+                picked.append(c)
+            picked.sort(key=lambda c: (c["meal_pen"], c["cost"] - 60 * c["taste"]))
             return picked[:n]
         slots = ctx.get("delivery_slots", MAX_DELIVERY_CANDIDATES)
         # few usual dishes for many meals: offer enough new ones to fill the week
@@ -342,6 +403,11 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     if not ctx["menu"]:
         # No restaurant dishes at all (no live Swiggy menus yet): say so, not "budget".
         skip_reason = "No real restaurant dishes yet — connect Swiggy and pick an address."
+    elif pool and not any(c["kind"] == "delivery" for c in cands):
+        skip_reason = (f"Nothing in your {meal} pool is on Swiggy's menu right now, or safe for your rules. "
+                       f"Add another dish to your {meal} pool.")
+    elif pool:
+        skip_reason = f"Your {meal} pool didn't fit the budget this time — skipped."
     if fasting:
         skip_reason = "Inside your fasting window — kept clear (cook/skip only)."
     skip = _skip(forced=False, reason=skip_reason)
@@ -388,6 +454,7 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
         + effort
         + cand.get("rating_pen", 0.0)
         + cand.get("learned_pen", 0.0)          # rating reasons: late / spicy / pricey (+), great (−)
+        + cand.get("meal_pen", 0.0)             # a tiffin dish at lunch, a dal at breakfast
         + cand.get("usual_pen", 0.0)             # ↑ objective for novel ⇒ usual picks preferred (when usual-first on)
         - cand.get("novelty_bonus", 0.0)         # ↓ objective ⇒ novel picks preferred (when nudge on)
         + cand["weather_bias"] + cand["festival_bias"],
@@ -419,7 +486,7 @@ def pinned_candidate(user, plan, session, ctx) -> dict | None:
         return None
     if pin.get("kind") == "delivery":
         item = next((it for it in ctx["menu"] if it["id"] == pin.get("item_id")), None)
-        if not item or allergens.violates(user, item) or not meal_suitable(item, session["meal"]):
+        if not item or allergens.violates(user, item) or not meal_suitable(item, session["meal"], chosen=True):
             return None
         cand = _delivery_candidate(user, plan, session, item, ctx)
     elif pin.get("kind") == "cook":
@@ -447,7 +514,7 @@ def carted_candidate(user, session, real, ctx) -> dict | None:
     item = next((it for it in ctx["menu"] if it["id"] == d["item_id"]), None) or next(
         (it for it in ctx["menu"] if it["name"] == d["item_name"] and it["restaurant_name"] == d["restaurant_name"]),
         None)
-    if item is not None and (allergens.violates(user, item) or not meal_suitable(item, session["meal"])):
+    if item is not None and (allergens.violates(user, item) or not meal_suitable(item, session["meal"], chosen=True)):
         return None
     nut = db.jl(d["nutrition"], {})
     return {"kind": "delivery", "restaurant_id": d["restaurant_id"], "restaurant_name": d["restaurant_name"],
@@ -622,10 +689,20 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
         cook_room = min(cookable, max(0, _cook_cap(user) - sum(1 for c in pinned.values() if c["kind"] == "cook")))
         uncovered = len(active) - usual_room - cook_room
         prob += pulp.lpSum(discovery_vars) <= max(n_new, uncovered)
+    # A small pool is the person saying "this is what I eat": its dishes may repeat as
+    # often as the pool's meals need (one dish in a breakfast pool → every breakfast).
+    item_cap = {}
+    for meal_name, pool in (ctx.get("pools") or {}).items():
+        n_meal = sum(1 for s in active if s["meal"] == meal_name)
+        if pool["ids"] and n_meal:
+            need = math.ceil(n_meal / len(pool["ids"]))
+            for item_id in pool["ids"]:
+                item_cap[item_id] = max(item_cap.get(item_id, repeat), need)
     for item_id, vlist in item_vars.items():                    # variety: cap repeats per dish —
         pinned_n = sum(1 for c in pinned.values() if c.get("item_id") == item_id)   # pins count too
-        if len(vlist) + pinned_n > repeat:
-            prob += pulp.lpSum(vlist) <= max(0, repeat - pinned_n)
+        cap_n = item_cap.get(item_id, repeat)
+        if len(vlist) + pinned_n > cap_n:
+            prob += pulp.lpSum(vlist) <= max(0, cap_n - pinned_n)
     for (item_id, day), vlist in item_day_vars.items():
         pinned_same = sum(1 for sid, c in pinned.items() if c.get("item_id") == item_id
                           and next(s["day"] for s in sessions if s["id"] == sid) == day)

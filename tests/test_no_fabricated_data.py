@@ -12,7 +12,7 @@
 """
 from test_roadmap_b_live_menus import RECORDED_MENU, _live_user, client, swiggy  # noqa: F401 (fixtures)
 from smartplate import service
-from smartplate.domain import models
+from smartplate.domain import household, models
 
 
 def test_live_dishes_cost_swiggys_price_with_no_invented_surge(client, swiggy):
@@ -22,9 +22,12 @@ def test_live_dishes_cost_swiggys_price_with_no_invented_surge(client, swiggy):
     menu = {it["id"]: it for it in models.menu_for_user(models.get_user(3))}
     rows = [d for d in models.decisions_for_plan(pid) if d["chosen_kind"] == "delivery"]
     assert rows, "a live week plans deliveries"
+    user, members = models.get_user(3), models.get_household_members(1)
     for d in rows:
         item = menu[d["item_id"]]
-        assert d["cost"] == round(item["price"] + item["delivery_fee"], 2), (d["item_name"], d["cost"])
+        portions = len(household.eaters(d, members, user))      # Arjun and Meera: a portion each
+        assert portions == 2
+        assert d["cost"] == round(item["price"] * portions + item["delivery_fee"], 2), (d["item_name"], d["cost"])
         assert d["surge_mult"] == 1.0 and not d.get("time_shift")
         assert not any("Surge" in r or "surge" in r for r in d["reasons"]), d["reasons"]
     view = client.get(f"/api/plan/{pid}").get_json()

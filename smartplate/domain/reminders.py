@@ -65,9 +65,9 @@ def upcoming(view: dict, at: dt.datetime | None = None) -> list[dict]:
     return out
 
 
-def to_ics(reminders: list[dict], *, plan_id: int, name: str = "SmartPlate") -> bytes:
+def to_ics(reminders: list[dict], *, plan_id: int, name: str = "Ziggy") -> bytes:
     cal = Calendar()
-    cal.add("prodid", "-//SmartPlate//order reminders//EN")
+    cal.add("prodid", "-//Ziggy//order reminders//EN")
     cal.add("version", "2.0")
     cal.add("calscale", "GREGORIAN")
     cal.add("x-wr-calname", f"{name} · meals")

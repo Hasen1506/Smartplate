@@ -1,11 +1,12 @@
-/* SmartPlate service worker: makes the app installable, opens offline, and shows
+/* Ziggy service worker: makes the app installable, opens offline, and shows
    order-time reminders pushed by the server (smartplate/push.py).
    Network-first for the app shell (so a new release is picked up on the next open),
    falling back to the cached copy when offline. API responses are never cached:
    budgets and plans must always be live. */
-const CACHE = "smartplate-shell-v4-live";
+const CACHE = "ziggy-shell-v1";
 const SHELL = ["/", "/static/app.js", "/static/styles.css", "/manifest.webmanifest",
-  "/static/icons/icon-192.png", "/static/icons/icon-512.png", "/static/icons/icon.svg"];
+  "/static/icons/icon-192.png", "/static/icons/icon-512.png", "/static/icons/icon.svg",
+  "/static/fonts/figtree-latin.woff2", "/static/fonts/bricolage-latin.woff2"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -31,7 +32,7 @@ self.addEventListener("fetch", (e) => {
 self.addEventListener("push", (e) => {
   let data = {};
   try { data = e.data ? e.data.json() : {}; } catch (_) { data = { body: e.data && e.data.text() }; }
-  e.waitUntil(self.registration.showNotification(data.title || "SmartPlate", {
+  e.waitUntil(self.registration.showNotification(data.title || "Ziggy", {
     body: data.body || "", tag: data.tag || "smartplate", renotify: true,
     icon: "/static/icons/icon-192.png", badge: "/static/icons/icon-192.png", data: { url: data.url || "/" },
   }));
