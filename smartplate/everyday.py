@@ -109,9 +109,10 @@ def _targets_blob(data: dict, existing: dict | None = None) -> tuple[dict, dict,
 def create_profile(body: dict) -> dict:
     # Optional sign-in set in the same step, so the profile is never tied to one browser.
     login = password = None
-    if isinstance(body, dict) and ("login" in body or "password" in body):
+    if isinstance(body, dict) and ("login" in body or "email" in body or "password" in body):
         from . import accounts
-        login, password = accounts.check_new_login(body.pop("login", None), body.pop("password", None))
+        login, password = accounts.check_new_login(body.pop("login", None), body.pop("password", None),
+                                                   email=body.pop("email", None))
     cook = body.pop("cook", "never") if isinstance(body, dict) else "never"
     if cook not in COOK_BY_ANSWER:
         raise ValueError("Choose how often you cook")

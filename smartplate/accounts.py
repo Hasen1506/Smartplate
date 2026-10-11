@@ -6,8 +6,9 @@ Each successful sign-in creates a *device token*: a random key for that browser,
 only as a SHA-256. The access check accepts the profile key or any of its device tokens,
 and "Sign out" deletes one.
 
-Deliberately simple for a trial: no email, so nothing to verify and nothing is ever
-sent. Forgotten password → open the profile with its recovery code (or any signed-in
+Deliberately simple for a trial: new sign-ins use an email address as the identifier
+(validated, unique, case-insensitive), but nothing is verified and nothing is ever sent.
+Older accounts with a free-form name keep signing in with it. Forgotten password → open the profile with its recovery code (or any signed-in
 device) and set a new one. Sample profiles are shared, so they can't have a sign-in.
 """
 import re
@@ -17,7 +18,13 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import access, clock, db, ratelimit
 
-LOGIN_RE = re.compile(r"^[a-z0-9._@+-]{3,64}$")
+LOGIN_RE = re.compile(r"^[a-z0-9._@+-]{3,64}$")         # legacy free-form names: still sign in
+# New sign-ins are an email (Oct 2026): one identifier people recognise, so nobody wonders
+# which account they're on. Stored lower-case in the same unique `login` column, so it is
+# unique and case-insensitive, and old name-only accounts keep working unchanged.
+EMAIL_RE = re.compile(r"^[a-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+                      r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,63}$")
+MAX_EMAIL = 254
 MIN_PASSWORD = 8
 MAX_PASSWORD = 200
 FAIL_LIMIT, FAIL_WINDOW_S = 5, 15 * 60                     # per sign-in name from one address
@@ -33,6 +40,25 @@ def _norm(login) -> str:
     return login
 
 
+def _email(email) -> str:
+    email = (email or "").strip().lower() if isinstance(email, str) else ""
+    if len(email) > MAX_EMAIL or ".." in email or not EMAIL_RE.match(email):
+        raise ValueError("Enter a valid email address, like name@example.com")
+    return email
+
+
+def _identifier(body: dict) -> tuple[str, bool]:
+    """The sign-in a request chooses: `email` (current) or the legacy free-form `login`."""
+    if body.get("email") is not None:
+        return _email(body.get("email")), True
+    return _norm(body.get("login")), False
+
+
+def _taken(is_email: bool) -> str:
+    return ("That email already has a Ziggy account. Sign in with it instead." if is_email
+            else "That sign-in name is taken. Try another.")
+
+
 def _password(pw) -> str:
     if not isinstance(pw, str) or not (MIN_PASSWORD <= len(pw) <= MAX_PASSWORD):
         raise ValueError(f"Use a password of at least {MIN_PASSWORD} characters")
@@ -43,12 +69,14 @@ def _now() -> str:
     return clock.now().isoformat(timespec="seconds")
 
 
-def check_new_login(login, password) -> tuple[str, str]:
-    """Validate a sign-in chosen while creating a profile, before anything is written."""
-    login, pw = _norm(login), _password(password)
+def check_new_login(login, password, email=None) -> tuple[str, str]:
+    """Validate a sign-in chosen while creating a profile, before anything is written.
+    `email` wins when given; `login` is the legacy free-form name."""
+    login, is_email = _identifier({"email": email, "login": login})
+    pw = _password(password)
     with db.cursor() as cur:
         if cur.execute("SELECT 1 FROM logins WHERE login=?", (login,)).fetchone():
-            raise ValueError("That sign-in name is taken. Try another.")
+            raise ValueError(_taken(is_email))
     return login, pw
 
 
@@ -68,7 +96,9 @@ def summary(user_id: int, presented: str | None = None) -> dict:
         row = cur.execute("SELECT login FROM logins WHERE user_id=?", (user_id,)).fetchone()
         devices = cur.execute("SELECT id, label, created_ts, last_seen_ts, token_hash FROM devices "
                               "WHERE user_id=? ORDER BY last_seen_ts DESC", (user_id,)).fetchall()
-    return {"private": bool(user and user["access_hash"]), "login": row["login"] if row else None,
+    login = row["login"] if row else None
+    return {"private": bool(user and user["access_hash"]), "login": login,
+            "email": login if login and EMAIL_RE.match(login) else None,
             "devices": [{"id": d["id"], "label": d["label"] or "Browser", "since": d["created_ts"],
                          "last_seen": d["last_seen_ts"], "this_device": d["token_hash"] == here} for d in devices]}
 
@@ -79,11 +109,12 @@ def set_login(user_id: int, body: dict, presented: str | None = None) -> dict:
         user = cur.execute("SELECT access_hash FROM users WHERE id=?", (user_id,)).fetchone()
     if not user or not user["access_hash"]:
         raise ValueError("Sample profiles are shared, so they can't have a sign-in. Set up your own profile first.")
-    login, pw = _norm(body.get("login")), _password(body.get("password"))
+    login, is_email = _identifier(body)
+    pw = _password(body.get("password"))
     with db.cursor() as cur:
         taken = cur.execute("SELECT user_id FROM logins WHERE login=?", (login,)).fetchone()
         if taken and taken["user_id"] != user_id:
-            raise ValueError("That sign-in name is taken. Try another.")
+            raise ValueError(_taken(is_email))
         existing = cur.execute("SELECT pw_hash FROM logins WHERE user_id=?", (user_id,)).fetchone()
         now = _now()
         cur.execute("INSERT INTO logins(user_id, login, pw_hash, created_ts, updated_ts) VALUES (?,?,?,?,?) "
@@ -100,8 +131,9 @@ def set_login(user_id: int, body: dict, presented: str | None = None) -> dict:
 def sign_in(body: dict, ip: str = "") -> dict:
     """Name + password → a new device token for this browser."""
     ratelimit.check(f"signin-ip:{ip}", IP_LIMIT, IP_WINDOW_S)
-    raw = body.get("login")
-    login = raw.strip().lower() if isinstance(raw, str) else ""
+    by_email = isinstance(body.get("email"), str)
+    raw = body.get("email") if by_email else body.get("login")
+    login = raw.strip().lower() if isinstance(raw, str) else ""        # case-insensitive, both kinds
     pw = body.get("password") if isinstance(body.get("password"), str) else ""
     # Failures count per (name, address), so a stranger elsewhere cannot lock the owner
     # out (L-04); a much higher per-name ceiling still slows distributed guessing.
@@ -113,7 +145,8 @@ def sign_in(body: dict, ip: str = "") -> dict:
     if not check_password_hash(row["pw_hash"] if row else _DUMMY, pw[:MAX_PASSWORD]) or not row:
         ratelimit.hit(f"signin:{login}:{ip}")
         ratelimit.hit(f"signin-name:{login}")
-        raise ValueError("That name and password don't match.")
+        raise ValueError("That email and password don't match." if by_email
+                         else "That name and password don't match.")
     token = secrets.token_urlsafe(24)
     label = body.get("device") if isinstance(body.get("device"), str) else ""
     now = _now()

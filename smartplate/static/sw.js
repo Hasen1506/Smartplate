@@ -21,7 +21,8 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
-  const key = e.request.mode === "navigate" ? "/" : e.request;
+  // A page opens as its own shell: /v3 (the v3 experiment) must never overwrite "/" offline.
+  const key = e.request.mode === "navigate" ? (url.pathname === "/v3" ? "/v3" : "/") : e.request;
   e.respondWith(fetch(e.request).then((res) => {
     if (res.ok) caches.open(CACHE).then((c) => c.put(key, res.clone()));
     return res;

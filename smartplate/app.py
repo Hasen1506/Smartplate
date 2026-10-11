@@ -40,7 +40,11 @@ def _missing(key: str, value) -> tuple:
                    missing=key, id=value), 404
 
 
-ASSETS = {"app.js": "text/javascript", "styles.css": "text/css"}
+ASSETS = {"app.js": "text/javascript", "styles.css": "text/css",
+          # Ziggy v3 (experiment, ui/v3-tonight): "tonight's meal" front end at /v3, beside the
+          # classic one. Delete smartplate/static/v3/ and these lines to remove it.
+          "v3/app.js": "text/javascript", "v3/v3.css": "text/css"}
+SWIGGY_UI_COOKIE = "sp_swiggy_ui"     # which front end started a Swiggy sign-in (fixed values only)
 
 
 def _fingerprinted_assets() -> dict:
@@ -55,8 +59,8 @@ def _fingerprinted_assets() -> dict:
     return out
 
 
-def _shell_html(assets: dict) -> str:
-    with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as f:
+def _shell_html(assets: dict, page: str = "index.html") -> str:
+    with open(os.path.join(STATIC_DIR, page), encoding="utf-8") as f:
         html = f.read()
     for name, asset in assets.items():
         html = html.replace(f'"/static/{name}"', f'"/static/{name}?v={asset["hash"]}"')
@@ -223,10 +227,18 @@ def create_app() -> Flask:
     # the URL. They are gzipped once here (the app runs behind no compressing proxy).
     assets = _fingerprinted_assets()
     shell = _shell_html(assets)
+    shell_v3 = _shell_html(assets, "v3/index.html")
 
     @app.get("/")
     def index():
-        response = Response(shell, mimetype="text/html")
+        # ?ui=v3 opens the v3 experiment; the classic app stays the default.
+        response = Response(shell_v3 if request.args.get("ui") == "v3" else shell, mimetype="text/html")
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    @app.get("/v3")
+    def index_v3():
+        response = Response(shell_v3, mimetype="text/html")
         response.headers["Cache-Control"] = "no-cache"
         return response
 
@@ -658,9 +670,15 @@ def create_app() -> Flask:
         response = jsonify(authorize_url=swiggy_connect.start(user_id, _swiggy_callback_url(), nonce))
         # Ties Swiggy's redirect back to THIS browser (H-01). Lax is sent on the top-level
         # GET redirect from Swiggy; the value never leaves the server except as this cookie.
+        secure = request.is_secure or _swiggy_callback_url().startswith("https://")
         response.set_cookie(SWIGGY_COOKIE, nonce, max_age=int(swiggy_connect.PENDING_TTL.total_seconds()),
-                            httponly=True, secure=request.is_secure or _swiggy_callback_url().startswith("https://"),
-                            samesite="Lax", path="/")
+                            httponly=True, secure=secure, samesite="Lax", path="/")
+        # Started from the v3 front end: Swiggy's redirect returns there, not to the classic app.
+        if (request.get_json(silent=True) or {}).get("ui") == "v3":
+            response.set_cookie(SWIGGY_UI_COOKIE, "v3", max_age=int(swiggy_connect.PENDING_TTL.total_seconds()),
+                                httponly=True, secure=secure, samesite="Lax", path="/")
+        else:
+            response.delete_cookie(SWIGGY_UI_COOKIE, path="/")
         return response
 
     @app.post("/api/user/<int:user_id>/swiggy/discover")
@@ -850,9 +868,14 @@ def create_app() -> Flask:
         # profile that started sign-in, so no profile key is needed on this hop.
         # Only fixed error codes go into the URL; the page maps them to its own text, so a
         # crafted link can't show arbitrary warnings (L-13).
+        v3 = request.cookies.get(SWIGGY_UI_COOKIE) == "v3"
+
         def done(location):
+            if v3:                                       # same fixed codes, the v3 page's address
+                location = location.replace("/?tab=more&", "/v3?", 1)
             response = redirect(location)
             response.delete_cookie(SWIGGY_COOKIE, path="/")
+            response.delete_cookie(SWIGGY_UI_COOKIE, path="/")
             return response
         if request.args.get("error"):
             code = "denied" if request.args["error"] == "access_denied" else "failed"

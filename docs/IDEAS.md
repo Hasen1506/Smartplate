@@ -282,3 +282,31 @@ Ideas met while building this (not built):
   so the week can show it too.
 - **Offline copy of the plan.** The service worker never caches API replies (by design);
   an explicit read-only snapshot would let the offline screen show more than what is loaded.
+
+## v3 "Tonight" front end, experiment behind /v3 (Oct 11, 2026)
+
+Built (branch `ui/v3-tonight`, delete-able): a second front end at `/v3` (also `/?ui=v3`)
+for one job: tonight's meal (dinner first), inside the weekly budget and the hard diet
+rules, one tap to a real Swiggy cart. Same API, same profile keys, same Dark v2 look.
+Onboarding is three steps: rules on one screen (diet, never-show-me, budget, which meals) →
+Swiggy (connect, address) → after the first meal, the Ziggy account by email. Tonight shows
+one pick, the order-by time with a one-tap reminder, three alternatives from places you use
+(one tap swaps), and the real bill after Add to Swiggy cart. Week shows money left split
+into Swiggy bills / had without a bill / still planned, and asks about past meals nobody
+confirmed. More holds rules, Swiggy, reminders, account and links to everything demoted
+(pools, cooking, household, festivals, insights, several carts, receipts) in the classic app.
+Sign-ins are now an email (validated, unique, case-insensitive); name-only accounts still
+sign in. A Swiggy sign-in started from v3 returns to v3.
+
+Ideas met while building this (not built):
+
+- **One shared shell.** If v3 wins, retire the classic tabs and keep its panels as More's
+  sub-pages instead of links out (one app, not two).
+- **Classic onboarding on email too.** The classic app still offers a free-form name; the
+  server accepts both. Switch its label and field to email when v3 is decided either way.
+- **Ask the account only once there's something to lose.** v3 asks after the first meal;
+  a softer reminder on day 3 (if still "Not now") would cut lost profiles on cleared browsers.
+- **Dinner-first default for the planner.** v3 sends dinner-only by default; measure whether
+  people add lunch later before changing the planner's defaults.
+- **Alternatives ranked by "places you actually ordered from".** Today they come from usual
+  places and pools; real Swiggy order history (`get_food_orders`, ~5 orders) could seed them.
