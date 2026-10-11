@@ -72,6 +72,29 @@ What makes it different from opening Swiggy every day:
 - **Real Swiggy behaviour** (reply shapes, rate limits, the closed-restaurant flag)
   still needs the first real sign-in on the hosted server.
 
+## Live test on real Swiggy, 9 October 2026
+
+Signed in to the real Swiggy MCP server (`mcp.swiggy.com`, OAuth, OTP typed on Swiggy's own
+page), delivering to a real saved address in Vadapalani, Chennai. ₹2,000 a week, nothing
+saved, so Ziggy picked the places itself. Ziggy never placed an order, and nothing went
+into the cart without a review.
+
+| # | Found on the real server | Now |
+|---|---|---|
+| L1 | A real menu came back in **sections** (`categories[].items`, max 10 each, with subcategories and pages). Ziggy read only the biggest list: **22 dishes from 4 places**. | **Fixed.** Every section and page is read (up to 5 pages of 8 sections). The same 4 places give **261 dishes**, each with its section path. Prices in sectioned menus are whole rupees, so they're no longer marked as estimates. |
+| L2 | It planned **Sambar**, **Chapati (1 Pc)**, **Idli Podi 150 Gm** and **Dal Panchmel** as whole meals. | **Fixed.** A dish is a side if its section says so (soups, starters, curries, dals, pickles…), if its name is a bare side (sambar, rasam, raita, a roti), or if it is a pack sold by weight. You can still pick a side yourself. |
+| L3 | Dosa for lunch, a thali at 8 am. | **Fixed, softly.** Breakfast prefers dishes filed under breakfast sections. Lunch prefers whole plates (Meals, Thali, rice, biryani, bowls). These are preferences, not walls: when a place has few plates, a dosa at lunch still beats no lunch. (CI caught the first version, which was a hard filter and skipped lunches.) |
+| L4 | Search results included **sponsored places** ("Name (Ad)") and closed ones. | **Fixed.** Ads are marked, not chosen automatically. Closed places are left out. Nearer places come first, then rating. "Load more places" pages through Swiggy's ~200 results. |
+| L5 | ₹2,000 a week on a Friday is ₹857 for the 7 meals left, so the plan is cheap sandwiches. That's honest arithmetic, but changing the budget meant a trip to Settings. | **New: Change budget, in place.** From Today, the Week budget card or the budget heads-up: ±₹250, a typed amount or presets, with "about ₹X a meal for the N meals left". Saving re-plans, and Undo puts the old budget back. Live: ₹3,000 went from 5 orders to 6. |
+| L6 | "I don't like these picks" had no answer short of changing each meal. | **New: Try different dishes.** Ziggy's picks for the open meals get a small penalty and the week is re-planned inside the same rules. Your picks, orders and carts stay. Undo brings them back. Live: 5 of 5 meals changed. |
+| L7 | Opening Swiggy is a feed to scroll. | **New: Order list.** Every dish from your places and pools as plain rows: dish, place, price. Meal chips, a filter, a quantity, the total with delivery against what's left for the meal, then *Have it for* or *Add N to Swiggy cart*. Live: 261 dishes from 4 places. |
+| L8 | Some dishes need options (sizes, add-ons) that Swiggy's tools don't let Ziggy choose. | **Said plainly.** The cart review says "Customize it in Swiggy" and links there. It never guesses an option. |
+
+Still open: Swiggy holds **one cart for one restaurant**, and Ziggy checks the cart by
+reading back exactly one dish and quantity. So the order list adds one dish (in any
+quantity) per cart. Several dishes in one cart need the checkout guard to verify a
+multi-line echo first. The Swiggy token from this test expires on 14 October.
+
 ## Recipes: what could be used
 
 - **RecipeNLG** (2.2M recipes) and **Recipe1M**: licensed for non-commercial research and
@@ -83,5 +106,12 @@ What makes it different from opening Swiggy every day:
   Wikimedia is reachable (or with the *Import Wikibooks recipes* workflow). The snapshot
   goes in `smartplate/data/wikibooks_recipes.json` and is credited in the app and on
   `/credits`.
-- **Indian datasets on Kaggle and Mendeley** (6000+ Indian recipes, INDoRI): scraped from
-  commercial sites with no clear licence. Not used.
+- **6000+ Indian Food Recipes Dataset** (Kanishka Jain, Mendeley Data, DOI
+  10.17632/xsphgmmh7b.1). It is listed as CC BY 4.0, but it was scraped from Archana's
+  Kitchen. **Used for facts only:** dish names, ingredient lists, times, servings, cuisine,
+  course, diet and the link to the original page. That gives 6,296 dishes after dropping
+  rows whose translation failed. The method text is **not** copied by default
+  (`--with-steps` is opt-in): whether the authors' own writing may be republished is the
+  site owner's call, not the scraper's. Cook along shows the ingredients, timers and a
+  link to the method. Credited in the app beside every search.
+- **INDoRI** and other Kaggle scrapes: no clear licence. Not used.
