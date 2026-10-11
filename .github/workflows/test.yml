@@ -24,7 +24,7 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pip_audit -r requirements.txt --strict
       - name: Unit and property tests
-        timeout-minutes: 3
+        timeout-minutes: 5                # a hang guard, not a budget: the same suite took 134-190 s on hosted runners
         run: >-
           python -m pytest -q -n auto --durations=10
           --ignore=tests/test_gt_golden_planner.py --ignore=tests/test_gt_journey.py
