@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request
 from . import ratelimit, today
 
 bp = Blueprint("today", __name__)
+bp.record_once(lambda _state: today.init_schema())     # tables exist before export/delete read them
 
 
 def _body() -> dict:

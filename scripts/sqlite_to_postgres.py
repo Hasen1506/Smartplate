@@ -45,6 +45,8 @@ def _upgrade_copy(source: Path) -> Path:
         db.init_db()
         from smartplate.integrations import swiggy_connect
         swiggy_connect.init_schema()
+        from smartplate import today                  # v3 Today tables (docs/IA.md)
+        today.init_schema()
     finally:
         config.DATABASE_URL, config.DB_PATH = url, path
     return Path(tmp)
@@ -73,6 +75,8 @@ def copy(source: Path, *, replace: bool = False, dry_run: bool = False, out=prin
         db.init_db()                                   # target schema (tables, migrations)
         from smartplate.integrations import swiggy_connect
         swiggy_connect.init_schema()
+        from smartplate import today                  # v3 Today tables (docs/IA.md)
+        today.init_schema()
         with closing(sqlite3.connect(upgraded)) as src:
             src.row_factory = sqlite3.Row
             tables = _tables(src)

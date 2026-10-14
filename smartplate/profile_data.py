@@ -4,13 +4,16 @@ from . import clock, db
 USER_TABLES = ("calendar_events", "leftovers", "receipts", "intake_log", "favourites", "ratings",
                "logins", "devices", "push_subscriptions", "swiggy_connections", "swiggy_pending",
                "swiggy_menus", "swiggy_favourites", "swiggy_order_attempts", "swiggy_checkout_quotes",
-               "swiggy_cart_intents", "swiggy_delivery_fees", "swiggy_photos", "swiggy_issues", "swiggy_meal_pools")
+               "swiggy_cart_intents", "swiggy_delivery_fees", "swiggy_photos", "swiggy_issues", "swiggy_meal_pools",
+               "today_settings", "today_budget", "today_picks", "pool_typed", "pool_meta")   # v3 Today (today.py)
 # A stable row order for the export (Postgres has no implicit insertion order).
 EXPORT_ORDER = {"favourites": "restaurant_id", "logins": "user_id", "swiggy_connections": "user_id",
                 "swiggy_pending": "created_ts, state", "swiggy_menus": "restaurant",
                 "swiggy_favourites": "address_id, restaurant_id", "swiggy_order_attempts": "created_ts, fingerprint",
                 "swiggy_checkout_quotes": "created_ts, token", "swiggy_cart_intents": "user_id",
                 "swiggy_delivery_fees": "address_id, provider_id", "swiggy_photos": "restaurant_id, dish", "swiggy_issues": "ts", "swiggy_meal_pools": "address_id, meal, added_ts, item_id", "order_queue": "session_id",
+                "today_settings": "user_id", "today_budget": "day", "today_picks": "day, meal",
+                "pool_meta": "meal, ref",
                 "grocery_have": "plan_id, item", "grocery_swaps": "plan_id, token",
                 "push_sent": "subscription_id, session_id, at"}
 PRIVATE_COLUMNS = frozenset({"access_hash", "pw_hash", "token_hash", "access_token", "verifier",
@@ -43,8 +46,15 @@ def _household_people(cur, hid, user_id, columns):
     return out
 
 
+def ensure_tables():
+    """Tables created on first use (v3 Today) must exist before export/delete read them."""
+    from . import today
+    today.init_schema()
+
+
 def export(user_id):
     """Return all saved profile/meal records, without authentication material."""
+    ensure_tables()
     with db.cursor() as cur:
         cur.execute("BEGIN")
         user = _private(cur, user_id)
@@ -76,6 +86,7 @@ def export(user_id):
 def delete(user_id, confirmation):
     if confirmation != "DELETE":
         raise ValueError("Type DELETE to confirm permanent removal of this Ziggy profile.")
+    ensure_tables()
     with db.cursor() as cur:
         cur.execute("BEGIN IMMEDIATE")
         _private(cur, user_id)

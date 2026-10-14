@@ -198,3 +198,18 @@ def test_typed_input_validation(plain):
            {"meal": "lunch", "name": "Dosa", "veg": "maybe"}, {"meal": "lunch", "name": "Dosa", "kind": "steal"}]
     for b in bad:
         assert c.post(f"/api/user/{uid}/today/pool", json={"source": "typed", **b}).status_code == 400, b
+
+
+def test_today_records_are_exported_and_deleted_with_the_profile(plain):
+    from smartplate import db
+    c, uid = plain["c"], plain["uid"]
+    t = _typed(c, uid, "breakfast", "Cappuccino", 140)
+    c.post(f"/api/user/{uid}/today/pick", json={"meal": "breakfast", "ref": t["pools"]["breakfast"][0]["ref"]})
+    c.post(f"/api/user/{uid}/today/budget", json={"amount": 500})
+    data = c.get(f"/api/user/{uid}/data.json").get_json()["data"]
+    assert [r["name"] for r in data["pool_typed"]] == ["Cappuccino"]
+    assert len(data["today_picks"]) == 1 and data["today_budget"][0]["amount"] == 500
+    assert c.delete(f"/api/user/{uid}", json={"confirmation": "DELETE"}).status_code == 200
+    with db.cursor() as cur:
+        for table in ("today_picks", "today_budget", "pool_typed", "pool_meta", "today_settings"):
+            assert cur.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE user_id=?", (uid,)).fetchone()["n"] == 0
