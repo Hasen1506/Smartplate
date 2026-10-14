@@ -219,6 +219,18 @@ def _typed(user_id: int) -> list[dict]:
                                              (user_id,)).fetchall()]
 
 
+def _w7_typed(user_id: int) -> list[dict]:
+    """W7's typed favourites (domain/typed_in.py): the same kind of dish, typed in from the
+    classic screens or before Swiggy; shown in the Today pools as one list."""
+    try:
+        with db.cursor() as cur:
+            return [dict(r) for r in cur.execute(
+                "SELECT id, meal, restaurant_name, item_name, price, platform FROM typed_favourites "
+                "WHERE user_id=? ORDER BY id", (user_id,)).fetchall()]
+    except Exception:                      # table not there (older database): nothing typed there
+        return []
+
+
 def _name_allergens(name: str, veg) -> list[str]:
     from .domain import live_catalog
     est = live_catalog.estimate(name, veg)
@@ -231,7 +243,8 @@ def _hard_reason(user: dict, name: str, veg, allergens=None) -> str | None:
     item = {"name": name, "veg": veg if veg is not None else 0,
             "allergens": allergens if allergens is not None else _name_allergens(name, veg)}
     reason = allergen_rules.violates(user, item)
-    if reason and reason.startswith("not ") and veg is None:
+    # unmarked (typed, no veg answer) is "not marked", never "marked non-veg" (W1's wording for veg=0)
+    if reason and veg is None and reason.lower().startswith(("not ", "marked non-veg")):
         return f"Not marked {user.get('diet')}"
     return cap(reason) if reason else None
 
@@ -273,6 +286,14 @@ def pools(user: dict, rules: dict | None = None) -> dict:
                               "item_id": d["item_id"], "price": d.get("price"), "veg": d.get("veg"),
                               "rating": m.get("rating"), "eta_min": m.get("eta_min"), "qty": m.get("qty") or 1,
                               "hard": bool(hard), "reasons": reasons})
+    for t in _w7_typed(uid):            # typed in elsewhere (W7 "typed favourites", no platform needed)
+        ref = f"tf:{t['id']}"
+        m = meta.get((t["meal"], ref), {})
+        hard = _hard_reason(user, t["item_name"], None)
+        out[t["meal"]].append({"ref": ref, "source": "typed", "kind": "order", "name": t["item_name"],
+                               "restaurant": t["restaurant_name"] or None, "price": t["price"], "veg": None,
+                               "platform": t.get("platform"), "rating": None, "eta_min": None,
+                               "qty": m.get("qty") or 1, "hard": bool(hard), "reasons": [hard] if hard else []})
     for t in _typed(uid):
         ref = f"t:{t['id']}"
         m = meta.get((t["meal"], ref), {})
@@ -328,6 +349,60 @@ def add_swiggy(user_id: int, body: dict) -> dict:
     return view(user_id)
 
 
+MAX_SUGGESTED_AT_ONCE = 15
+
+
+def add_suggested(user_id: int, body: dict) -> dict:
+    """Tick suggestions from the person's Swiggy order history (integrations/swiggy_history,
+    read once with consent) into the pools. Only stored suggestions can be added. A dish still
+    on the restaurant's live Swiggy menu goes in as a Swiggy dish (the shared safety check
+    runs; a refusal is reported, never worked around); one that can't be read off the menu now
+    goes in as the person's own typed dish (name and place only: no price or veg mark is
+    invented, so a veg profile sees it greyed out until they say)."""
+    from .domain import meal_pools
+    from .integrations import swiggy_history
+    from .integrations.swiggy_connect import SwiggyError
+    _user(user_id)
+    ticked = body.get("items")
+    if not isinstance(ticked, list) or not ticked:
+        raise ValueError("Tick at least one suggestion")
+    if len(ticked) > MAX_SUGGESTED_AT_ONCE:
+        raise ValueError(f"Add up to {MAX_SUGGESTED_AT_ONCE} at a time")
+    stored = {(str(r["restaurant_id"]), r["item_name"].lower()): r for r in swiggy_history.view(user_id)["items"]}
+    added, refused, typed = [], [], []
+    for t in ticked:
+        if not isinstance(t, dict):
+            raise ValueError("Tick a suggestion from the list")
+        r = stored.get((str(t.get("restaurant_id") or ""), str(t.get("item_name") or "").lower()))
+        if not r:
+            raise ValueError("That suggestion isn't in your list any more. Refresh it first.")
+        meal = _meal(t.get("meal") or body.get("meal") or r["pool_meal"])
+        name = r["item_name"]
+        if r.get("menu_item_id"):
+            try:
+                meal_pools.add(user_id, meal, str(r["restaurant_id"]), r["restaurant_name"], str(r["menu_item_id"]))
+                init_schema()
+                with db.cursor() as cur:
+                    cur.execute("INSERT OR IGNORE INTO pool_meta(user_id, meal, ref, qty, rating, eta_min) "
+                                "VALUES (?,?,?,?,?,?)", (user_id, meal, f"sw:{r['restaurant_id']}:{r['menu_item_id']}",
+                                                         1, r.get("rating"), None))
+                added.append(name)
+                continue
+            except ValueError as e:              # safety / diet refusal or a full pool: say so, don't work around it
+                refused.append(f"{name}: {e}")
+                continue
+            except (SwiggyError, Exception):      # not readable on the live menu now: keep it as typed
+                pass
+        try:
+            add_typed(user_id, {"meal": meal, "name": name, "restaurant_name": r["restaurant_name"], "kind": "order"})
+            typed.append(name)
+        except ValueError as e:
+            refused.append(f"{name}: {e}")
+    out = view(user_id)
+    out["suggested_added"] = {"swiggy": added, "typed": typed, "refused": refused}
+    return out
+
+
 def remove(user_id: int, meal, ref: str) -> dict:
     from .domain import meal_pools
     meal = _meal(meal)
@@ -339,6 +414,10 @@ def remove(user_id: int, meal, ref: str) -> dict:
     elif ref.startswith("t:") and ref[2:].isdigit():
         with db.cursor() as cur:
             cur.execute("DELETE FROM pool_typed WHERE user_id=? AND id=? AND meal=?", (user_id, int(ref[2:]), meal))
+    elif ref.startswith("tf:") and ref[3:].isdigit():
+        with db.cursor() as cur:
+            cur.execute("DELETE FROM typed_favourites WHERE user_id=? AND id=? AND meal=?",
+                        (user_id, int(ref[3:]), meal))
     else:
         raise ValueError("That dish isn't in your pool")
     with db.cursor() as cur:
@@ -585,6 +664,31 @@ def share_text(user: dict, meals: list[str], picks: dict, budget: float) -> str:
     return "\n".join(lines)
 
 
+def _bills(user_id: int, priced: list[dict]) -> None:
+    """W4's per-order bill for each Swiggy pick (domain/fees): delivery + platform fee +
+    packaging + GST on the dish total, learned from the person's real bills at this address,
+    else the research default, labelled an estimate with its range. Never for typed dishes."""
+    from .domain import fees
+    try:
+        m = fees.model(user_id)
+    except Exception:
+        return
+    for p in priced:
+        rule = fees.pricing_for(p.get("restaurant_id"), m)
+        p["bill"] = fees.breakdown({"fees": rule}, _cost(p, p["qty"]))
+
+
+def _recap(user: dict) -> dict | None:
+    """On Sunday: W4's week recap (domain/spend.week_recap), real Swiggy bills only."""
+    if clock.today().weekday() != 6:
+        return None
+    from .domain import spend
+    try:
+        return spend.week_recap(user)
+    except Exception:
+        return None
+
+
 def view(user_id: int) -> dict:
     from .integrations import swiggy_connect
     init_schema()
@@ -605,6 +709,12 @@ def view(user_id: int) -> dict:
         conn = {"connected": False}
     priced = [p for m, p in picks.items() if m in meals and p["kind"] == "order" and p.get("source") == "swiggy"
               and p.get("price") is not None]
+    _bills(user_id, priced)
+    bill_total = None
+    if priced:
+        bill_total = round(sum(p["bill"]["total"] for p in priced if p.get("bill"))
+                           + sum(_cost(p, p["qty"]) for m, p in picks.items()
+                                 if m in meals and p not in priced and p.get("price") is not None), 2)
     compare = None
     if priced:
         compare = {"swiggy": round(sum(_cost(p, p["qty"]) for p in priced), 2), "others": "coming",
@@ -613,7 +723,11 @@ def view(user_id: int) -> dict:
         "date": _today(), "weekday": clock.today().strftime("%A"),
         "meals": meals, "label": "+".join(LETTER[m] for m in meals),
         "budget": {**b, "presets": list(BUDGET_PRESETS), "picked": round(picked, 2),
-                   "left": round(b["amount"] - picked, 2), "unpriced": unknown},
+                   "left": round(b["amount"] - picked, 2), "unpriced": unknown,
+                   # W4: what the Swiggy picks cost with delivery, platform fee, packaging and GST
+                   "picked_bill": bill_total,
+                   "bill_estimated": any((p.get("bill") or {}).get("estimated") for p in priced)},
+        "recap": _recap(user),
         "weather": _weather(user),
         "rules": {"diet": user.get("diet"), "allergens": user.get("allergens") or [],
                   "medical": user.get("medical") or [], **rules},

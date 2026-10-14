@@ -48,6 +48,13 @@ def today_pool_add(user_id):
     return jsonify(today.add_typed(user_id, b))
 
 
+@bp.post("/api/user/<int:user_id>/today/pool/suggested")
+def today_pool_suggested(user_id):
+    """Ticked suggestions from the Swiggy order history (W7) into the Today pools (W5)."""
+    ratelimit.check(f"pools:{user_id}", 60, 3600)
+    return jsonify(today.add_suggested(user_id, _body()))
+
+
 @bp.post("/api/user/<int:user_id>/today/pool/remove")
 def today_pool_remove(user_id):
     b = _body()

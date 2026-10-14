@@ -133,3 +133,76 @@ test('integration: a live menu lists the W1 hidden dishes with their reasons', a
   assert.match(html, /Kozhi &lt;i&gt;Varuval&lt;\/i&gt;<\/b> — The name says “kozhi”/);
   assert.equal(run(w, 'ZiggyV3._test.hiddenList({ hidden_items: [] })'), '');
 });
+
+// ---- integration phase 2: W7 suggestions, W2 cart window, W4 charges + Sunday recap ----
+const PONGAL = { ref: 'sw:r-101:r-101-i5', source: 'swiggy', kind: 'order', name: 'Ven Pongal', restaurant: 'Annapoorna', restaurant_id: 'r-101',
+  item_id: 'r-101-i5', price: 90, veg: true, rating: 4.4, eta_min: 25, qty: 2, hard: false, reasons: [], how: 'you',
+  bill: { items: 180, delivery: 17.11, fees: 28.08, gst: 9, total: 234.19, estimated: true, range: [220, 250], label: '~₹234 incl. ₹54 delivery, fees & GST (estimate, ₹220–₹250)' } };
+
+test('integration: suggested favourites ask consent first, then list this meal\'s ticks (escaped, not already pooled)', async () => {
+  const w = world(); await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
+  run(w, 'S.v3.sheet = { kind: "add", meal: "breakfast" }');
+  let html = run(w, `ZiggyV3._test.suggBlock(S.v3.sheet, "breakfast")`);
+  assert.equal(html, '', 'nothing before the suggestions are read');
+  run(w, `S.v3.sheet.sugg = { imported: false, consent: 'Ziggy will read your last 15 Swiggy orders once', items: [] }`);
+  html = run(w, `ZiggyV3._test.suggBlock(S.v3.sheet, "breakfast")`);
+  assert.match(html, /last 15 Swiggy orders once/);
+  assert.match(html, /data-v3-act="sugg-import"/);
+  run(w, `S.v3.sheet.sugg = { imported: true, note: 'Tick the ones you like.', attribution: 'Powered by Swiggy', items: [
+    { restaurant_id: 'r-1', restaurant_name: 'Corner Cafe', item_name: 'Cappuccino', pool_meal: 'breakfast', times: 3, rating: null },
+    { restaurant_id: 'r-2', restaurant_name: 'Dosa <b>Hut</b>', item_name: 'Masala Dosa', pool_meal: 'breakfast', times: 2, rating: 4.2 },
+    { restaurant_id: 'r-3', restaurant_name: 'Biryani Junction', item_name: 'Veg Biryani', pool_meal: 'dinner', times: 4, rating: null }] }`);
+  html = run(w, `ZiggyV3._test.suggBlock(S.v3.sheet, "breakfast")`);
+  assert.doesNotMatch(html, /Cappuccino/, 'already in the breakfast pool');
+  assert.doesNotMatch(html, /Veg Biryani/, 'a dinner suggestion is not offered for breakfast');
+  assert.match(html, /Masala Dosa/);
+  assert.ok(!html.includes('<b>Hut</b>'), 'escaped');
+  assert.match(html, /Add ticked to breakfast pool/);
+  assert.match(html, /Powered by Swiggy/);
+  assert.match(html, /data-v3-act="sugg-delete"/);
+});
+
+test('integration: too early for the cart → "Remind me at …" instead of Place order (W2 cart_state)', async () => {
+  const w = world({ today: { ...TODAY, picks: { breakfast: PONGAL } } }); await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
+  run(w, `S.view.grid = [{ date: todayIso(), meals: { breakfast: { session_id: 7, status: 'active', order: { cart_state: 'early', label: '08:15', cart_opens_label: '07:45' } } } }]`);
+  let html = run(w, 'ZiggyV3._test.actions(S.v3.data)');
+  assert.match(html, /data-remind="7"[^>]*>.*Remind me at 08:15/);
+  assert.doesNotMatch(html, /Place order/);
+  run(w, 'S.v3.sheet = { kind: "order" }');
+  html = run(w, 'ZiggyV3.overlays()');
+  assert.match(html, /Remind me at 08:15/);
+  assert.match(html, /Cart opens 07:45/);
+  assert.doesNotMatch(html, /data-v3-cart="breakfast"/);
+  run(w, `S.view.grid[0].meals.breakfast.order = { cart_state: 'open', label: '08:15' }`);
+  html = run(w, 'ZiggyV3._test.actions(S.v3.data)');
+  assert.match(html, /Place order/);
+  assert.doesNotMatch(html, /Remind me/);
+});
+
+test('integration: a Swiggy pick shows its whole bill (W4 charges); typed picks show only their price', async () => {
+  const typed = { ...TODAY.pools.breakfast[0], qty: 1, how: 'you', reasons: [] };
+  const w = world({ today: { ...TODAY, meals: ['breakfast', 'lunch'], picks: { breakfast: PONGAL, lunch: { ...typed, ref: 't:9', name: 'Home Thali', price: 150 } },
+    budget: { ...TODAY.budget, picked: 330, left: 270, picked_bill: 384.19, bill_estimated: true } } });
+  await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
+  const html = run(w, 'tabBody()');
+  assert.match(html, /₹180 <span class="v3-bill"[^>]*>· ~₹234 with delivery, fees &amp; GST \(estimate\)/);
+  assert.equal((html.match(/class="v3-bill"/g) || []).length, 1, 'no fees invented for the typed pick');
+  assert.match(html, /About ₹384 with Swiggy delivery, fees &amp; GST \(estimate until Swiggy shows the bill\)/);
+});
+
+test('integration: Sunday recap card shows only real numbers', async () => {
+  const w = world(); await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
+  assert.equal(run(w, 'ZiggyV3._test.recapCard(S.v3.data)'), '', 'no recap on other days');
+  run(w, `S.v3.data.recap = { target: 4200, actual: 0, orders: 0, kept: null, finished: false, best_day: null, worst_day: null, share_text: null,
+    note: 'Read your Swiggy order history to see what you kept', basis: 'Real Swiggy bills only.' }`);
+  let html = run(w, 'ZiggyV3._test.recapCard(S.v3.data)');
+  assert.match(html, /₹0<\/b> <span class="muted">spent on Swiggy of your ₹4,200 target · 0 orders/);
+  assert.doesNotMatch(html, /kept<\/b>|data-v3-recap-share/);
+  assert.match(html, /Read your Swiggy order history/);
+  run(w, `S.v3.data.recap = { target: 4200, actual: 3860, orders: 9, kept: 340, finished: true, best_day: { date: '2026-11-03', day: 'Tue', spent: 300 },
+    worst_day: { date: '2026-11-07', day: 'Sat', spent: 900 }, share_text: '₹340 kept this week on Ziggy — that\\'s a movie.', note: null, basis: 'Real Swiggy bills only.' }`);
+  html = run(w, 'ZiggyV3._test.recapCard(S.v3.data)');
+  assert.match(html, /₹340 kept/);
+  assert.match(html, /Lightest ordering day Tue \(₹300\) · heaviest Sat \(₹900\)/);
+  assert.match(html, /data-v3-recap-share=/);
+});
