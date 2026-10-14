@@ -69,9 +69,49 @@ def plan_summary_reasons(stats: dict) -> list[str]:
     r = [f"Total ₹{stats['spend']:.0f} of ₹{stats['budget']:.0f} budget "
          f"({stats['budget'] - stats['spend']:+.0f} headroom)."]
     if stats.get("skipped"):
-        r.append(f"{stats['skipped']} session(s) skipped to stay within budget / rating floor.")
+        r.extend(skip_summary(stats["skipped"], stats.get("skip_reasons")))
     if stats.get("cooked"):
         r.append(f"{stats['cooked']} cook day(s) — respecting your fridge and your wallet.")
     if stats.get("surge_saved", 0) > 0:
         r.append(f"Time-shifts saved ≈ ₹{stats['surge_saved']:.0f} against surge pricing.")
     return r
+
+
+# Why a meal is empty, by what actually caused it (W10 simulation: a household with one
+# vegan member had 12 meals skipped "to stay within budget" with ₹5,640 unspent).
+_SKIP_CAUSES = (
+    ("variety", ("as often as your variety",)),
+    ("money", ("budget skip", "money left", "didn't fit the budget", "daily cap", "daily limit", "of this week's",
+               "fit the money")),
+    ("safety", ("aren't safe", "isn't safe", "not safe", "safe for everyone", "safe for your rules")),
+    ("you", ("you skipped", "you cook", "your fast", "fasting", "out of town", "holiday")),
+    ("supply", ("no real restaurant", "on swiggy's menu", "nothing from your", "add another dish")),
+)
+_CAUSE_TEXT = {
+    "money": "the money left doesn't cover them",
+    "safety": "nothing at your places is safe for everyone eating",
+    "variety": "the dishes that fit are already planned as often as your variety setting allows",
+    "you": "your own choice, fast or trip",
+    "supply": "nothing on the menu fits (add a dish or a place)",
+    "other": "no option fits your rules",
+}
+
+
+def skip_cause(reason: str) -> str:
+    text = (reason or "").lower()
+    for cause, words in _SKIP_CAUSES:
+        if any(w in text for w in words):
+            return cause
+    return "other"
+
+
+def skip_summary(skipped: int, reasons: list[str] | None) -> list[str]:
+    """One line per real cause, with its count. Without reasons, a neutral line (never a
+    claim that the budget did it)."""
+    if not reasons:
+        return [f"{skipped} meal(s) not planned."]
+    counts: dict[str, int] = {}
+    for reason in reasons:
+        c = skip_cause(reason)
+        counts[c] = counts.get(c, 0) + 1
+    return [f"{n} meal(s) skipped: {_CAUSE_TEXT[c]}." for c, n in sorted(counts.items(), key=lambda kv: -kv[1])]
