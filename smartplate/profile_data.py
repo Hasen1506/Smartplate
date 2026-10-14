@@ -6,13 +6,14 @@ USER_TABLES = ("calendar_events", "leftovers", "receipts", "intake_log", "favour
                "swiggy_menus", "swiggy_favourites", "swiggy_order_attempts", "swiggy_checkout_quotes",
                "swiggy_cart_intents", "swiggy_delivery_fees", "swiggy_photos", "swiggy_issues", "swiggy_meal_pools",
                "swiggy_bill_fees", "spend_ledger", "spend_sync", "events",
-               "today_settings", "today_budget", "today_picks", "pool_typed", "pool_meta")   # v3 Today (today.py)
+               "today_settings", "today_budget", "today_picks", "pool_typed", "pool_meta",   # v3 Today (today.py)
+               "swiggy_history_suggestions", "typed_favourites", "manual_addresses")       # W7
 # A stable row order for the export (Postgres has no implicit insertion order).
 EXPORT_ORDER = {"favourites": "restaurant_id", "logins": "user_id", "swiggy_connections": "user_id",
                 "swiggy_pending": "created_ts, state", "swiggy_menus": "restaurant",
                 "swiggy_favourites": "address_id, restaurant_id", "swiggy_order_attempts": "created_ts, fingerprint",
                 "swiggy_checkout_quotes": "created_ts, token", "swiggy_cart_intents": "user_id",
-                "swiggy_delivery_fees": "address_id, provider_id", "swiggy_photos": "restaurant_id, dish", "swiggy_issues": "ts", "swiggy_meal_pools": "address_id, meal, added_ts, item_id", "order_queue": "session_id",
+                "swiggy_delivery_fees": "address_id, provider_id", "swiggy_photos": "restaurant_id, dish", "swiggy_issues": "ts", "swiggy_meal_pools": "address_id, meal, added_ts, item_id", "swiggy_history_suggestions": "restaurant_id, item_name", "manual_addresses": "user_id", "order_queue": "session_id",
                 "swiggy_bill_fees": "address_id, provider_id, seen_ts", "spend_ledger": "iso_date, ref", "spend_sync": "user_id",
                 "today_settings": "user_id", "today_budget": "day", "today_picks": "day, meal",
                 "pool_meta": "meal, ref",
