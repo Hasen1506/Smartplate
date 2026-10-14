@@ -442,8 +442,26 @@ def warm() -> float:
     return time.monotonic() - t0
 
 
+# Stop pinging once nobody has used the app for this long, so a free Neon database can
+# suspend (it bills compute hours while awake). An external scheduler hitting /cron/tick
+# keeps the web instance awake; without this the keep-alive would keep Neon awake 24/7.
+# 0 = always ping (the default off Render).
+KEEPALIVE_IDLE_S = float(os.environ.get("SMARTPLATE_PG_KEEPALIVE_IDLE", "600" if os.environ.get("RENDER") else "0"))
+_last_activity = [time.monotonic()]
+
+
+def note_activity() -> None:
+    _last_activity[0] = time.monotonic()
+
+
+def _idle() -> bool:
+    return KEEPALIVE_IDLE_S > 0 and time.monotonic() - _last_activity[0] > KEEPALIVE_IDLE_S
+
+
 def _keep_alive_loop(stop: threading.Event) -> None:
     while not stop.wait(KEEPALIVE_S):
+        if _idle():
+            continue                             # let Neon scale to zero; the next request wakes it
         current = pool()
         try:
             conn = current.getconn(timeout=3)      # the check hook closes a dropped connection
@@ -472,8 +490,11 @@ def start_keepalive() -> None:
     _keepalive_wanted[0] = True
 
 
-def ensure_keepalive() -> None:
-    """Start the keep-alive in this process if it is switched on and not running yet."""
+def ensure_keepalive(activity: bool = True) -> None:
+    """Start the keep-alive in this process if it is switched on and not running yet.
+    `activity`: this request is a person using the app (resets the idle clock)."""
+    if activity:
+        note_activity()
     if not _keepalive_wanted[0] or _keeper:
         return
     with _keeper_lock:
@@ -534,6 +555,7 @@ class Connection:
         self._pool = pool_
         self._conn = conn
         self._first = True                   # nothing sent yet: a dead connection can be swapped
+        self.writes = 0                      # statements that may have written (db.writes_committed)
         _held[id(conn)] = (threading.current_thread().name, time.monotonic())
 
     def cursor(self) -> "Cursor":
@@ -590,6 +612,9 @@ def connect() -> Connection:
     return Connection(pool())
 
 
+_READ_ONLY = re.compile(r"\s*(SELECT|WITH\s+[^;]*\bSELECT\b[^;]*$|SHOW|EXPLAIN|BEGIN|SAVEPOINT|RELEASE)\b", re.I | re.S)
+
+
 class Cursor:
     """sqlite3.Cursor's surface over a psycopg cursor."""
 
@@ -628,6 +653,8 @@ class Cursor:
         self._pending = None
         if t.noop:
             return self
+        if self._owner is not None and not _READ_ONLY.match(t.sql):
+            self._owner.writes += 1
         params = tuple(params or ())
         self._run(lambda: self._cur.execute(t.sql, params))
         if t.returning_id:
@@ -642,6 +669,8 @@ class Cursor:
         seq = [tuple(p) for p in seq]
         if t.noop or not seq:
             return self
+        if self._owner is not None:
+            self._owner.writes += 1
         self._run(lambda: self._cur.executemany(t.sql, seq))
         if t.explicit_id_table:
             self._sync_identity(t.explicit_id_table)
