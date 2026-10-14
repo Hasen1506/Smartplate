@@ -82,12 +82,17 @@ def test_w6_planner_differences_are_all_intentional(both, body, at):
     assert base["recommendation"] == current["recommendation"]
 
 
-def test_w6_headline_low_budget_week_fills_meals(both):
-    """usab #10 pinned: a ₹1,500 two-meal veg week, balanced mode. Base left meals empty
-    with money unspent; now fewer meals are empty, still within budget."""
+def test_w6_headline_low_budget_week(both):
+    """A ₹1,500 two-meal veg week, balanced mode. Base filled some lunches with chai + bun
+    or coffee + vada; now those are never a lunch or dinner (W6-2), and at most that many
+    more meals are empty (W6-1 keeps the fewest skips the money allows)."""
     from gt_support import MONDAY_8AM
     body = {"name": "Priya", "diet": "veg", "allergens": [], "weekly_budget": 1500,
             "meals": ["lunch", "dinner"], "cook": "never", "favourites": []}
     base, current = both["base"].plan(body, MONDAY_8AM), both["current"].plan(body, MONDAY_8AM)
-    assert _skips(current) <= _skips(base)
+    snack_meals = [k for k, c in base["cells"].items() if c[0] == "delivery" and is_snack(c[1])]
+    assert snack_meals, "base planned no snack as a meal: pick another headline"
+    # at most one more empty meal per snack-meal base had (the money can move between meals)
+    assert _skips(current) <= _skips(base) + len(snack_meals)
+    assert not any(is_snack(c[1]) for c in current["cells"].values() if c[0] == "delivery")
     assert current["spend"] <= current["budget"]

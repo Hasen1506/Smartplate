@@ -116,7 +116,7 @@ def test_new_places_mode_adds_places_above_the_min_rating_only():
     out = decide.plan(slots("dinner"), menu, mode="favourites_plus_new", people=[ME], places=set(), pools={},
                       money=1000, rules={"min_rating": 4.0})
     assert out["picks"][0]["name"] == "Paneer Butter Masala"
-    assert "above your 4.0★ rule" in out["picks"][0]["why"]
+    assert "meets your 4.0★ rule" in out["picks"][0]["why"]
     only = decide.plan(slots("dinner"), menu, mode="favourites_only", people=[ME], places=set(), pools={},
                        money=1000, rules={"min_rating": 4.0})
     assert only["picks"][0]["kind"] == "skip"

@@ -79,3 +79,19 @@ def test_snack_log_golden(gt):
     assert_golden("planner_snack_log", {
         "snacks": [{k: e[k] for k in sorted(e) if k != "entry_id"} for e in logged],
         "ledger": ledger})
+
+
+def test_decide_for_me_golden(gt):
+    """'Decide for me' on a fixed profile: today (exact) and the week (MILP), each mode.
+    Pins the picks, money, skips and the one-sentence reasons (docs/planner-objective.md)."""
+    view = everyday.create_profile({"name": "Ravi", "diet": "nonveg", "allergens": ["peanut"], "weekly_budget": 1800,
+                                    "meals": ["lunch", "dinner"], "cook": "sometimes", "favourites": [1, 2, 3, 5]})
+    uid, pid = view["user"]["id"], view["plan"]["id"]
+    snap = {}
+    for mode in ("favourites_only", "favourites_plus_cook", "favourites_plus_new", "surprise_me"):
+        for horizon, out in (("today", service.decide_today(uid, mode)), ("week", service.decide_week(pid, mode))):
+            snap[f"{horizon} {mode}"] = {
+                "money": out["money"], "spent": out["spent"], "method": out["method"].replace("-capped", ""),
+                "picks": [f"{p['day_name']} {p['meal']}: {p.get('name') or 'skip'} ₹{p['cost']:.0f} — {p['why']}"
+                          for p in out["picks"]]}
+    assert_golden("planner_decide_for_me", snap)

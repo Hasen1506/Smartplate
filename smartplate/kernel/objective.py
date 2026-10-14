@@ -126,5 +126,5 @@ def why_pick(pick: dict, *, money_word: str = "this week's") -> str:
         lead = (f"From {pick['restaurant']}, one of your places{detail}"
                 + (" — cheaper than your usual, so this meal isn't skipped" if pick.get("cheaper_than_pool") else ""))
     else:
-        lead = f"New place {pick['restaurant']}{detail}, above your {pick.get('min_rating', 0):.1f}★ rule"
+        lead = f"New place {pick['restaurant']}{detail}, meets your {pick.get('min_rating', 0):.1f}★ rule"
     return f"{lead}; ₹{cost:.0f} fits {money_word} money.{split}"

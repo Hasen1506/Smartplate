@@ -571,7 +571,11 @@ def plan(slots: list[dict], menu: list[dict], *, mode: str, people: list[dict], 
 
 
 def _money_reason(cands, left, money_word, rules, slot, chosen, slots) -> str:
-    cheapest = min(c["cost"] for c in cands)
+    cooks_used = sum(1 for c in chosen if c["kind"] == "cook")
+    open_cands = [c for c in cands if c["kind"] != "cook" or cooks_used < int(rules.get("cook_cap", 99))]
+    if not open_cands:
+        return "Skipped: your cook days for the week are already planned and nothing else fits."
+    cheapest = min(c["cost"] for c in open_cands)
     if rules.get("daily_cap") is not None:
         day_spent = sum(c["cost"] for s, c in zip(slots, chosen) if s["day"] == slot["day"]) + \
             (rules.get("day_money") or {}).get(slot["day"], 0.0)
