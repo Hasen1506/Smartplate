@@ -52,7 +52,10 @@ def test_b1_estimate_reads_dish_names_and_never_invents_unknown_dishes():
     assert "peanut" in dosa["allergens"] and dosa["veg"] == 1 and 300 < dosa["kcal"] < 700
     biryani = live_catalog.estimate("Chicken Biryani", None)
     assert biryani["veg"] == 0 and biryani["protein_g"] >= 20              # name implies non-veg
-    assert live_catalog.estimate("Chicken Biryani", True)["veg"] == 1      # Swiggy's flag wins
+    # A name that says meat beats a veg mark (fail-closed, sp-grill #38): only ever stricter.
+    assert live_catalog.estimate("Chicken Biryani", True)["veg"] == 0
+    assert live_catalog.estimate("Veg Biryani", True)["veg"] == 1          # Swiggy's veg mark, no meat word
+    assert live_catalog.estimate("Veg Biryani", None)["veg_known"] == 0    # no mark: unknown, not veg
     assert "dairy" in live_catalog.estimate("Ghee Pongal", True)["allergens"]
     assert live_catalog.estimate("Chef's Special Platter", True) is None
     assert "dessert" in live_catalog.estimate("Filter Coffee", True)["tags"]   # not planned as a meal

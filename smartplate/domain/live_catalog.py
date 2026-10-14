@@ -18,6 +18,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 
 from .. import clock, config, db
+from . import food_lexicon
 
 LIVE_DELIVERY_FEE_ESTIMATE = 35.0     # ₹; the real fee comes from the cart bill
 MAX_PLACES = 4                        # restaurants read per refresh (favourites first)
@@ -60,12 +61,10 @@ TEMPLATES = [
     (r"coffee|tea|chai|juice|lassi|shake|ice cream|sweet|halwa|payasam|kheer|jamun|cake",
      dict(kcal=250, protein_g=4, carbs_g=40, fat_g=8, sugar_g=30, allergens=["dairy"], dessert=True)),
 ]
-# Words that always add an allergen, whatever template matched.
-ALLERGEN_WORDS = {"peanut": "peanut", "groundnut": "peanut", "cashew": "tree_nut", "badam": "tree_nut",
-                  "almond": "tree_nut", "paneer": "dairy", "cheese": "dairy", "butter": "dairy",
-                  "ghee": "dairy", "curd": "dairy", "cream": "dairy", "egg": "egg", "prawn": "shellfish",
-                  "fish": "fish", "soya": "soy", "wheat": "gluten", "maida": "gluten", "sesame": "sesame"}
-NONVEG_WORDS = r"chicken|mutton|lamb|fish|meen|prawn|shrimp|crab|egg|omelet|keema|kheema|beef|pork"
+# Allergen, meat, egg, sugar and salt words now come from the one shared lexicon
+# (domain/food_lexicon, sp-grill #60); these names stay for older imports.
+ALLERGEN_WORDS = {w: fam for fam, words in food_lexicon.ALLERGEN_WORDS.items() for w in words}
+NONVEG_WORDS = "|".join(sorted(food_lexicon.NONVEG_WORDS))
 SEARCH_PAGES = 2                 # pages of the broad search read to pick places when none are saved
 NEAR_KM = 3.0                    # places this close come first
 MENU_READERS = 3                 # live menus read at the same time on a refresh
@@ -97,32 +96,92 @@ BREAKFAST_SECTIONS = re.compile(r"\b(breakfast|tiffins?|idl[iy]s?|dosas?|uttap+a
 TAG_WORDS = {"biryani": "heavy", "meals": "comfort", "thali": "comfort", "salad": "light", "idli": "light"}
 
 
-def estimate(name: str, veg) -> dict | None:
+_DESSERT = next(values for pattern, values in TEMPLATES if values.get("dessert"))
+
+
+def _veg(veg, words: food_lexicon.Reading, template_veg=True, recipe_nonveg=False) -> tuple[int, int]:
+    """(veg, veg_known). Fail-closed (sp-grill #38): a name that says meat or egg is
+    non-veg whatever the mark says; with no mark from Swiggy the dish is NOT veg
+    (stored 0) and marked unknown, so every veg check excludes it."""
+    if words.nonveg or template_veg is False:
+        return 0, 1
+    if veg is None:
+        return 0, 0 if not recipe_nonveg else 1
+    return (1, 1) if bool(veg) else (0, 1)
+
+
+def _provider(provider: dict | None) -> dict:
+    """What the platform itself said (Swiggy's menus carry neither today: see
+    docs/safety/fail-closed.md). Allergens it lists are trusted as given; its kcal wins."""
+    provider = provider or {}
+    out = {}
+    if isinstance(provider.get("allergens"), list):
+        out["allergens"] = {str(a) for a in provider["allergens"]}
+    if isinstance(provider.get("kcal"), (int, float)) and not isinstance(provider.get("kcal"), bool):
+        out["kcal"] = float(provider["kcal"])
+    return out
+
+
+def _recipe(name: str) -> dict | None:
+    from . import dish_library
+    try:
+        return dish_library.infer(name)
+    except Exception:                           # the library is an aid, never a reason to fail a refresh
+        return None
+
+
+def estimate(name: str, veg, description: str | None = None, provider: dict | None = None) -> dict | None:
     """Estimated nutrition, implied allergens and veg flag for a dish name; None when the
-    name matches no template (the planner then doesn't use the dish)."""
+    name matches no template (the planner then doesn't use the dish).
+
+    Sweet words are read first (usability finding 4: "Sakkarai Pongal" is sweet, not the
+    savoury pongal template). Allergens are the template's, plus every lexicon word in the
+    name and description, plus what matching recipes in the recipe library hold: each can
+    only add one."""
     low = name.lower()
-    for pattern, values in TEMPLATES:
-        if re.search(pattern, low):
-            out = {k: v for k, v in values.items() if k not in ("allergens", "veg", "dessert")}
-            allergens_ = set(values["allergens"])
-            allergens_ |= {a for w, a in ALLERGEN_WORDS.items() if w in low}
-            veg_flag = values.get("veg", True) and not re.search(NONVEG_WORDS, low)
-            if veg is not None:                      # Swiggy's own flag wins over the name
-                veg_flag = bool(veg)
-            tags = sorted({t for w, t in TAG_WORDS.items() if w in low} | ({"dessert"} if values.get("dessert") else set()))
-            return {**out, "allergens": sorted(allergens_), "veg": 1 if veg_flag else 0, "tags": tags}
-    return None
+    words = food_lexicon.read_all(name, description or "")
+    values = _DESSERT if words.sweet else next((v for p, v in TEMPLATES if re.search(p, low)), None)
+    if values is None:
+        return None
+    out = {k: v for k, v in values.items() if k not in ("allergens", "veg", "dessert")}
+    recipe = _recipe(name)
+    allergens_ = set(values["allergens"]) | words.allergens | set((recipe or {}).get("allergens") or [])
+    given = _provider(provider)
+    if "allergens" in given:
+        allergens_ |= given["allergens"]
+    if "kcal" in given:
+        out["kcal"] = given["kcal"]
+    veg_flag, veg_known = _veg(veg, words, values.get("veg", True), bool(recipe and recipe["nonveg"]))
+    tags = {t for w, t in TAG_WORDS.items() if w in low}
+    if values.get("dessert") or words.sweet or (recipe and recipe["sweet"]):
+        tags.add("dessert")
+        out["sugar_g"] = max(out.get("sugar_g", 0), _DESSERT["sugar_g"])
+    if words.high_sodium:
+        tags.add("high_sodium")
+    return {**out, "allergens": sorted(allergens_), "veg": veg_flag, "veg_known": veg_known,
+            "tags": sorted(tags), "nutrition_known": 1,
+            "safety_basis": "provider" if "allergens" in given else "template"}
 
 
-def unestimated(name: str, veg) -> dict:
+def unestimated(name: str, veg, description: str | None = None, provider: dict | None = None) -> dict:
     """A dish the person put in a meal pool whose name matches no template: planned with
-    NO nutrition figures (nutrition_known = 0), never made-up ones. Allergen words and
-    the veg mark are still read from the name and Swiggy's flag."""
-    low = name.lower()
-    veg_flag = bool(veg) if veg is not None else not re.search(NONVEG_WORDS, low)
-    return {"kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0, "sugar_g": 0, "nutrition_known": 0,
-            "allergens": sorted({a for w, a in ALLERGEN_WORDS.items() if w in low}),
-            "veg": 1 if veg_flag else 0, "tags": []}
+    NO nutrition figures (nutrition_known = 0, sugar unknown so it fails diabetes), never
+    made-up ones. Allergens, meat and egg are read from the name (shared lexicon) and the
+    recipe library, and the veg mark from Swiggy; a missing mark means "unknown"."""
+    words = food_lexicon.read_all(name, description or "")
+    recipe = _recipe(name)
+    given = _provider(provider)
+    allergens_ = words.allergens | set((recipe or {}).get("allergens") or []) | given.get("allergens", set())
+    veg_flag, veg_known = _veg(veg, words, True, bool(recipe and recipe["nonveg"]))
+    tags = set()
+    if words.sweet or (recipe and recipe["sweet"]):
+        tags.add("dessert")
+    if words.high_sodium:
+        tags.add("high_sodium")
+    basis = "provider" if "allergens" in given else "recipe" if recipe else "name" if words.any else "none"
+    return {"kcal": given.get("kcal"), "protein_g": None, "carbs_g": None, "fat_g": None, "sugar_g": None,
+            "nutrition_known": 0, "allergens": sorted(allergens_), "veg": veg_flag, "veg_known": veg_known,
+            "tags": sorted(tags), "safety_basis": basis}
 
 
 # --------------------------------------------------------------------------- #
@@ -136,6 +195,11 @@ def has_live(user_id: int) -> bool:
     """True only when the live catalogue was read for the user's chosen delivery address."""
     with db.cursor() as cur:
         if cur.execute("SELECT 1 FROM restaurants WHERE city=? LIMIT 1", (city_key(user_id),)).fetchone() is None:
+            return False
+        # A catalogue read before the fail-closed checks (no safety_basis) is read again:
+        # its veg marks defaulted to veg when Swiggy gave none (sp-grill #38).
+        if cur.execute("SELECT 1 FROM menu_items m JOIN restaurants r ON r.id=m.restaurant_id "
+                       "WHERE r.city=? AND m.safety_basis IS NULL LIMIT 1", (city_key(user_id),)).fetchone():
             return False
         state = cur.execute("SELECT address_id FROM live_catalog_state WHERE user_id=?", (user_id,)).fetchone()
     return bool(state) and _for_current_address(user_id, state["address_id"])
@@ -219,7 +283,7 @@ def refresh(user_id: int) -> dict:
 
     def read(place):
         try:
-            return swiggy_live.live_menu(user_id, str(place["id"]), place["name"]), None
+            return swiggy_live.live_menu(user_id, str(place["id"]), place["name"], screen=False), None
         except SwiggyError as exc:
             return None, exc
 
@@ -241,9 +305,10 @@ def refresh(user_id: int) -> dict:
         for it in m["items"]:
             if it.get("in_stock") is False or not it.get("price"):
                 continue
-            est = estimate(it["name"], it.get("veg"))
+            est = estimate(it["name"], it.get("veg"), it.get("description"), it.get("provider_facts"))
             if not est and (str(r["id"]), str(it["id"])) in pooled:
-                est = unestimated(it["name"], it.get("veg"))      # their pick: planned, nutrition unknown
+                # their pick: planned, nutrition unknown
+                est = unestimated(it["name"], it.get("veg"), it.get("description"), it.get("provider_facts"))
             if not est:
                 continue
             est = {**est, "tags": section_tags(est["tags"], it.get("categories"), it["name"])}
@@ -283,13 +348,17 @@ def _insert_restaurant(cur, user_id: int, r: dict) -> tuple[int, float]:
 
 
 def _insert_dish(cur, rid: int, rating: float, d: dict) -> int:
+    # The columns are NOT NULL: an unknown figure is stored as 0 *with* nutrition_known = 0,
+    # which the safety checker reads as unknown (allergens._sugar_verdict), never as 0 g.
+    n = {k: (d.get(k) if d.get(k) is not None else 0) for k in ("kcal", "protein_g", "carbs_g", "fat_g", "sugar_g")}
     cur.execute("INSERT INTO menu_items(restaurant_id, name, price, cuisine, kcal, protein_g, carbs_g, "
                 "fat_g, sugar_g, veg, allergens, tags, carbon_kg, item_rating, popularity, reviews, "
-                "source, provider_item_id, nutrition_estimated, nutrition_known) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'[]','live',?,1,?)",
-                (rid, d["name"], d["price"], "mixed", d["kcal"], d["protein_g"], d["carbs_g"],
-                 d["fat_g"], d["sugar_g"], d["veg"], db.jd(d["allergens"]), db.jd(d["tags"]),
-                 1.0, rating, 0.5, d["provider_item_id"], d.get("nutrition_known", 1)))
+                "source, provider_item_id, nutrition_estimated, nutrition_known, veg_known, safety_basis) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'[]','live',?,1,?,?,?)",
+                (rid, d["name"], d["price"], "mixed", n["kcal"], n["protein_g"], n["carbs_g"],
+                 n["fat_g"], n["sugar_g"], d["veg"], db.jd(d["allergens"]), db.jd(d["tags"]),
+                 1.0, rating, 0.5, d["provider_item_id"], d.get("nutrition_known", 1),
+                 d.get("veg_known", 1), d.get("safety_basis") or "none"))
     return cur.lastrowid
 
 
@@ -316,7 +385,8 @@ def add_dish(user_id: int, restaurant: dict, item: dict) -> int:
             rid, rating = place["id"], place["rating"]
         else:
             rid, rating = _insert_restaurant(cur, user_id, restaurant)
-        est = estimate(item["name"], item.get("veg")) or unestimated(item["name"], item.get("veg"))
+        est = (estimate(item["name"], item.get("veg"), item.get("description"), item.get("provider_facts"))
+               or unestimated(item["name"], item.get("veg"), item.get("description"), item.get("provider_facts")))
         est = {**est, "tags": section_tags(est["tags"], item.get("categories"), item["name"])}
         local = _insert_dish(cur, rid, rating, {**est, "name": item["name"], "price": float(item["price"]),
                                                 "provider_item_id": str(item["id"])})

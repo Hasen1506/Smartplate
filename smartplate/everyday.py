@@ -357,6 +357,7 @@ def options(session_id: int) -> dict:
                 "kcal": n.get("kcal"), "protein_g": n.get("protein_g"), "tags": it.get("tags", []),
                 "fits": c["cost"] <= ceiling, "why": " · ".join(why), "score": score,
                 "nutrition_estimated": bool(it.get("nutrition_estimated")),
+                "safety": allergens.safety_label(user, it),
                 "current": bool(current and current.get("item_id") == it["id"]),
                 "instructions": allergens.order_instructions(user, {**n, "tags": it.get("tags", [])})}
 
@@ -400,6 +401,8 @@ def options(session_id: int) -> dict:
         "portions": n,
         "cook": [{"recipe_key": r["key"], "name": r["name"], "price": round(r["cost"] * n, 2), "kcal": r["kcal"],
                   "protein_g": r["protein_g"]} for r in cooks],
+        # why each dish was left out, in plain words ("Kozhi means chicken (not veg)")
+        "hidden_dishes": allergens.hidden_report(user, menu)["dishes"],
         "hidden": {"not_safe": len(menu) - len(safe_all), "cook_not_safe": len(cook_all) - len(cooks), "not_a_meal": len(safe_all) - len(safe),
                    "below_rating": len(safe) - len(rated_ok),
                    "not_again": len(rated_ok) - len(pool)},
@@ -434,6 +437,10 @@ def choose_live(session_id: int, body: dict) -> dict:
         raise ValueError("Pick a dish from a restaurant's Swiggy menu")
     menu = swiggy_live.live_menu(user["id"], rid, str(body.get("restaurant_name") or ""))
     item = next((i for i in menu["items"] if i["id"] == iid), None)
+    left_out = next((i for i in menu.get("hidden_items") or [] if i["id"] == iid), None)
+    if left_out:
+        # The same checker the menu used (allergens.check): say exactly why (usability #5, #6).
+        raise ValueError(f"Not safe for you: {left_out['reason']}. Your hard rules can't be overridden by a pick.")
     if not item:
         raise SwiggyError(f"That dish isn't on {menu['restaurant']['name']}'s Swiggy menu for your address now.")
     if item.get("in_stock") is False:
