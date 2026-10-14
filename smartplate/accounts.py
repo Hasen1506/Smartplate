@@ -111,8 +111,8 @@ def sign_in(body: dict, ip: str = "") -> dict:
         row = cur.execute("SELECT l.user_id, l.pw_hash, u.name FROM logins l JOIN users u ON u.id=l.user_id "
                           "WHERE l.login=?", (login,)).fetchone()
     if not check_password_hash(row["pw_hash"] if row else _DUMMY, pw[:MAX_PASSWORD]) or not row:
-        ratelimit.hit(f"signin:{login}:{ip}")
-        ratelimit.hit(f"signin-name:{login}")
+        ratelimit.hit(f"signin:{login}:{ip}", FAIL_LIMIT, FAIL_WINDOW_S)
+        ratelimit.hit(f"signin-name:{login}", NAME_LIMIT, NAME_WINDOW_S)
         raise ValueError("That name and password don't match.")
     token = secrets.token_urlsafe(24)
     label = body.get("device") if isinstance(body.get("device"), str) else ""
