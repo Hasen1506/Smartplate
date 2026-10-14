@@ -528,13 +528,15 @@ def eat_now(plan_id: int, body: dict) -> dict:
             cur.execute("UPDATE sessions SET status='active', note='' WHERE id=?", (sid,))
     optimizer.optimize(plan_id)
     decision = next((d for d in models.decisions_for_plan(plan_id) if d["session_id"] == sid), None)
-    if not decision or decision["chosen_kind"] not in ("delivery", "cook"):
-        # The week would still skip it (variety, budget): the person said they're hungry, so
-        # keep the best safe dish that fits what's left, else the first safe recipe.
+    if not decision or decision["chosen_kind"] != "delivery":
+        # The week would still skip it (variety, budget) or make it a cook day: the person
+        # said they're hungry *now* (an order), so keep the best safe dish that fits what's
+        # left, else keep their cook day, else the first safe recipe.
         o = options(sid)
         dishes = sorted([x for g in o["usual"] for x in g["dishes"]] + o["new"], key=lambda x: x["score"])
         dish = next((x for x in dishes if x["fits"]), None)
         pin = ({"kind": "delivery", "item_id": dish["item_id"]} if dish
+               else None if decision and decision["chosen_kind"] == "cook"
                else {"kind": "cook", "recipe_key": o["cook"][0]["recipe_key"]} if o["cook"] else None)
         if pin:
             with db.cursor() as cur:
