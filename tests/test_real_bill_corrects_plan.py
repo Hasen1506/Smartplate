@@ -158,8 +158,9 @@ def test_the_checked_total_replaces_the_estimate_in_the_week(client, swiggy):
     assert cart["budget"]["over"] is False and cart["budget"]["week_total"] == after["budget"]["spend"]
 
 
-# A ₹1,130 week leaves ₹20 unplanned; the real bill adds ₹43.50 to the planned dish.
-TIGHT = 1130
+# A ₹1,050 week leaves about ₹11 unplanned; the real bill adds ₹27 to the planned dish (W4 fee
+# estimate already in the plan). Was ₹1,130 before W2's slot rules changed which dishes fit.
+TIGHT = 1050
 
 
 def _over_budget_cart(client, swiggy):
