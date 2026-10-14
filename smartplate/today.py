@@ -74,6 +74,15 @@ CREATE TABLE IF NOT EXISTS pool_typed (           -- dishes the person typed in 
     kind TEXT NOT NULL DEFAULT 'order',
     added_ts TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS today_cart_bills (     -- the real Swiggy cart bill of a pick, once its cart is filled
+    user_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    restaurant_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    qty INTEGER NOT NULL,
+    to_pay REAL NOT NULL,
+    PRIMARY KEY (user_id, day, restaurant_id, item_id, qty)
+);
 CREATE TABLE IF NOT EXISTS pool_meta (            -- quantity + what Swiggy showed when a dish was added
     user_id INTEGER NOT NULL,
     meal TEXT NOT NULL,
@@ -478,6 +487,51 @@ def _cost(e: dict, qty: int) -> float:
     return (e.get("price") or 0) * qty
 
 
+# Money on Today counts what a pick really costs (founder decision 14 Oct 2026): a Swiggy pick
+# at its whole bill — dish + delivery + platform fee + packaging + GST, estimated from the
+# person's own bills (domain/fees) — and at the real Swiggy cart bill once its cart is
+# filled. Typed dishes and home cooking count at the price they carry (no fee is known).
+def record_cart_bill(user_id: int, restaurant_id, item_id, qty, to_pay) -> None:
+    """Keep the real Swiggy cart bill for today's pick of this dish (replaces the estimate)."""
+    if to_pay is None or not restaurant_id or not item_id:
+        return
+    init_schema()
+    with db.cursor() as cur:
+        cur.execute("INSERT OR REPLACE INTO today_cart_bills(user_id, day, restaurant_id, item_id, qty, to_pay) "
+                    "VALUES (?,?,?,?,?,?)", (user_id, _today(), str(restaurant_id), str(item_id), int(qty or 1),
+                                             round(float(to_pay), 2)))
+
+
+def _cart_bills(user_id: int) -> dict:
+    init_schema()
+    with db.cursor() as cur:
+        rows = cur.execute("SELECT restaurant_id, item_id, qty, to_pay FROM today_cart_bills WHERE user_id=? AND day=?",
+                           (user_id, _today())).fetchall()
+    return {(r["restaurant_id"], r["item_id"], int(r["qty"])): float(r["to_pay"]) for r in rows}
+
+
+def _fee_rule(user_id: int):
+    from .domain import fees
+    try:
+        m = fees.model(user_id)
+    except Exception:
+        m = {"restaurants": {}, "user": None}
+    return lambda rid: fees.pricing_for(rid, m)
+
+
+def _total(p: dict, qty: int, bills: dict, rule) -> tuple[float | None, str]:
+    """(what this pick costs in all, basis): "swiggy_cart" | "estimate" | "price"."""
+    if p.get("price") is None:
+        return None, "unknown"
+    if p.get("source") == "swiggy" and p.get("kind", "order") == "order":
+        real = bills.get((str(p.get("restaurant_id")), str(p.get("item_id")), int(qty)))
+        if real is not None:
+            return real, "swiggy_cart"
+        from .domain import fees
+        return fees.breakdown({"fees": rule(p.get("restaurant_id"))}, _cost(p, qty))["total"], "estimate"
+    return round(_cost(p, qty), 2), "price"
+
+
 # "Decide for me" runs on the one engine, kernel/decide.py (W6): the same modes, rules and
 # objective as /api/user/<id>/decide/today and /api/plan/<id>/decide. This module only
 # turns Today's own data (the pools, today's budget, the min-rating / max-time rules) into
@@ -561,9 +615,19 @@ def decide(user_id: int, mode: str) -> dict:
         return {**view(user_id), "decided": {"mode": ui_mode, "filled": [],
                                              "note": "Every meal today is already picked."}}
     budget = budget_for(user)["amount"]
-    left = max(0.0, budget - sum(_cost(p, p["qty"]) for p in picks.values()))
+    bills, rule = _cart_bills(user_id), _fee_rule(user_id)
+    # today's money left after what is picked, fees included (real cart bill once carted)
+    left = max(0.0, budget - sum(_total(p, p["qty"], bills, rule)[0] or 0 for m, p in picks.items() if m in meals))
     pool = pools(user, rules)
     menu, pool_ids, entries = _engine_inputs(user, rules, engine_mode, pool)
+    for it in menu:
+        # a Swiggy dish is weighed at its whole bill: its delivery, platform fee, packaging and
+        # GST ride on "delivery_fee" (the engine adds it once per order)
+        e = entries.get(it["id"]) or {}
+        if e.get("source") == "swiggy" and it.get("price") is not None:
+            q = int(it.get("qty") or e.get("qty") or 1)
+            total, _ = _total({**e, "price": it["price"], "kind": "order"}, q, {}, rule)
+            it["delivery_fee"] = round(max(0.0, total - it["price"] * q), 2)
     seed = f"{user_id}:{_today()}"
     if engine_mode == "surprise_me":
         with db.cursor() as cur:
@@ -701,7 +765,12 @@ def view(user_id: int) -> dict:
     for meal, p in picks.items():           # a pick whose pool dish now breaks a rule says so
         now = next((e for e in pool.get(meal, []) if e["ref"] == p["ref"]), None)
         p["reasons"] = now["reasons"] if now else []
-    picked = sum(_cost(p, p["qty"]) for m, p in picks.items() if m in meals)
+    bills, rule = _cart_bills(user_id), _fee_rule(user_id)
+    for m, p in picks.items():
+        p["total"], p["total_basis"] = _total(p, p["qty"], bills, rule)
+    dishes = sum(_cost(p, p["qty"]) for m, p in picks.items() if m in meals)
+    # "left" subtracts fees (estimated from learned bills; the real cart bill once carted)
+    picked = sum(p["total"] or 0 for m, p in picks.items() if m in meals)
     unknown = [m for m, p in picks.items() if m in meals and p.get("price") is None]
     try:
         conn = swiggy_connect.status(user_id)
@@ -723,7 +792,11 @@ def view(user_id: int) -> dict:
         "date": _today(), "weekday": clock.today().strftime("%A"),
         "meals": meals, "label": "+".join(LETTER[m] for m in meals),
         "budget": {**b, "presets": list(BUDGET_PRESETS), "picked": round(picked, 2),
+                   "picked_dishes": round(dishes, 2),
                    "left": round(b["amount"] - picked, 2), "unpriced": unknown,
+                   "fees_included": True,
+                   "left_basis": ("Fees included: Swiggy picks at their whole bill (an estimate from your bills "
+                                  "until the Swiggy cart shows the real one)."),
                    # W4: what the Swiggy picks cost with delivery, platform fee, packaging and GST
                    "picked_bill": bill_total,
                    "bill_estimated": any((p.get("bill") or {}).get("estimated") for p in priced)},

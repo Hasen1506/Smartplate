@@ -1327,7 +1327,15 @@ def fill_live_cart(user_id: int, restaurant_id: str, restaurant_name: str,
         raise SwiggyError(preview["reason"])
     if preview["fingerprint"] != expected_fingerprint:
         raise CartChanged("The live item, restaurant or address changed. Review it again.")
-    return _fill_reviewed_cart(user_id, preview)
+    result = _fill_reviewed_cart(user_id, preview)
+    # Today's money now counts this pick at the real cart bill, not the fee estimate.
+    try:
+        from .. import today
+        for iid in dict.fromkeys([str(item_id), str(preview["item_id"])]):
+            today.record_cart_bill(user_id, restaurant_id, iid, preview.get("quantity", 1), result.get("to_pay"))
+    except Exception:                                       # never fail a filled cart over a note
+        pass
+    return result
 
 
 def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
