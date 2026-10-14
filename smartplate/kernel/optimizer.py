@@ -19,7 +19,8 @@ import pulp
 
 from .. import clock, config, db
 from ..domain import (allergens, carbon, fatigue, festivals, flavour, health, household, learning, leftovers,
-                      meal_pools, models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
+                      meal_pools, models, nutrition, profile, reverse_mode, sentiment, surge, taste, timing,
+                      weather)
 from ..integrations import calendar_sync
 from . import explainability, scheduler
 
@@ -375,7 +376,8 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
         cands = [_delivery_candidate(user, plan, session, it, ctx) for it in safe]
     elif not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
-        safe = [it for it in safe if meal_suitable(it, meal) and it.get("nutrition_known", 1) != 0]
+        safe = [it for it in safe if meal_suitable(it, meal) and it.get("nutrition_known", 1) != 0
+                and timing.slot_suitability(it, meal)]          # no idli/vada as dinner unless pooled
         fit = meal_fit_pen(safe, meal)
         safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
         safe = [it for it in safe if it["id"] not in ctx["taste"]["disliked"]]   # "not again" is a lock
@@ -398,7 +400,9 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
         n_fresh = DISCOVERY_PER_SESSION if ctx.get("max_repeat", MAX_ITEM_REPEAT) * len(usual) >= ctx.get("n_active", 0) else slots
         cands = best(usual, slots) + best(fresh, n_fresh)
 
-    cook = _cook_candidate(user, session, ctx)
+    # A meal the user said they order (rhythm "order") is never turned into a cook day:
+    # the flexible "cook 1–2× a week" days only go to meals they didn't say they order.
+    cook = None if rhythm(user).get(meal) == "order" else _cook_candidate(user, session, ctx)
     if cook:
         cands.append(cook)
 
