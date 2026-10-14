@@ -20,7 +20,8 @@ from concurrent.futures import ThreadPoolExecutor
 from .. import clock, config, db
 from . import food_lexicon
 
-LIVE_DELIVERY_FEE_ESTIMATE = 35.0     # ₹; the real fee comes from the cart bill
+# ₹; Swiggy's average fee + GST until a real cart bill shows the fee (domain/fees.DELIVERY)
+LIVE_DELIVERY_FEE_ESTIMATE = 17.11
 MAX_PLACES = 4                        # restaurants read per refresh (favourites first)
 DEFAULT_QUERY = "meals"               # used only when the user has no live favourites
 
@@ -321,6 +322,9 @@ def refresh(user_id: int) -> dict:
     if not rows:
         raise SwiggyError("Swiggy's menus had no dishes Ziggy can plan with yet. "
                           "Add a favourite restaurant from live search and try again.")
+    from . import fees
+    fees.reprice_guard(_current_prices(user_id), {(str(r["id"]), str(d["provider_item_id"])): d["price"]
+                                                  for r, dishes in rows for d in dishes})
     clear(user_id)
     n_dishes = 0
     with db.cursor() as cur:
@@ -333,6 +337,14 @@ def refresh(user_id: int) -> dict:
                     "VALUES (?,?,?,?,?)",
                     (user_id, clock.now().isoformat(timespec="minutes"), len(rows), n_dishes, address_id))
     return {**source_for(user_id), "skipped": skipped}
+
+
+def _current_prices(user_id: int) -> dict:
+    """{(Swiggy restaurant id, Swiggy item id): rupees} of the live catalogue being replaced."""
+    with db.cursor() as cur:
+        rows = cur.execute("SELECT r.provider_id, m.provider_item_id, m.price FROM menu_items m "
+                           "JOIN restaurants r ON r.id=m.restaurant_id WHERE r.city=?", (city_key(user_id),)).fetchall()
+    return {(str(r["provider_id"]), str(r["provider_item_id"])): r["price"] for r in rows}
 
 
 def _rating(r: dict) -> float:
@@ -442,13 +454,10 @@ def fee_view(provider_id, fallback: float, fees: dict) -> dict:
 
 
 def with_learned_fees(user_id: int, items: list[dict]) -> list[dict]:
-    """Live menu rows with each restaurant's billed delivery fee in place of the estimate."""
-    fees = learned_fees(user_id)
-    out = []
-    for it in items:
-        view = fee_view(it.get("provider_id") or it.get("restaurant_provider_id"), it["delivery_fee"], fees)
-        out.append({**it, "delivery_fee": view["amount"], "delivery_fee_estimated": view["estimated"]})
-    return out
+    """Live menu rows priced with the fees from the user's real Swiggy bills (delivery,
+    platform fee, packaging, GST), or labelled estimates until a bill is seen (domain/fees)."""
+    from . import fees
+    return fees.annotate(user_id, items)
 
 
 def source_for(user_id: int, connected: bool | None = None) -> dict:

@@ -24,10 +24,10 @@ together over time**:
 | Need | Swiggy / Zomato app | AI chat + connector | SmartPlate |
 |---|---|---|---|
 | Find a dish | Endless feed, promoted listings | Good, if you type well | 3–4 usual places × 3 dishes, already filtered |
-| Stay inside a weekly budget | No concept of a week | Forgets between chats | Hard weekly cap (and optional daily cap), prorated, re-balanced after every change |
+| Stay inside a weekly budget | No concept of a week | Forgets between chats | A weekly target (and optional daily limit) the plan stays inside, prorated, re-balanced after every change; actual vs target from your real Swiggy bills |
 | Never see an allergen | Filters are per-search and easy to miss | Depends on the prompt | Hard exclusion; even your own pick can't override it |
 | Know *when* to order | ETA after you order | No | Order-by time from arrival, ETA, rush hour and rain |
-| Plan around weather and holidays | Surge surprises you | No | Rain and holidays shift orders earlier and are priced in |
+| Plan around weather and holidays | Rain slows delivery | No | Rain adds buffer to order-by times; holidays are flagged (no invented surge pricing) |
 | Remember what you liked | Order history is a list | ~5 orders via `get_food_orders` | 👍/👎 and usual places shape every plan |
 | Cook sometimes | Never suggested (against their interest) | Rarely | Cook days, recipes and one grocery list |
 
@@ -41,8 +41,11 @@ Honest read on willingness to pay: consumers rarely pay subscriptions for
 ₹600–1,000/month of visible value) still stands. The value SmartPlate can
 *show* is:
 
-1. **Money kept.** Surge avoided by ordering earlier (shown per meal and per
-   week), budget never exceeded, cook days swapped in when the week runs tight.
+1. **Money kept.** Shown only from real Swiggy bills: a Sunday recap of target vs
+   actual and "₹X kept" (`/api/recap/week`), estimates that include delivery,
+   platform fee, packaging and GST, and cook days swapped in when the week runs
+   tight. (The old "surge avoided" claim was dropped: Swiggy publishes no surge
+   data, so it was never a measured saving.)
 2. **Decisions removed.** One meal and one button, not a 20-minute scroll.
 3. **Safety.** Allergens and medical limits that can't slip through, which
    matters most to people who'd otherwise not order at all.
@@ -68,7 +71,8 @@ and verified savings exist.
    sliders or forms up front.
 2. **Only your usual places.** The shortlist is capped: 4 places × 3 dishes,
    plus 3 "something new". Everything shown already fits your rules. Prices
-   include delivery and expected surge. Hidden items are counted, not dumped
+   include delivery, platform fee, packaging and GST (learned from your Swiggy bills; a
+   labelled estimate until the first one). Hidden items are counted, not dumped
    ("4 not safe for your allergies").
 3. **One meal, one button.** Today shows the next meal, when to order it, and
    *Order on Swiggy* / *Change* / *I had it*.
@@ -90,7 +94,7 @@ and verified savings exist.
 | Onboarding → real profile → plan | ✅ `POST /api/profiles`; Mifflin–St Jeor targets from optional body stats, with safety floors |
 | Usual places | ✅ Favourites drive the candidate pool; the weekly count of new places is capped by the variety setting |
 | Shortlist / pick / swap / confirm / rate | ✅ `options`, `choose` (pins survive re-plans; unsafe picks refused), `swap`, `confirm` (spend + intake + expense), `rate` (👎 excludes the dish for 45 days) |
-| Budgets | ✅ Weekly hard cap, prorated for partial weeks; optional per-day cap; spent meals subtracted |
+| Budgets | ✅ Weekly target the plan stays inside (not a cap on what you spend in Swiggy), prorated for partial weeks; optional per-day limit; spent meals subtracted; actual vs target from real bills; suggested target from your last 4 weeks of real spend |
 | When to order | ✅ Order-by time per delivery (arrival − ETA − buffer, +15 min in rain) |
 | Weather | ✅ Live Open-Meteo 16-day forecast, cached, with an offline fallback to the sample feed. Free for non-commercial use; production needs their paid plan |
 | Holidays | ✅ Indian calendar Sep 2026 → Mar 2027 (Gandhi Jayanti, Navratri, Dussehra, Karva Chauth, Diwali, Bhai Dooj, Guru Nanak Jayanti, Christmas, NYE, Pongal, Republic Day, Ramadan, Eid al-Fitr, Holi); lunar dates flagged; holiday dinners carry a surge bump |

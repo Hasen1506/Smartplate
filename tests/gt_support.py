@@ -192,7 +192,7 @@ def plan_state(plan_id: int) -> dict:
 
 def check_plan(plan_id: int, *, pins_or_spent_allowed_over: bool = True) -> list[str]:
     """Every hard invariant a stored plan must satisfy. Returns human-readable failures."""
-    from smartplate.domain import festivals, models, profile, reverse_mode
+    from smartplate.domain import festivals, models, profile, reverse_mode, surge
     from smartplate.kernel import optimizer, scheduler
 
     st = plan_state(plan_id)
@@ -231,10 +231,22 @@ def check_plan(plan_id: int, *, pins_or_spent_allowed_over: bool = True) -> list
                 why = item_violation(user, item)
                 if why and s["status"] not in ("ordered", "confirmed"):
                     bad.append(f"{label}: planned {item['name']} — {why}")
-                # 3. item + fees, times the recorded surge, is the cost
-                base = item["price"] + item["delivery_fee"]
+                # 3. item + delivery + per-order charges (platform fee, packaging, 5% GST on food;
+                #    restated here, not read from domain/fees), times the recorded surge, is the cost
+                #    (one portion: the oracle's profiles plan for one person). A live dish stores the
+                #    delivery fee and charges it was priced with; the charges always include at least
+                #    the 5% GST on the food (a plan that leaves out GST under-states the bill).
+                fee, charges = item["delivery_fee"], 0.0
+                if d.get("charges") is not None:
+                    fee, charges = d["delivery_fee"], d["charges"]
+                    if charges + CENT < round(0.05 * item["price"], 2):
+                        bad.append(f"{label}: charges {charges} leave out 5% GST on ₹{item['price']}")
+                base = item["price"] + fee + charges
                 if abs(round(base * (d["surge_mult"] or 1.0), 2) - d["cost"]) > CENT:
-                    bad.append(f"{label}: cost {d['cost']} != ({item['price']} + {item['delivery_fee']}) × {d['surge_mult']}")
+                    bad.append(f"{label}: cost {d['cost']} != ({item['price']} + {fee} + "
+                               f"{charges:.2f}) × {d['surge_mult']}")
+                if not surge.ENABLED and (d["surge_mult"] or 1.0) != 1.0:
+                    bad.append(f"{label}: surge ×{d['surge_mult']} priced in while the surge model is off")
         if kind == "cook" and d.get("recipe_key"):
             r = reverse_mode.recipe(d["recipe_key"])
             why = item_violation(user, r) if r else "unknown recipe"

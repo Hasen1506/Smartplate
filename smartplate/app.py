@@ -1,4 +1,6 @@
 """Flask JSON API and vanilla JavaScript UI; no frontend build step."""
+import datetime as dt
+import math
 import os
 import secrets
 
@@ -184,7 +186,7 @@ def create_app() -> Flask:
         response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after, rule=rule)
         if error.retry_after is not None:
             response.headers['Retry-After'] = str(error.retry_after)
-        if error.code == 'swiggy_cart_other_address':
+        if error.code in ('swiggy_cart_other_address', 'price_unit_changed', 'cart_over_cap'):
             return response, 409        # the user's cart is for another of their addresses: their choice, not an outage
         return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
@@ -984,6 +986,50 @@ def create_app() -> Flask:
     @app.get("/api/plan/<int:plan_id>/recap")
     def week_recap(plan_id):
         return jsonify(service.week_recap(plan_id))
+
+    # ---- money: real spend, Sunday recap, budget from real spend (domain/spend, domain/fees) ---- #
+    def _week_arg():
+        week = request.args.get("week")
+        if week is not None:
+            try:
+                dt.date.fromisoformat(week)
+            except ValueError:
+                raise ValueError("week must be a date like 2026-11-02") from None
+        return week
+
+    @app.get("/api/user/<int:user_id>/recap/week")
+    def user_week_money_recap(user_id):
+        from .domain import spend
+        return jsonify(spend.week_recap(models.get_user(user_id), _week_arg()))
+
+    @app.get("/api/recap/week")
+    def week_money_recap():
+        from .domain import spend
+        uid = request.args.get("user_id", type=int)
+        if uid is None:
+            raise ValueError("Add ?user_id= for the profile whose week to recap")
+        user = models.get_user(uid)
+        if not user:
+            return _missing("user_id", uid)
+        return jsonify(spend.week_recap(user, _week_arg()))
+
+    @app.get("/api/user/<int:user_id>/budget/suggestion")
+    def budget_suggestion(user_id):
+        from .domain import spend
+        cut, target = request.args.get("cut", type=float), request.args.get("target", type=float)
+        for v in (cut, target):
+            if v is not None and (not math.isfinite(v) or v < 0):
+                raise ValueError("cut and target must be non-negative numbers")
+        if cut is not None and cut >= 1:
+            raise ValueError("cut is a fraction: 0.2 means 20% less")
+        user = models.get_user(user_id)
+        return jsonify({**spend.suggest(user, cut=cut, target=target),
+                        "low_budget": spend.low_budget_check(user, target)})
+
+    @app.get("/api/fees/defaults")
+    def fee_defaults():
+        from .domain import fees
+        return jsonify(fees.defaults())
 
     @app.get("/api/plan/<int:plan_id>/swaps")
     def swap_options(plan_id):

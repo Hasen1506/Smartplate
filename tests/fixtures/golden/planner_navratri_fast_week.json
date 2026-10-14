@@ -3,8 +3,8 @@
   "budget": 2000.0,
   "daily_cap": null,
   "prorated": false,
-  "remaining": 860.81,
-  "spend": 1139.19,
+  "remaining": 1075.0,
+  "spend": 925.0,
   "weekly_budget": 2000.0
  },
  "counts": {
@@ -25,11 +25,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 228.27,
-    "item": "Chana Masala Bowl",
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "The Bowl Company",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "lunch": {
@@ -51,11 +51,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 163.05,
-    "item": "Veg Meals",
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "lunch": {
@@ -77,11 +77,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 169.4,
-    "item": "Parotta + Veg Kurma",
+    "cost": 150.0,
+    "item": "Veg Meals",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    },
    "lunch": {
@@ -103,11 +103,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 119.57,
-    "item": "Vegan Sambar Rice",
+    "cost": 115.0,
+    "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    },
    "lunch": {
@@ -129,11 +129,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 163.05,
-    "item": "Veg Meals",
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "lunch": {
@@ -155,11 +155,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 174.3,
-    "item": "Parotta + Veg Kurma",
+    "cost": 150.0,
+    "item": "Veg Meals",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    },
    "lunch": {
@@ -181,7 +181,7 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 121.55,
+    "cost": 110.0,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
@@ -208,10 +208,10 @@
  ],
  "mode": "balanced",
  "recommendation": {
-  "floor": 2443.0,
+  "floor": 2135.0,
   "suggested_rating_floor": 4.2,
-  "usual": 3570.0,
-  "variety": 4168.0
+  "usual": 3150.0,
+  "variety": 3670.0
  },
  "week_start": "2026-10-12"
 }

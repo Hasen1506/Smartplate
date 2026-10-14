@@ -12,7 +12,7 @@
 """
 from test_roadmap_b_live_menus import RECORDED_MENU, _live_user, client, swiggy  # noqa: F401 (fixtures)
 from smartplate import service
-from smartplate.domain import household, models
+from smartplate.domain import fees, household, models
 
 
 def test_live_dishes_cost_swiggys_price_with_no_invented_surge(client, swiggy):
@@ -27,7 +27,9 @@ def test_live_dishes_cost_swiggys_price_with_no_invented_surge(client, swiggy):
         item = menu[d["item_id"]]
         portions = len(household.eaters(d, members, user))      # Arjun and Meera: a portion each
         assert portions == 2
-        assert d["cost"] == round(item["price"] * portions + item["delivery_fee"], 2), (d["item_name"], d["cost"])
+        # Swiggy's price × portions + delivery + per-order fees and 5% GST (domain/fees): no multiplier
+        assert d["cost"] == round(item["price"] * portions + item["delivery_fee"]
+                                  + fees.charges(item, item["price"] * portions), 2), (d["item_name"], d["cost"])
         assert d["surge_mult"] == 1.0 and not d.get("time_shift")
         assert not any("Surge" in r or "surge" in r for r in d["reasons"]), d["reasons"]
     view = client.get(f"/api/plan/{pid}").get_json()
@@ -41,12 +43,19 @@ def test_community_lists_no_invented_members_or_counts(client):
     assert not {"campus_survivor", "veg_athlete"} & {t["author"] for t in service.list_community()}
 
 
-def test_budget_recommendation_uses_swiggys_price_for_live_dishes(seeded):
+def test_budget_recommendation_uses_swiggys_price_for_live_dishes(seeded, monkeypatch):
+    from smartplate.domain import fees, surge
     from smartplate.kernel import recommender
     live = {"price": 180, "delivery_fee": 30, "city": "live:3", "source": "live"}
     assert recommender._expected_cost(live, "dinner") == 210
+    # with its fee model a live dish's expected cost includes platform fee, packaging and GST
+    priced = {**live, "fees": fees.pricing_for(None, {})}
+    assert recommender._expected_cost(priced, "dinner") == round(210 + fees.DEFAULT_FIXED + 0.05 * 180, 2)
     sample = {**live, "city": "Chennai", "source": "sample"}
-    assert recommender._expected_cost(sample, "dinner") > 210      # the labelled sample keeps its demo surge
+    assert recommender._expected_cost(sample, "dinner") == 210     # surge model archived, off by default
+    monkeypatch.setattr(surge, "ENABLED", True)
+    assert recommender._expected_cost(sample, "dinner") > 210      # switched on, the labelled sample keeps its demo surge
+    assert recommender._expected_cost(live, "dinner") == 210       # ...and live dishes never get it
 
 
 def test_invented_members_are_removed_from_an_existing_database_on_start(seeded):

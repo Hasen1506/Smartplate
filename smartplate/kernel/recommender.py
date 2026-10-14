@@ -16,7 +16,7 @@ priors when there's no personal history (cold-start honesty).
 This is an *estimate* over the candidate menu, deliberately labelled as such — it
 is not a second MILP. The planner remains the source of truth for an actual plan.
 """
-from ..domain import allergens, fatigue, models, nutrition, surge
+from ..domain import allergens, fatigue, fees, models, nutrition, surge
 
 MIN_OPTIONS_PER_MEAL = 3      # a ★ floor that leaves fewer than this is "too tight"
 RATING_FLOOR_CANDIDATES = [4.6, 4.4, 4.2, 4.0, 3.8, 3.6]
@@ -29,8 +29,8 @@ def _expected_cost(item: dict, meal: str) -> float:
     prior) so the recommendation isn't optimistic about peak pricing. Rain/storm
     is surfaced separately as a contingency, not baked into the headline number.
     """
-    base = item.get("price", 0) + item.get("delivery_fee", 0)
-    if not surge.applies(item):                   # live Swiggy dish: Swiggy's own price
+    base = item.get("price", 0) + item.get("delivery_fee", 0) + fees.charges(item, item.get("price", 0))
+    if not surge.applies(item):                   # live Swiggy dish (or surge model off): no multiplier
         return round(base, 2)
     mult = surge.predict(item.get("city", ""), 0, meal, "clear")
     return round(base * mult, 2)
@@ -106,12 +106,12 @@ def recommend(user: dict, meals: list[str], *, history: dict | None = None,
         "variety": {"total": variety_total,
                     "line": f"room to try {k} new dish{'es' if k != 1 else ''} this period"},
         "suggested_rating_floor": suggested,
-        "rain_contingency_pct": 25,   # peak/rain can add ~this much; see surge model
         "assumptions": [
             "Estimate over nearby serviceable dishes — not a full plan solve.",
-            "Surge priced from a clear-weather baseline; rain/storm adds the contingency above.",
+            "Includes delivery, platform fee, packaging and GST: from your Swiggy bills where you have them, "
+            "otherwise an estimate.",
             "Familiarity proxied by popularity until your order history fills (cold-start).",
-        ],
+        ] + (["Sample catalogue: demo surge pricing is on."] if surge.ENABLED else []),
     }
 
 

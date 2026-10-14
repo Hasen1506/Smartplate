@@ -221,6 +221,12 @@ def plan_view(plan_id: int) -> dict:
     env["weekly_budget"] = user["weekly_budget"]
     env["prorated"] = cap < user["weekly_budget"]
     env["daily_cap"] = profile.daily_cap(user)
+    # A weekly TARGET for planning, not a hard cap on what's spent (critique 33): beside it, what
+    # real Swiggy bills say was actually spent this week (never estimates).
+    from .domain import spend
+    env["kind"] = "target"
+    _ws = dt.date.fromisoformat(plan["week_start"])
+    env["actual"] = spend.actual(user["id"], _ws.isoformat(), (_ws + dt.timedelta(days=6)).isoformat())
 
     nut = nutrition.summary([d["nutrition"] for d in spend_rows if d.get("nutrition")])
     targets = nutrition.targets_for(user)
@@ -473,6 +479,8 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None, at=None):
                 extra["handoff_url"] = timing.swiggy_handoff(d.get("restaurant_name") or "", d.get("item_name") or "")
                 if d.get("delivery_fee") is not None:   # live dish: estimated until a real bill shows the fee
                     extra["delivery_fee"] = {"amount": d["delivery_fee"], "estimated": bool(d.get("fee_estimated"))}
+                if d.get("charges") is not None:        # platform fee + packaging + GST priced into cost
+                    extra["charges"] = {"amount": d["charges"], "estimated": bool(d.get("charges_estimated"))}
                 if d.get("real_bill"):
                     extra["real_bill"] = True
                     extra["planned_cost"] = round(d["planned_cost"], 2)

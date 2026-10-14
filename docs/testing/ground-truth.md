@@ -26,8 +26,12 @@ app code, then every plan, re-plan and checkout is checked against it:
    safe dishes to spare has no empty meals.
 6. Pinned meals survive re-plans, mode switches, favourites, budget changes, ratings, swaps,
    the clock moving on and new meals; a pin that becomes unsafe is dropped, never kept.
-7. Prices add up: item + delivery fee × surge = cost; Σ items = checkout total = receipts;
-   a live Swiggy total is item + fees exactly or refused, never guessed.
+7. Prices add up: item + delivery fee + per-order charges (platform fee + packaging + 5% GST on
+   food, `domain/fees`) = cost, × surge only when the archived surge model is switched on (it is
+   off by default, so any multiplier ≠ 1 is a failure); a live dish's charges always include at
+   least the 5% GST; Σ items = checkout total = receipts; a live Swiggy total is item + fees
+   exactly or refused, never guessed; a menu re-read whose prices move ≥ 3× is refused (unit
+   flip, `fees.reprice_guard`).
 8. Nothing is ordered without an explicit approval of the exact fingerprint and total, and no
    live cart change or order happens without the reviewed fingerprint / fresh approval token.
 9. Fuzzed requests to every API route never return 500 (5xx only for Swiggy upstream errors
@@ -83,3 +87,13 @@ HYPOTHESIS_PROFILE=deep pytest tests/test_gt_properties.py                      
 ```
 
 Re-blessing a golden or the recording is a code change: review the JSON diff and say why it moved.
+
+### Intentional golden changes
+
+- **W4, Oct 2026 — surge model archived (critiques 6/52).** Every planner golden and
+  `journey_asha.json` moved: sample-catalogue costs lost their demo surge multiplier (e.g.
+  ₹121.55 → ₹110), so the solver picks some different dishes, fills a previously skipped meal,
+  and the "Ordering a little earlier saves ₹X" heads-up is gone. The differential test runs the
+  current tree with `surge.ENABLED = True` so the baselines are still compared like with like.
+  The simulated execution in the journey's approval step fails one more flaky order (one more
+  delivery in the week). Live-dish prices now include fees (`test_w04_money.py`).

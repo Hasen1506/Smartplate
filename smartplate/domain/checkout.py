@@ -62,3 +62,52 @@ def validate(review: dict, *, expected_fingerprint: str | None = None,
 def _fingerprint(items: list[dict]) -> str:
     payload = json.dumps(items, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()[:24]
+
+
+# --------------------------------------------------------------------------- #
+# Swiggy Builders Club's ₹1,000 cart cap (critique 47)
+# --------------------------------------------------------------------------- #
+CART_CAP = 1000.0     # ₹ payable, Builders Club Food orders (checked again on Swiggy's real bill)
+
+
+def split_for_cap(price: float, quantity: int, item: dict | None = None, *, cap: float = CART_CAP) -> dict:
+    """Does `quantity` × a ₹`price` dish fit one capped Swiggy cart once delivery, fees and
+    GST are on the bill? If not, how to order it: split into the fewest carts that each fit
+    (every cart pays its own delivery and platform fee, so splitting costs extra and says
+    how much), or hand off to the Swiggy app when even one portion can't fit.
+
+    Fees come from the dish's fee model (domain/fees: learned from the user's bills, else a
+    labelled estimate); a row without one is checked on the item total plus the default
+    fees, so the check never under-counts."""
+    from . import fees
+    quantity = int(quantity)
+    if quantity < 1 or price is None or price <= 0:
+        raise ValueError("Quantity and price must be positive")
+    model = (item or {}).get("fees") or fees.pricing_for(None, {})
+
+    def bill(q: int) -> float:
+        row = {"fees": model}
+        return round(price * q + model["delivery"]["amount"] + fees.charges(row, price * q), 2)
+
+    one = bill(quantity)
+    if one <= cap:
+        return {"fits": True, "mode": "one_cart", "carts": [{"quantity": quantity, "estimate": one}],
+                "estimate_total": one, "extra_fees": 0.0, "cap": cap}
+    per_cart = max((q for q in range(1, quantity + 1) if bill(q) <= cap), default=0)
+    if per_cart == 0:
+        return {"fits": False, "mode": "handoff", "carts": [], "cap": cap, "estimate_total": one,
+                "extra_fees": 0.0,
+                "message": (f"One portion comes to about ₹{bill(1):,.0f} with fees, above Swiggy's ₹{cap:,.0f} limit "
+                            "for orders placed from Ziggy. Order it in the Swiggy app.")}
+    n = math.ceil(quantity / per_cart)
+    base, rest = divmod(quantity, n)                     # even split: 5 → 3 + 2, never 4 + 1
+    sizes = [base + (1 if i < rest else 0) for i in range(n)]
+    carts = [{"quantity": q, "estimate": bill(q)} for q in sizes]
+    total = round(sum(c["estimate"] for c in carts), 2)
+    extra = round(total - one, 2)
+    return {"fits": False, "mode": "split", "carts": carts, "cap": cap, "estimate_total": total,
+            "extra_fees": extra,
+            "message": (f"{quantity} × this dish is about ₹{one:,.0f} with fees, above Swiggy's ₹{cap:,.0f} limit for "
+                        f"orders placed from Ziggy. Order it as {n} carts ({' + '.join(str(q) for q in sizes)}), one "
+                        f"after the other: about ₹{extra:,.0f} more in delivery and platform fees. Or order it in "
+                        "one go in the Swiggy app.")}
