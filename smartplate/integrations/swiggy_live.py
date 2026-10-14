@@ -1343,7 +1343,16 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
               "price_estimated": price_estimated(item),
               "image": _image(item), "handoff_url": timing.swiggy_handoff(place["name"], str(_get(item, "name")))}
     blocked = None
-    if _safety_blocked(user):
+    from ..domain import allergens
+    verdict = allergens.check(user, _dish_facts(str(_get(item, "name")), _row_veg(item),
+                                                 item.get("description") if isinstance(item.get("description"), str)
+                                                 else None))
+    if verdict["status"] in ("unsafe", "unknown"):
+        # The same checker as the menu and the planner: a mis-marked "Chicken 65 (veg)" or
+        # an unmarked Kozhi Varuval is never carted for a vegetarian (sp-grill #38).
+        blocked = (f"Not for your diet, allergies or health filters: {allergens.reason_text(verdict)}. "
+                   "Check the ingredients with the restaurant in Swiggy.")
+    elif _safety_blocked(user):
         blocked = SAFETY_NOTE
     elif _get(item, "stock") not in (True, 1):
         blocked = "Swiggy did not confirm this dish is in stock. Refresh the menu or check it in Swiggy."
