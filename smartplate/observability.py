@@ -112,6 +112,7 @@ def init_app(app) -> None:
     """Install the request hooks. Call once from create_app()."""
     from flask import g, request
     init_logging()
+    init_sentry()                            # no-op unless SENTRY_DSN is set
 
     @app.before_request
     def _start_request():

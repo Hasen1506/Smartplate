@@ -8,3 +8,5 @@ cryptography==50.0.2
 psycopg[binary]==3.3.6
 psycopg-pool==3.3.3
 numpy==2.5.3
+# Error reporting, used only when SENTRY_DSN is set (observability.init_sentry)
+sentry-sdk[flask]==2.72.0

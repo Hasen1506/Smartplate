@@ -216,7 +216,7 @@ CRON_KEY = os.environ.get("SMARTPLATE_CRON_KEY", "").strip()
 ADMIN_KEY = os.environ.get("SMARTPLATE_ADMIN_KEY", "").strip()
 # Logs: "json" (one JSON object per line, default on Render) or "text".
 LOG_FORMAT = os.environ.get("SMARTPLATE_LOG_FORMAT", "json" if os.environ.get("RENDER") else "text").lower()
-# Error tracking: set SENTRY_DSN (and add sentry-sdk to requirements) to report errors; unset = off.
+# Error tracking: set SENTRY_DSN to report errors (sentry-sdk[flask] is in requirements.txt); unset = off.
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
 SENTRY_TRACES = float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0") or 0)
 # Requests slower than this many ms are logged at WARNING (all are logged at INFO).
