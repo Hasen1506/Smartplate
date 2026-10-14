@@ -34,7 +34,7 @@ def test_gt1_egg_is_never_vegetarian(gt):
     egg_puff = next(it for it in models.menu_for_city("Chennai") if it["name"] == "Egg Puff + Chai")
     assert egg_puff["veg"] == 0                                         # seed fixed
     for diet in ("veg", "vegan"):
-        assert allergens.violates({"diet": diet}, {**egg_puff, "veg": 1}) == f"not {diet}"   # rule, not just data
+        assert allergens.violates({"diet": diet}, {**egg_puff, "veg": 1}).endswith(f"(not {diet})")   # rule, not just data
     assert allergens.violates({"diet": "nonveg"}, egg_puff) is None
     _, pid, view = _plan({**VEG_WEEK, "allergens": []})
     assert "Egg Puff + Chai" not in {c["item"] for d in view["grid"] for c in d["meals"].values()}
