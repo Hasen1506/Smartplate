@@ -41,7 +41,7 @@ MAX_FAVOURITE_CANDIDATES = 40
 POOL_FALLBACK_PEN = 1.0
 FALLBACK_PER_MEAL = 12
 # Diet mix (usab #11): a non-veg eater gets at least this share of non-veg dishes among
-# meals that have one on offer, unless they set prefs.nonveg_share. Soft: each meal
+# the lunches and dinners that have one on offer, unless they set prefs.nonveg_share. Soft: each meal
 # short costs DIET_MIX_PEN (more than a typical price gap, less than any skip).
 NONVEG_SHARE = 0.5
 DIET_MIX_PEN = 0.5
@@ -444,7 +444,7 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
         # With saved places, whole places are candidates (grill #5), not a short list.
         n_usual = max(slots, MAX_FAVOURITE_CANDIDATES) if favs else slots
         cands = best(usual, n_usual) + best(fresh, n_fresh)
-        if nonveg_share(user) > 0:
+        if nonveg_share(user) > 0 and meal != "breakfast":
             # a non-veg eater always sees non-veg dishes, not only the cheapest (veg) few
             have = {c["item_id"] for c in cands}
             cands += [c for c in best([it for it in usual if not it.get("veg", 1)], slots)
@@ -749,6 +749,8 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
         nv, deliv = [], []
         for s in active:
             cands = cand_map[s["id"]]
+            if s["meal"] == "breakfast":
+                continue                                  # breakfast is tiffin: no mix asked of it
             if not any(c["kind"] == "delivery" and c.get("nonveg") for c in cands):
                 continue
             for i, c in enumerate(cands):
@@ -1035,6 +1037,9 @@ def _decision_context(user, session, chosen, ctx):
         "discovery": chosen.get("discovery", False),
         "liked": chosen.get("item_id") in ctx["taste"]["liked"],
         "flavour": chosen.get("flavour_why") or [],
+        "pool_fallback": chosen.get("pool_fallback", False),
+        "pool_blocked": chosen.get("pool_blocked"),
+        "meal": session["meal"],
     }
 
 

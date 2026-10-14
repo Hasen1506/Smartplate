@@ -4,8 +4,8 @@
    "budget": 2500.0,
    "daily_cap": null,
    "prorated": false,
-   "remaining": 29.93,
-   "spend": 2470.07,
+   "remaining": 29.41,
+   "spend": 2470.59,
    "weekly_budget": 2500.0
   },
   "counts": {
@@ -174,11 +174,11 @@
    },
    "Wed 2026-11-04": {
     "breakfast": {
-     "cost": 101.8,
-     "item": "Curd Rice",
+     "cost": 91.62,
+     "item": "Masala Chai + Bun Butter",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Sangeetha Veg",
+     "restaurant": "Chai Kings",
      "status": "active"
     },
     "dinner": {
@@ -190,11 +190,11 @@
      "status": "active"
     },
     "lunch": {
-     "cost": 96.3,
-     "item": "Masala Chai + Bun Butter",
+     "cost": 107.0,
+     "item": "Curd Rice",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Chai Kings",
+     "restaurant": "Sangeetha Veg",
      "status": "active"
     }
    }
@@ -210,13 +210,13 @@
   "hidden": {
    "below_rating": 1,
    "cook_not_safe": 1,
-   "not_a_meal": 1,
+   "not_a_meal": 3,
    "not_again": 0,
    "not_safe": 11
   },
   "limits": {
    "left_day": null,
-   "left_week": 196.81
+   "left_week": 196.29
   },
   "new": [
    [
@@ -230,9 +230,9 @@
     137.08
    ],
    [
-    "Masala Chai + Bun Butter",
-    "Chai Kings",
-    107.28
+    "Rajma Chawal Bowl",
+    "The Bowl Company",
+    262.24
    ]
   ],
   "usual": [
@@ -298,8 +298,8 @@
    "budget": 2500.0,
    "daily_cap": null,
    "prorated": false,
-   "remaining": 29.06,
-   "spend": 2470.94,
+   "remaining": 28.54,
+   "spend": 2471.46,
    "weekly_budget": 2500.0
   },
   "counts": {
@@ -468,11 +468,11 @@
    },
    "Wed 2026-11-04": {
     "breakfast": {
-     "cost": 101.8,
-     "item": "Curd Rice",
+     "cost": 91.62,
+     "item": "Masala Chai + Bun Butter",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Sangeetha Veg",
+     "restaurant": "Chai Kings",
      "status": "active"
     },
     "dinner": {
@@ -484,11 +484,11 @@
      "status": "active"
     },
     "lunch": {
-     "cost": 96.3,
-     "item": "Masala Chai + Bun Butter",
+     "cost": 107.0,
+     "item": "Curd Rice",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Chai Kings",
+     "restaurant": "Sangeetha Veg",
      "status": "active"
     }
    }
@@ -548,8 +548,8 @@
   }
  },
  "5_approval": {
-  "failed": 1,
-  "placed": 17,
+  "failed": 2,
+  "placed": 16,
   "preview": {
    "items": [
     [
@@ -585,14 +585,14 @@
     [
      2,
      "breakfast",
-     "Curd Rice",
-     101.8
+     "Masala Chai + Bun Butter",
+     91.62
     ],
     [
      2,
      "lunch",
-     "Masala Chai + Bun Butter",
-     96.3
+     "Curd Rice",
+     107.0
     ],
     [
      2,
@@ -662,9 +662,9 @@
     ]
    ],
    "order_count": 18,
-   "total": 2380.94
+   "total": 2381.46
   },
-  "substituted": 1
+  "substituted": 0
  },
  "6_check_in": {
   "cooked": "Cook: Dal + rice",
@@ -705,11 +705,11 @@
  },
  "7_expenses_insights": {
   "nutrition_daily_avg": {
-   "carbs_g": 206.3,
-   "fat_g": 38.1,
-   "kcal": 1391.4,
-   "protein_g": 36.7,
-   "sugar_g": 17.4
+   "carbs_g": 199.4,
+   "fat_g": 36.1,
+   "kcal": 1341.4,
+   "protein_g": 35.7,
+   "sugar_g": 14.9
   },
   "nutrition_target": {
    "carbs_g": 250,
@@ -718,22 +718,22 @@
    "protein_g": 80,
    "sugar_g": 40
   },
-  "receipts_total": 2228.77,
-  "rows": 17
+  "receipts_total": 2131.46,
+  "rows": 16
  },
  "8_after_settings": {
   "budget": {
    "budget": 1800.0,
    "daily_cap": 450.0,
    "prorated": false,
-   "remaining": -473.77,
-   "spend": 2273.77,
+   "remaining": -376.46,
+   "spend": 2176.46,
    "weekly_budget": 1800.0
   },
   "counts": {
-   "cook": 2,
-   "delivery": 17,
-   "ordered": 17,
+   "cook": 1,
+   "delivery": 18,
+   "ordered": 16,
    "skip": 2,
    "snoozed": 0
   },
@@ -748,11 +748,11 @@
      "status": "ordered"
     },
     "dinner": {
-     "cost": 0.0,
-     "item": "Skip",
-     "kind": "skip",
+     "cost": 157.62,
+     "item": "Pesarattu + Chutney",
+     "kind": "delivery",
      "pinned": false,
-     "restaurant": "",
+     "restaurant": "Murugan Idli Shop",
      "status": "past"
     },
     "lunch": {
@@ -774,12 +774,12 @@
      "status": "ordered"
     },
     "dinner": {
-     "cost": 97.83,
-     "item": "Masala Chai + Bun Butter",
+     "cost": 119.57,
+     "item": "Vegan Sambar Rice",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Chai Kings",
-     "status": "ordered"
+     "restaurant": "Sangeetha Veg",
+     "status": "past"
     },
     "lunch": {
      "cost": 120.98,
@@ -878,11 +878,11 @@
      "status": "ordered"
     },
     "dinner": {
-     "cost": 45.0,
-     "item": "Cook: Dal + rice",
-     "kind": "cook",
+     "cost": 0.0,
+     "item": "Skip",
+     "kind": "skip",
      "pinned": false,
-     "restaurant": "Home kitchen",
+     "restaurant": "",
      "status": "past"
     },
     "lunch": {
@@ -896,11 +896,11 @@
    },
    "Wed 2026-11-04": {
     "breakfast": {
-     "cost": 101.8,
-     "item": "Curd Rice",
+     "cost": 91.62,
+     "item": "Masala Chai + Bun Butter",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Sangeetha Veg",
+     "restaurant": "Chai Kings",
      "status": "ordered"
     },
     "dinner": {
@@ -912,11 +912,11 @@
      "status": "ordered"
     },
     "lunch": {
-     "cost": 96.3,
-     "item": "Masala Chai + Bun Butter",
+     "cost": 107.0,
+     "item": "Curd Rice",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Chai Kings",
+     "restaurant": "Sangeetha Veg",
      "status": "ordered"
     }
    }

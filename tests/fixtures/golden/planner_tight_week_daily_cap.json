@@ -3,8 +3,8 @@
   "budget": 1400.0,
   "daily_cap": 250.0,
   "prorated": false,
-  "remaining": 0.28,
-  "spend": 1399.72,
+  "remaining": 0.25,
+  "spend": 1399.75,
   "weekly_budget": 1400.0
  },
  "counts": {
@@ -43,8 +43,8 @@
   },
   "Mon 2026-11-02": {
    "breakfast": {
-    "cost": 105.0,
-    "item": "Egg Puff + Chai",
+    "cost": 90.0,
+    "item": "Masala Chai + Bun Butter",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Chai Kings",
@@ -59,11 +59,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
+    "cost": 105.2,
+    "item": "Curd Rice",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    }
   },
@@ -95,6 +95,32 @@
   },
   "Sun 2026-11-08": {
    "breakfast": {
+    "cost": 90.0,
+    "item": "Masala Chai + Bun Butter",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Chai Kings",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 105.2,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   }
+  },
+  "Thu 2026-11-05": {
+   "breakfast": {
     "cost": 35.0,
     "item": "Cook: Masala oats + veg",
     "kind": "cook",
@@ -119,39 +145,13 @@
     "status": "active"
    }
   },
-  "Thu 2026-11-05": {
+  "Tue 2026-11-03": {
    "breakfast": {
-    "cost": 105.0,
+    "cost": 116.02,
     "item": "Egg Puff + Chai",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Chai Kings",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 94.68,
-    "item": "Masala Chai + Bun Butter",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Chai Kings",
-    "status": "active"
-   }
-  },
-  "Tue 2026-11-03": {
-   "breakfast": {
-    "cost": 110.5,
-    "item": "Curd Rice",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "dinner": {
@@ -173,11 +173,11 @@
   },
   "Wed 2026-11-04": {
    "breakfast": {
-    "cost": 101.8,
-    "item": "Curd Rice",
+    "cost": 106.89,
+    "item": "Egg Puff + Chai",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Chai Kings",
     "status": "active"
    },
    "dinner": {
@@ -189,11 +189,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 96.3,
-    "item": "Masala Chai + Bun Butter",
-    "kind": "delivery",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "Chai Kings",
+    "restaurant": "Home kitchen",
     "status": "active"
    }
   }

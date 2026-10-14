@@ -3,8 +3,8 @@
   "budget": 1500.0,
   "daily_cap": null,
   "prorated": true,
-  "remaining": 279.77,
-  "spend": 1220.23,
+  "remaining": 0.72,
+  "spend": 1499.28,
   "weekly_budget": 2100.0
  },
  "counts": {
@@ -54,19 +54,19 @@
   },
   "Sat 2026-11-07": {
    "dinner": {
-    "cost": 133.1,
-    "item": "Vegan Sambar Rice",
+    "cost": 163.35,
+    "item": "Ghee Pongal",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    },
    "lunch": {
-    "cost": 115.7,
-    "item": "Curd Rice",
+    "cost": 133.06,
+    "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    }
   },
@@ -80,11 +80,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 120.98,
-    "item": "Masala Dosa",
+    "cost": 341.9,
+    "item": "Chicken Biryani",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Dindigul Thalappakatti",
     "status": "active"
    }
   },
@@ -99,10 +99,10 @@
    },
    "lunch": {
     "cost": 120.98,
-    "item": "Idli Sambar (4 pc)",
+    "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    }
   },
@@ -126,26 +126,27 @@
   },
   "Wed 2026-11-04": {
    "dinner": {
-    "cost": 127.08,
-    "item": "Masala Dosa",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 107.0,
-    "item": "Curd Rice",
+    "cost": 121.55,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 123.05,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    }
   }
  },
  "heads_up": [
+  "budget: ₹1 left this week",
   "holiday: Sun 08 Nov: Diwali",
-  "saving: Ordering a little earlier saves ₹206 this week",
+  "saving: Ordering a little earlier saves ₹241 this week",
   "weather: Sat 07 Nov: rain likely (80%)",
   "weather: Today: 38°C"
  ],

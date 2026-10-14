@@ -3,8 +3,8 @@
   "budget": 3000.0,
   "daily_cap": null,
   "prorated": false,
-  "remaining": 52.21,
-  "spend": 2947.79,
+  "remaining": 22.41,
+  "spend": 2977.59,
   "weekly_budget": 3000.0
  },
  "counts": {
@@ -25,19 +25,19 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 115.72,
+    "cost": 119.57,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 268.26,
+    "item": "Chicken Chettinad + Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Junior Kuppanna",
     "status": "active"
    }
   },
@@ -59,29 +59,29 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 220.92,
-    "item": "Chana Masala Bowl",
+    "cost": 268.26,
+    "item": "Chicken Chettinad + Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "The Bowl Company",
+    "restaurant": "Junior Kuppanna",
     "status": "active"
    }
   },
   "Sat 2026-11-07": {
    "breakfast": {
-    "cost": 243.1,
-    "item": "Rajma Chawal Bowl",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "The Bowl Company",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 181.5,
+    "cost": 165.75,
     "item": "Veg Meals",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
     "status": "active"
    },
    "lunch": {
@@ -137,8 +137,8 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 220.92,
-    "item": "Chana Masala Bowl",
+    "cost": 284.04,
+    "item": "Chicken Tikka Rice Bowl",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "The Bowl Company",
@@ -147,11 +147,11 @@
   },
   "Tue 2026-11-03": {
    "breakfast": {
-    "cost": 243.1,
-    "item": "Rajma Chawal Bowl",
+    "cost": 149.18,
+    "item": "Ghee Pongal",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "The Bowl Company",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    },
    "dinner": {
@@ -199,9 +199,9 @@
   }
  },
  "heads_up": [
-  "budget: ₹52 left this week",
+  "budget: ₹22 left this week",
   "holiday: Sun 08 Nov: Diwali",
-  "nutrition: Protein runs low: about 55 g a day of 80 g",
+  "nutrition: Protein runs low: about 61 g a day of 80 g",
   "weather: Sat 07 Nov: rain likely (80%)",
   "weather: Tomorrow: rain likely (80%)",
   "weather: Wed 04 Nov: 38°C"

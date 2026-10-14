@@ -39,6 +39,12 @@ def reasons_for(decision: dict, context: dict) -> list[str]:
         r.append(f"Delivery ₹{fee['amount']:.0f} is an estimate until a Swiggy bill from this restaurant shows "
                  f"the real fee." if fee["estimated"] else
                  f"Delivery ₹{fee['amount']:.0f}: the delivery fee from your last Swiggy bill here.")
+    if context.get("pool_fallback"):
+        meal = context.get("meal") or "meal"
+        r.append(f"Your usual {meal} isn't safe for everyone eating ({context['pool_blocked']}), so this is "
+                 f"from one of your places." if context.get("pool_blocked") else
+                 f"Not one of your {meal} dishes: a dish from one of your places that fits the money left, "
+                 f"so this {meal} isn't skipped.")
     if context.get("discovery"):
         r.append("Something new from outside your usual places — within your variety setting.")
     if context.get("liked"):
