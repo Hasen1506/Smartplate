@@ -259,6 +259,11 @@ def suggest_budget(body: dict) -> dict:
         rec["suggested"] = round50(rec["usual"]["total"])
         rec["tight"] = round50(rec["floor"]["total"])
         rec["roomy"] = round50(rec["variety"]["total"] * 1.1)
+    # A typed budget too small for the meals it covers gets a warning and a choice (usability 23).
+    if "weekly_budget" in data:
+        from .domain import spend
+        rec["low_budget"] = spend.low_budget_check({**user, "prefs": {"meals": data.get("meals")}},
+                                                   data["weekly_budget"])
     return rec
 
 
@@ -839,8 +844,13 @@ def heads_up(view: dict, user: dict, plan: dict, decisions: list[dict], at: dt.d
         if rec.get("feasible") and rec["usual"]["total"] > view["budget"]["budget"]:
             more = f" Your usual week costs about ₹{rec['usual']['total']:.0f}."
         out.append({"level": "warn", "icon": "₹", "kind": "budget",
-                    "title": f"{len(skipped_budget)} meal{'s' if len(skipped_budget) != 1 else ''} didn't fit the budget",
-                    "body": "Raise the weekly budget, cook one of them, or switch to Tight week." + more})
+                    "title": f"{len(skipped_budget)} meal{'s' if len(skipped_budget) != 1 else ''} didn't fit the weekly target",
+                    "body": "Raise the weekly target, cook one of them, or switch to Tight week." + more})
+    from .domain import spend
+    low = spend.low_budget_check(user)
+    if low:                       # an impossible target becomes a choice, not 20 silent skips
+        out.append({"level": "warn", "icon": "₹", "kind": "low_budget", "title": low["title"], "body": low["body"],
+                    "actions": low["actions"]})
 
     b = view["budget"]
     if not skipped_budget and b["budget"] and b["remaining"] < 0.08 * b["budget"] and b["remaining"] >= 0:

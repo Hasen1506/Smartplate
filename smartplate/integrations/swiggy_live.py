@@ -1163,8 +1163,15 @@ def cart_preview(session_id: int) -> dict:
     fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price")},
                                             sort_keys=True).encode()).hexdigest()
     remember_photos(user_id, place["id"], [{"name": cell["item"], "image": _image(item)}])
+    price = rupees(item, menu_unit(records(data, "menu_item_id", "name")))
+    if price:
+        # Builders Club caps a Food cart at ₹1,000 payable (household meals hit it): stop before the cart.
+        from ..domain import checkout, fees
+        cap = checkout.split_for_cap(price, quantity, {"fees": fees.pricing_for(place["id"], fees.model(user_id))})
+        if not cap["fits"]:
+            raise SwiggyError(cap["message"], code="cart_over_cap", http_status=409)
     return {**details, "address": conn.get("address_label") or "Selected Swiggy address",
-            "menu_price": rupees(item, menu_unit(records(data, "menu_item_id", "name"))),
+            "menu_price": price,
             "price_estimated": price_estimated(item), "image": _image(item), "fingerprint": fingerprint}
 
 
@@ -1280,6 +1287,14 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
         blocked = "This dish needs options that Ziggy cannot choose yet. Customize it in Swiggy."
     elif user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
         blocked = "Swiggy did not verify this dish as vegetarian. Check it in Swiggy."
+    cap = None
+    if not blocked and price:
+        # Builders Club caps a Food cart at ₹1,000 payable: say so before the cart, with a split or a hand-off.
+        from ..domain import checkout, fees
+        cap = checkout.split_for_cap(price, quantity, {"fees": fees.pricing_for(restaurant_id, fees.model(user_id))})
+        review["cart_cap"] = cap
+        if not cap["fits"]:
+            blocked = cap["message"]
     if blocked:
         return {**review, "orderable": False, "reason": blocked, "fingerprint": None,
                 "rule": swiggy_rules.explain(blocked)}
@@ -1556,6 +1571,10 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     from ..domain import live_catalog
     live_catalog.record_fee(user_id, preview["address_id"], restaurant_id, preview["restaurant"],
                             billed_delivery_fee(view, _anchor(preview)))
+    # ...and its platform fee, packaging and GST replace the fee estimate (domain/fees).
+    from ..domain import fees
+    fees.record_bill(user_id, preview["address_id"], restaurant_id, preview["restaurant"],
+                     bill_breakdown(view, _anchor(preview)), _anchor(preview))
     return {**preview, "to_pay": cart_total(view, _anchor(preview)), "checkout_url": CHECKOUT_URL,
             "bill": bill_breakdown(view, _anchor(preview)), "orderable": True,
             "cancellation_note": cancellation_note(cart)}
@@ -1593,7 +1612,8 @@ def _checkout_state(user_id: int) -> dict:
         raise SwiggyError("Swiggy did not confirm the cart's delivery address. Refresh your cart or check it in Swiggy.")
     total = cart_total(cart, _anchor(intent))
     if total is None or total <= 0 or total > 1000:
-        raise SwiggyError("Swiggy did not return a valid payable total within its ₹1,000 Builders Club limit.")
+        raise SwiggyError("Swiggy did not return a valid payable total within its ₹1,000 Builders Club limit. "
+                          "Order fewer portions per cart (Ziggy shows how to split it) or place it in the Swiggy app.")
     options = call(user_id, "get_payment_options", build_args(_tool(conn, "get_payment_options"),
                                                         {"address": address_id}))
     body = options.get("data", options) if isinstance(options, dict) else {}
@@ -1686,6 +1706,8 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
                 cur.execute("DELETE FROM swiggy_cart_intents WHERE user_id=?", (user_id,))
         if not confirmed:
             raise SwiggyError("Swiggy did not confirm a completed order. Check Swiggy orders; do not retry this cart.")
+        from ..domain import spend          # a confirmed order is real spend (same ref as Swiggy's order history)
+        spend.record_placed(user_id, None, preview["to_pay"], str(order_id), preview.get("restaurant") or "")
         return {"order_id": str(order_id), "status": "confirmed", "item": preview["item"],
                 "to_pay": preview["to_pay"], "address": preview["address"],
                 "message": str(result.get("message") or "")}
@@ -1748,6 +1770,8 @@ def live_order_history(user_id: int) -> dict:
                "status": str(r.get("orderStatus") or ""), "ordered_time": str(r.get("orderedTime") or "")}
               for r in rows if isinstance(r, dict) and r.get("orderId")]
     _reconcile_with(user_id, rows)
+    from ..domain import spend          # real spend for actual-vs-target, the recap and budget suggestions
+    spend.record_swiggy_orders(user_id, rows)
     with db.cursor() as cur:
         attempts = cur.execute("SELECT state, order_id, address_id, created_ts, to_pay FROM swiggy_order_attempts "
                                "WHERE user_id=? ORDER BY created_ts DESC LIMIT 20", (user_id,)).fetchall()

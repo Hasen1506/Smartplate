@@ -200,10 +200,12 @@ def place(session_id: int, user_id: int, expected_fingerprint: str | None, over_
     budget = budget_check(row["plan_id"], session_id)
     if budget["over"] and over_budget_ok is not True:
         raise OverBudget(budget)
+    from . import spend
     if not config.LIVE_ORDERS:
         with db.cursor() as cur:
             cur.execute("UPDATE order_queue SET state='handed_off', updated_ts=? WHERE session_id=?",
                         (clock.now().isoformat(timespec="seconds"), session_id))
+        spend.record_handoff(user_id, session_id, row["to_pay"])     # a real bill, payment not yet known
         return {"mode": "tap_to_place", "placed": False, "url": swiggy_live.CHECKOUT_URL,
                 "message": "Your cart is ready in Swiggy. Tap to place it there."}
     result = swiggy_live.place_live_order(user_id, expected_fingerprint)
@@ -211,4 +213,6 @@ def place(session_id: int, user_id: int, expected_fingerprint: str | None, over_
         with db.cursor() as cur:
             cur.execute("UPDATE order_queue SET state='placed', updated_ts=? WHERE session_id=?",
                         (clock.now().isoformat(timespec="seconds"), session_id))
+        spend.record_placed(user_id, session_id, result.get("to_pay", row["to_pay"]), result.get("order_id"),
+                            result.get("restaurant") or "")
     return {"mode": "placed", **result}
