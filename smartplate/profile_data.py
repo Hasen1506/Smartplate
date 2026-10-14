@@ -4,13 +4,15 @@ from . import clock, db
 USER_TABLES = ("calendar_events", "leftovers", "receipts", "intake_log", "favourites", "ratings",
                "logins", "devices", "push_subscriptions", "swiggy_connections", "swiggy_pending",
                "swiggy_menus", "swiggy_favourites", "swiggy_order_attempts", "swiggy_checkout_quotes",
-               "swiggy_cart_intents", "swiggy_delivery_fees", "swiggy_photos", "swiggy_issues", "swiggy_meal_pools")
+               "swiggy_cart_intents", "swiggy_delivery_fees", "swiggy_photos", "swiggy_issues", "swiggy_meal_pools",
+               "swiggy_bill_fees", "spend_ledger", "spend_sync")
 # A stable row order for the export (Postgres has no implicit insertion order).
 EXPORT_ORDER = {"favourites": "restaurant_id", "logins": "user_id", "swiggy_connections": "user_id",
                 "swiggy_pending": "created_ts, state", "swiggy_menus": "restaurant",
                 "swiggy_favourites": "address_id, restaurant_id", "swiggy_order_attempts": "created_ts, fingerprint",
                 "swiggy_checkout_quotes": "created_ts, token", "swiggy_cart_intents": "user_id",
                 "swiggy_delivery_fees": "address_id, provider_id", "swiggy_photos": "restaurant_id, dish", "swiggy_issues": "ts", "swiggy_meal_pools": "address_id, meal, added_ts, item_id", "order_queue": "session_id",
+                "swiggy_bill_fees": "address_id, provider_id, seen_ts", "spend_ledger": "iso_date, ref", "spend_sync": "user_id",
                 "grocery_have": "plan_id, item", "grocery_swaps": "plan_id, token",
                 "push_sent": "subscription_id, session_id, at"}
 PRIVATE_COLUMNS = frozenset({"access_hash", "pw_hash", "token_hash", "access_token", "verifier",

@@ -32,13 +32,20 @@ def reasons_for(decision: dict, context: dict) -> list[str]:
                  f"was re-balanced around it.")
     elif context.get("pinned"):
         r.append("Your pick — the rest of the week was re-balanced around it.")
-    r.append(f"{decision['item_name']} from {decision['restaurant_name']} "
-             f"(₹{decision['cost']:.0f} incl. delivery, rated {decision['rating']:.1f}).")
     fee = context.get("fee")
+    bill = (fee or {}).get("bill") if not context.get("carted") else None
+    r.append(f"{decision['item_name']} from {decision['restaurant_name']} "
+             f"(₹{decision['cost']:.0f} incl. {'delivery, fees & GST' if bill else 'delivery'}, "
+             f"rated {decision['rating']:.1f}).")
     if fee and not context.get("carted"):
         r.append(f"Delivery ₹{fee['amount']:.0f} is an estimate until a Swiggy bill from this restaurant shows "
                  f"the real fee." if fee["estimated"] else
                  f"Delivery ₹{fee['amount']:.0f}: the delivery fee from your last Swiggy bill here.")
+    if bill:
+        extra = bill["fees"] + bill["gst"]
+        r.append(f"Platform fee, packaging & GST ≈ ₹{extra:.0f} — an estimate (whole bill ₹{bill['range'][0]:.0f}–"
+                 f"₹{bill['range'][1]:.0f}) until a Swiggy bill from here shows them." if bill["basis"]["fees"] != "bill"
+                 else f"Platform fee, packaging & GST ₹{extra:.0f}, from your Swiggy bills here.")
     if context.get("discovery"):
         r.append("Something new from outside your usual places — within your variety setting.")
     if context.get("liked"):

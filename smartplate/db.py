@@ -102,6 +102,37 @@ CREATE TABLE IF NOT EXISTS swiggy_delivery_fees (  -- the delivery fee Swiggy ac
     PRIMARY KEY (user_id, address_id, provider_id)
 );
 
+CREATE TABLE IF NOT EXISTS swiggy_bill_fees (      -- fee lines of real Swiggy cart bills (domain/fees)
+    user_id INTEGER NOT NULL,
+    address_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,                     -- Swiggy restaurant id
+    restaurant_name TEXT NOT NULL DEFAULT '',
+    item_total REAL NOT NULL,                      -- rupees
+    delivery REAL,                                 -- rupees; NULL when the bill had no delivery line
+    other REAL NOT NULL,                           -- platform + packaging + GST & other charges (no discounts)
+    to_pay REAL NOT NULL,
+    lines TEXT NOT NULL DEFAULT '[]',
+    seen_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, address_id, provider_id, seen_ts)
+);
+
+CREATE TABLE IF NOT EXISTS spend_ledger (          -- money actually spent: real Swiggy bills only (domain/spend)
+    user_id INTEGER NOT NULL,
+    ref TEXT NOT NULL,                             -- swiggy:<order id> | queue:<session id>
+    iso_date TEXT NOT NULL,
+    amount REAL NOT NULL,                          -- rupees, as billed
+    restaurant TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL,                          -- swiggy_order | ziggy_placed | ziggy_handoff
+    confirmed INTEGER NOT NULL DEFAULT 1,          -- 0: real bill, placement not confirmed (never counted)
+    PRIMARY KEY (user_id, ref)
+);
+
+CREATE TABLE IF NOT EXISTS spend_sync (            -- when Swiggy's order history was last read (domain/spend)
+    user_id INTEGER PRIMARY KEY,
+    synced_ts TEXT NOT NULL,
+    oldest_date TEXT
+);
+
 CREATE TABLE IF NOT EXISTS live_catalog_state (   -- the user's live Swiggy catalogue (domain/live_catalog)
     user_id INTEGER PRIMARY KEY,
     fetched_ts TEXT NOT NULL,
@@ -360,6 +391,8 @@ MIGRATIONS = [
     ("order_queue", "planned_cost", "REAL"),             # the plan's estimate when the real cart was checked
     ("decisions", "delivery_fee", "REAL"),               # live dish: the delivery fee priced into cost
     ("decisions", "fee_estimated", "INTEGER"),           # 1 = flat estimate, 0 = from a real Swiggy bill
+    ("decisions", "charges", "REAL"),                    # live dish: platform fee + packaging + GST priced into cost
+    ("decisions", "charges_estimated", "INTEGER"),       # 1 = research default / other bills, 0 = this restaurant's bill
 ]
 
 

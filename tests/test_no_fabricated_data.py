@@ -12,7 +12,7 @@
 """
 from test_roadmap_b_live_menus import RECORDED_MENU, _live_user, client, swiggy  # noqa: F401 (fixtures)
 from smartplate import service
-from smartplate.domain import household, models
+from smartplate.domain import fees, household, models
 
 
 def test_live_dishes_cost_swiggys_price_with_no_invented_surge(client, swiggy):
@@ -27,7 +27,9 @@ def test_live_dishes_cost_swiggys_price_with_no_invented_surge(client, swiggy):
         item = menu[d["item_id"]]
         portions = len(household.eaters(d, members, user))      # Arjun and Meera: a portion each
         assert portions == 2
-        assert d["cost"] == round(item["price"] * portions + item["delivery_fee"], 2), (d["item_name"], d["cost"])
+        # Swiggy's price × portions + delivery + per-order fees and 5% GST (domain/fees): no multiplier
+        assert d["cost"] == round(item["price"] * portions + item["delivery_fee"]
+                                  + fees.charges(item, item["price"] * portions), 2), (d["item_name"], d["cost"])
         assert d["surge_mult"] == 1.0 and not d.get("time_shift")
         assert not any("Surge" in r or "surge" in r for r in d["reasons"]), d["reasons"]
     view = client.get(f"/api/plan/{pid}").get_json()

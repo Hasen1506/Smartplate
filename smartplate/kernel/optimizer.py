@@ -19,7 +19,7 @@ import pulp
 
 from .. import clock, config, db
 from ..domain import (allergens, carbon, fatigue, festivals, flavour, health, household, learning, leftovers,
-                      meal_pools, models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
+                      meal_pools, models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather, fees)
 from ..integrations import calendar_sync
 from . import explainability, scheduler
 
@@ -211,7 +211,9 @@ def _delivery_candidate(user, plan, session, item, ctx):
     item, learned_pen = learning.adjust(item, ctx.get("learned"))
     cond = _wx(ctx, day)["condition"]
     n = portions(user, session, ctx)
-    base_cost = item["price"] * n + item["delivery_fee"]          # one delivery fee, a portion each
+    # one delivery fee and one set of per-order fees (platform, packaging, GST), a portion each
+    extra = fees.charges(item, item["price"] * n)
+    base_cost = round(item["price"] * n + item["delivery_fee"] + extra, 2)
 
     # Surge + optional time-shift (calendar-aware) -------------------------- #
     if surge.applies(item):
@@ -256,6 +258,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "item_id": item["id"], "item_name": item["name"], "rating": item["restaurant_rating"],
         "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3), "portions": n,
         "delivery_fee": item["delivery_fee"], "delivery_fee_estimated": item.get("delivery_fee_estimated"),
+        "charges": extra, "bill_estimate": fees.breakdown(item, item["price"] * n),
         "time_shift": time_shift, "flaky": item.get("flaky", 0), "rating_pen": _rating_pen(user, item),
         "is_usual": (not discovery) if ctx["taste"]["favourites"] else not fatigue.is_novel(item, history),
         "familiarity": round(1.0 - novel, 4), "discovery": discovery,
@@ -890,7 +893,8 @@ def _decision_context(user, session, chosen, ctx):
         "carbon_band": carbon.band(chosen.get("carbon_kg", 0)) if chosen["kind"] == "delivery" else None,
         "pinned": chosen.get("pinned", False),
         "carted": chosen.get("carted", False),
-        "fee": ({"amount": chosen["delivery_fee"], "estimated": chosen["delivery_fee_estimated"]}
+        "fee": ({"amount": chosen["delivery_fee"], "estimated": chosen["delivery_fee_estimated"],
+                 "bill": chosen.get("bill_estimate")}
                 if chosen.get("delivery_fee_estimated") is not None else None),
         "discovery": chosen.get("discovery", False),
         "liked": chosen.get("item_id") in ctx["taste"]["liked"],
@@ -916,14 +920,16 @@ def _write_decision(plan, user, session, chosen, ctx):
             "INSERT INTO decisions(session_id, plan_id, chosen_kind, restaurant_id, item_id, "
             "item_name, cost, surge_mult, substituted, reasons, nutrition, carbon_kg, "
             "recipe_key, time_shift, restaurant_name, rating, idempotency_key, created_ts, "
-            "delivery_fee, fee_estimated) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "delivery_fee, fee_estimated, charges, charges_estimated) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (row["session_id"], row["plan_id"], row["chosen_kind"], row["restaurant_id"],
              row["item_id"], row["item_name"], row["cost"], row["surge_mult"], 0,
              row["reasons"], row["nutrition"], row["carbon_kg"],
              chosen.get("recipe_key"), db.jd(chosen["time_shift"]) if chosen.get("time_shift") else None,
              chosen.get("restaurant_name"), chosen.get("rating", 0), None, now().isoformat(timespec="seconds"),
-             fee["amount"] if fee else None, (1 if fee["estimated"] else 0) if fee else None),
+             fee["amount"] if fee else None, (1 if fee["estimated"] else 0) if fee else None,
+             chosen.get("charges") if fee and fee.get("bill") else None,
+             (1 if fee["bill"]["basis"]["fees"] != "bill" else 0) if fee and fee.get("bill") else None),
         )
         row["id"] = cur.lastrowid
     return {**row, "day": session["day"], "meal": session["meal"],
