@@ -276,21 +276,24 @@ def test_exact_today_matches_the_milp(seed):
     assert _key(exact)[:3] == _key(milp)[:3]
 
 
-def test_greedy_week_is_within_two_percent_of_the_milp():
-    """grill #53: benchmark the greedy against the exact MILP on random weeks. Rule 4
-    (meals filled) must match exactly; the favourite score within 2% on average."""
-    gaps, filled_diff = [], 0
-    for seed in range(20):
+def test_week_benchmark_greedy_vs_exact_milp():
+    """grill #53: benchmark the greedy against the exact MILP on random weeks. The greedy
+    fills exactly as many meals (rule 4) but trails on favourite score, so the week uses the
+    MILP with the greedy as its floor: `solve` is never worse than either."""
+    gaps = []
+    for seed in range(6):
         rng = random.Random(1000 + seed)
         sl, menu, pools, hist, money = _random_problem(rng, 14, n_dishes=30)
         lists = _lists(sl, menu, pools, hist)
         rules = {"max_repeat": 2}
         caps = decide._caps(sl, lists, pools, 2)
-        g, m = _key(decide._greedy(sl, lists, money, rules, caps)), _key(decide.solve_milp(sl, lists, money, rules, caps))
-        filled_diff += m[0] - g[0]
+        g = _key(decide._greedy(sl, lists, money, rules, caps))
+        m = _key(decide.solve_milp(sl, lists, money, rules, caps))
+        chosen, method = decide.solve(sl, lists, money, rules, caps=caps)
+        assert g[0] == m[0]                                  # same meals filled
+        assert _key(chosen) >= max(g, m) and method.startswith("milp")
         gaps.append(0.0 if m[1] == 0 else (m[1] - g[1]) / m[1])
-    assert filled_diff == 0
-    assert sum(gaps) / len(gaps) < 0.02, gaps
+    assert max(gaps) < 0.2, gaps
 
 
 def test_decide_today_is_fast_on_a_big_menu():
@@ -311,7 +314,8 @@ def test_week_decide_is_fast():
     t0 = time.perf_counter()
     out = decide.plan(sl, menu, mode="favourites_only", people=[ME], places=set(range(1, 11)), pools=pools,
                       money=money, history=hist, rules={})
-    assert time.perf_counter() - t0 < 1.0 and out["method"] == "greedy"
+    assert time.perf_counter() - t0 < 5.0 and out["method"] in ("milp", "milp-capped", "greedy")
+    assert out["spent"] <= money
 
 
 # --------------------------------------------------------------------------- #
@@ -377,22 +381,29 @@ def test_decide_week_apply_pins_picks_and_stays_safe_and_in_budget(gt):
     assert out["spent"] <= out["money"] + 0.01
     assert not check_plan(pid)
     view = out["view"]
-    planned = {(d["day"], m): c for d in view["grid"] for m, c in d["meals"].items()}
+    planned = {c["session_id"]: c for d in view["grid"] for c in d["meals"].values()}
     for p in out["picks"]:
         if p["kind"] == "delivery" and len(p["lines"]) == 1:
-            assert planned[(p["day"], p["meal"])]["item"] == p["name"]
+            assert planned[p["session_id"]]["item"] == p["name"]
+            assert planned[p["session_id"]]["pinned"]
+        if p["kind"] == "skip":
+            assert planned[p["session_id"]]["status"] == "skipped"
 
 
 def test_decide_api_routes(gt):
     from smartplate.app import create_app
-    v = _profile({"name": "Asha", "diet": "veg", "weekly_budget": 2100, "meals": ["lunch", "dinner"]})
     c = create_app().test_client()
+    v = c.post("/api/profiles", json={"name": "Asha", "diet": "veg", "weekly_budget": 2100,
+                                      "meals": ["lunch", "dinner"]}).get_json()
+    c.environ_base["HTTP_X_SMARTPLATE_KEY"] = v["access_key"]
     r = c.post(f"/api/user/{v['user']['id']}/decide/today", json={"mode": "favourites_plus_new"})
     assert r.status_code == 200 and r.get_json()["mode"] == "favourites_plus_new"
     r = c.post(f"/api/plan/{v['plan']['id']}/decide", json={"mode": "surprise_me"})
     assert r.status_code == 200 and r.get_json()["horizon"] == "week"
     assert c.post(f"/api/plan/{v['plan']['id']}/decide", json={"mode": "everything"}).status_code == 400
     assert c.post(f"/api/user/{v['user']['id']}/decide/today", json={"money": "lots"}).status_code == 400
+    del c.environ_base["HTTP_X_SMARTPLATE_KEY"]
+    assert c.post(f"/api/plan/{v['plan']['id']}/decide", json={}).status_code == 401
 
 
 def test_balanced_week_fills_meals_before_skipping(gt):

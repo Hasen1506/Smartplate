@@ -13,9 +13,10 @@ Modes (all inside the person's rules: min rating, max price a meal, quantity, di
   favourites_plus_new    … plus places they haven't saved, rated at least their min rating
   surprise_me            anything inside their rules, picked for novelty (stable per day)
 
-Small problems (today: up to 4 meals) are solved exactly by branch and bound; a week
-uses a greedy fill-then-upgrade pass. `solve_milp` is the exact reference the tests and
-docs/testing/differential-w06.md compare the greedy against.
+Small problems (today: up to 4 meals) are solved exactly by branch and bound (ms). A
+week is solved exactly by a staged MILP (`solve_milp`, ~0.1–0.4 s), with a greedy
+fill-then-upgrade pass as its floor; the benchmark that chose this is in
+docs/testing/differential-w06.md.
 
 The engine (`candidates_for_slot`, `solve`, `plan`) is pure: no database, no clock.
 `gather` reads one person's inputs from the database for service.decide_today/week.
@@ -271,22 +272,35 @@ def _key(chosen) -> tuple:
     return obj.plan_key(filled, q, cost)
 
 
+def _undominated(cands, n, keep_max: int | None = None):
+    """Drop a candidate dominated (liked no more, costs no less) by n others: with at most
+    n meals, one of those n is always free to take its place, so the optimum is kept.
+    O(K log K). `keep_max` additionally bounds the list (best-liked, then cheapest)."""
+    import bisect
+    cs = sorted(cands, key=lambda c: (-obj.quantize(c["score"]), c["cost"]))
+    keep, costs, seen = [], [], {}
+    for c in cs:
+        k = (obj.quantize(c["score"]), c["cost"])
+        # earlier = liked at least as much; dominated by those of them costing no more
+        # (an identical twin is not a dominator)
+        dom = bisect.bisect_right(costs, c["cost"]) - seen.get(k, 0)
+        if dom < n:
+            keep.append(c)
+        bisect.insort(costs, c["cost"])
+        seen[k] = seen.get(k, 0) + 1
+    if keep_max is not None and len(keep) > keep_max:
+        cheapest = sorted(keep, key=lambda c: c["cost"])[: keep_max // 3]
+        ids = {id(c) for c in cheapest}
+        keep = [c for c in keep if id(c) not in ids][: keep_max - len(cheapest)] + cheapest
+    return keep
+
+
 def _exact(slots, cand_lists, money, rules, caps):
     """Branch and bound over the plan key. Exact for the problem as stated."""
     n = len(slots)
     lists = []
     for cands in cand_lists:
-        cs = sorted(cands, key=lambda c: (-obj.quantize(c["score"]), c["cost"]))
-        # Drop a candidate dominated (liked no more, costs no less) by n others: with at
-        # most n meals, one of those n is always free to take its place.
-        keep = []
-        for c in cs:
-            dom = sum(1 for d in cs if d is not c and obj.quantize(d["score"]) >= obj.quantize(c["score"])
-                      and d["cost"] <= c["cost"] and (obj.quantize(d["score"]), -d["cost"]) != (
-                          obj.quantize(c["score"]), -c["cost"]))
-            if dom < n:
-                keep.append(c)
-        lists.append(keep + [SKIP])
+        lists.append(_undominated(cands, n) + [SKIP])
     best_q = [max((obj.quantize(c["score"]) for c in cs if c["kind"] != "skip"), default=0) for cs in lists]
     has = [any(c["kind"] != "skip" for c in cs) for cs in lists]
     st = _State(slots, money, rules, caps)
@@ -330,29 +344,8 @@ def _greedy(slots, cand_lists, money, rules, caps):
                 st.add(slots[i], c)
                 chosen[i] = c
                 break
-    while True:
-        best = None
-        for i in range(n):
-            cur = chosen[i]
-            if cur["kind"] == "skip":
-                continue
-            cq = obj.quantize(cur["score"])
-            for c in cand_lists[i]:
-                dq = obj.quantize(c["score"]) - cq
-                if dq <= 0:
-                    continue
-                dc = c["cost"] - cur["cost"]
-                if not st.fits(slots[i], c, old=cur):
-                    continue
-                rank = (1, dq, -dc) if dc <= 0 else (0, dq / dc, dq)
-                if best is None or rank > best[0]:
-                    best = (rank, i, c)
-        if best is None:
-            break
-        _, i, c = best
-        st.add(slots[i], chosen[i], -1)
-        st.add(slots[i], c)
-        chosen[i] = c
+    _upgrade(slots, cand_lists, chosen, st)
+    _pair_exchange(slots, cand_lists, chosen, st)
     for i in range(n):                                  # rule 5: cheaper among equals
         cur = chosen[i]
         if cur["kind"] == "skip":
@@ -374,6 +367,89 @@ def _greedy(slots, cand_lists, money, rules, caps):
                     chosen[i] = c
                     break
     return chosen
+
+
+def _pair_exchange(slots, cand_lists, chosen, st, max_rounds: int = 60):
+    """Local search: upgrade one meal and pay for it by stepping another meal down, when
+    the pair raises the total favourite score. (The greedy alone was up to 13% below the
+    exact MILP on random weeks; see docs/testing/differential-w06.md.)"""
+    n = len(slots)
+    q = obj.quantize
+    for _ in range(max_rounds):
+        left = st.money - st.spent
+        best = None
+        for i in range(n):
+            ci = chosen[i]
+            if ci["kind"] == "skip":
+                continue
+            for c in cand_lists[i]:
+                dqi = q(c["score"]) - q(ci["score"])
+                if dqi <= 0:
+                    continue
+                need = c["cost"] - ci["cost"] - left      # > 0: money-blocked; else cap-blocked
+                for j in range(n):
+                    cj = chosen[j]
+                    if j == i or cj["kind"] == "skip":
+                        continue
+                    for d in cand_lists[j]:
+                        if d is cj or d["cost"] > cj["cost"] - need + 1e-9:
+                            continue
+                        gain = dqi + q(d["score"]) - q(cj["score"])
+                        if gain <= 0 or (best is not None and (gain, -(c["cost"] + d["cost"])) <= best[0]):
+                            continue
+                        st.add(slots[j], cj, -1)
+                        ok = st.fits(slots[j], d)
+                        if ok:
+                            st.add(slots[j], d)
+                            ok = st.fits(slots[i], c, old=ci)
+                            st.add(slots[j], d, -1)
+                        st.add(slots[j], cj)
+                        if ok:
+                            best = ((gain, -(c["cost"] + d["cost"])), i, c, j, d)
+        if best is None:
+            return
+        _, i, c, j, d = best
+        st.add(slots[j], chosen[j], -1)
+        st.add(slots[j], d)
+        chosen[j] = d
+        st.add(slots[i], chosen[i], -1)
+        st.add(slots[i], c)
+        chosen[i] = c
+        # money freed by the pair may buy plain upgrades again
+        _upgrade(slots, cand_lists, chosen, st)
+
+
+def _upgrade(slots, cand_lists, chosen, st):
+    n = len(slots)
+    while True:
+        best = None
+        for i in range(n):
+            cur = chosen[i]
+            if cur["kind"] == "skip":
+                continue
+            cq = obj.quantize(cur["score"])
+            for c in cand_lists[i]:
+                dq = obj.quantize(c["score"]) - cq
+                if dq <= 0:
+                    continue
+                dc = c["cost"] - cur["cost"]
+                if not st.fits(slots[i], c, old=cur):
+                    continue
+                rank = (1, dq, -dc) if dc <= 0 else (0, dq / dc, dq)
+                if best is None or rank > best[0]:
+                    best = (rank, i, c)
+        if best is None:
+            return
+        _, i, c = best
+        st.add(slots[i], chosen[i], -1)
+        st.add(slots[i], c)
+        chosen[i] = c
+
+
+MILP_MAX_NODES = 5000
+MILP_PER_SLOT = 24
+MILP_TIME_LIMIT_S = 30
+MILP_LAST = {"proven": None}
 
 
 def solve_milp(slots, cand_lists, money, rules, caps=None):
@@ -409,13 +485,18 @@ def solve_milp(slots, cand_lists, money, rules, caps=None):
     score = pulp.lpSum(obj.quantize(c["score"]) * x[(i, j)] for i, cs in enumerate(cand_lists)
                        for j, c in enumerate(cs))
     cost = pulp.lpSum(c["cost"] * x[(i, j)] for i, cs in enumerate(cand_lists) for j, c in enumerate(cs))
-    solver = pulp.PULP_CBC_CMD(msg=False)
+    # A node cap (deterministic, like the week planner's) so a hard instance can't hang;
+    # MILP_LAST says whether every stage was proven optimal.
+    solver = pulp.PULP_CBC_CMD(msg=False, maxNodes=MILP_MAX_NODES, timeLimit=MILP_TIME_LIMIT_S)
+    MILP_LAST["proven"] = True
     for stage in (filled, score):
         prob.setObjective(stage)
         prob.solve(solver)
+        MILP_LAST["proven"] &= prob.status == pulp.LpStatusOptimal and prob.sol_status == pulp.LpSolutionOptimal
         prob += stage >= round(pulp.value(stage) or 0)
     prob.setObjective(-cost)
     prob.solve(solver)
+    MILP_LAST["proven"] &= prob.sol_status == pulp.LpSolutionOptimal
     out = []
     for i, cs in enumerate(cand_lists):
         j = next((j for j in range(len(cs)) if (x[(i, j)].value() or 0) > 0.5), None)
@@ -429,7 +510,22 @@ def solve(slots, cand_lists, money, rules, *, caps=None, method="auto"):
         return solve_milp(slots, cand_lists, money, rules, caps), "milp"
     if method == "exact" or (method == "auto" and len(slots) <= EXACT_MAX_SLOTS):
         return _exact(slots, cand_lists, money, rules, caps), "exact"
-    return _greedy(slots, cand_lists, money, rules, caps), "greedy"
+    greedy = _greedy(slots, cand_lists, money, rules, caps)
+    if method == "greedy":
+        return greedy, "greedy"
+    # A week: the greedy matches the exact MILP on meals filled but was 0–13% below it on
+    # favourite score in the benchmark (docs/testing/differential-w06.md), so the week is
+    # solved exactly (≈0.1–0.4 s) and the greedy stays as the floor if CBC hits its cap.
+    try:
+        # every slot keeps its undominated dishes, at most MILP_PER_SLOT (best-liked and the
+        # cheapest): a bound for CBC on big menus, never a taste rule
+        bounded = [_undominated(cs, len(slots), MILP_PER_SLOT) for cs in cand_lists]
+        milp = solve_milp(slots, bounded, money, rules, caps)
+    except Exception:                                    # no CBC binary: the greedy answer
+        return greedy, "greedy"
+    if _key(milp) >= _key(greedy):
+        return milp, "milp" if MILP_LAST["proven"] else "milp-capped"
+    return greedy, "greedy"
 
 
 def plan(slots: list[dict], menu: list[dict], *, mode: str, people: list[dict], places: set,

@@ -83,7 +83,7 @@ _SKIP_CAUSES = (
     ("variety", ("as often as your variety",)),
     ("money", ("budget skip", "money left", "didn't fit the budget", "daily cap", "daily limit", "of this week's",
                "fit the money")),
-    ("safety", ("aren't safe", "isn't safe", "not safe", "safe for everyone", "safe for your rules")),
+    ("safety", ("aren't safe", "isn't safe", "not safe", "safe for ", "safe for your rules")),
     ("you", ("you skipped", "you cook", "your fast", "fasting", "out of town", "holiday")),
     ("supply", ("no real restaurant", "on swiggy's menu", "nothing from your", "add another dish")),
 )

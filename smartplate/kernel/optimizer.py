@@ -444,6 +444,11 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
         # With saved places, whole places are candidates (grill #5), not a short list.
         n_usual = max(slots, MAX_FAVOURITE_CANDIDATES) if favs else slots
         cands = best(usual, n_usual) + best(fresh, n_fresh)
+        if nonveg_share(user) > 0:
+            # a non-veg eater always sees non-veg dishes, not only the cheapest (veg) few
+            have = {c["item_id"] for c in cands}
+            cands += [c for c in best([it for it in usual if not it.get("veg", 1)], slots)
+                      if c["item_id"] not in have]
 
     cook = _cook_candidate(user, session, ctx)
     if cook:
