@@ -192,11 +192,10 @@ def test_onboarding_budget_and_diet_choice_and_tamil(town_world):
             page.locator("#ob-budget").fill("300")          # typing, not the ± buttons
             expect(per).to_have_text("about ₹14 a meal for 21 meals")
             expect(page.locator('[data-ob="budgetpick"][data-val="3000"]')).to_have_attribute("aria-pressed", "false")
-            warn = page.locator("#ob-floor [role=alert]")
-            expect(warn).to_contain_text("₹300 is ₹14 a meal")
-            warn.get_by_role("button", name="Use ₹1,500").click()
-            expect(page.locator("#ob-budget")).to_have_value("1500")
+            # Founder, Oct 2026: no fixed ₹60-a-meal floor; first run has no per-user floor → no warning
             expect(page.locator("#ob-floor [role=alert]")).to_have_count(0)
+            page.locator('[data-ob="budgetpick"][data-val="1500"]').click()
+            expect(page.locator("#ob-budget")).to_have_value("1500")
             expect(page.locator('[data-ob="budgetpick"][data-val="1500"]')).to_have_attribute("aria-pressed", "true")
 
             # Back goes to the previous step, not out of Ziggy

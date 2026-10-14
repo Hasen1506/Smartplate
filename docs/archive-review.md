@@ -24,6 +24,10 @@ How this was measured: `git log` dates against `main` at `19fd3ef`, `git branch 
 
 ### Moved to `docs/archive/` (done, nothing deleted)
 
+**Update (Round 2, Oct 2026):** at the founder's request the brainstorm, `project/` and
+`design-audit/` (≈6.2 MB, mostly PNG screenshots) were then **deleted** from the tree. They stay
+in git history: `git show 9fc21e5:docs/archive/<path>`. The 2026-09-27 audit is still in `docs/archive/`.
+
 | File | Last change | Why it went |
 |---|---|---|
 | `SmartPlate_Brainstorm.html` → `docs/archive/` | 13 Jun | The June brainstorm. The product has moved past it. README link updated. |
@@ -93,7 +97,7 @@ checked per file: every file the branch added exists in `main` (usually changed 
 | `codex/smartplate-live-core-20260930` | 1 Oct | `agent_api.py`, `food_memory.py`, `live_basket.py`, `live_core.py`, `live_planner.py`, `monitoring.py`, `reminder_queue.py`, `reminder_worker.py`, `static/live-core.js`, 2 docs, 5 test files | An unmerged alternative architecture. Its `reminder_worker.py` (an always-on process) and `monitoring.py` (request ids) are superseded by W9's `/cron/tick` and `observability.py`. Keep the branch until you've read `docs/agent-architecture.md` on it, then delete. |
 | `ui/v3-tonight` | 11 Oct | `static/v3/*`, `tests/test_email_signin.py`, `tests/test_ui_v3.py`, 3 more test files | A "Tonight" v3 UI. W5 is building a new `static/v3/` now, so check for overlap before W5 merges. Keep until then. |
 
-Suggested clean-up, which you run yourself (it pushes): `git push origin --delete <branch>` for the 31 branches in the first two groups (8 merged + 23 superseded; never `main`).
+Suggested clean-up, which you run yourself (it pushes): `git push origin --delete <branch>` for the 31 branches in the first two groups (8 merged + 23 superseded; never `main`). The exact list is in `docs/branches-cleanup.md`.
 
 ---
 

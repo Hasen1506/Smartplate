@@ -23,7 +23,7 @@
 .v3-rules .link{min-height:36px;font-size:13.5px;margin-left:4px}
 
 .v3-meals{gap:0;padding:6px 16px 12px}
-.v3-meal{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);grid-template-areas:"n m" "p p" "w w";column-gap:10px;row-gap:6px;padding:12px 0;border-bottom:1px solid var(--line)}
+.v3-meal{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);grid-template-areas:"n m" "p p" "w w" "u u";column-gap:10px;row-gap:6px;padding:12px 0;border-bottom:1px solid var(--line)}
 .v3-meal-name{grid-area:n;font-weight:800;font-size:15px;align-self:center}
 .v3-meal-meta{justify-content:flex-end}
 .v3-qty.stepper.sm button{width:36px;height:36px;min-height:36px}
@@ -49,6 +49,15 @@
 .v3-compare .fine{flex-basis:100%}
 
 .v3-pools-h{margin-top:6px}
+/* Phone: each meal's usual meals open under its line ("Usual ▾"), not as a separate block. */
+.v3-usual{grid-area:u;display:flex;flex-direction:column;gap:8px;padding:4px 12px 12px;border-radius:14px;background:var(--raised);min-width:0}
+.v3-usual .v3-pool-list{min-width:0}
+.v3-usual-btn{white-space:nowrap}
+.v3-other-usual{display:flex;flex-direction:column;gap:6px;padding-top:10px;margin-top:10px;border-top:1px solid var(--line)}
+.v3-other-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px}
+.v3-other-row .link{min-height:40px;display:inline-flex;align-items:center;gap:4px;font-size:13.5px}
+.v3-left-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:14.5px}
+.v3-left-tag{font-size:11.5px;padding:2px 7px;vertical-align:1px}
 .v3-pools{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
 .v3-pool{gap:10px;padding:16px}
 .v3-pool-list{list-style:none;display:flex;flex-direction:column}

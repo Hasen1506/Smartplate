@@ -4,7 +4,7 @@
 API header keep the original SmartPlate name.*
 
 A **scheduling** AI agent for food delivery — the white space the
-[strategic brainstorm](docs/archive/SmartPlate_Brainstorm.html) identified: scheduled +
+[strategic brainstorm](https://github.com/Hasen1506/Smartplate/blob/9fc21e5/docs/archive/SmartPlate_Brainstorm.html) (removed from the tree in Oct 2026; the link is the last commit that had it) identified: scheduled +
 predictive + budget-constrained + delivery-integrated + autonomous substitution.
 
 This repo is the **working v1.1 app**. It plans a week of meals with a real

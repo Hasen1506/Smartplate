@@ -21,6 +21,32 @@ No Swiggy account, OAuth code, cart, payment, or real order was used in the obse
 6. For a supervised order pilot only, confirm Swiggy explicitly permits Food placement and its COD response matches the adapter. Set `SMARTPLATE_SWIGGY_MODE=live_order` (or `SMARTPLATE_LIVE_ORDERS=on`) only after a support owner, refund/cancellation route, backup restore, and staging test exist. Start with a small allowed order and a single user. Every real order requires a fresh approval that displays full address, item, total and payment method. If the response is uncertain, inspect Swiggy orders and contact support; do not retry the same cart blindly. UPI placement is not built: users pay in Swiggy checkout. Swiggy's MCP has had a UPI payment stage since July 2026 (`get_payment_options` → `place_food_order` with a UPI intent/QR → `PENDING_PAYMENT` → `confirm_order`); adopting it is a future switch that keeps the same explicit-approval rule (docs/research/platform-2026-10.md). Ziggy never collects money itself.
 7. Monitor `/readyz`, failed OAuth, provider errors, unknown order attempts, backup age and disk fill. Roll back code by redeploying the prior known-good commit while retaining the persistent disk and secret. Do not roll back the database file over live orders without an incident plan.
 
+## Environment checklist (operator values)
+
+Set in Render → Environment for the live service. Values marked *decided* were confirmed by
+the founder in Oct 2026; tick them off in Render after each new service or Blueprint sync.
+
+| Variable | Value | Status |
+|---|---|---|
+| `SMARTPLATE_SECRET` | generated, ≥ 32 chars (never rotate casually; see below) | set (Blueprint `generateValue`) |
+| `SMARTPLATE_PUBLIC_URL` | `https://smartplate-xgxd.onrender.com` | set (Blueprint) — must stay: Swiggy whitelisted this exact origin |
+| `SMARTPLATE_SWIGGY_CALLBACK_PATH` | `/swiggy/callback` | set (Blueprint) — must stay |
+| `SMARTPLATE_SWIGGY_MODE` (or `SMARTPLATE_SWIGGY` + `SMARTPLATE_LIVE_ORDERS`) | `live_cart` (`live` + `off`) | set (Blueprint) |
+| `SMARTPLATE_OPERATOR` | `VijeyaHasen K H` | decided |
+| `SMARTPLATE_GRIEVANCE_NAME` | `VijeyaHasen K H` | decided |
+| `SMARTPLATE_PRIVACY_CONTACT` | `hasenhamesh15@gmail.com` | decided |
+| `SMARTPLATE_PUSH_CONTACT` | `mailto:hasenhamesh15@gmail.com` | decided (Blueprint prompts, `sync: false`) |
+| `SMARTPLATE_BACKUP_WINDOW` | `6 hours on Neon's free plan` (default) | change only if the backup plan changes |
+| `DATABASE_URL` | Neon connection string (if Postgres) | founder's account |
+| `SMARTPLATE_CRON_KEY`, `SMARTPLATE_ADMIN_KEY` | generated | needed for `/cron/tick` and the admin read-outs (docs/reliability.md) |
+
+There is no meal-price floor to configure: the old fixed ₹60-a-meal warning was removed in
+Oct 2026. A low-budget warning, when shown, comes from the person's own cheapest favourite
+with fees.
+
+The names keep the `SMARTPLATE_` prefix on purpose (renaming them would need every deploy
+changed at once); users only ever see "Ziggy".
+
 ## Data controls and incident recovery
 
 Private profiles can download their local data and permanently delete their active

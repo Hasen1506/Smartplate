@@ -548,7 +548,7 @@ def test_l14_shared_week_is_anonymous_unless_opted_in_and_adopts_deduped(client)
     client.post(f"/api/plan/{pid}/save-template", json={"title": "Week"}, headers=h)
     listed = client.get("/api/community").get_json()
     mine = next(t for t in listed if t["title"] == "Week")
-    assert "Priya" not in json.dumps(listed) and mine["author"] == "A SmartPlate user"
+    assert "Priya" not in json.dumps(listed) and mine["author"] == "A Ziggy user"
     client.post(f"/api/plan/{pid}/save-template", json={"title": "Named", "show_name": True}, headers=h)
     assert any(t["author"] == "Priya Secret" for t in client.get("/api/community").get_json())
     a = client.post(f"/api/community/{mine['id']}/adopt", json={}).get_json()["adopts"]

@@ -2,17 +2,18 @@
 
 Production settings (no fixture data), frozen clock (Mon 2 Nov 2026 08:00 IST), the stand-in
 Swiggy neighbourhood (tests/swiggy_town.py). A vegetarian with breakfast + lunch:
-  * Today shows "Today's budget ₹600 (B+L)", the weather card, rule chips, empty pools;
-  * "+ New item / restaurant" → search Swiggy → a place → a dish → in the breakfast pool;
+  * Today shows "Today's budget ₹600 (B+L)", the weather card, rule chips, no usual meals yet;
+  * "+ New item / restaurant" → search Swiggy → a place → a dish → in the usual breakfasts;
     a typed dish; a typed "Chicken Burrito" with no veg mark is greyed out with the reason;
-  * a meal line picks from the pool (▾), quantity ±, budget presets;
+  * a meal line picks from the usual meals (▾), quantity ±, budget presets; "₹X left after fees";
   * nothing is decided until "Decide for me" → a mode → Decide;
   * the price-compare row appears only once a Swiggy-priced pick exists (no fake numbers);
   * Send details hands the text to the share sheet; Place order → Swiggy cart review;
   * Swap is the one way to change a meal; the Week's "Change" sheet is reachable from it;
   * Cook tab: type any dish → ingredients with Instamart links;
   * Week: nutrition is off until turned on;
-  * desktop: the three pools sit side by side; phone: stacked;
+  * usual meals (founder, Oct 2026): desktop — three panels side by side; phone — no separate
+    block, each meal line opens its own "Usual ▾" drawer (pick, add, remove);
   * no horizontal scroll, no console errors, WCAG AA text contrast, in light and dark;
   * first run: two questions (diet with nothing preselected, today's budget + meals) → Today;
     the account is offered only after a first pick;
@@ -137,8 +138,26 @@ def contrast_ok(page):
     assert not bad, bad[:5]
 
 
+def usual(page, viewport, meal):
+    """The usual meals for one meal: a panel on a computer, the meal line's drawer on a phone."""
+    if viewport["width"] >= 1024:
+        return page.locator(".v3-pool", has=page.get_by_role("heading", name=f"Usual {meal}{'es' if meal == 'lunch' else 's'}", exact=True))
+    btn = page.locator(f'[data-v3-usual="{meal}"]')
+    if btn.get_attribute("aria-expanded") != "true":
+        btn.click()
+    expect(btn).to_have_attribute("aria-expanded", "true")
+    return page.locator(f"#v3-usual-{meal}")
+
+
+def no_old_name(page):
+    """Users see Ziggy, never SmartPlate (founder, Oct 2026)."""
+    text = page.evaluate("document.title + ' ' + document.body.innerText")
+    assert "smartplate" not in text.lower().replace(" ", ""), text[:200]
+
+
 def _add_from_swiggy(page, meal_btn, search, place, dish):
-    page.locator(meal_btn).click()
+    if meal_btn:
+        page.locator(meal_btn).click()
     sheet = page.get_by_role("dialog", name="New item / restaurant")
     expect(sheet).to_be_visible()
     sheet.get_by_role("searchbox", name="Search Swiggy").fill(search)
@@ -170,39 +189,46 @@ def test_today_favourites_first_journey(town, viewport, theme):
         expect(page.locator(".v3-compare")).to_have_count(0)            # no data → no price row
         assert page.locator("[data-v3-pick]").count() == 0
         # nothing decided for you: the meal lines are empty
-        expect(today.get_by_label("Today's meals")).to_contain_text("Add to breakfast pool")
+        expect(today.get_by_label("Today's meals")).to_contain_text("Add a usual breakfast")
+        if viewport["width"] < 1024:
+            expect(page.locator(".v3-pools")).to_have_count(0)          # no separate block on a phone
+        no_old_name(page)
         page.wait_for_load_state("networkidle")
         shot(page, f"01-today-empty-{tag}")
         no_overflow(page)
 
         # + New item / restaurant → Swiggy search → place → dish
-        _add_from_swiggy(page, '.v3-pool [data-v3-add="breakfast"]', "pongal", "Annapoorna Tiffin Room", "Ven Pongal")
+        usual(page, viewport, "breakfast").locator('[data-v3-add="breakfast"]').click()
+        _add_from_swiggy(page, None, "pongal", "Annapoorna Tiffin Room", "Ven Pongal")
         page.get_by_role("button", name="Close add a dish").click()
         # typed dishes: one fine, one greyed out (no veg mark for a vegetarian)
-        page.locator('.v3-pool [data-v3-add="lunch"]').click()
+        usual(page, viewport, "lunch").locator('[data-v3-add="lunch"]').click()
         sheet = page.get_by_role("dialog", name="New item / restaurant")
         sheet.get_by_role("button", name="Type it in").click()
         sheet.get_by_role("textbox", name="Dish").fill("Chicken Burrito")
         sheet.get_by_label("Place (optional)").fill("Burrito Co")
         sheet.get_by_label("Price you pay (₹)").fill("220")
-        sheet.get_by_role("button", name="Add to lunch pool").click()
+        sheet.get_by_role("button", name="Add to your usual lunches").click()
         expect(page.locator(".toast")).to_contain_text("Chicken Burrito added")
-        lunch_pool = page.locator(".v3-pool", has=page.get_by_role("heading", name="Lunch pool"))
+        lunch_pool = usual(page, viewport, "lunch")
         expect(lunch_pool.locator(".v3-pool-item.off")).to_contain_text("The name says “chicken” (not veg)")   # W1 reason
-        page.locator('.v3-pool [data-v3-add="lunch"]').click()
+        usual(page, viewport, "lunch").locator('[data-v3-add="lunch"]').click()
         sheet = page.get_by_role("dialog", name="New item / restaurant")
         sheet.get_by_role("button", name="Type it in").click()
         sheet.get_by_role("textbox", name="Dish").fill("Veg Thali")
         sheet.get_by_label("Price you pay (₹)").fill("650")
         sheet.locator("label.chip", has_text="Yes").click()
-        sheet.get_by_role("button", name="Add to lunch pool").click()
+        sheet.get_by_role("button", name="Add to your usual lunches").click()
         expect(page.locator(".toast")).to_contain_text("Veg Thali added")
 
-        # pick breakfast from the pool (▾), two of them
-        page.get_by_label("Breakfast from your pool").select_option(label="Ven Pongal · ₹90 · Annapoorna Tiffin Room")
+        # pick breakfast from the usual meals (▾), two of them
+        page.get_by_label("Breakfast from your usual meals").select_option(label="Ven Pongal · ₹90 · Annapoorna Tiffin Room")
         expect(page.locator('[data-v3-meal="breakfast"]')).to_contain_text("₹90")
         page.get_by_role("button", name="One more Ven Pongal").first.click()
         expect(page.locator('[data-v3-meal="breakfast"] .v3-qty b')).to_have_text("2×")
+        # what's left is net of Swiggy fees, and says it is an estimate until a real bill
+        expect(page.locator(".v3-budget .v3-left")).to_contain_text("left after fees")
+        expect(page.locator(".v3-budget .v3-left-tag")).to_have_text("estimate")
         # price compare row appears now that a Swiggy price exists
         expect(page.locator(".v3-compare")).to_contain_text("Swiggy ₹180")
         expect(page.locator(".v3-compare")).to_contain_text("Other apps · coming")
@@ -229,12 +255,28 @@ def test_today_favourites_first_journey(town, viewport, theme):
         no_overflow(page)
         contrast_ok(page)
 
-        # desktop: the three pools side by side; phone: stacked
-        boxes = [b.bounding_box() for b in page.locator(".v3-pool").all()]
+        # usual meals: desktop — the three panels side by side; phone — a drawer under each meal line
         if viewport["width"] >= 1024:
+            boxes = [b.bounding_box() for b in page.locator(".v3-pool").all()]
+            assert len(boxes) == 3
             assert len({round(b["y"]) for b in boxes}) == 1 and boxes[0]["x"] < boxes[1]["x"] < boxes[2]["x"]
+            assert page.locator("[data-v3-usual]").count() == 0
         else:
-            assert boxes[0]["y"] < boxes[1]["y"] < boxes[2]["y"]
+            expect(page.locator(".v3-pools")).to_have_count(0)
+            for meal in ("breakfast", "lunch"):
+                drawer = usual(page, viewport, meal)
+                expect(page.locator(f'[data-v3-meal="{meal}"] #v3-usual-{meal}')).to_have_count(1)   # under its own line
+            expect(usual(page, viewport, "dinner")).to_contain_text("No dishes yet")   # not today, still reachable
+            # remove from the drawer: the typed burrito goes, the thali stays
+            usual(page, viewport, "lunch").get_by_role("button", name="Remove Chicken Burrito from your usual lunches").click()
+            expect(page.locator(".toast")).to_contain_text("Removed from your usual lunches")
+            expect(usual(page, viewport, "lunch")).not_to_contain_text("Chicken Burrito")
+            expect(usual(page, viewport, "lunch")).to_contain_text("Veg Thali")
+            shot(page, f"02b-usual-drawers-{tag}")
+            no_overflow(page)
+            contrast_ok(page)
+            page.locator('[data-v3-usual="lunch"]').click()           # close again
+            expect(page.locator("#v3-usual-lunch")).to_have_count(0)
 
         # Send details → the share sheet gets today's text
         page.get_by_role("button", name="Send details").click()
@@ -245,7 +287,7 @@ def test_today_favourites_first_journey(town, viewport, theme):
         # Swap: the one way to change a meal; the classic Change sheet is behind it
         page.locator('[data-v3-swap="breakfast"]').click()
         swap = page.get_by_role("dialog", name="Swap breakfast")
-        expect(swap.get_by_text("From your breakfast pool")).to_be_visible()
+        expect(swap.get_by_text("From your usual breakfasts")).to_be_visible()
         expect(swap.get_by_role("button", name="New item / restaurant")).to_be_visible()
         shot(page, f"03-swap-{tag}")
         swap.get_by_role("button", name="Close swap breakfast").click()
@@ -285,9 +327,10 @@ def test_today_favourites_first_journey(town, viewport, theme):
         expect(page.get_by_label("Show nutrition")).to_be_checked()
         shot(page, f"05-week-{tag}")
         no_overflow(page)
-        # Saved → My meals: no drag-and-drop board; it points to the pools on Today
+        # Saved → My meals: no drag-and-drop board; it points to the usual meals on Today
         nav.get_by_role("button", name="Saved").click()
-        expect(page.get_by_text("Your meal pools are on Today")).to_be_visible()
+        expect(page.get_by_text("Your usual meals are on Today")).to_be_visible()
+        no_old_name(page)
         assert page.locator("[data-drop]").count() == 0
         assert not errors, errors
         browser.close()
@@ -324,6 +367,7 @@ def test_first_run_two_questions_then_today_and_account_after_value(fresh, viewp
         expect(today.locator(".v3-budget .v3-big")).to_have_text("₹600", timeout=BOOT_MS)   # the profile plans first
         expect(today.get_by_role("heading", name="Get set up")).to_be_visible()
         expect(today.get_by_text("Swiggy sign-in is opening soon")).to_be_visible()
+        no_old_name(page)
         expect(today.get_by_label("Your rules")).to_contain_text("No peanut")
         expect(page.locator(".v3-save")).to_have_count(0)              # no account before value
         page.wait_for_load_state("networkidle")
@@ -339,8 +383,8 @@ def test_first_run_two_questions_then_today_and_account_after_value(fresh, viewp
         sheet.get_by_label("Price you pay (₹)").fill("140")
         sheet.locator("label.chip", has_text="Yes").click()
         shot(page, f"13-add-typed-{tag}")
-        sheet.get_by_role("button", name="Add to breakfast pool").click()
-        page.get_by_label("Breakfast from your pool").select_option(label="Cappuccino · ₹140 · Corner Cafe")
+        sheet.get_by_role("button", name="Add to your usual breakfasts").click()
+        page.get_by_label("Breakfast from your usual meals").select_option(label="Cappuccino · ₹140 · Corner Cafe")
         expect(page.locator(".v3-save")).to_be_visible()
         page.get_by_label("Sign-in name").fill("priya-v3")
         page.get_by_label("Password").fill("a-long-password")

@@ -15,18 +15,28 @@ Bottom bar on phones, a side rail from 900 px. Your avatar (top right) is **Me**
 
 | Tab | What it is for | What's on it |
 |---|---|---|
-| **Today** | Today only, from your own favourites | Order \| Cook toggle · Today's budget card (₹600 (B+L), − / +, presets ₹300 / ₹600 / ₹1,000, Other…) · Weather today · your rules as chips (diet, allergies, min rating, max delivery time) with *Edit rules* · one line per meal you have today (`Breakfast: [1× Cappuccino ▾] − 2× +  · ₹ · Swap`) · *Decide for me* · Place order / Send details / Cook it · price-compare row (only when a Swiggy price exists) · the Swiggy cart and checkout · *Keep this on every device?* (only after a first pick) · Breakfast / Lunch / Dinner pools |
+| **Today** | Today only, from your own favourites | Order \| Cook toggle · Today's budget card (₹600 (B+L), − / +, presets ₹300 / ₹600 / ₹1,000, Other…) · Weather today · your rules as chips (diet, allergies, min rating, max delivery time) with *Edit rules* · one line per meal you have today (`Breakfast: [1× Cappuccino ▾] − 2× +  · ₹ · Swap`) · *Decide for me* · Place order / Send details / Cook it · price-compare row (only when a Swiggy price exists) · the Swiggy cart and checkout · *Keep this on every device?* (only after a first pick) · your usual meals (phone: a *Usual ▾* drawer on each meal line; desktop: three panels) |
 | **Week** | The week, as a plan and a ledger | Week budget, days, meals (tap one of today's meals → Swap), Order list, Cooking & groceries, Order several meals, Re-plan, Plan next week. **Nutrition is opt-in** (*Show nutrition*, off by default); the desktop aside shows it only when on |
 | **Cook** | Cooking, separate from ordering | Type any dish → ingredients scaled to how many eat, Instamart link per ingredient, copy list, cook along; link to this week's grocery list |
 | **Saved** | Places and dishes you liked | Saved places, Good dishes, Recently had, Swiggy order history |
 | Me (avatar) | Settings | Food & budget, Swiggy connection + rules, reminders, account, appearance, household, data |
 
 Desktop (≥ 1024 px) Today: meals and actions on the left, budget / weather / rules on the
-right, the three pools **side by side** below. Phones stack everything in the sketch's order.
+right, the three usual-meals panels (**Usual breakfasts / lunches / dinners**) **side by side**
+below. Phones stack everything in the sketch's order, and there is **no separate usual-meals
+block**: each meal line (Breakfast / Lunch / Dinner) has a small *Usual ▾* button that opens that
+meal's usual meals right under the line (pick, + New item / restaurant, quantity, remove). A meal
+that isn't on today (say dinner on a B+L day) gets its own *Usual ▾* row under the meals.
 
-## Pools (favourites)
+The budget card shows what's left **after fees** ("₹X left after fees"), tagged *estimate* until
+Swiggy's real bill is seen, then *real bill* (founder, Oct 2026).
 
-- One pool per meal: Breakfast, Lunch, Dinner. **No drag-and-drop.** Each pool has
+## Usual meals (favourites)
+
+The founder's word (Oct 2026) is **usual meals**, not "pools". Code, storage and the API keep
+the `pool` name (`/today/pool`, `domain/meal_pools.py`); nothing a person reads says pool.
+
+- One list per meal: usual breakfasts, lunches, dinners. **No drag-and-drop.** Each has
   `+ New item / restaurant`, a quantity stepper per dish and a remove button.
 - Two kinds of dish:
   - **From Swiggy**: search Swiggy → a restaurant (rating, time) → its live menu → tap a dish.
