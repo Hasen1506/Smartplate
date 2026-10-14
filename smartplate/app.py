@@ -71,6 +71,11 @@ def create_app() -> Flask:
             raise RuntimeError("Live orders on Render require the live provider, a durable database "
                                "(DATABASE_URL or /var/data), "
                                "stable SMARTPLATE_SECRET and HTTPS SMARTPLATE_PUBLIC_URL")
+    if config.PRODUCTION and config.secret_problem():
+        # Never encrypt Swiggy tokens with a key kept beside them, or with a public one (#64).
+        raise RuntimeError(f"Refusing to start in production: {config.secret_problem()}. Set a random value "
+                           "of at least 32 characters in the Render dashboard (Environment → SMARTPLATE_SECRET); "
+                           "see docs/production-deployment.md, 'The encryption key'.")
     initialize()
     app = Flask(__name__, static_folder=None)
     app.config['MAX_CONTENT_LENGTH'] = 256 * 1024

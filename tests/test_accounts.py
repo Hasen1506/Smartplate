@@ -152,8 +152,12 @@ def test_vault_seals_and_rejects_foreign_keys(seeded, monkeypatch):
     assert sealed.startswith("v1:") and "swiggy-token" not in sealed
     assert vault.unseal(sealed) == "swiggy-token"
     assert vault.unseal("legacy-plaintext") == "legacy-plaintext"
-    monkeypatch.setattr(config, "SECRET", "a different server secret")
-    assert vault.unseal(sealed) is None
+    # A value sealed under one environment key does not open under an unrelated one (#64:
+    # the trial key kept in the database still opens old values until they are re-sealed).
+    monkeypatch.setattr(config, "SECRET", "first server secret, at least 32 chars")
+    under_first = vault.seal("t1")
+    monkeypatch.setattr(config, "SECRET", "a different server secret, 32+ chars")
+    assert vault.unseal(under_first) is None
     assert vault.unseal(vault.seal("t2")) == "t2"
 
 

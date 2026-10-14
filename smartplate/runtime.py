@@ -32,6 +32,9 @@ def initialize():
         else:
             removed = cleanup.remove_seeded_samples()
             cleanup.replan(removed["replanned_plans"])
+        from . import vault
+        if config.SECRET:                       # after a key rotation: re-seal tokens under the new key
+            vault.reseal_all()
         festivals.ensure_calendar()             # the real India holiday calendar
         cleanup.remove_invented_community()
         if config.DATABASE_URL:

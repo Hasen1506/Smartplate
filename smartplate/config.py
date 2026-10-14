@@ -110,10 +110,32 @@ SWIGGY_CALLBACK_PATH = os.environ.get("SMARTPLATE_SWIGGY_CALLBACK_PATH", "/swigg
 if SWIGGY_CALLBACK_PATH not in ("/swiggy/callback", "/auth/swiggy/callback"):
     raise ValueError("SMARTPLATE_SWIGGY_CALLBACK_PATH must be a supported callback route")
 
-# Server secret for encrypting stored tokens. render.yaml generates one; without it a
-# random key is created once and kept in the database (fine for a trial, not for
-# production, where the key must live outside the data it protects).
-SECRET = os.environ.get("SMARTPLATE_SECRET", "")
+# Server secret for encrypting stored tokens and signing browser sessions (grill #64).
+# SMARTPLATE_SECRET (SMARTPLATE_VAULT_KEY is accepted as another name). render.yaml generates
+# one. Production refuses to start without a strong one (secret_problem below): the key must
+# live outside the data it protects. Off production a random key is kept in the database so a
+# local trial needs zero setup. Rotation: put the old value in SMARTPLATE_SECRET_PREVIOUS
+# (comma-separated) and a new one in SMARTPLATE_SECRET; old tokens still open and are re-sealed
+# under the new key (docs/production-deployment.md, "The encryption key").
+SECRET = (os.environ.get("SMARTPLATE_SECRET") or os.environ.get("SMARTPLATE_VAULT_KEY") or "").strip()
+SECRET_PREVIOUS = tuple(v.strip() for v in os.environ.get("SMARTPLATE_SECRET_PREVIOUS", "").split(",") if v.strip())
+MIN_SECRET_LENGTH = 32
+# Values from examples, tutorials and old .env files. A secret equal to one of these is public.
+DEV_SECRETS = frozenset({"dev", "devsecret", "dev-secret", "secret", "changeme", "change-me", "change_me",
+                         "test", "testing", "password", "smartplate", "ziggy", "replace-me", "your-secret-here",
+                         "insecure", "default", "local", "example"})
+
+
+def secret_problem(secret: str | None = None) -> str | None:
+    """Why the encryption secret is not fit for production, or None when it is."""
+    value = SECRET if secret is None else secret
+    if not value:
+        return "SMARTPLATE_SECRET is not set"
+    if value.lower() in DEV_SECRETS or len(set(value)) < 8:
+        return "SMARTPLATE_SECRET is a well-known example value"
+    if len(value) < MIN_SECRET_LENGTH:
+        return f"SMARTPLATE_SECRET is shorter than {MIN_SECRET_LENGTH} characters"
+    return None
 # Behind one reverse proxy (Render, Codespaces): trust its X-Forwarded-* headers.
 BEHIND_PROXY = os.environ.get("SMARTPLATE_BEHIND_PROXY", "1" if os.environ.get("RENDER") else "0") == "1"
 
