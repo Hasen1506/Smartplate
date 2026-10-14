@@ -298,7 +298,9 @@ def test_ordering_gate_and_unsupported_tools_are_refused(client, swiggy):
     _connect(client, swiggy)
     with pytest.raises(SwiggyError, match="disabled"):
         swiggy_live.call(1, "place_food_order", {})
-    for name in ["apply_food_coupon", "confirm_order"]:
+    with pytest.raises(SwiggyError, match="disabled"):      # UPI confirm: live_order only (swiggy_upi)
+        swiggy_live.call(1, "confirm_order", {})
+    for name in ["apply_food_coupon", "fetch_food_coupons"]:
         with pytest.raises(SwiggyError, match="does not support"):
             swiggy_live.call(1, name, {})
     assert swiggy.tool_calls() == []

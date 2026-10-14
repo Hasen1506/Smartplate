@@ -1000,7 +1000,16 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy/checkout/preview")
     def swiggy_checkout_preview(user_id):
+        # ?payment=upi[&app=gpay]: a UPI order through Swiggy's Payment stage (live_order only);
+        # "Pay in Swiggy" when Swiggy doesn't offer it here
+        if request.args.get("payment") == "upi":
+            return jsonify(swiggy_live.live_checkout_preview(user_id, "upi", request.args.get("app") or None))
         return jsonify(swiggy_live.live_checkout_preview(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/orders/<order_id>/payment")
+    def swiggy_upi_payment(user_id, order_id):
+        from .integrations import swiggy_upi
+        return jsonify(swiggy_upi.payment_status(user_id, order_id))
 
     @app.post("/api/user/<int:user_id>/swiggy/checkout")
     def swiggy_checkout(user_id):
