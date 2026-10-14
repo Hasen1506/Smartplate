@@ -8,6 +8,7 @@ The schema deliberately carries the columns every gap feature needs (allergens,
 nutrition, carbon, surge history, leftovers, calendar, community, receipts) so
 the optimiser can read them all as constraints/signals from one place.
 """
+import contextvars
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -359,8 +360,19 @@ CREATE TABLE IF NOT EXISTS push_sent (           -- one reminder per meal per su
     session_id INTEGER NOT NULL,
     at TEXT NOT NULL,                              -- the reminder time it was sent for
     sent_ts TEXT NOT NULL,
+    outcome TEXT NOT NULL DEFAULT 'sent',          -- sending | sent | late | missed | rejected
     PRIMARY KEY (subscription_id, session_id, at)
 );
+
+CREATE TABLE IF NOT EXISTS events (              -- product analytics, the source of truth (smartplate/analytics.py)
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER,                               -- NULL: not tied to a profile
+    name TEXT NOT NULL,                            -- app_open | plan_viewed | cart_filled | ordered_confirmed | budget_overrun
+    ts TEXT NOT NULL,                              -- local time, ISO seconds
+    props TEXT NOT NULL DEFAULT '{}'               -- ids and amounts only, never free text
+);
+
+CREATE INDEX IF NOT EXISTS events_name_user_ts ON events(name, user_id, ts);
 
 CREATE TABLE IF NOT EXISTS app_secrets (         -- generated keys when no env secret is set
     name TEXT PRIMARY KEY,
@@ -395,6 +407,7 @@ MIGRATIONS = [
     ("decisions", "fee_estimated", "INTEGER"),           # 1 = flat estimate, 0 = from a real Swiggy bill
     ("decisions", "charges", "REAL"),                    # live dish: platform fee + packaging + GST priced into cost
     ("decisions", "charges_estimated", "INTEGER"),       # 1 = research default / other bills, 0 = this restaurant's bill
+    ("push_sent", "outcome", "TEXT NOT NULL DEFAULT 'sent'"),  # sending | sent | late | missed | rejected
 ]
 
 
@@ -410,17 +423,48 @@ def connect():
     return conn
 
 
+# Committed writes in this request/thread. A request that committed nothing can be run
+# again safely after a stale-connection failure (smartplate/resilience.py).
+_writes = contextvars.ContextVar("smartplate_db_writes", default=0)
+
+
+def reset_writes() -> None:
+    _writes.set(0)
+
+
+def writes_committed() -> int:
+    return _writes.get()
+
+
+def _changes(conn) -> int:
+    """A counter that grows with every row written on this connection."""
+    if isinstance(conn, sqlite3.Connection):
+        return conn.total_changes
+    return getattr(conn, "writes", 0)
+
+
 @contextmanager
 def cursor():
     conn = connect()
     try:
+        before = _changes(conn)
         yield conn.cursor()
         conn.commit()
+        if _changes(conn) != before:
+            _writes.set(_writes.get() + 1)
     except BaseException:
         conn.rollback()
         raise
     finally:
         conn.close()
+
+
+def on_stale_connection() -> None:
+    """A database call failed as if the connection had gone stale (Neon closes idle
+    connections and suspends its compute after 5 minutes): start over with a new pool."""
+    if config.DATABASE_URL:
+        from . import db_pg
+        db_pg.replace_pool(db_pg.pool())
 
 
 try:                                   # the error a constraint failure raises, on either database
@@ -447,6 +491,36 @@ def init_db() -> None:
             have = {r["name"] for r in cur.execute(f"PRAGMA table_info({table})")}
             if column not in have:
                 cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
+def schema_fingerprint(*extra) -> str:
+    """A hash of everything init_db would create or alter (plus `extra` schema text)."""
+    import hashlib
+    h = hashlib.sha256(SCHEMA.encode())
+    h.update(repr(MIGRATIONS).encode())
+    for part in extra:
+        h.update(repr(part).encode())
+    return h.hexdigest()[:24]
+
+
+SCHEMA_MARK = "schema_fingerprint"
+
+
+def schema_is_current(fingerprint: str) -> bool:
+    """True when this database was last migrated to exactly this schema. Boot then skips
+    ~70 statements (each a network round trip to a hosted Postgres; cold start, grill #66).
+    Any doubt (no table yet, no mark, an error) means "no": the full migration runs."""
+    try:
+        with cursor() as cur:
+            row = cur.execute("SELECT value FROM app_secrets WHERE name=?", (SCHEMA_MARK,)).fetchone()
+        return bool(row) and row["value"] == fingerprint
+    except Exception:
+        return False
+
+
+def mark_schema(fingerprint: str) -> None:
+    with cursor() as cur:
+        cur.execute("INSERT OR REPLACE INTO app_secrets(name, value) VALUES (?,?)", (SCHEMA_MARK, fingerprint))
 
 
 # --- small json helpers so callers don't sprinkle json.loads everywhere ---

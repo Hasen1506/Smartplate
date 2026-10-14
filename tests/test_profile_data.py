@@ -57,7 +57,8 @@ def test_delete_removes_dependents_and_preserves_other_users(client):
                     (uid, "https://fcm.googleapis.com/delete-device", "key", "auth", "now"))
         sub = dict(cur.execute("SELECT * FROM push_subscriptions WHERE user_id=?", (uid,)).fetchone())
         session = cur.execute("SELECT id FROM sessions WHERE plan_id=? LIMIT 1", (pid,)).fetchone()[0]
-        cur.execute("INSERT INTO push_sent VALUES (?,?,?,?)", (sub["id"], session, "due", "now"))
+        cur.execute("INSERT INTO push_sent(subscription_id, session_id, at, sent_ts) VALUES (?,?,?,?)",
+                    (sub["id"], session, "due", "now"))
     result = client.delete(f"/api/user/{uid}", headers=headers, json={"confirmation": "DELETE"})
     assert result.status_code == 200 and result.get_json()["deleted"]
     with db.cursor() as cur:

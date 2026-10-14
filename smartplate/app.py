@@ -8,7 +8,8 @@ from flask import Flask, Response, g, jsonify, redirect, request, send_from_dire
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, accounts, config, errors, everyday, privacy, profile_data, push, ratelimit, service, websession
+from . import (access, accounts, config, errors, everyday, observability, ops, privacy, profile_data, push, ratelimit,
+               service, websession)
 from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, timing, week_orders
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
@@ -81,6 +82,7 @@ def create_app() -> Flask:
     initialize()
     app = Flask(__name__, static_folder=None)
     app.config['MAX_CONTENT_LENGTH'] = 256 * 1024
+    observability.init_app(app)              # request ids, JSON logs, latency, optional Sentry (W9)
     if config.BEHIND_PROXY:                  # one trusted hop sets X-Forwarded-For/Proto/Host
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
@@ -90,14 +92,16 @@ def create_app() -> Flask:
         @app.before_request
         def database_keepalive():
             # Started by the process that serves requests, never by a gunicorn --preload
-            # master (db_pg._after_fork_in_child). A no-op once it runs.
-            db_pg.ensure_keepalive()
+            # master (db_pg._after_fork_in_child). A no-op once it runs. Only people's
+            # requests count as activity: a scheduler's /cron/tick or a health check must
+            # not keep a free Neon database awake all day.
+            db_pg.ensure_keepalive(activity=not request.path.startswith(ops.NOT_ACTIVITY))
 
     @app.before_request
     def assign_request_id():
         # One id per request, echoed in the X-Request-ID header and in error replies, so a
         # person can quote it and the log line can be found without exposing internals (#65).
-        g.request_id = errors.request_id(request.headers.get("X-Request-ID"))
+        g.request_id = g.get("request_id") or errors.request_id(request.headers.get("X-Request-ID"))  # W9 may have set it
 
     @app.before_request
     def validate_request():
@@ -1200,4 +1204,5 @@ def create_app() -> Flask:
     def health():
         return jsonify({"ok": True, "app": "smartplate", "version": "1.1.0"})
 
+    ops.init_app(app)                        # /cron/tick, /admin/metrics, analytics events (W9)
     return app

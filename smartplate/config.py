@@ -158,6 +158,19 @@ PUSH_TICK_S = float(os.environ.get("SMARTPLATE_PUSH_TICK", "60"))
 PUSH_ENABLED = os.environ.get("SMARTPLATE_PUSH", "on") == "on"
 VAPID_PRIVATE = os.environ.get("SMARTPLATE_VAPID_PRIVATE", "")   # base64url P-256 key; generated if unset
 
+# Operations (docs/reliability.md). Each endpoint is OFF (404) until its key is set.
+# CRON_KEY: an external scheduler calls /cron/tick every 5 min with it, so reminders are
+# sent even while the free instance sleeps. ADMIN_KEY: opens /admin/metrics (retention).
+CRON_KEY = os.environ.get("SMARTPLATE_CRON_KEY", "").strip()
+ADMIN_KEY = os.environ.get("SMARTPLATE_ADMIN_KEY", "").strip()
+# Logs: "json" (one JSON object per line, default on Render) or "text".
+LOG_FORMAT = os.environ.get("SMARTPLATE_LOG_FORMAT", "json" if os.environ.get("RENDER") else "text").lower()
+# Error tracking: set SENTRY_DSN (and add sentry-sdk to requirements) to report errors; unset = off.
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
+SENTRY_TRACES = float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0") or 0)
+# Requests slower than this many ms are logged at WARNING (all are logged at INFO).
+SLOW_REQUEST_MS = int(os.environ.get("SMARTPLATE_SLOW_MS", "2000"))
+
 # Default order-execution policy. Swiggy's cautious posture (§7.1) means we
 # default to an editable window rather than silent auto-placement.
 ORDER_EDIT_WINDOW_MIN = int(os.environ.get("SMARTPLATE_EDIT_WINDOW", "30"))
