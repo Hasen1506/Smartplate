@@ -23,6 +23,8 @@ each with a reason code and plain words).
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 from . import food_lexicon
 
 DIABETES_SUGAR_G = 20     # per item; more is "unsafe for diabetes"
@@ -99,7 +101,12 @@ def _name(item: dict) -> str:
 
 def reading(item: dict) -> food_lexicon.Reading:
     """What the dish's own words say (name, plus a menu description when there is one)."""
-    return food_lexicon.read_all(_name(item), item.get("description") or "")
+    return _reading(_name(item), item.get("description") or "")
+
+
+@lru_cache(maxsize=20000)
+def _reading(name: str, description: str) -> food_lexicon.Reading:
+    return food_lexicon.read_all(name, description)
 
 
 def _basis(item: dict) -> str:

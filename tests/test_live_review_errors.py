@@ -80,7 +80,9 @@ def test_review_works_when_the_browse_id_is_not_the_cart_id(client, swiggy):
     put the cart id, not the browse id, into the cart."""
     _connect(client, swiggy, uid=3)
     client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
-    swiggy.dishes = {"Veg Biryani": 16000, "Mushroom Biryani": 24500}
+    # (Arjun cooks for a vegan; Mushroom Biryani recipes usually hold ghee or curd, so the
+    # shared checker now leaves it out of his menu. Masala Dosa keeps two dishes on show.)
+    swiggy.dishes = {"Veg Biryani": 16000, "Masala Dosa": 24500}
     swiggy.browse_ids = {0: "118263455", 1: "118263456"}
     menu = _menu(client, 3)
     assert [i["id"] for i in menu["items"]] == ["118263455", "118263456"]
