@@ -121,7 +121,7 @@ def test_meal_pools_drive_the_plan_and_any_nearby_dish_can_be_picked(town_world,
             page.get_by_role("navigation", name="Main").get_by_role("button", name="Today").click()
             hero = page.locator('section[aria-label="Next meal"]')
             expect(hero).to_contain_text("Ven Pongal")
-            expect(hero).to_contain_text("From your breakfast pool")
+            expect(hero).to_contain_text("From your usual breakfasts")       # W3: plain words instead of "pool"
             expect(page.get_by_role("heading", name="Tell Ziggy what you eat")).to_have_count(0)
 
             # Change dinner → any place Swiggy lists → filter → full menu → Have for dinner
