@@ -5,7 +5,14 @@ from flask import Blueprint, jsonify, request
 from . import ratelimit, today
 
 bp = Blueprint("today", __name__)
-bp.record_once(lambda _state: today.init_schema())     # tables exist before export/delete read them
+def _tables(_state) -> None:
+    """Tables created on first use exist before export/delete read them."""
+    from .domain import autofill
+    today.init_schema()
+    autofill.init_schema()                              # plan-ahead carts (opt-in auto-fill)
+
+
+bp.record_once(_tables)
 
 
 def _body() -> dict:
