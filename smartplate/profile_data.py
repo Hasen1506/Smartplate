@@ -4,7 +4,8 @@ from . import clock, db
 USER_TABLES = ("calendar_events", "leftovers", "receipts", "intake_log", "favourites", "ratings",
                "logins", "devices", "push_subscriptions", "swiggy_connections", "swiggy_pending",
                "swiggy_menus", "swiggy_favourites", "swiggy_order_attempts", "swiggy_checkout_quotes",
-               "swiggy_cart_intents", "swiggy_delivery_fees", "swiggy_photos", "swiggy_issues", "swiggy_meal_pools")
+               "swiggy_cart_intents", "swiggy_delivery_fees", "swiggy_photos", "swiggy_issues", "swiggy_meal_pools",
+               "events")
 # A stable row order for the export (Postgres has no implicit insertion order).
 EXPORT_ORDER = {"favourites": "restaurant_id", "logins": "user_id", "swiggy_connections": "user_id",
                 "swiggy_pending": "created_ts, state", "swiggy_menus": "restaurant",
