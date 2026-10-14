@@ -243,7 +243,8 @@ and skip. **Hard constraints** (allergens, medical limits, diet, rating floor,
 fasting window, calendar/festival suspension) are filtered out of the candidate
 set, so the solver *cannot* violate them — even under Tight-Week (Survival) mode.
 **Soft constraints** (taste, nutrition, health, carbon, surge, weather/festival
-bias) are weighted terms in the objective. Budget is a hard cap; skip is the
+bias) are weighted terms in the objective (the surge term is archived, off by default:
+SMARTPLATE_SURGE_MODEL). The weekly target is a hard constraint on the *plan*; skip is the
 always-feasible relief valve. Every decision emits plain-language reasons.
 
 At execution the plan is placed against the (simulated) Swiggy MCP with
