@@ -529,3 +529,16 @@ ul.ingr.big li{font-size:17px}
 .sheet.full{max-height:100dvh;min-height:70dvh}
 .cookalong .h1{font-size:28px;line-height:1.2}
 .timer{display:grid;gap:10px;justify-items:center;padding:12px 0}
+/* order list: plain rows, dish · place · price; the picked one opens a quantity */
+ul.olist{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.olrow{border-bottom:1px solid var(--line)}
+.olrow.on{background:var(--card)}
+.olpick{display:flex;align-items:flex-start;gap:10px;width:100%;min-height:52px;padding:10px 4px;border:0;border-radius:0;background:transparent;text-align:left;font-weight:400;box-shadow:none}
+.olpick .t{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
+.olpick .t b{font-size:15px;font-weight:700}
+.olpick .t span{font-size:13px;color:var(--ink2)}
+.olpick .pr{font-variant-numeric:tabular-nums;padding-top:1px}
+.olqty{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;padding:0 4px 12px 28px;font-size:14px}
+.olqty .stepper{gap:12px}
+.olbar{position:sticky;bottom:calc(84px + env(safe-area-inset-bottom));z-index:2;display:grid;gap:8px}
+@media (min-width:900px){.olbar{bottom:16px}}

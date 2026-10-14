@@ -340,6 +340,7 @@ CREATE TABLE IF NOT EXISTS app_secrets (         -- generated keys when no env s
 # Columns added after the first trial shipped. CREATE TABLE IF NOT EXISTS does not
 # alter an existing table, so a saved Codespace database is upgraded in place.
 MIGRATIONS = [
+    ("plans", "avoid", "TEXT NOT NULL DEFAULT '[]'"),                    # "try different": batches of dish ids to steer away from
     ("restaurants", "source", "TEXT NOT NULL DEFAULT 'sample'"),       # sample | live
     ("restaurants", "provider_id", "TEXT"),                             # Swiggy restaurant id (live rows)
     ("live_catalog_state", "address_id", "TEXT"),                       # address the live menus were read for

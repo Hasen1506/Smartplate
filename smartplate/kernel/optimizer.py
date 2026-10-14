@@ -58,6 +58,7 @@ def _choice_key(c: dict) -> tuple:
 # `_cook_cap` / `_cook_effort`; the constants remain only as the cold-start default.
 MAX_COOK_PER_WEEK = 6
 COOK_EFFORT_PENALTY = 0.35   # soft cost of cooking yourself (time/effort)
+AVOID_PEN = 1.0              # "Try different dishes": a dish already shown this week must win by this much
 MAX_ITEM_REPEAT = 2          # variety: don't order the same dish more than twice a week
 
 
@@ -163,6 +164,8 @@ def build_context(user: dict, plan: dict) -> dict:
         # The person's own breakfast / lunch / dinner pools (domain/meal_pools): a meal
         # with a pool is planned only from it.
         "pools": meal_pools.for_planner(user["id"]) if live else {},
+        # "Try different dishes" (everyday.try_different): dishes to steer away from, softly
+        "avoid": {i for batch in db.jl(plan.get("avoid"), []) for i in batch},
         # Epicure flavour signals ("more like this", cuisine tilt); {} when neither is set
         "flavour": flavour.context(user, menu),
         "festivals": festivals.for_week(plan["week_start"]),
@@ -261,7 +264,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
                      + (round(config.USUAL_FIRST_W * novel, 4) if config.USUAL_FIRST == "on" else 0.0),
         "novelty_bonus": round(config.VARIETY_NUDGE_W * novel * ctx.get("variety_frac", 0.0), 4),
         "taste": taste_score, "sentiment": senti, "nutri": nutri, "health": hp, "carbon_pen": cpen,
-        "learned_pen": learned_pen,
+        "learned_pen": learned_pen + (AVOID_PEN if item["id"] in ctx.get("avoid", ()) else 0.0),
         "carbon_kg": carbon.estimate(item), "weather_cond": cond,
         "weather_bias": weather.taste_bias(cond, item),
         "festival_bias": festivals.taste_bias(ctx["festivals"].get(day), item),

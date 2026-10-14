@@ -45,13 +45,22 @@ or your phone's setting, and an optional Zomato-red-to-Swiggy-orange colour mesh
    anyone eating has an allergy, a medical rule or a vegan diet, Ziggy won't fill
    the cart (Swiggy menus don't list ingredients) and says so.
 3. **Change** (on any meal) opens one sheet: *Better fits*, *Other places* (switch
-   restaurants with one tap) and *Cook*, plus Skip (with Undo), Keep and Swap with
-   another meal.
-4. **Week**: a day strip, the chosen day's meals, the budget at a glance, cooking and
-   the grocery list (each line opens Instamart's search; *Copy list* for pasting), a
-   recipe library from the Wikibooks Cookbook (CC BY-SA 4.0, credited; read and shop,
-   not auto-planned because it has no prices),
-   and ordering several meals at once. On a computer, a side panel shows the week's
+   restaurants with one tap) and *Cook* (type any dish), plus Skip (with Undo), Keep,
+   Swap with another meal and *Every dish as a list*.
+4. **Week**: a day strip, the chosen day's meals and the budget at a glance.
+   **Change budget** in place (±₹250, presets, "about ₹X a meal"; it re-plans, with
+   Undo). **Try different dishes** swaps Ziggy's picks for others that still fit, also
+   with Undo.
+   **Order list**: every dish from your places and meal pools as plain rows (dish ×
+   price × quantity), sorted for the meal, filterable, with the total against what's
+   left for that meal. One tap plans it, or puts it in your Swiggy cart in that quantity
+   after a review. No feed to scroll.
+   **Cook something**: type any dish from 6,296 Indian dishes (the 6000+ Indian Food
+   Recipes Dataset, CC BY 4.0) and the Wikibooks Cookbook (CC BY-SA 4.0), both credited.
+   You get ingredients scaled to who's eating, each opening Instamart's search, plus cook
+   along with step timers and *Cook it for* a meal. Groceries aren't priced, and there's
+   no nutrition estimate: the sources don't give them. Also the grocery list for Ziggy's
+   priced home meals, and ordering several meals at once. On a computer, a side panel shows the week's
    balance: money left, nutrition a day against your own targets, the order / cook /
    skip mix, a day-by-day glance and the household split.
 5. **Saved**: **My meals** first. Drag dishes from your places' real Swiggy menus into a
