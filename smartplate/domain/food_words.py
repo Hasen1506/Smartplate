@@ -7,6 +7,8 @@ one ("coconut milk", "meat masala", "eggplant") are taken out first.
 """
 import re
 
+from . import food_lexicon
+
 NONVEG = re.compile(r"\b(chicken|mutton|lamb|goat|beef|pork|bacon|ham|fish|prawns?|shrimps?|crabs?|lobster|"
                     r"squid|eggs?|meat|keema|anchov\w*|sardines?|tuna|salmon|mackerel|pomfret|surmai|bangda|"
                     r"gelatin)\b", re.I)
@@ -45,9 +47,13 @@ def _keep(phrase: str) -> str:
 
 
 def flags(ingredients: list[str]) -> dict:
-    """{"veg", "vegan", "egg", "allergens"} read from the ingredient lines."""
+    """{"veg", "vegan", "egg", "allergens"} read from the ingredient lines: these word
+    lists plus the shared food lexicon (Tamil/Hindi/Telugu names; domain/food_lexicon),
+    which can only add a restriction."""
     words = _clean(" ".join(ingredients).lower())
-    veg = not NONVEG.search(words)
-    allergens = sorted({a for w, a in ALLERGEN_WORDS.items() if re.search(rf"\b{w}(s|es)?\b", words)})
-    return {"veg": veg, "vegan": veg and not ANIMAL.search(words),
-            "egg": bool(re.search(r"\beggs?\b", words)), "allergens": allergens}
+    shared = food_lexicon.read_all(list(ingredients))
+    veg = not NONVEG.search(words) and not shared.nonveg
+    allergens = sorted({a for w, a in ALLERGEN_WORDS.items() if re.search(rf"\b{w}(s|es)?\b", words)}
+                       | shared.allergens)
+    return {"veg": veg, "vegan": veg and not ANIMAL.search(words) and "dairy" not in allergens,
+            "egg": bool(re.search(r"\beggs?\b", words)) or shared.egg, "allergens": allergens}
