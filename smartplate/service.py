@@ -75,10 +75,12 @@ def reoptimize(plan_id: int, mode: str | None = None) -> dict:
 
 
 def current_plan(user_id):
-    """The plan to show now. Today always has an answer: while today still has a meal
-    ahead, the plan covering today wins over a later week planned in advance; otherwise
-    the latest plan, rolled forward once its week is over (or, late on its last
-    Sunday, once nothing is left in it)."""
+    """The plan to show now: the latest one, rolled forward once its week is over (or,
+    late on its last Sunday, once nothing is left in it).
+
+    When a later week was planned ahead while today still has meals to come, the view
+    also names the plan covering today (`today_plan_id`), so Today can still answer
+    for today's remaining meals."""
     at = optimizer.now()
     today = at.date()
     with db.cursor() as cur:
@@ -86,16 +88,17 @@ def current_plan(user_id):
                            (user_id,)).fetchall()
     user = models.get_user(user_id)
     meals = profile.meals_planned(user) if user else models.MEALS
-    covering = next((r for r in rows if dt.date.fromisoformat(r['week_start']) <= today
-                     < dt.date.fromisoformat(r['week_start']) + dt.timedelta(days=7)), None)
-    if covering and covering['id'] != rows[0]['id'] and _meal_ahead(today, meals, at):
-        return plan_view(covering['id'])
     row = rows[0] if rows else None
     if row:
         end = dt.date.fromisoformat(row['week_start']) + dt.timedelta(days=7)
         if end <= today or (end == today + dt.timedelta(days=1) and not _meal_ahead(today, meals, at)):
             row = None
-    return plan_view(row['id'] if row else create_plan(user_id))
+    view = plan_view(row['id'] if row else create_plan(user_id))
+    covering = next((r for r in rows if dt.date.fromisoformat(r['week_start']) <= today
+                     < dt.date.fromisoformat(r['week_start']) + dt.timedelta(days=7)), None)
+    if covering and covering['id'] != view['plan']['id'] and _meal_ahead(today, meals, at):
+        view['today_plan_id'] = covering['id']
+    return view
 
 
 def update_preferences(user_id, body):

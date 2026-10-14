@@ -138,15 +138,18 @@ def test_sunday_night_after_dinner_plans_next_week(gt):
     assert view["plan"]["week_start"] == "2026-11-09"
 
 
-def test_today_wins_over_a_week_planned_ahead_while_today_has_meals_left(gt):
+def test_a_week_planned_ahead_still_points_today_at_todays_plan(gt):
     gt.set(dt.datetime(2026, 11, 7, 11, 0))                  # Saturday
     view = everyday.create_profile(dict(BASE))
     uid, this_week = view["user"]["id"], view["plan"]["id"]
+    assert "today_plan_id" not in service.current_plan(uid)
     ahead = service.create_plan(uid)                          # "plan next week" on Saturday
     assert models.get_plan(ahead)["week_start"] == "2026-11-09"
-    assert service.current_plan(uid)["plan"]["id"] == this_week
+    cur = service.current_plan(uid)
+    assert cur["plan"]["id"] == ahead                         # the week just planned stays the one shown
+    assert cur["today_plan_id"] == this_week                  # …and Today can still find today's meals
     gt.set(dt.datetime(2026, 11, 8, 23, 0))                   # Sunday night: nothing left today
-    assert service.current_plan(uid)["plan"]["id"] == ahead
+    assert "today_plan_id" not in service.current_plan(uid)
 
 
 def test_late_sunday_rolls_a_finished_current_week_forward(gt):
