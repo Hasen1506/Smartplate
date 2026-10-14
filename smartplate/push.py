@@ -29,7 +29,7 @@ from .integrations import webpush
 
 LATE_OK = dt.timedelta(minutes=20)        # later than this, the reminder says it is late
 LOOKBACK = dt.timedelta(hours=12)         # how far back a server that slept looks for unsent reminders
-QUIET_MAX = dt.timedelta(minutes=30)      # a tick re-reads the database at least this often
+QUIET_MAX = dt.timedelta(minutes=60)      # a tick re-reads the database at least this often (and at midnight)
 log = logging.getLogger("smartplate.push")
 _worker: threading.Thread | None = None
 _stop = threading.Event()
@@ -284,7 +284,8 @@ def tick(at: dt.datetime | None = None, sender=None, *, force: bool = False) -> 
         pairs = due(at, _next=upcoming)               # per-profile locks inside, never the whole API
         stats = deliver(at, sender=sender, pairs=pairs) if pairs else {}
         retry_soon = any(stats.get(k) for k in ("failed", "busy"))
-        nxt = min([at + QUIET_MAX] + upcoming)
+        midnight = dt.datetime.combine(at.date() + dt.timedelta(days=1), dt.time())   # a new day/week's plan
+        nxt = min([at + QUIET_MAX, midnight] + upcoming)
         _quiet_until[0] = None if retry_soon else nxt
         return {"ok": True, "checked_at": at.isoformat(timespec="seconds"), **stats,
                 "next_check": None if retry_soon else nxt.isoformat(timespec="seconds")}

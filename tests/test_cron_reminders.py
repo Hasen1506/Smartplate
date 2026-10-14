@@ -132,7 +132,8 @@ def test_tick_skips_the_database_while_nothing_can_be_due(client, monkeypatch):
     when = dt.datetime.fromisoformat(first["at"])
     early = when - dt.timedelta(hours=2)
     r = push.tick(early, sender=FakeService())
-    assert r["next_check"] == min(when, early + push.QUIET_MAX).isoformat(timespec="seconds")
+    midnight = dt.datetime.combine(early.date() + dt.timedelta(days=1), dt.time())
+    assert r["next_check"] == min(when, early + push.QUIET_MAX, midnight).isoformat(timespec="seconds")
     reads = []
     monkeypatch.setattr(push, "due", lambda *a, **kw: reads.append(1) or [])
     assert push.tick(early + dt.timedelta(minutes=5))["skipped"] == "nothing due"
