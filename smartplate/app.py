@@ -940,6 +940,17 @@ def create_app() -> Flask:
     def plan_try_different_undo(plan_id):
         return jsonify(everyday.try_different_undo(plan_id))
 
+    # ---- "Decide for me" (kernel/decide.py): proposals only when the person asks (W6) ---- #
+    @app.post("/api/user/<int:user_id>/decide/today")
+    def decide_today(user_id):
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.decide_today(user_id, body.get("mode"), body.get("money")))
+
+    @app.post("/api/plan/<int:plan_id>/decide")
+    def decide_week(plan_id):
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.decide_week(plan_id, body.get("mode"), apply=body.get("apply") is True))
+
     # ---- household (domain/household.py) ---- #
     @app.post("/api/user/<int:user_id>/household")
     def household_create(user_id):
