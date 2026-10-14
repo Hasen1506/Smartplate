@@ -210,7 +210,7 @@
   "hidden": {
    "below_rating": 1,
    "cook_not_safe": 1,
-   "not_a_meal": 1,
+   "not_a_meal": 3,
    "not_again": 0,
    "not_safe": 11
   },
@@ -232,9 +232,9 @@
     115.0
    ],
    [
-    "Masala Chai + Bun Butter",
-    "Chai Kings",
-    90.0
+    "Rajma Chawal Bowl",
+    "The Bowl Company",
+    220.0
    ]
   ],
   "usual": [
@@ -548,8 +548,8 @@
   }
  },
  "5_approval": {
-  "failed": 2,
-  "placed": 17,
+  "failed": 3,
+  "placed": 16,
   "preview": {
    "items": [
     [
@@ -670,7 +670,7 @@
    "order_count": 19,
    "total": 2405.0
   },
-  "substituted": 2
+  "substituted": 1
  },
  "6_check_in": {
   "cooked": "Cook: Dal + rice",
@@ -711,11 +711,11 @@
  },
  "7_expenses_insights": {
   "nutrition_daily_avg": {
-   "carbs_g": 232.9,
-   "fat_g": 42.0,
-   "kcal": 1565.7,
-   "protein_g": 41.9,
-   "sugar_g": 19.0
+   "carbs_g": 226.9,
+   "fat_g": 39.9,
+   "kcal": 1515.7,
+   "protein_g": 40.3,
+   "sugar_g": 16.9
   },
   "nutrition_target": {
    "carbs_g": 250,
@@ -724,22 +724,22 @@
    "protein_g": 80,
    "sugar_g": 40
   },
-  "receipts_total": 2085.0,
-  "rows": 17
+  "receipts_total": 1995.0,
+  "rows": 16
  },
  "8_after_settings": {
   "budget": {
    "budget": 1800.0,
    "daily_cap": 450.0,
    "prorated": false,
-   "remaining": -330.0,
-   "spend": 2130.0,
+   "remaining": -240.0,
+   "spend": 2040.0,
    "weekly_budget": 1800.0
   },
   "counts": {
-   "cook": 1,
-   "delivery": 17,
-   "ordered": 17,
+   "cook": 2,
+   "delivery": 16,
+   "ordered": 16,
    "skip": 3,
    "snoozed": 0
   },
@@ -788,12 +788,12 @@
      "status": "confirmed"
     },
     "lunch": {
-     "cost": 90.0,
-     "item": "Masala Chai + Bun Butter",
-     "kind": "delivery",
+     "cost": 45.0,
+     "item": "Cook: Dal + rice",
+     "kind": "cook",
      "pinned": false,
-     "restaurant": "Chai Kings",
-     "status": "ordered"
+     "restaurant": "Home kitchen",
+     "status": "past"
     }
    },
    "Sat 2026-11-07": {
