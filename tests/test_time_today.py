@@ -380,3 +380,15 @@ def test_change_sheet_does_not_offer_a_snack_alone_for_dinner(gt):
     sheet = everyday.options(dinner["session_id"])
     offered = [d["name"] for g in sheet["usual"] for d in g["dishes"]] + [d["name"] for d in sheet["new"]]
     assert offered and not [n for n in offered if optimizer.is_snack(n)]
+
+
+def test_planner_offers_tiffin_at_dinner_bounded(gt):
+    """Founder decision 14 Oct 2026: a dosa or idli can be planned as dinner. The week MILP
+    offers a dinner the best few (optimizer.DINNER_TIFFIN_CANDIDATES) to stay fast."""
+    view = everyday.create_profile(dict(BASE))
+    plan = models.get_plan(view["plan"]["id"])
+    user = models.get_user(view["user"]["id"])
+    ctx = optimizer.build_context(user, plan)
+    cands = optimizer.build_candidates(user, plan, {"day": 0, "meal": "dinner", "id": -1}, ctx)
+    tiffin = [c["item_name"] for c in cands if c["kind"] == "delivery" and timing.is_breakfast_only(c["item_name"])]
+    assert 1 <= len(tiffin) <= optimizer.DINNER_TIFFIN_CANDIDATES, tiffin

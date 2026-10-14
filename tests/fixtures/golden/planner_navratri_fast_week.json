@@ -3,8 +3,8 @@
   "budget": 2000.0,
   "daily_cap": null,
   "prorated": false,
-  "remaining": 920.0,
-  "spend": 1080.0,
+  "remaining": 1040.0,
+  "spend": 960.0,
   "weekly_budget": 2000.0
  },
  "counts": {
@@ -25,11 +25,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 140.0,
-    "item": "Parotta + Veg Kurma",
+    "cost": 210.0,
+    "item": "Chana Masala Bowl",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "The Bowl Company",
     "status": "active"
    },
    "lunch": {
@@ -51,11 +51,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 210.0,
-    "item": "Chana Masala Bowl",
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "The Bowl Company",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "lunch": {
@@ -181,11 +181,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 210.0,
-    "item": "Chana Masala Bowl",
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "The Bowl Company",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "lunch": {

@@ -902,6 +902,21 @@ def create_app() -> Flask:
         return jsonify(dish_library.search(user, request.args.get("q", "")[:60],
                                            meal if meal in models.MEALS else None))
 
+    # How likely a restaurant dish holds each of this person's allergens, from the recipe
+    # library (founder decision 14 Oct 2026). Information only: verdicts stay fail-closed.
+    @app.get("/api/user/<int:user_id>/allergen-likelihood")
+    def allergen_likelihood(user_id):
+        from .domain import allergens as allergens_
+        user = models.get_user(user_id)
+        if not user:
+            raise KeyError("Profile not found")
+        name = (request.args.get("name") or "").strip()[:80]
+        if not name:
+            raise ValueError("Add ?name= with the dish name")
+        item = {"name": name, "description": (request.args.get("description") or "")[:200], "source": "live"}
+        return jsonify({"allergen_likelihood": allergens_.allergen_likelihood(user, name),
+                        "safety": allergens_.safety_label(user, item)})
+
     @app.get("/api/user/<int:user_id>/dishes/<key>")
     def dish_detail(user_id, key):
         from .domain import dish_library

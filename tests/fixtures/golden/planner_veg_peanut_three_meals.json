@@ -25,8 +25,8 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 100.0,
-    "item": "Curd Rice",
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
@@ -51,11 +51,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
+    "cost": 115.0,
+    "item": "Masala Dosa",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    },
    "lunch": {
@@ -129,19 +129,19 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 110.0,
-    "item": "Vegan Sambar Rice",
-    "kind": "delivery",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Home kitchen",
     "status": "active"
    },
    "lunch": {
-    "cost": 115.0,
-    "item": "Masala Dosa",
+    "cost": 100.0,
+    "item": "Curd Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    }
   },

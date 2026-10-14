@@ -301,12 +301,49 @@ def hidden_report(user: dict, items: list[dict], limit: int = 30) -> dict:
 
 
 def safety_label(user: dict, item: dict) -> dict:
-    """What a shown dish says about safety: {"status", "note"}; never the word "safe"."""
+    """What a shown dish says about safety: {"status", "note"}; never the word "safe".
+    For someone with an allergy (them or anyone eating with them) it also carries
+    `allergen_likelihood`: how often home recipes for this dish hold each of THEIR
+    allergens (see allergen_likelihood)."""
     v = check(user, item)
     note = v["reason"] if v["status"] != "ok" else ""
     if v["status"] == "not_checked" and any(p.get("medical") for p in [user, *(user.get("household_members") or [])]):
         note = f"{note} {MEDICAL_NOTE}"
-    return {"status": v["status"], "code": v["code"], "note": note}
+    out = {"status": v["status"], "code": v["code"], "note": note}
+    if any(p.get("allergens") for p in [user, *(user.get("household_members") or [])]):
+        out["allergen_likelihood"] = allergen_likelihood(user, item)
+    return out
+
+
+def allergen_likelihood(user: dict | None, item: dict | str) -> dict:
+    """Founder decision (14 Oct 2026): keep people with allergies in, and tell them how
+    likely a restaurant dish holds each allergen from the recipe library ("usually contains
+    cashew — 7 of 9 recipes"), with the caveat that restaurants cook differently.
+
+    Informational only. It never changes a verdict: `check` stays fail-closed (a dish whose
+    name matches no recipe is still "unknown" for an allergy) and nothing here certifies a
+    dish safe. An allergen no recipe holds is simply not listed: "0 of 9 recipes" is not
+    "free of". `yours` lists the rows for the allergies of the person and the people
+    eating with them (all rows when no profile is given)."""
+    from . import dish_library
+    name = item if isinstance(item, str) else _name(item)
+    lk = dish_library.likelihood(name)
+    mine = set()
+    for p in [user or {}, *((user or {}).get("household_members") or [])]:
+        mine |= set(p.get("allergens") or [])
+    if not lk:
+        return {"dish": name, "known": False, "allergens": [], "yours": [],
+                "text": (f"Ziggy's recipe library has no recipe for {name or 'this dish'}, so it can't say how "
+                         "likely it is to hold an allergen. Ask the restaurant."),
+                "caveat": dish_library.LIKELIHOOD_CAVEAT, "never_safe": True}
+    yours = [r for r in lk["allergens"] if r["allergen"] in mine] if mine else list(lk["allergens"])
+    return {"dish": name, "known": True, "recipes": lk["recipes"], "matched": lk["matched"],
+            "allergens": lk["allergens"], "yours": yours,
+            "text": "; ".join(r["text"] for r in yours) if yours else
+                    (f"None of {lk['recipes']} home recipe{'s' if lk['recipes'] != 1 else ''} for this dish "
+                     f"list{'s' if lk['recipes'] == 1 else ''} your allergens. That is not a promise: ask the restaurant."
+                     if mine else ""),
+            "caveat": dish_library.LIKELIHOOD_CAVEAT, "never_safe": True}
 
 
 def household_safe(members: list[dict], item: dict) -> str | None:

@@ -359,6 +359,27 @@ def meal_fit_pen(items: list[dict], meal: str):
     return lambda it: 0.0
 
 
+# Tiffin at dinner (founder decision 14 Oct 2026: allowed by default). The planner offers
+# a dinner the best few tiffin dishes (by the same meal-fit and cost order as every other
+# candidate) next to its plates, not all of them: the same dosa as a breakfast and as a
+# dinner candidate on every day ties the week MILP in knots (a ₹3,500 week with six places
+# went from 0.6 s proven optimal to the 10 s limit, unproven, with the same plan; capped at
+# 2 it is back to 0.4 s, proven, same plan). The person's own dinner list, the Change sheet
+# and Decide for me are not bounded.
+DINNER_TIFFIN_CANDIDATES = 2
+
+
+def _bound_dinner_tiffin(cands: list[dict]) -> list[dict]:
+    out, n = [], 0
+    for c in cands:
+        if c.get("kind") == "delivery" and timing.is_breakfast_only(c.get("item_name") or ""):
+            n += 1
+            if n > DINNER_TIFFIN_CANDIDATES:
+                continue
+        out.append(c)
+    return out
+
+
 def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[dict]:
     """All options for one session, hard constraints already applied. Always
     returns at least a 'skip' so the MILP stays feasible."""
@@ -438,6 +459,8 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
             have = {c["item_id"] for c in cands}
             cands += [c for c in best([it for it in usual if not it.get("veg", 1)], slots)
                       if c["item_id"] not in have]
+        if meal == "dinner":
+            cands = _bound_dinner_tiffin(cands)
 
     # A meal the user said they order (rhythm "order") is never turned into a cook day:
     # the flexible "cook 1–2× a week" days only go to meals they didn't say they order.
