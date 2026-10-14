@@ -23,6 +23,7 @@ from . import food_lexicon
 # ₹; Swiggy's average fee + GST until a real cart bill shows the fee (domain/fees.DELIVERY)
 LIVE_DELIVERY_FEE_ESTIMATE = 17.11
 MAX_PLACES = 4                        # restaurants read per refresh (favourites first)
+MAX_SAVED_PLACES = 12                 # saved places read per refresh: all of them (profile caps at 12) (W6)
 DEFAULT_QUERY = "meals"               # used only when the user has no live favourites
 
 # Dish-name templates → typical per-portion values (Indian restaurant portions; IFCT-style
@@ -233,8 +234,9 @@ def _places(user_id: int) -> list[dict]:
     favs = swiggy_live.live_favourites(user_id)
     if pooled or favs:
         out, seen = [], set()
-        for p in pooled + favs[:MAX_PLACES]:
-            if p["id"] not in seen and len(out) < MAX_PLACES + meal_pools.MAX_PLACES:
+        # Every saved place, not the first four (grill #5: whole favourite places, W6).
+        for p in pooled + favs[:MAX_SAVED_PLACES]:
+            if p["id"] not in seen and len(out) < MAX_SAVED_PLACES + meal_pools.MAX_PLACES:
                 seen.add(p["id"])
                 out.append(p)
         return out
