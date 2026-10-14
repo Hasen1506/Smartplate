@@ -46,7 +46,7 @@ def town_world(frozen, monkeypatch):
     app = create_app()
     client = app.test_client()
     uid = client.post("/api/profiles", json={**{
-        "name": "Priya", "diet": "veg", "weekly_budget": 3500, "cook": "never",
+        "name": "Priya", "diet": "veg", "weekly_budget": 5000, "cook": "never",   # W4 fees priced in: 3,500 is money-bound once a lunch thali is pooled
         "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "order"},
         "login": "priya@example.com", "password": "priya-long-password"}, "consent": {"account": True, "health": True, "learning": True}}).get_json()["user"]["id"]
     _connect(client, fake, uid=uid)

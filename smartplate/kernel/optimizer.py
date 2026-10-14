@@ -728,7 +728,11 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
             v = pulp.LpVariable(f"x_{s['id']}_{i}", cat="Binary")
             x[(s["id"], i)] = v
             choice_vars.append(v)
-            keep = config.STABILITY_W if previous.get(s["id"]) == _choice_key(c) else 0.0
+            # A fallback dish (not in the meal's own list) gets no stability bonus: the list is the
+            # person's word, so adding a dish to it changes today's meal too (W6: "pool dishes win
+            # when they fit"; found at integration, browser_pools).
+            keep = (config.STABILITY_W if previous.get(s["id"]) == _choice_key(c) and not c.get("pool_fallback")
+                    else 0.0)
             obj_terms.append((_objective(c, w, ref_cost, user["carbon_pref"], skip_penalty) - keep
                               + _tiebreak(s, c)) * v)
             budget_terms.append(c["cost"] * v)

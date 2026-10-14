@@ -3,10 +3,10 @@
   "Fri 2026-11-06": {
    "breakfast": {
     "cost": 115.0,
-    "item": "Masala Dosa",
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Murugan Idli Shop",
     "status": "ordered"
    },
    "dinner": {
@@ -36,12 +36,12 @@
     "status": "ordered"
    },
    "dinner": {
-    "cost": 100.0,
-    "item": "Curd Rice",
-    "kind": "delivery",
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
-    "status": "ordered"
+    "restaurant": "",
+    "status": "active"
    },
    "lunch": {
     "cost": 0.0,
@@ -80,11 +80,11 @@
   },
   "Sun 2026-11-08": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
+    "cost": 90.0,
+    "item": "Masala Chai + Bun Butter",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Chai Kings",
     "status": "ordered"
    },
    "dinner": {
@@ -114,20 +114,20 @@
     "status": "ordered"
    },
    "dinner": {
-    "cost": 90.0,
-    "item": "Masala Chai + Bun Butter",
+    "cost": 100.0,
+    "item": "Curd Rice",
     "kind": "delivery",
     "pinned": true,
-    "restaurant": "Chai Kings",
+    "restaurant": "Sangeetha Veg",
     "status": "ordered"
    },
    "lunch": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 115.0,
+    "item": "Masala Dosa",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "",
-    "status": "active"
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "ordered"
    }
   },
   "Tue 2026-11-03": {
@@ -198,10 +198,10 @@
   "Fri 2026-11-06": {
    "breakfast": {
     "cost": 115.0,
-    "item": "Masala Dosa",
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "dinner": {
@@ -231,11 +231,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 100.0,
-    "item": "Curd Rice",
-    "kind": "delivery",
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "",
     "status": "active"
    },
    "lunch": {
@@ -275,11 +275,11 @@
   },
   "Sun 2026-11-08": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
+    "cost": 90.0,
+    "item": "Masala Chai + Bun Butter",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Chai Kings",
     "status": "active"
    },
    "dinner": {
@@ -317,11 +317,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 115.0,
+    "item": "Masala Dosa",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    }
   },
@@ -361,11 +361,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 90.0,
-    "item": "Masala Chai + Bun Butter",
+    "cost": 100.0,
+    "item": "Curd Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Chai Kings",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "lunch": {

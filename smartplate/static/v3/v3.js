@@ -395,18 +395,25 @@
     s.menu = await api(`/api/user/${S.userId}/swiggy/live-menu?restaurant_id=${encodeURIComponent(id)}&restaurant_name=${encodeURIComponent(name)}`);
     render();
   }
+  // A background read re-renders the sheet: keep what the person is typing in the search box.
+  const keepTyped = () => { const el = typeof document !== "undefined" ? document.getElementById("v3-q") : null;
+    if (el && st().sheet && typeof el.value === "string") st().sheet.q = el.value; };
   async function loadHistory() {
     const s = st().sheet;
+    if (!s) return;
     try {
       const h = await api(`/api/user/${S.userId}/swiggy/order-history`);
       s.history = [...new Set((h.provider_orders || []).map(o => o.restaurant).filter(Boolean))].slice(0, 8);
     } catch (_) { s.history = []; }
-    render();
+    if (st().sheet !== s) return;
+    keepTyped(); render();
   }
   async function loadSugg() {
     const s = st().sheet;
+    if (!s) return;
     try { s.sugg = await api(`/api/user/${S.userId}/favourites/suggested`); } catch (_) { s.sugg = null; }
-    render();
+    if (st().sheet !== s) return;
+    keepTyped(); render();
   }
   async function importSugg() {
     const s = st().sheet;
@@ -575,7 +582,9 @@
     on("[data-v3-swapto]", "click", (e) => { const [meal, ref] = e.currentTarget.dataset.v3Swapto.split("|");
       guard(async () => { await post("/pick", { meal, ref: ref || null }); T(null); }, `Swap ${meal}`); });
     on("[data-v3-add]", "click", (e) => { const meal = e.currentTarget.dataset.v3Add; T({ kind: "add", meal });
-      if (v().data?.swiggy.connected) { guard(loadHistory, "Your Swiggy orders"); guard(loadSugg, "Suggestions from your Swiggy orders"); } });
+      // background reads (each catches its own error): not through guard(), which drops a call while
+      // another runs and would block the person's first tap in the sheet
+      if (v().data?.swiggy.connected) { loadHistory(); loadSugg(); } });
     on("[data-v3-addtab]", "click", (e) => { v().sheet.tab = e.currentTarget.dataset.v3Addtab; render(); });
     on("[data-v3-addmeal]", "click", (e) => { v().sheet.meal = e.currentTarget.dataset.v3Addmeal; render(); });
     on("[data-v3-hist]", "click", (e) => { const q = e.currentTarget.dataset.v3Hist; guard(() => searchSwiggy(q), `Search Swiggy for “${q}”`); });

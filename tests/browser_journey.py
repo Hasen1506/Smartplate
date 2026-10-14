@@ -105,8 +105,9 @@ def test_browser_golden_first_week(server):
             api_view = client.get(f"/api/plan/{pid}", headers=h).get_json()
             expect(page.locator("nav.days [data-day]")).to_have_count(7)
             labels = page.locator(".mrow").evaluate_all("els => els.map(e => e.getAttribute('aria-label'))")
-            assert labels == [f"{m.capitalize()}: {api_view['grid'][0]['meals'][m]['item']}"
-                              for m in ("breakfast", "lunch", "dinner")], labels
+            cells = [api_view['grid'][0]['meals'][m] for m in ("breakfast", "lunch", "dinner")]
+            assert labels == [f"{m.capitalize()}: {c['item'] if c['kind'] in ('delivery', 'cook') else 'Skipped'}"
+                              for m, c in zip(("breakfast", "lunch", "dinner"), cells)], labels
             transcript["week"] = grid_snapshot(api_view)
 
             # 3. pick a dish in the Change sheet: it is kept ------------------------------------
