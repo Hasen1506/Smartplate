@@ -89,10 +89,20 @@ def no_network(monkeypatch):
 
 
 def pytest_configure(config):
+    config.addinivalue_line("markers", "cart_window: keep the Swiggy cart-window refusal on (domain/timing)")
     config.addinivalue_line("markers", "sqlite_only: exercises the SQLite file itself; on the Postgres "
                                        "run it still runs, against SQLite")
     if pg_support.enabled():
         pg_support.setup_worker()
+
+
+@pytest.fixture(autouse=True)
+def cart_window_for_test(request, monkeypatch):
+    """The cart-window refusal (domain/timing) is on only for tests marked `cart_window`:
+    the many older tests fill a cart at whatever instant they run (some on the real
+    clock), which is not what they test. tests/test_time_today.py covers the window."""
+    from smartplate.domain import timing
+    monkeypatch.setattr(timing, "CART_WINDOW_ENFORCED", request.node.get_closest_marker("cart_window") is not None)
 
 
 @pytest.fixture(autouse=True)

@@ -3,8 +3,8 @@
   "budget": 2000.0,
   "daily_cap": null,
   "prorated": false,
-  "remaining": 950.39,
-  "spend": 1049.61,
+  "remaining": 860.81,
+  "spend": 1139.19,
   "weekly_budget": 2000.0
  },
  "counts": {
@@ -25,11 +25,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 157.62,
-    "item": "Pesarattu + Chutney",
+    "cost": 228.27,
+    "item": "Chana Masala Bowl",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "The Bowl Company",
     "status": "active"
    },
    "lunch": {
@@ -51,11 +51,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 157.62,
-    "item": "Pesarattu + Chutney",
+    "cost": 163.05,
+    "item": "Veg Meals",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    },
    "lunch": {
@@ -77,11 +77,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 181.5,
-    "item": "Veg Meals",
+    "cost": 169.4,
+    "item": "Parotta + Veg Kurma",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "lunch": {
@@ -94,32 +94,6 @@
    }
   },
   "Sun 2026-10-18": {
-   "breakfast": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 125.0,
-    "item": "Mini Tiffin",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   }
-  },
-  "Thu 2026-10-15": {
    "breakfast": {
     "cost": 0.0,
     "item": "Skip",
@@ -145,6 +119,32 @@
     "status": "active"
    }
   },
+  "Thu 2026-10-15": {
+   "breakfast": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 163.05,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
   "Tue 2026-10-13": {
    "breakfast": {
     "cost": 0.0,
@@ -155,11 +155,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 186.75,
-    "item": "Veg Meals",
+    "cost": 174.3,
+    "item": "Parotta + Veg Kurma",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "lunch": {

@@ -15,7 +15,7 @@ import datetime as dt
 
 from . import access, clock, db, service
 from .domain import (allergens, epicure, festivals, flavour, intake, learning, models, profile,
-                     reverse_mode, taste)
+                     reverse_mode, taste, timing)
 from .kernel import optimizer, recommender, scheduler
 
 CITY = "Chennai"                 # profiles' default city; restaurant dishes come only from live Swiggy menus
@@ -302,13 +302,30 @@ def _session_bundle(session_id: int):
 
 
 def _limits(plan, user, session) -> dict:
-    """Money left for this one meal if everything else in the week stays as planned."""
+    """Money for this one meal if everything else in the week stays as planned.
+
+    Counted exactly as Today's "₹X left this week" is (service.plan_view: checked carts
+    at their real bill, unconfirmed past meals not counted), so the two never disagree:
+      week_left  = Today's number (the week's money not yet planned or spent)
+      this_meal  = what this meal is planned at now (0 for a skip)
+      left_week  = week_left + this_meal, the most a swap of this meal can use. It never
+                   exceeds the week's money left once this meal's own share is freed.
+    """
     decisions = models.decisions_for_plan(plan["id"])
     at = optimizer.now()
-    others = [d for d in decisions if d["session_id"] != session["id"] and d["chosen_kind"] in ("delivery", "cook")
-              and not (d["session_status"] == "active" and scheduler.is_past(d, at))]
-    left_week = optimizer.week_cap(user, plan) - sum(d["cost"] for d in others)
-    out = {"left_week": round(left_week, 2), "left_day": None}
+    from .domain import week_orders
+    real = week_orders.real_totals(plan["id"])
+    for d in decisions:
+        r = real.get(d["session_id"])
+        if r and d["chosen_kind"] == "delivery":
+            d["cost"] = r["to_pay"]
+    spend = [d for d in decisions if d["chosen_kind"] in ("delivery", "cook")
+             and not (d["session_status"] == "active" and scheduler.is_past(d, at))]
+    mine = sum(d["cost"] for d in spend if d["session_id"] == session["id"])
+    others = [d for d in spend if d["session_id"] != session["id"]]
+    week_left = optimizer.week_cap(user, plan) - sum(d["cost"] for d in spend)
+    out = {"left_week": round(week_left + mine, 2), "week_left": round(week_left, 2),
+           "this_meal": round(mine, 2), "left_day": None}
     cap = profile.daily_cap(user)
     if cap:
         out["left_day"] = round(cap - sum(d["cost"] for d in others if d["day"] == session["day"]), 2)
@@ -328,7 +345,8 @@ def options(session_id: int) -> dict:
     safe_all = allergens.safe_items(user, menu)
     pooled_ids = ((ctx.get("pools") or {}).get(session["meal"]) or {}).get("ids", set())
     # Dishes with no nutrition estimate are offered only where the person pooled them.
-    safe = [it for it in safe_all if optimizer.meal_suitable(it, session["meal"]) and it.get("nutrition_known", 1) != 0]
+    safe = [it for it in safe_all if optimizer.meal_suitable(it, session["meal"]) and it.get("nutrition_known", 1) != 0
+            and timing.slot_suitability(it, session["meal"], favourited_for_slot=it["id"] in pooled_ids)]
     floor = float(user["rating_floor"])
     rated_ok = [it for it in safe if it["restaurant_rating"] >= floor]
     disliked = ctx["taste"]["disliked"]
@@ -517,13 +535,15 @@ def eat_now(plan_id: int, body: dict) -> dict:
             cur.execute("UPDATE sessions SET status='active', note='' WHERE id=?", (sid,))
     optimizer.optimize(plan_id)
     decision = next((d for d in models.decisions_for_plan(plan_id) if d["session_id"] == sid), None)
-    if not decision or decision["chosen_kind"] not in ("delivery", "cook"):
-        # The week would still skip it (variety, budget): the person said they're hungry, so
-        # keep the best safe dish that fits what's left, else the first safe recipe.
+    if not decision or decision["chosen_kind"] != "delivery":
+        # The week would still skip it (variety, budget) or make it a cook day: the person
+        # said they're hungry *now* (an order), so keep the best safe dish that fits what's
+        # left, else keep their cook day, else the first safe recipe.
         o = options(sid)
         dishes = sorted([x for g in o["usual"] for x in g["dishes"]] + o["new"], key=lambda x: x["score"])
         dish = next((x for x in dishes if x["fits"]), None)
         pin = ({"kind": "delivery", "item_id": dish["item_id"]} if dish
+               else None if decision and decision["chosen_kind"] == "cook"
                else {"kind": "cook", "recipe_key": o["cook"][0]["recipe_key"]} if o["cook"] else None)
         if pin:
             with db.cursor() as cur:

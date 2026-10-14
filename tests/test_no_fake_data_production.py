@@ -84,6 +84,17 @@ def test_new_profile_without_swiggy_plans_home_cooking_only_and_says_why(prod):
     cells = [c for d in view["grid"] for c in d["meals"].values()]
     assert cells and all(c["kind"] in ("cook", "skip", "leftover", "past") for c in cells), {c["kind"] for c in cells}
     assert not any(c["kind"] == "delivery" for c in cells)
+    # W2 (usability #13): meals the person said they *order* are never turned into cook
+    # days, so with no Swiggy yet they stay empty and say why (connect Swiggy).
+    ordered = [c for c in cells if c["kind"] == "skip"]
+    assert ordered and all("connect Swiggy" in " ".join(c["reasons"]) for c in ordered)
+    assert "connect Swiggy" in view["plan_summary"]["message"]
+    # a meal they cook is home cooking
+    client = create_app().test_client()
+    r = client.post("/api/profiles", json={**SETUP, "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "cook"}})
+    assert r.status_code == 201, r.get_json()
+    view = r.get_json()
+    cells = [c for d in view["grid"] for c in d["meals"].values()]
     src = view["source"]
     assert src["kind"] == "none" and src["needs"] == "connect"
     assert "sample" not in json.dumps(src).lower()

@@ -7,7 +7,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
-from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, week_orders
+from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, timing, week_orders
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
 from .kernel import agent_brain
@@ -129,6 +129,11 @@ def create_app() -> Flask:
     def release_user_locks(error):
         for lock in reversed(g.pop('user_locks', [])):
             lock.release()
+
+    @app.errorhandler(timing.CartWindowClosed)
+    def cart_window_closed(error):
+        # Too early (or too late) to fill this meal's Swiggy cart: say when, so the UI can offer a reminder.
+        return jsonify(error=str(error), code=error.code, opens_at=error.opens_at, closed=error.closed), 409
 
     @app.errorhandler(ValueError)
     def invalid_input(error):
