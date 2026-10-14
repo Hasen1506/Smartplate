@@ -168,7 +168,9 @@ def _row(session_id: int) -> dict:
 def check_cart(session_id: int, expected_fingerprint: str | None) -> dict:
     """Step 1: the reviewed dish goes into the Swiggy cart; record the true bill."""
     from ..integrations import swiggy_live
+    from .. import service
     row = _row(session_id)
+    service.require_cart_window(session_id)          # not before the meal's order window
     result = swiggy_live.fill_cart(session_id, expected_fingerprint)
     record_cart(row["plan_id"], session_id, result)
     next_step = ({"mode": "approve_and_place", "label": f"Approve ₹{result['to_pay']:.2f} and place"}
@@ -184,6 +186,8 @@ def check_single_cart(session_id: int, expected_fingerprint: str | None) -> dict
     session = models.get_session(session_id)
     if not session:
         raise ValueError("Meal not found")
+    from .. import service
+    service.require_cart_window(session_id)          # tomorrow's breakfast can't be paid for (and delivered) now
     result = swiggy_live.fill_cart(session_id, expected_fingerprint)
     if result.get("to_pay") is not None:
         record_cart(session["plan_id"], session_id, result)

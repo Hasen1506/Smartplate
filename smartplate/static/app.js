@@ -1106,14 +1106,23 @@ function whyChips(c) {
   return out.length ? `<ul class="why" aria-label="Why this pick">${out.map(([t, k]) => `<li class="${k}">${esc(t)}</li>`).join("")}</ul>` : "";
 }
 // "Order by 19:45": a ring that empties as the order-by time gets closer (the last 3 hours).
+// Minutes until an absolute instant ("2026-11-02T12:15+05:30"); null once it has passed.
+function minutesUntilAt(iso) {
+  const t = Date.parse(String(iso || ""));
+  if (Number.isNaN(t)) return null;
+  const mins = Math.floor((t - Date.now()) / 60000);
+  return mins >= 0 ? mins : null;
+}
 function orderTimer(order) {
   if (!order?.order_at) return "";
-  const mins = minutesUntil(order.order_at);
+  // The server gives the meal's own order-by instant: tomorrow's 12:15 never counts down today.
+  const mins = order.order_by_at ? minutesUntilAt(order.order_by_at) : minutesUntil(order.order_at);
+  const at = order.label || order.order_at;
   const frac = mins == null ? 1 : Math.max(0, Math.min(1, mins / 180));
   const off = (94.2 * (1 - frac)).toFixed(1);
-  return `<span class="timer" aria-label="Order by ${esc(order.order_at)}${mins != null ? `, in ${mins} minutes` : ""}">
+  return `<span class="timer" aria-label="Order by ${esc(at)}${mins != null ? `, in ${mins} minutes` : ""}">
     <svg viewBox="0 0 36 36" aria-hidden="true"><circle class="ring-bg" cx="18" cy="18" r="15"/><circle class="ring" cx="18" cy="18" r="15" stroke-dasharray="94.2" stroke-dashoffset="${off}" transform="rotate(-90 18 18)"/></svg>
-    <span><b>Order by ${esc(order.order_at)}</b><span class="muted" style="display:block;font-size:12px">${mins != null && mins <= 180 ? `in ${mins} min` : esc(order.why || "")}</span></span></span>`;
+    <span><b>Order by ${esc(at)}</b><span class="muted" style="display:block;font-size:12px">${mins != null && mins <= 180 ? `in ${mins} min` : esc(order.why || "")}</span></span></span>`;
 }
 function nextUpCard(nu) {
   const c = nu.cell, when = `${nu.when} · ${cap1(nu.meal)}`;
@@ -1132,6 +1141,8 @@ function nextUpCard(nu) {
   let cta = "";
   if (isCook) cta = `<button class="primary" data-confirm="${c.session_id}">I cooked it</button>`;
   else if (carted) cta = "";
+  // Too early for the cart: paying now would deliver now. Offer the order-by reminder instead.
+  else if (order.cart_state === "early" && (live || c.handoff_url)) cta = `<button class="primary" data-remind="${c.session_id}" data-remind-at="${esc(order.label || order.order_at)}">Remind me at ${esc(order.label || order.order_at)}</button>`;
   else if (live && cartEligible(c)) cta = `<button class="primary" data-cart="${c.session_id}" aria-live="polite" ${adding ? 'aria-busy="true"' : ""}>${adding ? `${roller()}<span>Adding to your cart…</span>` : (c.portions || 1) > 1 ? `Add ${c.portions} to Swiggy cart` : "Add to Swiggy cart"}</button>`;
   else if (!live && swiggySignInOpen() && cartEligible(c) && S.view.source?.kind === "live") cta = `<button class="primary" data-connect-order="${c.session_id}">Connect Swiggy &amp; add</button>`;
   else if (c.handoff_url) cta = `<a class="btn primary" href="${esc(c.handoff_url)}" target="_blank" rel="noopener" data-handoff="${c.session_id}">Order on Swiggy ${ICON.out}</a>`;
@@ -1649,7 +1660,7 @@ function sheetDialog() {
   const cook = d.cook[0];
   return `<div class="sheet-bg" data-ov="sheet" data-close-sheet="1"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
     <span class="grab" aria-hidden="true"></span>
-    <div class="sheet-head"><div><p class="eyebrow">${esc(s.day)} ${esc(fmtDate(s.date))} · ${rupee0(left)} to spend on this meal${L.left_day != null ? " (today's cap)" : ""}${(d.portions || 1) > 1 ? ` · prices for ${d.portions}` : ""}</p>
+    <div class="sheet-head"><div><p class="eyebrow">${esc(s.day)} ${esc(fmtDate(s.date))} · ${L.left_day == null && L.this_meal > 0 && L.week_left >= 0 ? `${rupee0(left)} if you swap this meal (${rupee0(L.week_left)} left + its ${rupee0(L.this_meal)})` : `${rupee0(left)} to spend on this meal`}${L.left_day != null ? " (today's cap)" : ""}${(d.portions || 1) > 1 ? ` · prices for ${d.portions}` : ""}</p>
       <h2 class="h2" id="sheet-title">Change ${esc(s.meal)}</h2>${d.current ? `<p class="muted">Now: ${esc(d.current.item)}</p>` : ""}</div>
       <button class="icon-btn" data-close-sheet="1" aria-label="Close">${ICON.close}</button></div>
     ${d.timing_tip ? `<p class="fine">${esc(d.timing_tip)}</p>` : ""}
@@ -2848,7 +2859,7 @@ async function onboardNav(dir) {
     S.tab = "today"; S.more = null;
     // Quick connection: the very next step after planning, one tap away.
     S.connectSheet = swiggySignInOpen() && !S.swiggy?.connected;
-    toast("Your week is planned"); render(); return;
+    toast(view.plan_summary?.message || "Your week is planned"); render(); return;
   }
   o.step += 1; S.error = null; render();
 }
@@ -3062,6 +3073,10 @@ function wire() {
   const dishSearch = document.getElementById("dish-search");
   if (dishSearch) dishSearch.onsubmit = (e) => { e.preventDefault(); const q = document.getElementById("dish-query").value; guard(() => searchLiveDishes(q), `Find dishes for “${q}”`); };
   on("[data-connect-order]", "click", (e) => { S.pendingResume = { kind: "order-meal", args: [Number(e.currentTarget.dataset.connectOrder)] }; S.connectSheet = true; render(); });
+  on("[data-remind]", "click", (e) => guard(async () => {
+    if (remindersOn()) { toast(`You'll get a nudge at ${e.currentTarget.dataset.remindAt}`); return; }
+    await toggleAlerts();
+  }, "Remind me"));
   on("[data-cart]", "click", (e) => guard(() => liveAction("order-meal", Number(e.currentTarget.dataset.cart)), "Add to Swiggy cart"));
   on("[data-rm-device]", "click", (e) => guard(() => removeDevice(e.currentTarget.dataset.rmDevice)));
   const signin = document.getElementById("signin");
