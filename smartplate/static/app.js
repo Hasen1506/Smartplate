@@ -268,6 +268,9 @@ async function api(path, method = "GET", body, { timeoutMs } = {}) {
     err.code = "server_timeout";
     throw err;
   } finally { if (timer) clearTimeout(timer); }
+  // The service worker answered from its offline copy (sw.js): say so, with its age.
+  const cachedAt = r.headers?.get?.("X-Ziggy-Cached-At");
+  if (cachedAt) { S.offline = true; S.servedFromCache = new Date(cachedAt); }
   if (!r.ok) {
     const data = await r.json().catch(() => ({}));
     if (SWIGGY_RECONNECT.has(data.code) && S.swiggy) {
@@ -346,6 +349,7 @@ async function guard(fn, label) {
 // redeploy). Every later call with this id would fail the same way, so go back to the
 // welcome screen and say what happened instead of offering a Retry that cannot work.
 async function profileGone(message) {
+  clearPlanCache();
   if (S.userId) keys.drop(S.userId);
   store.del("smartplate.user");
   S.userId = null; S.view = null; S.planId = null; S.exec = null; S.swiggy = null; S.liveBrowseMenu = null;
@@ -451,8 +455,9 @@ async function boot() {
   syncPush().catch(() => {});
 }
 async function loadOrCreatePlan() {
+  S.servedFromCache = null;
   S.view = await api(`/api/user/${S.userId}/plan`);
-  S.planId = S.view.plan.id; S.loadedAt = new Date();
+  S.planId = S.view.plan.id; S.loadedAt = S.servedFromCache || new Date(); S.stale = !!S.servedFromCache;
   S.exec = await api(`/api/plan/${S.planId}/orders`);
   S.swiggy = await api(`/api/user/${S.userId}/swiggy`).catch(() => null);
   S.liveFavourites = swiggyReady() ? await api(`/api/user/${S.userId}/swiggy/favourites`).catch(() => null) : null;
@@ -877,12 +882,12 @@ function welcomeLede() {
 }
 function render() {
   const app = document.getElementById("app");
-  if (S.planning) { app.innerHTML = planningScreen(); wire(); return; }
+  if (S.planning) { app.innerHTML = planningScreen(); wire(); syncHistory(); return; }
   if (S.onboard) {
     const step = `ob${S.onboard.step}`, arrive = step !== S.viewKey; S.viewKey = step;
-    app.innerHTML = storageBanner() + onboardingScreen().replace('<main class="onboard">', `<main class="onboard${arrive ? " anim" : ""}">`); wire(); return;
+    app.innerHTML = storageBanner() + onboardingScreen().replace('<main class="onboard">', `<main class="onboard${arrive ? " anim" : ""}">`); wire(); syncHistory(); return;
   }
-  if (S.welcome || !S.view) { app.innerHTML = storageBanner() + welcomeScreen(); wire(); return; }
+  if (S.welcome || !S.view) { app.innerHTML = storageBanner() + welcomeScreen(); wire(); syncHistory(); return; }
   const viewKey = [S.tab, S.more, S.weekView, S.savedTab].join("|");
   const arrive = viewKey !== S.viewKey; S.viewKey = viewKey;
   app.innerHTML = storageBanner() + offlineBar() + `<div class="shell">${navBar()}<div class="col">${topbar()}`
@@ -897,12 +902,15 @@ function render() {
   S.openSheets = new Set(open.map(el => el.dataset.ov));
   S.fresh = null;
   wire();
+  syncHistory();
   queueQuick();
 }
 // Offline: say so, and how old the plan on screen is. Nothing is cached as if it were live.
 function offlineBar() {
   if (!S.offline) return "";
-  const at = S.loadedAt ? S.loadedAt.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : null;
+  const L = S.loadedAt, time = L ? L.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : null;
+  const sameDay = L && L.toDateString() === new Date().toDateString();
+  const at = L ? (sameDay ? time : `${L.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}, ${time}`) : null;
   return `<div class="offline" role="status">You're offline.${at ? ` Showing your plan as loaded at ${esc(at)}.` : ""} Changes, live menus and your Swiggy cart need a connection.</div>`;
 }
 function errbar(retry = true) {
@@ -2672,7 +2680,12 @@ async function signOut() {
   clearCurrentProfile();
   S.users = mergeUsers(await api("/api/users")); S.welcome = true; render(); toast("Signed out of this device");
 }
+// The offline copy of plans (sw.js) belongs to whoever was signed in: drop it on sign-out.
+function clearPlanCache() {
+  try { if (typeof caches !== "undefined" && caches.delete) caches.delete("ziggy-api-v1").catch(() => {}); } catch (_) {}
+}
 function clearCurrentProfile() {
+  clearPlanCache();
   resetProfileState();
   for (const key of ["userId", "planId", "view", "onboard"]) S[key] = null;
   S.welcome = true;
@@ -3118,17 +3131,56 @@ async function goTab(tab, sub = null) {
   if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);
 }
 
-const anyDialog = () => S.orderReview || S.liveOrderReview || S.checkoutReview || S.sheet || S.addrSheet || S.connectSheet || S.liveBrowseMenu || S.dish || S.cookAlong || S.budgetSheet;
-document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && (anyDialog() || S.moving)) {
-    if (S.cookAlong) { stopCookAlong(); return; }
-    if (S.budgetSheet) S.budgetSheet = null;
-    else if (S.dish) S.dish = null;
-    else if (S.liveOrderReview) S.liveOrderReview = null;
-    else if (S.checkoutReview) S.checkoutReview = null;
-    else { S.orderReview = null; S.sheet = null; S.moving = null; S.addrSheet = false; S.connectSheet = false; S.liveBrowseMenu = null; }
-    render();
+const anyDialog = () => S.orderReview || S.liveOrderReview || S.checkoutReview || S.sheet || S.addrSheet || S.connectSheet || S.liveBrowseMenu || S.liveLoading || S.dish || S.cookAlong || S.budgetSheet;
+// Close the top-most sheet (Escape, and the phone's Back button). Renders.
+function closeTopDialog() {
+  if (S.cookAlong) { stopCookAlong(); return; }
+  if (S.budgetSheet) S.budgetSheet = null;
+  else if (S.dish) S.dish = null;
+  else if (S.liveOrderReview) S.liveOrderReview = null;
+  else if (S.checkoutReview) S.checkoutReview = null;
+  else { S.orderReview = null; S.sheet = null; S.moving = null; S.addrSheet = false; S.connectSheet = false; S.liveBrowseMenu = null; S.liveLoading = null; }
+  render();
+}
+/* ---- Back button (Android, browser): one history entry per layer the user opened, so Back
+   closes the top sheet, then leaves a sub-page (Me → Settings, Week → Orders), then returns
+   to Today, then (only then) leaves Ziggy. render() keeps the entries in step with the
+   screen; closing a sheet with its own X or Escape pops the entry it pushed. */
+const NAV = { depth: 0, skip: 0 };
+function subView() { return (S.tab === "week" && !!S.weekView) || (S.tab === "more" && !!S.more); }
+function navDepth() {
+  if (S.planning) return NAV.depth;                          // hold still while the server plans
+  if (S.onboard) return (S.onboard.step || 0) + 1;            // each step is one Back away from the last
+  if (S.welcome || !S.view) return S.signin ? 1 : 0;
+  return (S.tab !== "today" ? 1 : 0) + (subView() ? 1 : 0) + (anyDialog() || S.moving ? 1 : 0);
+}
+function syncHistory() {
+  if (typeof history === "undefined" || typeof history.pushState !== "function") return;
+  const want = navDepth();
+  while (NAV.depth < want) { NAV.depth += 1; history.pushState({ ziggy: NAV.depth }, ""); }
+  if (want < NAV.depth) {                                     // closed in the app: drop the extra entries
+    const n = NAV.depth - want; NAV.depth = want; NAV.skip += 1; history.go(-n);
   }
+}
+function navBack() {
+  if (S.planning) return;
+  if (S.onboard) { guard(() => onboardNav("back")); return; }
+  if (S.welcome || !S.view) { if (S.signin) { S.signin = false; S.error = null; if (S.view) S.welcome = false; } render(); return; }
+  if (anyDialog() || S.moving) { closeTopDialog(); return; }
+  if (S.tab === "week" && S.weekView) { S.weekView = null; S.olist = null; render(); return; }
+  if (S.tab === "more" && S.more) { guard(() => goTab("more")); return; }
+  if (S.tab !== "today") { guard(() => goTab("today")); return; }
+  render();
+}
+if (typeof window !== "undefined" && window.addEventListener) {
+  window.addEventListener("popstate", () => {
+    if (NAV.skip) { NAV.skip -= 1; return; }                  // our own history.go() from syncHistory
+    NAV.depth = Math.max(0, NAV.depth - 1);
+    navBack();
+  });
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && (anyDialog() || S.moving)) { closeTopDialog(); }
   if (e.key === "Tab" && anyDialog()) {
     const dialogs = [...document.querySelectorAll("[role=dialog]")];
     const top = dialogs.at(-1);
@@ -3161,7 +3213,11 @@ function bootFailed(e) {
 }
 if (typeof window !== "undefined" && window.addEventListener) {
   window.addEventListener("offline", () => { S.offline = true; if (S.view) render(); });
-  window.addEventListener("online", () => { S.offline = false; if (S.view) render(); });
+  window.addEventListener("online", () => {
+    S.offline = false;
+    if (S.view && S.stale && S.userId) { S.stale = false; guard(loadOrCreatePlan).then(() => render()); }   // the copy was from before
+    else if (S.view) render();
+  });
 }
 if (typeof matchMedia === "function") matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => applyLook());
 // A Swiggy photo that fails to load becomes the dish's category icon.
