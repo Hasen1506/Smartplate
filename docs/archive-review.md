@@ -1,5 +1,14 @@
 # Archive review: what is useful, what to put away (14 Oct 2026)
 
+> **Done (Round 2, founder decisions 14 Oct 2026).** The experiment flags are archived to
+> `smartplate/archive/experiments.py` (not imported by the app): `SMARTPLATE_BRAIN=llm`,
+> `SMARTPLATE_RATING_FLOOR=soft` + `SMARTPLATE_SAFETY_FLOOR`, `SMARTPLATE_VARIETY(_W)`.
+> The planner tuning knobs are pinned as constants in `config.py` (no env var):
+> `SOLVER_GAP` 0.001, `SOLVER_TIME_LIMIT_S` 10, `SOLVER_MAX_NODES` 20,000, `STABILITY_W` 0.3,
+> `PROTEIN_EVEN_W` 0.25, `ORDER_EDIT_WINDOW_MIN` 30. **Usual-first (favourites first) is the
+> default** (`USUAL_FIRST_W` 0.5, was `SMARTPLATE_USUAL_FIRST=on`), applied once there is order
+> history. The tables below are kept as the record of what was recommended.
+
 Grill #28, #58 and #59, and Vijay's answer to #59: *"keep what's useful, save the rest by
 function so I can review before deleting."* Nothing here has been deleted. Four
 clearly stale documents were **moved** into `docs/archive/`, and the links to them were
@@ -96,12 +105,12 @@ experiments that are off:
 
 | Flag (env var) | Off since | Code | Tests | Recommendation |
 |---|---|---|---|---|
-| `SMARTPLATE_BRAIN=llm` | 13 Jun | `kernel/agent_brain.py` (an LLM brain stub, unused) | 0 | **Archive.** It has been off for 4 months and has no tests. Keep the deterministic brain and pin it. |
-| `SMARTPLATE_RATING_FLOOR=soft` (+ `SMARTPLATE_SAFETY_FLOOR`) | 15 Jun | 2 branches in `kernel/optimizer.py` | 0 | **Archive.** It is untested, and "hard" is the brand promise. |
-| `SMARTPLATE_VARIETY=on` (+ `_W`) | 15 Jun | 1 term in `optimizer.py` | 0 | **Archive** the env knob. If W6's "surprise me" mode needs variety, it should be a per-user setting, not a server flag. |
-| `SMARTPLATE_USUAL_FIRST=on` (+ `_W`) | 16 Jun | 1 term in `optimizer.py` | 2 files | **Decide with W6.** "Favourites first" is now the product direction, so this may become the default, set per user. |
+| `SMARTPLATE_BRAIN=llm` | 13 Jun | `kernel/agent_brain.py` (an LLM brain stub, unused) | 0 | **Archived** → `smartplate/archive/experiments.py` (`LLMBrain`). The deterministic brain is the only one. |
+| `SMARTPLATE_RATING_FLOOR=soft` (+ `SMARTPLATE_SAFETY_FLOOR`) | 15 Jun | 2 branches in `kernel/optimizer.py` | 0 | **Archived** → `experiments.py` (`soft_rating_filter`, `soft_rating_pen`). The ★ floor is always hard. |
+| `SMARTPLATE_VARIETY=on` (+ `_W`) | 15 Jun | 1 term in `optimizer.py` | 0 | **Archived** → `experiments.py` (`variety_nudge_bonus`). Novelty is "Surprise me" in Decide for me. |
+| `SMARTPLATE_USUAL_FIRST=on` (+ `_W`) | 16 Jun | 1 term in `optimizer.py` | 2 files | **Now the default** (`config.USUAL_FIRST_W` = 0.5, no env var), once there is order history. |
 | `SMARTPLATE_LIVE_ORDERS` | 30 Sep | 9 call sites | 15 files | **Keep.** It is the safety switch for real orders. |
-| `SMARTPLATE_STABILITY`, `SMARTPLATE_PROTEIN_EVEN`, solver gap/time/nodes, `SMARTPLATE_EDIT_WINDOW` | — | planner tuning | some | **Keep the values, drop the env knobs.** Make them constants: nobody tunes them per deploy. |
+| `SMARTPLATE_STABILITY`, `SMARTPLATE_PROTEIN_EVEN`, solver gap/time/nodes, `SMARTPLATE_EDIT_WINDOW` | — | planner tuning | some | **Pinned** as constants in `config.py`; the env knobs are gone. |
 
 Feature modules that are on but not on Ziggy's core path ("favourites → rules → solver"):
 `domain/community.py` (shared weeks), `domain/carbon.py`, `domain/surge.py` (W4 is dropping
@@ -126,8 +135,8 @@ There are 57 distinct reads, 6 of them new from W9. Grill #59 counted about 43 i
 | **Swiggy** | `SMARTPLATE_SWIGGY`, `SMARTPLATE_SWIGGY_MCP`, `SMARTPLATE_SWIGGY_TIMEOUT`, `SMARTPLATE_SWIGGY_REDIRECT_APPROVED`, `SMARTPLATE_SWIGGY_CALLBACK_PATH`, `SMARTPLATE_SWIGGY_MAX_CLIENTS`, `SMARTPLATE_LIVE_ORDERS` | Keep. W7 is folding provider and approval into one mode enum. |
 | **Reminders and operations** | `SMARTPLATE_PUSH`, `SMARTPLATE_PUSH_TICK`, `SMARTPLATE_PUSH_CONTACT`, `SMARTPLATE_VAPID_PRIVATE`, `SMARTPLATE_CRON_KEY` (new), `SMARTPLATE_ADMIN_KEY` (new) | Keep. |
 | **Observability** | `SMARTPLATE_LOG_FORMAT` (new), `SMARTPLATE_SLOW_MS` (new), `SENTRY_DSN` (new), `SENTRY_TRACES_SAMPLE_RATE` (new) | Keep. |
-| **Planner tuning** | `SMARTPLATE_SOLVER_GAP`, `SMARTPLATE_SOLVER_TIME_LIMIT`, `SMARTPLATE_SOLVER_MAX_NODES`, `SMARTPLATE_STABILITY`, `SMARTPLATE_PROTEIN_EVEN`, `SMARTPLATE_EDIT_WINDOW` | Pin them as constants (archive the knob). |
-| **Experiments (off)** | `SMARTPLATE_BRAIN`, `SMARTPLATE_RATING_FLOOR`, `SMARTPLATE_SAFETY_FLOOR`, `SMARTPLATE_VARIETY`, `SMARTPLATE_VARIETY_W`, `SMARTPLATE_USUAL_FIRST`, `SMARTPLATE_USUAL_FIRST_W` | Archive (see §3). |
+| **Planner tuning** | `SMARTPLATE_SOLVER_GAP`, `SMARTPLATE_SOLVER_TIME_LIMIT`, `SMARTPLATE_SOLVER_MAX_NODES`, `SMARTPLATE_STABILITY`, `SMARTPLATE_PROTEIN_EVEN`, `SMARTPLATE_EDIT_WINDOW` | **Done:** pinned as constants; no longer read. |
+| **Experiments (off)** | `SMARTPLATE_BRAIN`, `SMARTPLATE_RATING_FLOOR`, `SMARTPLATE_SAFETY_FLOOR`, `SMARTPLATE_VARIETY`, `SMARTPLATE_VARIETY_W`, `SMARTPLATE_USUAL_FIRST`, `SMARTPLATE_USUAL_FIRST_W` | **Done:** archived (`USUAL_FIRST` became the default); no longer read. |
 | **Data and test** | `SMARTPLATE_FIXTURE_DATA`, `SMARTPLATE_EPICURE_DIR`, `SMARTPLATE_EPICURE_CHECKSUMS`, `SMARTPLATE_WEATHER`, `SMARTPLATE_WEATHER_TIMEOUT` | Keep. They are test seams. |
 
 Archiving the planner and experiment knobs alone brings the operator-facing list from 57

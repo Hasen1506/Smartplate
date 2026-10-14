@@ -37,9 +37,14 @@ Founder facts (Oct 2026): **Swiggy is connected and the Render origin is whiteli
   `confirm_order` (Food: `orderId + addressId + lat + lng`) → `PLACED`/`FAILED`. Never ask for a
   VPA. https://mcp.swiggy.com/builders/blog/2026-07-10-mcp-payments-upi.md
 - Ziggy today: `live_cart` (default) never places or pays; `live_order` places only a reviewed,
-  freshly approved COD order. UPI is a **future switch** (needs: Payment-stage tools enabled for
-  Ziggy, a payment-picker UI, the confirm contract, and the same explicit approval). Ziggy must
-  never collect money itself (payment-aggregator rules; see W10's founder answers #48).
+  freshly approved COD order, and (R2, `integrations/swiggy_upi.py`) a UPI order through the
+  Payment stage with the same explicit approval of the exact cart fingerprint + total:
+  `GET …/swiggy/checkout/preview?payment=upi[&app=]` → `POST …/swiggy/checkout` (PENDING_PAYMENT,
+  the person pays in their own UPI app) → `POST …/swiggy/orders/<id>/payment`
+  (check_payment_status, then confirm_order). When the Payment-stage tools aren't offered to
+  Ziggy, or UPI isn't offered for the cart, or the mode is below live_order, the answer is
+  "Pay in Swiggy" with the checkout link. Ziggy never collects money and never asks for a VPA
+  (payment-aggregator rules; see W10's founder answers #48). Still open: the payment-picker UI.
 
 ## Attribution
 
