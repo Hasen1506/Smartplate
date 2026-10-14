@@ -142,6 +142,7 @@ def test_a_5xx_answer_carries_its_request_id(client, monkeypatch):
 
 
 def test_json_logs_carry_request_id_route_status_and_latency(client, monkeypatch):
+    monkeypatch.setattr(config, "SLOW_REQUEST_MS", 10**9)   # a loaded box must not turn the line into a WARNING
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
     handler.addFilter(observability.RequestIdFilter())
