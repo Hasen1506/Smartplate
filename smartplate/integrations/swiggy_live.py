@@ -216,9 +216,14 @@ def call(user_id: int, name: str, arguments: dict) -> object:
     except Exception:
         logging.getLogger(__name__).warning("Could not record Swiggy response shape for %s", name)
     if result.get("isError"):
-        text = data.get("text") if isinstance(data, dict) else None
-        # Never the raw reply: it can hold addresses and phone numbers (grill #45).
+        # Swiggy's own words only, with personal data masked; never a dump of the raw reply,
+        # which can hold addresses and phone numbers (grill #45).
         from .. import privacy
+        error = data.get("error") if isinstance(data, dict) else None
+        candidates = [data] if isinstance(data, str) else [
+            *(data.get(k) for k in ("text", "message", "error") if isinstance(data, dict)),
+            *(error.get(k) for k in ("message", "text") if isinstance(error, dict))]
+        text = next((c for c in candidates if isinstance(c, str) and c.strip()), None)
         raise SwiggyError(f"Swiggy said: {privacy.redact(text or 'the request failed')[:240]}")
     if isinstance(data, dict) and data.get("success") is False:
         error = data.get("error") or {}
