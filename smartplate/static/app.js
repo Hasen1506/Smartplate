@@ -1105,7 +1105,7 @@ function realDishesState() {
 function whyChips(c) {
   const u = S.view.user || {}, b = S.view.budget || {}, out = [];
   if (c.pinned) out.push(["Your pick", "ok"]);
-  if (c.pooled) out.push([`From your ${c.meal || "meal"} pool`, "ok"]);
+  if (c.pooled) out.push([`From your usual ${usualMeals(c.meal)}`, "ok"]);
   else if (c.usual) out.push(["Your usual place", ""]);
   if (c.kind === "delivery" || c.kind === "cook") {
     if ((b.budget || 0) >= (b.spend || 0)) out.push(["Week stays in budget", "ok"]);
@@ -1303,7 +1303,7 @@ function quickStrip(c) {
     <div class="quick" role="group" aria-labelledby="quick-${c.session_id}">
     ${picks.map(x => `<button class="qpick${x.fits ? "" : " over"}" data-quick="${x.item_id}" data-quick-name="${esc(x.name)}"
       aria-label="${esc(`${x.name}, ${x.restaurant}, about ${rupee0(x.price)}${x.fits ? "" : ", over budget"}`)}">
-      ${dishIcon(x.name, { image: photoOf(x), lg: true })}<b>${esc(x.name)}</b><span class="muted">${x.pooled ? "Your pool · " : ""}${esc(x.restaurant)}</span>
+      ${dishIcon(x.name, { image: photoOf(x), lg: true })}<b>${esc(x.name)}</b><span class="muted">${x.pooled ? "Your usual · " : ""}${esc(x.restaurant)}</span>
       <span class="pr">≈${rupee0(x.price)}${x.fits ? "" : ` <i>over</i>`}</span></button>`).join("")}
     ${cook ? `<button class="qpick" data-quick-cook="${esc(cook.recipe_key)}" data-quick-name="${esc(cook.name)}" aria-label="${esc(`Cook ${cook.name} at home, about ${rupee0(cook.price)}`)}">
       ${dishIcon(cook.name, { cook: true, lg: true })}<b>${esc(cook.name)}</b><span class="muted">Cook at home</span><span class="pr">≈${rupee0(cook.price)}</span></button>` : ""}
@@ -1533,7 +1533,7 @@ function olRows() {
 }
 function olLine(d, o) {
   const picked = o.pick === d.id, qty = picked ? o.qty || 1 : 1;
-  const note = [d.restaurant, d.pooled.length ? `in your ${d.pooled.join(" & ")} pool` : "", d.side ? "side or treat" : ""].filter(Boolean).join(" · ");
+  const note = [d.restaurant, d.pooled.length ? `one of your usual ${d.pooled.map(usualMeals).join(" & ")}` : "", d.side ? "side or treat" : ""].filter(Boolean).join(" · ");
   return `<li class="olrow ${picked ? "on" : ""}"><button class="olpick" data-ol-pick="${d.id}" aria-pressed="${picked}">
       <span class="vegdot ${d.veg ? "veg" : "nonveg"}" aria-label="${d.veg ? "Vegetarian" : "Not vegetarian"}"></span>
       <span class="t"><b>${esc(d.name)}</b><span>${esc(note)}</span></span><b class="pr">${rupee0(d.price)}</b></button>
@@ -1542,7 +1542,7 @@ function olLine(d, o) {
 }
 function orderListPanel() {
   const o = S.olist || {}, data = o.data;
-  const head = `<h1 class="h1">Order list</h1><p class="muted">Every dish from your saved places and meal pools, with Swiggy's price. Type to narrow it, pick one, set how many.</p>`;
+  const head = `<h1 class="h1">Order list</h1><p class="muted">Every dish from your saved places and your usual meals, with Swiggy's price. Type to narrow it, pick one, set how many.</p>`;
   if (o.loading || !data) return `${head}<div class="skeleton" aria-busy="true"><i></i><i></i><i></i></div>`;
   const rows = olRows(), shown = rows.slice(0, o.show || OL_SHOW);
   const pick = (data.dishes || []).find(d => d.id === o.pick);
@@ -1556,7 +1556,7 @@ function orderListPanel() {
     <div class="row" style="gap:8px"><label class="sr" for="ol-q">Filter dishes or places</label><input id="ol-q" type="search" placeholder="Filter: dosa, biryani, a place…" value="${esc(o.q || "")}" maxlength="40" autocomplete="off" style="flex:1">
       <button class="chip" data-act="ol-veg" aria-pressed="${!!o.veg}">Veg only</button></div>
     <p class="fine">${rows.length} dish${rows.length === 1 ? "" : "es"}${data.places.length ? ` from ${data.places.length} place${data.places.length === 1 ? "" : "s"}` : ""}${data.hidden ? ` · ${data.hidden} hidden: they break your rules` : ""}</p>
-    ${shown.length ? `<ul class="olist" aria-label="Dishes">${shown.map(d => olLine(d, o)).join("")}</ul>` : `<p class="fine">${data.dishes.length ? "Nothing matches. Clear the filter." : "No dishes yet: save a place or add dishes to a meal pool."}</p>`}
+    ${shown.length ? `<ul class="olist" aria-label="Dishes">${shown.map(d => olLine(d, o)).join("")}</ul>` : `<p class="fine">${data.dishes.length ? "Nothing matches. Clear the filter." : "No dishes yet: save a place or add dishes to your usual meals."}</p>`}
     ${rows.length > shown.length ? `<button class="ghost" data-act="ol-more">Show ${Math.min(OL_SHOW, rows.length - shown.length)} more of ${rows.length - shown.length}</button>` : ""}
     ${pick ? `<section class="card olbar" aria-label="Your pick">
       <div class="row" style="justify-content:space-between;align-items:baseline;flex-wrap:nowrap"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${esc(pick.name)}</b> × ${qty}</span><b class="money">≈${rupee0(total)}</b></div>
@@ -1669,13 +1669,13 @@ function sheetDialog() {
       <button class="icon-btn" data-close-sheet="1" aria-label="Close">${ICON.close}</button></div>
     ${d.timing_tip ? `<p class="fine">${esc(d.timing_tip)}</p>` : ""}
     <div class="seg" role="group" aria-label="Show"><button data-sheet-tab="fits" aria-pressed="${tab === "fits"}">Better fits</button><button data-sheet-tab="places" aria-pressed="${tab === "places"}">Other places</button><button data-sheet-tab="cook" aria-pressed="${tab === "cook"}">Cook</button></div>
-    ${tab === "fits" ? `${poolPicks.length ? `<p class="k">Your ${esc(s.meal)} pool</p><div class="stack" style="gap:8px">${poolPicks.map(x => pickBtn(x, x.restaurant, d)).join("")}</div><p class="k">Other dishes from your places</p>` : ""}${moreLikeBlock(d, s)}<div class="stack" style="gap:8px">${fits.map(x => pickBtn(x, x.restaurant, d)).join("") || `<p class="fine">Nothing else nearby fits your rules for this meal. Cook, or skip it.</p>`}</div>` : ""}
+    ${tab === "fits" ? `${poolPicks.length ? `<p class="k">Your usual ${esc(usualMeals(s.meal))}</p><div class="stack" style="gap:8px">${poolPicks.map(x => pickBtn(x, x.restaurant, d)).join("")}</div><p class="k">Other dishes from your places</p>` : ""}${moreLikeBlock(d, s)}<div class="stack" style="gap:8px">${fits.map(x => pickBtn(x, x.restaurant, d)).join("") || `<p class="fine">Nothing else nearby fits your rules for this meal. Cook, or skip it.</p>`}</div>` : ""}
     ${tab === "places" ? `<div class="chips scroll" role="group" aria-label="Restaurants">${places.map(p => `<button class="chip" data-sheet-place="${esc(p)}" aria-pressed="${p === place}">${d.usual.some(g => g.restaurant === p) ? "♥ " : ""}${esc(p)}</button>`).join("")}</div>
       ${(() => { const g = d.usual.find(x => x.restaurant === place); return g ? `<p class="fine">${Number(g.rating).toFixed(1)}★ · about ${g.eta_min} min${g.more ? ` · ${g.more} more on their menu` : ""}</p>` : ""; })()}
       <div class="stack" style="gap:8px">${all.filter(x => x.restaurant === place).map(x => pickBtn(x, x.restaurant, d)).join("") || `<p class="fine">No places nearby fit your rules for this meal.</p>`}</div>
       ${liveFav && swiggyReady() ? `<button class="secondary" data-live-place="${esc(liveFav.id)}" data-live-name="${esc(liveFav.name)}">See ${esc(liveFav.name)}'s full menu</button>` : ""}` : ""}
     ${tab !== "cook" ? `<button class="secondary" data-ol-open="${s.id}">Every dish as a list</button>` : ""}
-    ${swiggyReady() && tab !== "cook" ? `<div class="two"><button class="secondary" data-pick-anywhere="${s.id}">Any place near you</button><button class="secondary" data-edit-pool="${esc(s.meal)}">Edit ${esc(s.meal)} pool</button></div>` : ""}
+    ${swiggyReady() && tab !== "cook" ? `<div class="two"><button class="secondary" data-pick-anywhere="${s.id}">Any place near you</button><button class="secondary" data-edit-pool="${esc(s.meal)}">Edit usual ${esc(usualMeals(s.meal))}</button></div>` : ""}
     ${tab === "cook" ? `${cookFinder({ sid: s.id, meal: s.meal })}${d.cook.length ? `<p class="k">Ziggy's priced home meals</p><div class="stack" style="gap:8px">${d.cook.map(c => `<button class="pick" data-cook="${esc(c.recipe_key)}">${dishIcon(c.name, { cook: true })}<span class="t"><b>${esc(c.name)}</b><span>Cook at home · on your grocery list</span></span><b class="pr">${rupee0(c.price)}</b></button>`).join("")}</div>` : ""}` : ""}
     ${eatersBlock(s)}
     <div class="two">${cook && tab !== "cook" && cell?.kind !== "cook" ? `<button class="secondary" data-cook="${esc(cook.recipe_key)}">Cook instead · ${rupee0(cook.price)}</button>` : `<button class="secondary" data-choose-auto="${s.id}">Let Ziggy choose</button>`}
@@ -2031,6 +2031,8 @@ function pickBanner() {
 
 /* ---- meal pools: what you'd have for each meal, dragged in from your places' real menus ---- */
 const POOL_MEALS = ["breakfast", "lunch", "dinner"];
+// Plain words for a meal's list of dishes ("pool" was jargon): "your usual lunches".
+function usualMeals(meal) { return meal === "lunch" ? "lunches" : meal ? `${meal}s` : "meals"; }
 function inPool(meal, rid, iid) { return !!S.pools?.meals?.[meal]?.some(d => d.restaurant_id === rid && d.item_id === iid); }
 function poolChip(meal, d) {
   const others = POOL_MEALS.filter(m => m !== meal);
@@ -2047,9 +2049,9 @@ function poolsBoard() {
   const favs = P.places || [];
   const planned = new Set((S.view.user?.meals) || POOL_MEALS);
   return `<section class="rise3 stack" aria-labelledby="pools-h"><div><h2 class="h2" id="pools-h">What you'd have for each meal</h2>
-      <p class="sub">Drag dishes from your places into a meal. Ziggy then orders that meal only from its pool, inside your budget (your home-cook days still count). A meal with no pool is planned from all your places.</p></div>
+      <p class="sub">Add dishes from your places to a meal (drag them, or tap B, L or D). Ziggy then orders that meal only from those dishes, inside your budget (your home-cook days still count). A meal with no dishes here is planned from all your places.</p></div>
     <div class="pools">${POOL_MEALS.map(m => { const list = P.meals[m] || [];
-      return `<section class="pool card" data-drop="${m}" aria-label="${cap1(m)} pool"><div class="row" style="justify-content:space-between"><h3 class="h3">${cap1(m)}</h3><span class="tag">${list.length ? `${list.length} dish${list.length > 1 ? "es" : ""}` : planned.has(m) ? "Any of your places" : "Not planned"}</span></div>
+      return `<section class="pool card" data-drop="${m}" aria-label="Usual ${usualMeals(m)}"><div class="row" style="justify-content:space-between"><h3 class="h3">${cap1(m)}</h3><span class="tag">${list.length ? `${list.length} dish${list.length > 1 ? "es" : ""}` : planned.has(m) ? "Any of your places" : "Not planned"}</span></div>
         <ul class="plist">${list.map(d => poolChip(m, d)).join("") || `<li class="pempty">Drop dishes here</li>`}</ul></section>`; }).join("")}</div>
     <div><h2 class="h2">From your places</h2><p class="fine">Real menus for ${esc(P.address || "your address")}. Drag a dish onto a meal, or tap B, L or D.</p></div>
     ${favs.some(f => !f.saved) ? `<p class="fine">${favs.some(f => f.saved) ? "Your saved places first, then other places Ziggy found near you." : "Places Ziggy found near you."} Adding a dish saves its place.</p>` : ""}
@@ -2096,7 +2098,7 @@ async function poolAdd(meal, rid, rname, iid, name) {
   S.pools = await api(`/api/user/${S.userId}/pools`, "POST", { meal, restaurant_id: rid, restaurant_name: rname, item_id: iid });
   S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
   await reloadPlan();
-  toast(`${name} is in your ${meal} pool. Your ${meal === "lunch" ? "lunches" : `${meal}s`} now come from it.`);
+  toast(`${name} added to your usual ${usualMeals(meal)}. Your ${usualMeals(meal)} now come from that list.`);
 }
 async function poolMove(from, to, rid, iid, name) {
   S.pools = await api(`/api/user/${S.userId}/pools`, "POST", { meal: to, from_meal: from, restaurant_id: rid, item_id: iid });
@@ -2351,8 +2353,8 @@ function connectSheet() {
   let body;
   if (sw.requires_private_profile) body = `<h2 class="h2">Use your own private profile</h2><p class="sub">Sample profiles are shared by every visitor. Create or sign in to your own profile to keep your Swiggy account and addresses private.</p>
     <button class="primary" data-act="start-onboard">Create my profile</button><button class="ghost" data-act="signin-open">Sign in</button>`;
-  else if (!swiggySignInOpen()) body = `<h2 class="h2">Swiggy connection is coming</h2><p class="sub">Swiggy hasn't approved connecting from this server yet, so sign-in would fail here. Until then, “Order on Swiggy” opens the dish in Swiggy.</p>
-    ${sw.callback_url ? `<p class="fine">For this deployment, request <code>${esc(sw.callback_url)}</code> from Swiggy Builders Club.</p>` : ""}<button class="secondary" data-close-connect="1">OK</button>`;
+  else if (!swiggySignInOpen()) body = `<h2 class="h2">Swiggy sign-in is opening soon</h2><p class="sub">Connecting your Swiggy account from Ziggy isn't switched on yet. Meanwhile Ziggy plans with home-cook meals, you can browse dishes, and “Order on Swiggy” opens the dish in the Swiggy app.</p>
+    <button class="secondary" data-close-connect="1">OK</button>`;
   else body = `<h2 class="h2">${sw.needs_reconnect || sw.expired ? "Reconnect Swiggy" : "Connect Swiggy"}</h2>
     <p class="sub">${sw.needs_reconnect ? "This server can no longer read the saved Swiggy sign-in. " : sw.expired ? "Swiggy sign-ins last about 5 days. " : ""}Sign in on Swiggy's own page with your phone and OTP, about 20 seconds.${resume}</p>
     <div class="stack" style="gap:10px"><div class="row" style="flex-wrap:nowrap"><span class="tick n">1</span><span>Sign in on Swiggy</span></div><div class="row" style="flex-wrap:nowrap"><span class="tick n">2</span><span>Tap the address you order to</span></div><div class="row" style="flex-wrap:nowrap"><span class="tick n">3</span><span>Ziggy never orders or pays without you</span></div></div>
@@ -2420,7 +2422,8 @@ function connectionPanel() {
   if (!sw.connected) return `<h1 class="h1">Swiggy</h1><section class="card"><span class="tag">${sw.needs_reconnect ? "Reconnect required" : sw.expired ? "Sign-in expired" : "Not connected"}</span>
     <p class="sub">Sign in on Swiggy's own page (phone + OTP). Ziggy then plans from real places near your address, fills your cart in one tap, and you pay in Swiggy. Sign-ins last about 5 days.</p>
     <button class="primary" data-act="connect-open">${sw.expired || sw.needs_reconnect ? "Reconnect Swiggy" : "Connect Swiggy"}</button>
-    ${!swiggySignInOpen() ? `<p class="fine">Swiggy needs production access and an exact-match allowlisted HTTPS redirect, and hasn't approved this server's yet, so sign-in is expected to fail here.${sw.callback_url ? ` Request <code>${esc(sw.callback_url)}</code> from Swiggy Builders Club.` : ""}</p>` : ""}</section>${rulesCard()}`;
+    ${!swiggySignInOpen() ? `<p class="fine">Swiggy sign-in from Ziggy is opening soon, so connecting may not work yet.</p>
+      <details><summary>Technical details</summary><p class="fine">Swiggy needs production access and an exact-match allowlisted HTTPS redirect, and hasn't approved this server's yet.${sw.callback_url ? ` Request <code>${esc(sw.callback_url)}</code> from Swiggy Builders Club.` : ""}</p></details>` : ""}</section>${rulesCard()}`;
   return `<h1 class="h1">Swiggy</h1>
     <section class="card"><span class="tag good">Connected</span>
       <div class="row" style="justify-content:space-between"><span>Delivering to <b>${esc(sw.address?.label || "no address yet")}</b></span><button class="small secondary" data-act="addr-open">${sw.address ? "Change" : "Choose address"}</button></div>
@@ -3120,7 +3123,7 @@ function wire() {
   on("[data-pool-remove]", "click", (e) => { const d = e.currentTarget.dataset; guard(() => poolRemove(d.poolRemove, d.rid, d.iid, d.name), `Remove “${d.name}”`); });
   on("[data-cuisine]", "click", (e) => { const c = e.currentTarget.dataset.cuisine; S.cuisine = S.cuisine === c ? null : c; render(); });
   on("[data-pick-anywhere]", "click", (e) => { const sid = Number(e.currentTarget.dataset.pickAnywhere); guard(() => pickAnywhere(sid), "Browse places near you"); });
-  on("[data-edit-pool]", "click", () => { S.savedTab = "meals"; guard(() => goTab("saved"), "Open your meal pools"); });
+  on("[data-edit-pool]", "click", () => { S.savedTab = "meals"; guard(() => goTab("saved"), "Open your usual meals"); });
   on("[data-have-dish]", "click", (e) => { const t = e.currentTarget; guard(() => haveForMeal(t.dataset.haveDish, t.dataset.haveName), `Have “${t.dataset.haveName}”`); });
   wirePoolDrag();
   on("[data-live-track]", "click", (e) => { const id = e.currentTarget.dataset.liveTrack; guard(() => trackLiveOrder(id), "Track order"); });
