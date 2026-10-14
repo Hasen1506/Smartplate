@@ -20,8 +20,8 @@ EMPTY = {"late_pen": {}, "portion": {}, "spicy_pen": {}, "spicy_tag_pen": 0.0, "
 KEYS = {}
 
 
-def _setup():
-    view = everyday.create_profile(dict(WEEK))
+def _setup(**extra):
+    view = everyday.create_profile({**WEEK, **extra})
     KEYS[view["user"]["id"]] = view["access_key"]
     return view["user"]["id"], view["plan"]["id"]
 
@@ -99,7 +99,9 @@ def test_d3_too_spicy_pushes_that_dish_down(gt):
 
 
 def test_d4_too_pricey_raises_the_cost_weight_and_cuts_spend(gt):
-    uid, pid = _setup()
+    # With W4's fees priced in, ₹3,200 for 21 meals is money-bound (₹3,185 planned), so a
+    # cost weight has nothing to cut; a looser week shows the learned nudge.
+    uid, pid = _setup(weekly_budget=4500)
     _fresh(pid)
     spend_before = service.plan_view(pid)["budget"]["spend"]
     _tap(pid, "pricey", 3)

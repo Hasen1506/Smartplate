@@ -392,10 +392,9 @@ def create_app() -> Flask:
     @app.post("/api/plan")
     def create_plan():
         body = request.get_json(force=True, silent=True) or {}
-        uid = body.get("user_id")
-        if isinstance(uid, bool) or not isinstance(uid, (int, str)) or not str(uid).strip().isdigit():
-            raise ValueError("user_id must be a profile id")
-        pid = service.create_plan(int(uid), body.get("mode"))
+        uid = body["user_id"]
+        # None / a list / a dict is a bad request like "abc", not a server bug (TypeError → 500)
+        pid = service.create_plan(int(uid if isinstance(uid, (int, str)) else "invalid"), body.get("mode"))
         return jsonify(service.plan_view(pid))
 
     @app.get("/api/plan/<int:plan_id>")
