@@ -325,14 +325,24 @@ def test_property_meal_room_never_exceeds_week_money_left(gt, budget, at):
 # --------------------------------------------------------------------------- #
 # 7. Meal-slot suitability
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("name", ["Medu Vada", "Masala Dosa", "Ghee Roast Dosai", "Idli Sambar (4 pc)", "Idlis",
-                                  "Ven Pongal", "Ghee Pongal", "Rava Upma", "Filter Coffee + Vada", "Mini Tiffin",
-                                  "Onion Uthappam", "Pesarattu + Chutney", "Medu Vadai"])
-def test_tiffin_dishes_are_not_dinner(name):
-    assert timing.slot_suitability({"name": name}, "dinner") is False
-    assert timing.slot_suitability({"name": name}, "breakfast") is True
-    assert timing.slot_suitability({"name": name}, "lunch") is True        # lunch keeps the soft penalty
-    assert timing.slot_suitability({"name": name}, "dinner", favourited_for_slot=True) is True
+# Founder decision 14 Oct 2026: tiffin dishes (dosa, idli, pongal…) are a normal dinner.
+# Only the snack-alone rule stays: a vada or a chai by itself is not a lunch or dinner.
+@pytest.mark.parametrize("name", ["Masala Dosa", "Ghee Roast Dosai", "Idli Sambar (4 pc)", "Idlis",
+                                  "Ven Pongal", "Ghee Pongal", "Rava Upma", "Mini Tiffin",
+                                  "Onion Uthappam", "Pesarattu + Chutney"])
+def test_tiffin_dishes_are_allowed_at_dinner(name):
+    for slot in ("breakfast", "lunch", "dinner"):
+        assert timing.slot_suitability({"name": name}, slot) is True
+    assert optimizer.meal_suitable({"name": name, "tags": ["breakfast"]}, "dinner")
+    assert timing.is_breakfast_only(name)                  # still recognised as tiffin
+
+
+@pytest.mark.parametrize("name", ["Medu Vada", "Medu Vadai", "Filter Coffee + Vada", "Masala Chai", "Onion Bonda"])
+def test_a_snack_alone_is_still_not_a_dinner(name):
+    assert not optimizer.meal_suitable({"name": name, "tags": []}, "dinner")
+    assert not optimizer.meal_suitable({"name": name, "tags": []}, "lunch")
+    assert optimizer.meal_suitable({"name": name, "tags": []}, "breakfast")
+    assert optimizer.meal_suitable({"name": name, "tags": []}, "dinner", chosen=True)   # their own pick
 
 
 @pytest.mark.parametrize("name", ["Vada Pav", "Dahi Vada", "Chilli Idli", "Sweet Pongal", "Paneer Biryani",
@@ -346,29 +356,27 @@ def test_unknown_slot_is_not_suitable():
 
 
 @settings(max_examples=80)
-@given(word=st.sampled_from(["idli", "dosa", "vada", "pongal", "upma", "uthappam"]),
+@given(word=st.sampled_from(["idli", "dosa", "pongal", "upma", "uthappam"]),
        pre=st.sampled_from(["", "Ghee ", "Masala ", "Mini ", "Rava ", "Podi "]),
        post=st.sampled_from(["", " Combo", " (2 pc)", " + Chutney", "s"]),
        slot=st.sampled_from(["breakfast", "lunch", "dinner"]), fav=st.booleans())
 def test_property_slot_suitability(word, pre, post, slot, fav):
     name = (pre + word + post).title()
-    ok = timing.slot_suitability({"name": name}, slot, favourited_for_slot=fav)
-    assert ok == (fav or slot != "dinner")
+    assert timing.slot_suitability({"name": name}, slot, favourited_for_slot=fav) is True
 
 
-def test_planner_never_puts_a_tiffin_dish_at_dinner(gt):
+def test_planner_never_puts_a_snack_alone_at_dinner(gt):
     for body in ({**BASE}, {**BASE, "diet": "nonveg"}, {**BASE, "weekly_budget": 900}):
         view = everyday.create_profile(dict(body))
         dinners = [d["item_name"] for d in models.decisions_for_plan(view["plan"]["id"])
                    if d["meal"] == "dinner" and d["chosen_kind"] == "delivery"]
-        assert not [n for n in dinners if timing.is_breakfast_only(n)], dinners
+        assert not [n for n in dinners if optimizer.is_snack(n)], dinners
         assert not check_plan(view["plan"]["id"])
 
 
-def test_change_sheet_does_not_offer_tiffin_for_dinner(gt):
+def test_change_sheet_does_not_offer_a_snack_alone_for_dinner(gt):
     view = everyday.create_profile(dict(BASE))
     dinner = next(c for _, m, c in _cells(view) if m == "dinner" and c["status"] == "active")
     sheet = everyday.options(dinner["session_id"])
     offered = [d["name"] for g in sheet["usual"] for d in g["dishes"]] + [d["name"] for d in sheet["new"]]
-    assert offered and not [n for n in offered if timing.is_breakfast_only(n)]
-    assert optimizer.meal_suitable({"name": "Masala Dosa", "tags": []}, "dinner")   # the old filter is unchanged
+    assert offered and not [n for n in offered if optimizer.is_snack(n)]

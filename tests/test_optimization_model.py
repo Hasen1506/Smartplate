@@ -90,12 +90,15 @@ def test_variety_pref_defaults_without_assuming(seeded):
     assert fatigue.variety_pref(models.get_user(1)) in fatigue.VARIETY_LEVELS
 
 
-def test_novelty_nudge_lowers_objective_for_novel_picks():
+def test_usual_pen_raises_objective_for_novel_picks():
+    # The SMARTPLATE_VARIETY nudge is archived (smartplate/archive/experiments.py);
+    # favourites first is the default: a novel pick's usual_pen makes it cost more.
     base = dict(kind="delivery", cost=100, surge_mult=1.0, taste=0.5, nutri=0.0,
                 health=0.0, carbon_pen=0.0, weather_bias=0.0, festival_bias=0.0)
     plain = optimizer._objective(base, config.MODE_WEIGHTS["balanced"], 100, 0.0, 3.0)
-    novel = optimizer._objective({**base, "novelty_bonus": 0.3}, config.MODE_WEIGHTS["balanced"], 100, 0.0, 3.0)
-    assert novel < plain                                 # novel picks score better when the nudge feeds a bonus
+    novel = optimizer._objective({**base, "usual_pen": 0.3}, config.MODE_WEIGHTS["balanced"], 100, 0.0, 3.0)
+    assert novel > plain
+    assert optimizer._objective({**base, "novelty_bonus": 0.3}, config.MODE_WEIGHTS["balanced"], 100, 0.0, 3.0) == plain
 
 
 # --------------------------------------------------------------------------- #
