@@ -7,7 +7,8 @@ import pytest
 from smartplate import clock, db, websession
 from smartplate.app import create_app
 
-NEW = {"name": "Priya", "diet": "veg", "weekly_budget": 2000, "meals": ["dinner"], "favourites": [6]}
+NEW = {"name": "Priya", "diet": "veg", "weekly_budget": 2000, "meals": ["dinner"], "favourites": [6],
+       "consent": {"account": True}}
 OPT_IN = {"X-Ziggy-Session": "cookie"}
 
 

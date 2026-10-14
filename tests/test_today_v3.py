@@ -96,7 +96,8 @@ def test_veg_profile_greys_out_unmarked_and_meat_dishes_and_cannot_pick_them(pla
     c, uid = plain["c"], plain["uid"]
     t = _typed(c, uid, "lunch", "Chicken Burrito", 220, veg=None)
     e = t["pools"]["lunch"][0]
-    assert e["hard"] and e["reasons"][0] == "Not marked veg"
+    # W1's shared checker names the reason from the dish name (was the generic "Not marked veg")
+    assert e["hard"] and e["reasons"][0] == "The name says “chicken” (not veg)"
     r = c.post(f"/api/user/{uid}/today/pick", json={"meal": "lunch", "ref": e["ref"]})
     assert r.status_code == 400 and "breaks your food rules" in r.get_json()["error"]
 
