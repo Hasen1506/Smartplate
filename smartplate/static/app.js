@@ -3015,18 +3015,23 @@ function onboardingScreen() {
     ${st === 0 && !d.diet ? `<p class="fine center" id="ob-need">${t("Choose what you eat to continue.")}</p>` : ""}
     <button class="primary big" data-ob-nav="next" ${st === 0 && !d.diet ? 'disabled aria-describedby="ob-need"' : ""}>${t(last ? "Plan my week" : "Continue")}</button></main>`;
 }
-/* Budget step: the per-meal line and the "too little to eat on" warning, recomputed on every
-   keystroke (not only on the ± buttons and chips). */
-const MEAL_FLOOR_DEFAULT = 60;  // ₹ a meal: below this, delivered meals near you rarely fit
-const mealFloor = () => Number(S.meta?.meal_floor) || MEAL_FLOOR_DEFAULT;   // server: config.MEAL_FLOOR_RUPEES
+/* Budget step: the per-meal line, recomputed on every keystroke (not only on the ± buttons and
+   chips), and a "too little" warning only when the server gives this person's own floor.
+   Founder, Oct 2026: no fixed ₹60-a-meal floor. The floor is the person's cheapest favourite
+   with fees (server: S.view.meal_floor = number or {amount, basis}); on first run there is none,
+   so no warning. */
+const mealFloor = () => {
+  const f = S.view?.meal_floor, n = Number(f && typeof f === "object" ? f.amount : f);
+  return n > 0 ? { amount: n, basis: (f && typeof f === "object" && f.basis) || "" } : null;
+};
 const obMeals = (d) => MEALS.filter(m => d.rhythm[m] !== "skip").length * 7 || 1;
 const obPerMeal = (weekly, meals) => weekly ? t("about {x} a meal for {n} meals", { x: rupee0(weekly / meals), n: meals }) : t("Enter an amount");
 function obFloorWarn(weekly, meals) {
-  const MEAL_FLOOR = mealFloor();
-  if (!weekly || weekly / meals >= MEAL_FLOOR) return "";
-  const need = Math.ceil((MEAL_FLOOR * meals) / 250) * 250, fit = Math.max(0, Math.floor(weekly / MEAL_FLOOR));
+  const floor = mealFloor();
+  if (!floor || !weekly || weekly / meals >= floor.amount) return "";
+  const need = Math.ceil((floor.amount * meals) / 250) * 250, fit = Math.max(0, Math.floor(weekly / floor.amount));
   return `<div class="note warn" role="alert"><span style="flex:1"><b>${rupee0(weekly)} is ${rupee0(weekly / meals)} a meal.</b>
-    A meal near you usually costs ${rupee0(MEAL_FLOOR)} or more, so this covers about ${fit} of your ${meals} meals.
+    Your cheapest favourite costs about ${rupee0(floor.amount)}${floor.basis ? ` (${esc(floor.basis)})` : " with fees"}, so this covers about ${fit} of your ${meals} meals.
     Raise it, order fewer meals (Back), or cook more of them.</span>
     <button type="button" class="small secondary" data-ob="budgetpick" data-val="${need}" data-multi="0">Use ${rupee0(need)}</button></div>`;
 }

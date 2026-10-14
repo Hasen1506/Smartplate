@@ -220,7 +220,7 @@ test('onboarding: no diet is preselected and Continue needs a choice', async () 
   assert.doesNotMatch(run(context, 'onboardingScreen()'), /data-ob-nav="next" disabled/);
 });
 
-test('onboarding budget: typing updates the per-meal line, the chip, and warns below ₹60 a meal', async () => {
+test('onboarding budget: typing updates the per-meal line and the chip; no fixed ₹60 floor, a warning only from the server\'s per-user floor', async () => {
   const { context } = fixture(); await context.bootPromise;
   run(context, 'startOnboard(); S.onboard.step = 2; S.onboard.d.rhythm = { breakfast: "order", lunch: "order", dinner: "order" }');
   // a tiny DOM for the three live regions
@@ -228,17 +228,23 @@ test('onboarding budget: typing updates the per-meal line, the chip, and warns b
     globalThis.chips = [1500, 3000, 5000].map(v => ({ dataset: { val: String(v) }, closest: () => null, attrs: {}, setAttribute(k, x) { this.attrs[k] = x; } }));
     document.getElementById = (id) => els[id] || null;
     document.querySelectorAll = (sel) => sel.includes('budgetpick') ? chips : [];`);
+  run(context, 'S.view = null; S.meta = { ...(S.meta || {}), meal_floor: 60 }');   // the old global floor is ignored
   run(context, 'S.onboard.d.weekly_budget = 3000; obBudgetInput({ value: "300" })');
   assert.equal(run(context, 'S.onboard.d.weekly_budget'), 300);
   assert.equal(run(context, 'els["ob-per"].textContent'), 'about ₹14 a meal for 21 meals');
   assert.equal(run(context, 'chips[1].attrs["aria-pressed"]'), 'false', 'the ₹3,000 chip lets go');
+  assert.equal(run(context, 'els["ob-floor"].innerHTML'), '', 'no per-user floor yet → no warning');
+  assert.doesNotMatch(run(context, 'onboardingScreen()'), /role="alert"[^]*a meal near you/);
+  // with the server's per-user floor (cheapest favourite with fees) the warning comes back
+  run(context, 'S.view = { meal_floor: { amount: 120, basis: "your cheapest favourite, with fees" } }; obBudgetInput({ value: "300" })');
   const warn = run(context, 'els["ob-floor"].innerHTML');
   assert.match(warn, /₹300 is ₹14 a meal/);
-  assert.match(warn, /covers about 5 of your 21 meals/);
-  assert.match(warn, /data-val="1500"[^>]*>Use ₹1,500</);        // 60 × 21 = ₹1,260 → up to the next ₹250 step
-  run(context, 'obBudgetInput({ value: "1500" })');
+  assert.match(warn, /cheapest favourite costs about ₹120/);
+  assert.match(warn, /covers about 2 of your 21 meals/);
+  assert.match(warn, /data-val="2750"[^>]*>Use ₹2,750</);        // 120 × 21 = ₹2,520 → up to the next ₹250 step
+  run(context, 'obBudgetInput({ value: "3000" })');
   assert.equal(run(context, 'els["ob-floor"].innerHTML'), '');
-  assert.equal(run(context, 'chips[0].attrs["aria-pressed"]'), 'true');
+  assert.equal(run(context, 'chips[1].attrs["aria-pressed"]'), 'true');
 });
 
 /* 6. Account wording --------------------------------------------------------------------- */
