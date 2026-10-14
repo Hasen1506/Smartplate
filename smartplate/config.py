@@ -206,10 +206,8 @@ BEHIND_PROXY = os.environ.get("SMARTPLATE_BEHIND_PROXY", "1" if os.environ.get("
 
 # Web Push (order-time reminders). Keys are generated on first use when unset.
 PUSH_CONTACT = os.environ.get("SMARTPLATE_PUSH_CONTACT", "mailto:smartplate@example.invalid")
-# ₹ for the cheapest realistic delivered meal (a plain tiffin item, before fees). One number for
-# the onboarding "too little to eat on" warning (static/app.js via /api/meta) and the server's
-# low-budget guard / budget-suggestion floor (domain/spend.py). An estimate, not a quote.
-MEAL_FLOOR_RUPEES = float(os.environ.get("SMARTPLATE_MEAL_FLOOR", "60"))
+# (No meal floor: the old SMARTPLATE_MEAL_FLOOR ₹60 estimate is gone, founder decision 14 Oct
+# 2026. The only floor is the user's own cheapest favourite with its fees: spend.cheapest_meal.)
 PUSH_TICK_S = float(os.environ.get("SMARTPLATE_PUSH_TICK", "60"))
 PUSH_ENABLED = os.environ.get("SMARTPLATE_PUSH", "on") == "on"
 VAPID_PRIVATE = os.environ.get("SMARTPLATE_VAPID_PRIVATE", "")   # base64url P-256 key; generated if unset

@@ -12,6 +12,7 @@ Every write re-optimises the rest of the week, so one tap never leaves the budge
 the hard rules inconsistent.
 """
 import datetime as dt
+import math
 
 from . import access, clock, db, service
 from .domain import (allergens, epicure, festivals, flavour, intake, learning, models, profile,
@@ -262,8 +263,9 @@ def suggest_budget(body: dict) -> dict:
     # A typed budget too small for the meals it covers gets a warning and a choice (usability 23).
     if "weekly_budget" in data:
         from .domain import spend
-        rec["low_budget"] = spend.low_budget_check({**user, "prefs": {"meals": data.get("meals")}},
-                                                   data["weekly_budget"])
+        # floor = their own cheapest favourite (places picked in onboarding); none picked → no warning
+        rec["low_budget"] = spend.low_budget_check({**user, "prefs": {"meals": data.get("meals")},
+                                                    "favourite_places": sorted(favs)}, data["weekly_budget"])
     return rec
 
 
@@ -869,10 +871,37 @@ def heads_up(view: dict, user: dict, plan: dict, decisions: list[dict], at: dt.d
     if skipped_budget:
         more = ""
         if rec.get("feasible") and rec["usual"]["total"] > view["budget"]["budget"]:
-            more = f" Your usual week costs about ₹{rec['usual']['total']:.0f}."
+            # "your usual" only once there is order history to be usual (usab #18): a profile
+            # made a minute ago hears what these meals cost at the places near it instead.
+            if (view.get("learning") or {}).get("orders", 0) > 0:
+                more = f" Your usual week costs about ₹{rec['usual']['total']:.0f}."
+            else:
+                more = (f" Planning every one of these meals from places near you costs about "
+                        f"₹{rec['usual']['total']:.0f} a week.")
         out.append({"level": "warn", "icon": "₹", "kind": "budget",
                     "title": f"{len(skipped_budget)} meal{'s' if len(skipped_budget) != 1 else ''} didn't fit the weekly target",
                     "body": "Raise the weekly target, cook one of them, or switch to Tight week." + more})
+    bo = view.get("buildout") or {}
+    if bo.get("needed"):            # favourites that don't fit: a choice, never a silent swap
+        names = ", ".join(m["label"] for m in bo["meals"][:3]) + ("…" if bo["count"] > 3 else "")
+        out.append({"level": "warn", "icon": "₹", "kind": "buildout",
+                    "title": f"Your favourites don't all fit this week ({names})",
+                    "body": "Ziggy didn't swap them for something cheaper or skip them. Pick how to build out the "
+                            "week: skip or cook a meal, swap to a cheaper favourite, or raise the target.",
+                    "actions": [{"act": "buildout", "label": "See choices"}]})
+    b0 = view["budget"]
+    if b0.get("over") and b0.get("budget"):
+        # usab #17: a pin (their own pick) that takes the week over the target is said, not hidden
+        pins = [d for d in decisions if d.get("pinned") and d["chosen_kind"] in ("delivery", "cook")
+                and not d.get("past")]
+        out.append({"level": "warn", "icon": "₹", "kind": "budget",
+                    "title": f"₹{b0['spend'] - b0['budget']:,.0f} over this week's target",
+                    "body": (f"Planned meals come to ₹{b0['spend']:,.0f} of your ₹{b0['budget']:,.0f} target"
+                             + (f", with {len(pins)} meal{'s' if len(pins) != 1 else ''} you picked yourself. "
+                                "Ziggy didn't drop your picks: change one, or raise the target."
+                                if pins else ". Change a meal, or raise the target.")),
+                    "actions": [{"act": "raise-budget", "label": "Raise the target",
+                                 "amount": int(math.ceil((b0["spend"] - b0["budget"]) / 50.0) * 50)}]})
     from .domain import spend
     low = spend.low_budget_check(user)
     if low:                       # an impossible target becomes a choice, not 20 silent skips

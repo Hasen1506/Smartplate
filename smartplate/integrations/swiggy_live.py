@@ -843,7 +843,43 @@ def _name(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", (value or "").lower())).strip()
 
 
-def cart_preview(session_id: int) -> dict:
+def split_view(cap: dict) -> dict:
+    """The split-cart path (founder decision 14 Oct 2026: over ₹1,000 is split by default,
+    not handed off): sequential carts, each reviewed and approved on its own, because Swiggy
+    holds one live cart and delivers each order at once. Cart N is asked for with part=N."""
+    parts = [{"part": i + 1, "quantity": c["quantity"], "estimate": c["estimate"]} for i, c in enumerate(cap["carts"])]
+    n = len(parts)
+    return {"part": 1, "of": n, "parts": parts, "quantity": parts[0]["quantity"],
+            "next_quantity": sum(p["quantity"] for p in parts[1:]) or None,
+            "extra_fees": cap.get("extra_fees", 0.0), "estimate_total": cap.get("estimate_total"),
+            "message": (f"Over Swiggy's ₹{cap['cap']:,.0f} limit for orders from Ziggy, so it goes as {n} carts "
+                        f"({' + '.join(str(p['quantity']) for p in parts)}), one after the other: about "
+                        f"₹{cap.get('extra_fees', 0):,.0f} more in delivery and platform fees. This is cart 1 of {n}: "
+                        "review it, pay it in Swiggy, then Ziggy prepares the next one.")}
+
+
+def _split_part(price: float, total_qty: int, fee_model: dict, part: int) -> tuple[int, dict | None]:
+    """(quantity of cart `part`, split view) for an order of `total_qty` portions; the whole
+    order and no split view when it fits one cart. Raises for a single portion over the cap."""
+    from ..domain import checkout
+    cap = checkout.split_for_cap(price, total_qty, {"fees": fee_model})
+    if cap["fits"]:
+        if part != 1:
+            raise ValueError("This order fits one cart: there is no next cart")
+        return total_qty, None
+    if cap["mode"] != "split":
+        raise SwiggyError(cap["message"], code="cart_over_cap", http_status=409)
+    view = split_view(cap)
+    if not 1 <= part <= view["of"]:
+        raise ValueError(f"Cart {part} doesn't exist: this order is {view['of']} carts")
+    here = view["parts"][part - 1]
+    view.update(part=part, quantity=here["quantity"],
+                next_quantity=sum(p["quantity"] for p in view["parts"][part:]) or None,
+                message=view["message"].replace("This is cart 1 of", f"This is cart {part} of"))
+    return here["quantity"], view
+
+
+def cart_preview(session_id: int, part: int = 1) -> dict:
     """Read a fresh, exact, simple live item before the user approves a cart change.
 
     Provider menus do not establish allergen or medical safety, and a vegetarian
@@ -894,22 +930,31 @@ def cart_preview(session_id: int) -> dict:
                                             sort_keys=True).encode()).hexdigest()
     remember_photos(user_id, place["id"], [{"name": cell["item"], "image": _image(item)}])
     price = rupees(item, menu_unit(records(data, "menu_item_id", "name")))
+    split = None
     if price:
-        # Builders Club caps a Food cart at ₹1,000 payable (household meals hit it): stop before the cart.
-        from ..domain import checkout, fees
-        cap = checkout.split_for_cap(price, quantity, {"fees": fees.pricing_for(place["id"], fees.model(user_id))})
-        if not cap["fits"]:
-            raise SwiggyError(cap["message"], code="cart_over_cap", http_status=409)
-    return {**details, "address": conn.get("address_label") or "Selected Swiggy address",
-            "menu_price": price,
-            "price_estimated": price_estimated(item), "image": _image(item), "fingerprint": fingerprint}
+        # Builders Club caps a Food cart at ₹1,000 payable (household meals hit it): split it
+        # into sequential carts by default; hand off only when one portion is over the cap.
+        from ..domain import fees
+        q, split = _split_part(price, quantity, fees.pricing_for(place["id"], fees.model(user_id)), int(part or 1))
+        if split:
+            details["quantity"] = q
+            fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price"), "part": part},
+                                                    sort_keys=True).encode()).hexdigest()
+    elif int(part or 1) != 1:
+        raise ValueError("This order fits one cart: there is no next cart")
+    out = {**details, "address": conn.get("address_label") or "Selected Swiggy address",
+           "menu_price": price,
+           "price_estimated": price_estimated(item), "image": _image(item), "fingerprint": fingerprint}
+    if split:
+        out["split"] = split
+    return out
 
 
-def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
+def fill_cart(session_id: int, expected_fingerprint: str | None = None, part: int = 1) -> dict:
     """Add exactly the item the user reviewed, then read the provider's current cart."""
     if not expected_fingerprint:
         raise CartChanged("Review the live Swiggy item before adding it to your cart.")
-    preview = cart_preview(session_id)  # fresh provider lookup: no six-hour browse cache
+    preview = cart_preview(session_id, part)  # fresh provider lookup: no six-hour browse cache
     if preview["fingerprint"] != expected_fingerprint:
         raise CartChanged("The live Swiggy item or your plan changed. Review it again before adding to cart.")
     user_id, cell = _planned(session_id)
@@ -921,7 +966,8 @@ def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
             "planned": cell["item"], "planned_cost": planned, "menu_price": preview["menu_price"],
             "to_pay": to_pay, "over_plan": round(to_pay - planned, 2) if to_pay is not None else None,
             "bill": prepared.get("bill"), "checkout_url": CHECKOUT_URL,
-            "cancellation_note": prepared.get("cancellation_note")}
+            "cancellation_note": prepared.get("cancellation_note"),
+            **({"split": preview["split"]} if preview.get("split") else {})}
 
 
 SAFETY_NOTE = ("Ziggy cannot verify your ingredient or medical rules from Swiggy's menu, so it won't add "
@@ -947,7 +993,7 @@ def _quantity(value) -> int:
 
 
 def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
-                      item_id: str, item_name: str, quantity=1) -> dict:
+                      item_id: str, item_name: str, quantity=1, part=1) -> dict:
     """Review an item chosen from a real menu, without a seeded plan or fuzzy match.
 
     Always answers with a review (dish, current price, address). For profiles whose
@@ -1029,11 +1075,23 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
         blocked = "Swiggy did not verify this dish as vegetarian. Check it in Swiggy."
     cap = None
     if not blocked and price:
-        # Builders Club caps a Food cart at ₹1,000 payable: say so before the cart, with a split or a hand-off.
+        # Builders Club caps a Food cart at ₹1,000 payable. Over it, the default is a split into
+        # sequential carts, each reviewed and approved (founder decision 14 Oct 2026); the
+        # hand-off is only for one portion that is over the cap by itself.
         from ..domain import checkout, fees
-        cap = checkout.split_for_cap(price, quantity, {"fees": fees.pricing_for(restaurant_id, fees.model(user_id))})
+        model = fees.pricing_for(restaurant_id, fees.model(user_id))
+        cap = checkout.split_for_cap(price, quantity, {"fees": model})
         review["cart_cap"] = cap
-        if not cap["fits"]:
+        if not cap["fits"] and cap["mode"] == "split":
+            try:
+                part = int(part or 1)
+            except (TypeError, ValueError):
+                raise ValueError("part must be a cart number") from None
+            q, split = _split_part(price, quantity, model, part)
+            details["quantity"] = q
+            details["part"] = part
+            review.update(quantity=q, menu_total=round(price * q, 2), split=split)
+        elif not cap["fits"]:
             blocked = cap["message"]
     if blocked:
         return {**review, "orderable": False, "reason": blocked, "fingerprint": None,
@@ -1261,10 +1319,10 @@ def current_live_cart(user_id: int) -> dict:
 
 
 def fill_live_cart(user_id: int, restaurant_id: str, restaurant_name: str,
-                   item_id: str, item_name: str, expected_fingerprint: str | None, quantity=1) -> dict:
+                   item_id: str, item_name: str, expected_fingerprint: str | None, quantity=1, part=1) -> dict:
     if not expected_fingerprint:
         raise CartChanged("Review the exact live Swiggy item before adding it to your cart.")
-    preview = live_cart_preview(user_id, restaurant_id, restaurant_name, item_id, item_name, quantity)
+    preview = live_cart_preview(user_id, restaurant_id, restaurant_name, item_id, item_name, quantity, part)
     if not preview["orderable"]:
         raise SwiggyError(preview["reason"])
     if preview["fingerprint"] != expected_fingerprint:

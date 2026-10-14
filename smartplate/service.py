@@ -292,6 +292,8 @@ def plan_view(plan_id: int) -> dict:
     for c in cells:
         if photos.get(c["item_id"]):
             c["image"] = photos[c["item_id"]]
+    from .domain import buildout
+    view["buildout"] = buildout.summary(plan_id, decisions)
     from . import everyday
     view["next_up"] = everyday.next_up(view, at)
     view["heads_up"] = everyday.heads_up(view, user, plan, decisions, at)
