@@ -145,7 +145,8 @@ the rules allow. Its new pieces map onto the rules above:
   planned alone as lunch or dinner (unless you chose them).
 - **Tiffin at dinner** (founder, 14 Oct 2026): dosa, idli and pongal are allowed at dinner.
   The week MILP offers each dinner its best `DINNER_TIFFIN_CANDIDATES` = 2 tiffin dishes;
-  offering all of them made the 6-place week hit the 10 s limit unproven.
+  offering all of them made the 6-place week hit the 10 s limit unproven. How the solver
+  stays fast on x86 with them: "Solver formulation" below.
 - **Favourites never cheapened silently**: a pooled meal whose list is too dear for the money
   left is not swapped to a cheaper dish; it is left open for the build-out set. The pool
   fallback (below) runs only when no list dish is safe for someone eating, or when a
@@ -153,6 +154,32 @@ the rules allow. Its new pieces map onto the rules above:
 - **Honest skips**: every skip in every mode says the real cause (money left vs cheapest
   option, daily limit, variety cap, nothing safe for a named household member); the plan
   summary counts skips *by cause* instead of "skipped to stay within budget".
+
+### Solver formulation (x86 fix, 14 Oct 2026)
+
+Tiffin at dinner put the same cheap dosa on every breakfast, lunch and dinner of the week.
+The plan didn't change, but on GitHub's x86 CBC build the ₹3,500 six-place week went from
+1,001 to 8,592 branch-and-bound nodes (≈7–8 s, over the 6 s test bound; the ARM build
+needed 212). The incumbent was found at the root; all the time went into proving a 1.3%
+gap, because one dish placed on any of seven days is worth almost the same, so branching
+on one meal's choice only moved the dish to another day. Three changes, none of which
+changes which whole plan is best:
+
+- **Dish counts are integer variables.** For every dish offered at more than one meal,
+  `n = Σ x` (bounded by the repeat cap) is its own whole-number variable, so the solver
+  branches on "this dish 0 / 1 / 2 times this week", which settles every day at once.
+- **The protein-evenness term is exact per option.** A meal's shortfall is
+  `Σ_i x_i · max(0, target − protein_i)` (one option is chosen, so this equals the old
+  `slack ≥ target − Σ protein_i x_i` for every whole plan), and the relaxation can no longer
+  average half a dosa and half a chicken plate into "no shortfall".
+- **CBC preprocessing is off** for the week solve (`preprocess off`): it substitutes the
+  dish counts back out as sums of binaries, undoing the first change.
+
+Measured with pulp's CBC 2.10.3 binaries (x86 under qemu, as on GitHub's runner), same
+profile and production settings: x86 8,592 → 0 nodes (root bound 4.156 → 4.2127 = the
+optimum), ARM 212 → 0; the plan, its objective and every golden are unchanged. The
+dominated-candidate and "one tiffin per place" reductions were not needed (on this
+profile one tiffin per place is already the same two dishes).
 
 ## Performance (grill #55)
 

@@ -773,8 +773,13 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
 
     # Protein evenness (day-level): penalise backloading protein into one meal.
     # Each active meal's even target is daily_protein / (meals planned that day); a
-    # meal under it contributes a normalised shortfall (linearised via a slack var).
-    # Unlike the per-candidate protein term this adapts to how many meals a day has.
+    # meal under it contributes a normalised shortfall. Unlike the per-candidate protein
+    # term this adapts to how many meals a day has.
+    # Exactly one option is chosen per meal, so a meal's shortfall is its chosen option's
+    # own: sum_i x_i * max(0, tgt - protein_i). That is the same number for every whole
+    # plan as a slack >= tgt - sum_i protein_i * x_i, but the relaxation can't average half
+    # a dosa with half a chicken plate into "no shortfall" (the exact hull of the term, so
+    # the solver's bound is tighter — docs/planner-objective.md, "Solver formulation").
     if config.PROTEIN_EVEN_W > 0 and active:
         daily_protein = nutrition.targets_for(user)["protein_g"]
         by_day = {}
@@ -783,12 +788,10 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
         for day, day_sessions in by_day.items():
             tgt = daily_protein / max(1, len(day_sessions))
             for s in day_sessions:
-                cands = cand_map[s["id"]]
-                prot = pulp.lpSum((cands[i].get("nutrition") or {}).get("protein_g", 0) * x[(s["id"], i)]
-                                  for i in range(len(cands)))
-                short = pulp.LpVariable(f"pshort_{s['id']}", lowBound=0)
-                prob += short >= tgt - prot
-                obj_terms.append(config.PROTEIN_EVEN_W * short / max(tgt, 1.0))
+                for i, c in enumerate(cand_map[s["id"]]):
+                    gap = max(0.0, tgt - (c.get("nutrition") or {}).get("protein_g", 0))
+                    if gap > 0:
+                        obj_terms.append(config.PROTEIN_EVEN_W * gap / max(tgt, 1.0) * x[(s["id"], i)])
 
     prob += pulp.lpSum(obj_terms)
     committed = committed_spend(plan_id)
@@ -858,6 +861,7 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     # A small pool is the person saying "this is what I eat": its dishes may repeat as
     # often as the pool's meals need (one dish in a breakfast pool → every breakfast).
     item_cap = {}
+    item_count_vars = []
     for meal_name, pool in (ctx.get("pools") or {}).items():
         n_meal = sum(1 for s in active if s["meal"] == meal_name)
         if pool["ids"] and n_meal:
@@ -867,7 +871,16 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     for item_id, vlist in item_vars.items():                    # variety: cap repeats per dish —
         pinned_n = sum(1 for c in pinned.values() if c.get("item_id") == item_id)   # pins count too
         cap_n = item_cap.get(item_id, repeat)
-        if len(vlist) + pinned_n > cap_n:
+        if len(vlist) > 1:
+            # How many times the dish is planned, as a whole number the solver can branch on.
+            # The same dish on any of the week's days is worth almost the same, so branching
+            # on one meal's choice only moves it to another day; "this dish 0 / 1 / 2 times"
+            # settles every day at once (W6 x86 regression: 8,592 nodes -> single digits).
+            n_item = pulp.LpVariable(f"n_{len(item_count_vars)}", lowBound=0,
+                                     upBound=max(0, min(len(vlist), cap_n - pinned_n)), cat="Integer")
+            item_count_vars.append(n_item)
+            prob += pulp.lpSum(vlist) == n_item
+        elif len(vlist) + pinned_n > cap_n:
             prob += pulp.lpSum(vlist) <= max(0, cap_n - pinned_n)
     for (item_id, day), vlist in item_day_vars.items():
         pinned_same = sum(1 for sid, c in pinned.items() if c.get("item_id") == item_id
@@ -878,8 +891,12 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     # CBC minutes; a 0.1% objective gap returns the same plan in well under a second.
     # The node cap is the real work limit (the same on a busy server as on an idle one,
     # so a plan never depends on load); the time limit only guards a pathological solve.
+    # CBC's preprocessing substitutes the dish counts back out (they are sums of binaries),
+    # so it is off: with the counts and the exact protein term the root bound is within a
+    # hair of the optimum, and the ₹3,500 six-place week proves in a handful of nodes on
+    # both the x86 and the ARM CBC builds (it was 8,592 nodes / ~7 s on GitHub's x86 runner).
     solver = pulp.PULP_CBC_CMD(msg=False, gapRel=config.SOLVER_GAP, timeLimit=config.SOLVER_TIME_LIMIT_S,
-                               maxNodes=config.SOLVER_MAX_NODES)
+                               maxNodes=config.SOLVER_MAX_NODES, options=["preprocess off"])
     stages = []                    # (stage, seconds, proven) — diagnostics (LAST_SOLVE["stages"])
     if skip_vars and (ctx["tight"] or SKIP_STAGE):
         # Tight Week never skips a meal the money left could still cover. Lexicographic:
