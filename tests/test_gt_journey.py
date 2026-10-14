@@ -45,7 +45,7 @@ def test_golden_journey_signup_to_settings(world):
     transcript = {}
 
     # 1. sign-up / onboarding --------------------------------------------------
-    r = c.post("/api/profiles", json=ASHA)
+    r = c.post("/api/profiles", json={**ASHA, "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201, r.get_json()
     view = r.get_json()
     uid, pid, key = view["user"]["id"], view["plan"]["id"], view["access_key"]

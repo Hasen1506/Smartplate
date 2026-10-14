@@ -15,8 +15,8 @@ def client(seeded):
 
 
 def private(client, name):
-    result = client.post("/api/profiles", json={"name": name, "diet": "veg", "weekly_budget": 2000,
-                                               "meals": ["dinner"], "favourites": [6]}).get_json()
+    result = client.post("/api/profiles", json={**{"name": name, "diet": "veg", "weekly_budget": 2000,
+                                               "meals": ["dinner"], "favourites": [6]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     return result["user"]["id"], {"X-SmartPlate-Key": result["access_key"]}, result["plan"]["id"]
 
 

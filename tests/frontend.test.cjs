@@ -484,8 +484,12 @@ test('recovery rotation saves the new key and replaces the checkout approval', a
   };
   await vm.runInContext('rotateRecoveryCode()', context);
   assert.equal(requests[0].options.headers['X-SmartPlate-Key'], 'old-key');
-  assert.equal(requests[1].options.headers['X-SmartPlate-Key'], 'fresh-private-key');
-  assert.equal(vm.runInContext('keys.get(2)', context), 'fresh-private-key');
+  // #62: the new code is shown once and never stored; the session cookie keeps access.
+  assert.equal(requests[1].options.headers['X-SmartPlate-Key'], undefined);
+  assert.equal(vm.runInContext('keys.get(2)', context), null);
+  assert.equal(vm.runInContext('keys.has(2)', context), true);
+  assert.equal(vm.runInContext('S.freshCode', context), '2.fresh-private-key');
+  assert.ok(!JSON.stringify(vm.runInContext('rotateBag', context)).includes('fresh-private-key'));
   assert.equal(vm.runInContext('S.checkoutReview', context), null);
 });
 
@@ -505,9 +509,9 @@ const HOUSEHOLD = { name: 'Home', members: ['Meera', 'Dev'], merged_allergens: [
 
 test('household panel: create form for a private profile, sample profiles are sent to set-up', async () => {
   const { context } = fixture(); await context.bootPromise;
-  vm.runInContext('keys.get = () => null', context);
+  vm.runInContext('keys.has = () => false', context);
   assert.match(vm.runInContext('householdPanel()', context), /Sample profiles are shared by every visitor/);
-  vm.runInContext("keys.get = () => 'k'", context);
+  vm.runInContext("keys.has = () => true", context);
   const html = vm.runInContext('householdPanel()', context);
   assert.match(html, /<form id="hh-create"/);
   assert.match(html, /Every shared meal meets all their allergies and diets/);
@@ -1515,4 +1519,40 @@ test('order list: plain rows, name matches first, quantity × price against what
   const sent = JSON.parse(calls.find(c => c.url === '/api/user/2/swiggy/live-cart/preview').options.body);
   assert.deepEqual(sent, { restaurant_id: 'r1', restaurant_name: 'Annapoorna', item_id: 'i2', item_name: 'Veg Meals', quantity: 2 });
   assert.match(vm.runInContext('liveOrderReviewDialog()', context), /2 × /);
+});
+
+
+test('#62: cookie sessions — no key stored, CSRF token sent on writes, legacy keys migrated', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`const sbag = {}; localStorage.getItem = k => sbag[k] ?? null; localStorage.setItem = (k, v) => { sbag[k] = v; };
+    document.cookie = 'theme=x; zg_csrf=tok%2D123'; keys.put(2, null, 'Meera');`, context);
+  assert.equal(vm.runInContext('keys.has(2) && keys.get(2) === null', context), true);
+  assert.ok(!vm.runInContext('sbag["smartplate.keys"]', context).includes('"key"'));
+  const seen = [];
+  context.fetch = async (url, options) => { seen.push({ url, options }); return { ok: true, json: async () => ({ name: 'Meera', profiles: [{ id: 7, name: 'Asha' }] }) }; };
+  await vm.runInContext('api("/api/user/2/account", "POST", { login: "m" })', context);
+  assert.equal(seen[0].options.headers['X-CSRF-Token'], 'tok-123');
+  assert.equal(seen[0].options.headers['X-Ziggy-Session'], 'cookie');
+  assert.equal(seen[0].options.headers['X-SmartPlate-Key'], undefined);
+  await vm.runInContext('api("/api/user/2/plan")', context);
+  assert.equal(seen[1].options.headers['X-CSRF-Token'], undefined);       // reads carry no token
+  // A key left by an older version is moved into the session, then forgotten here.
+  vm.runInContext(`sbag["smartplate.keys"] = JSON.stringify({ 3: { key: "legacy-key-1234567890", name: "Old" } })`, context);
+  await vm.runInContext('migrateKeys()', context);
+  const claim = seen.find(c => c.url === '/api/session/claim');
+  assert.equal(claim.options.headers['X-SmartPlate-Key'], 'legacy-key-1234567890');
+  assert.equal(vm.runInContext('keys.get(3)', context), null);
+  assert.equal(vm.runInContext('keys.has(7)', context), true);           // listed by the session
+});
+
+test('DPDP: sign-up needs the adult + notice tick, health details need their own tick', async () => {
+  const { context } = fixture(); await context.bootPromise;
+  vm.runInContext(`startOnboard(); S.onboard.step = OB_STEPS.length - 1; Object.assign(S.onboard.d, { login: "priya", password: "long enough", medical: ["diabetes"] });
+    readOnboardInputs = () => {};`, context);
+  await assert.rejects(vm.runInContext('onboardNav("next")', context), /18 or older/);
+  vm.runInContext('S.onboard.d.consent = { account: true }', context);
+  await assert.rejects(vm.runInContext('onboardNav("next")', context), /health details/);
+  const html = vm.runInContext('S.onboard.d.consent = null; onboardingScreen()', context);
+  assert.match(html, /id="ob-c-account"/); assert.match(html, /href="\/privacy"/);
+  assert.ok(!/id="ob-c-(health|learning|account)"[^>]*checked/.test(html));   // nothing pre-ticked
 });

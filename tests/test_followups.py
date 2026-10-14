@@ -84,7 +84,7 @@ NEW = {"name": "Priya", "diet": "veg", "weekly_budget": 2000, "meals": ["dinner"
 
 
 def _private(client):
-    r = client.post("/api/profiles", json=dict(NEW))
+    r = client.post("/api/profiles", json={**dict(NEW), "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201
     v = r.get_json()
     return v["user"]["id"], v["access_key"], v
@@ -280,7 +280,7 @@ def _connect(client, swiggy, uid=1):
     the sign-in cookie set at start comes back with Swiggy's redirect."""
     _allow_app_host()
     _secure_profile(client, uid)
-    url = client.post(f"/api/user/{uid}/swiggy/connect", json={}, base_url=APP).get_json()["authorize_url"]
+    url = client.post(f"/api/user/{uid}/swiggy/connect", json={"consent": True}, base_url=APP).get_json()["authorize_url"]
     q = swiggy.approve(url)
     assert q["redirect_uri"] == "https://app.example/swiggy/callback"
     return client.get(f"/swiggy/callback?state={q['state']}&code=code-1", base_url=APP), q
@@ -309,7 +309,7 @@ def test_swiggy_can_use_approved_auth_callback_path_on_app_origin(client, swiggy
     _secure_profile(client)
     status = client.get("/api/user/1/swiggy", base_url=APP).get_json()
     assert status["callback_url"] == "https://app.example/auth/swiggy/callback"
-    url = client.post("/api/user/1/swiggy/connect", json={}, base_url=APP).get_json()["authorize_url"]
+    url = client.post("/api/user/1/swiggy/connect", json={"consent": True}, base_url=APP).get_json()["authorize_url"]
     q = swiggy.approve(url)
     assert q["redirect_uri"] == status["callback_url"]
     result = client.get(f"/auth/swiggy/callback?state={q['state']}&code=code-1", base_url=APP)
@@ -331,7 +331,7 @@ def test_swiggy_state_is_single_use_and_checked(client, swiggy):
 
 def test_swiggy_registration_reused_and_pkce_enforced(client, swiggy):
     _connect(client, swiggy)
-    url = client.post("/api/user/1/swiggy/connect", json={}, base_url=APP).get_json()["authorize_url"]
+    url = client.post("/api/user/1/swiggy/connect", json={"consent": True}, base_url=APP).get_json()["authorize_url"]
     assert swiggy.registrations == 1                                                 # one client per redirect URI
     q = swiggy.approve(url)
     swiggy.codes["code-1"] = "not-the-challenge"                                    # tampered verifier/challenge
@@ -341,9 +341,9 @@ def test_swiggy_registration_reused_and_pkce_enforced(client, swiggy):
 
 def test_swiggy_requires_https_and_handles_expiry_and_disconnect(client, swiggy, monkeypatch):
     _secure_profile(client)
-    r = client.post("/api/user/1/swiggy/connect", json={}, base_url="http://evil.example")
+    r = client.post("/api/user/1/swiggy/connect", json={"consent": True}, base_url="http://evil.example")
     assert r.status_code == 502 and "HTTPS" in r.get_json()["error"]
-    r = client.post("/api/user/1/swiggy/connect", json={}, base_url="https://evil.example")
+    r = client.post("/api/user/1/swiggy/connect", json={"consent": True}, base_url="https://evil.example")
     assert r.status_code == 502 and "SMARTPLATE_PUBLIC_URL" in r.get_json()["error"]          # M-04
     _connect(client, swiggy)
     swiggy.token = "rotated"                                                        # server no longer accepts ours
@@ -361,14 +361,14 @@ def test_swiggy_requires_https_and_handles_expiry_and_disconnect(client, swiggy,
 def test_swiggy_connection_is_private_to_the_profile(client, swiggy):
     uid, key, _ = _private(client)
     assert client.get(f"/api/user/{uid}/swiggy").status_code == 401
-    assert client.post(f"/api/user/{uid}/swiggy/connect", json={}).status_code == 401
+    assert client.post(f"/api/user/{uid}/swiggy/connect", json={"consent": True}).status_code == 401
     assert client.get(f"/api/user/{uid}/swiggy", headers={"X-SmartPlate-Key": key}).get_json()["connected"] is False
 
 
 def test_swiggy_cannot_connect_or_expose_a_shared_sample_profile(client, swiggy):
     status = client.get("/api/user/1/swiggy").get_json()
     assert status["requires_private_profile"] is True and status["connected"] is False
-    r = client.post("/api/user/1/swiggy/connect", json={})
+    r = client.post("/api/user/1/swiggy/connect", json={"consent": True})
     assert r.status_code == 502 and "private" in r.get_json()["error"]
     assert swiggy.calls == []
 

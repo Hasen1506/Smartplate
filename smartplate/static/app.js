@@ -35,13 +35,43 @@ const store = {
 // One-tap quick filters on live menus and restaurant lists, remembered on this device.
 try { Object.assign(S.filters, JSON.parse(store.get("smartplate.filters") || "{}") || {}); } catch (_) {}
 
-/* Private profiles: the key lives only in this browser ({id: {key, name}}). */
+/* Private profiles on this browser ({id: {name}}). Access lives in an HttpOnly session cookie
+   that page scripts can't read (websession.py); a key is kept here only until it has been
+   moved into that session once (migrateKeys), for browsers set up before Oct 2026. */
 const keys = {
   all() { try { const v = JSON.parse(store.get("smartplate.keys") || "{}"); return v && typeof v === "object" && !Array.isArray(v) ? v : {}; } catch (_) { return {}; } },
+  has(id) { return id != null && Object.prototype.hasOwnProperty.call(this.all(), id); },
   get(id) { return this.all()[id]?.key || null; },
-  put(id, key, name) { const a = this.all(); a[id] = { key, name }; store.set("smartplate.keys", JSON.stringify(a)); },
+  put(id, key, name) { const a = this.all(); a[id] = key ? { key, name } : { name }; store.set("smartplate.keys", JSON.stringify(a)); },
   drop(id) { const a = this.all(); delete a[id]; store.set("smartplate.keys", JSON.stringify(a)); },
 };
+// The double-submit CSRF token the server set beside the session cookie.
+function csrfToken() {
+  try { const m = /(?:^|;\s*)zg_csrf=([^;]+)/.exec(document.cookie || ""); return m ? decodeURIComponent(m[1]) : null; } catch (_) { return null; }
+}
+function authHeaders(method = "GET") {
+  const h = { "X-Ziggy-Session": "cookie" };
+  const k = S.userId ? keys.get(S.userId) : null;
+  if (k) h["X-SmartPlate-Key"] = k;
+  const t = method !== "GET" ? csrfToken() : null;
+  if (t) h["X-CSRF-Token"] = t;
+  return h;
+}
+// Move keys kept by older versions into the HttpOnly session, then forget them here (#62),
+// and list profiles the session holds that this browser's list lost.
+async function migrateKeys() {
+  for (const [id, v] of Object.entries(keys.all())) {
+    if (!v.key) continue;
+    try {
+      const r = await fetch("/api/session/claim", { method: "POST", headers: { "Content-Type": "application/json", "X-Ziggy-Session": "cookie", "X-SmartPlate-Key": v.key, ...(csrfToken() ? { "X-CSRF-Token": csrfToken() } : {}) }, body: JSON.stringify({ user_id: Number(id) }) });
+      if (r.ok) keys.put(id, null, (await r.json()).name || v.name);
+    } catch (_) { /* offline: try again next time */ }
+  }
+  try {
+    const s = await (await fetch("/api/session", { method: "GET", headers: { "X-Ziggy-Session": "cookie" } })).json();
+    for (const p of s.profiles || []) if (!keys.has(p.id)) keys.put(p.id, null, p.name);
+  } catch (_) {}
+}
 
 /* Appearance: light, dark or the phone's setting; Ember or Zomato × Swiggy colours. */
 const THEMES = [["system", "Auto"], ["light", "Light"], ["dark", "Dark"]];
@@ -225,10 +255,7 @@ async function loadPhotos(items) {
 }
 
 async function downloadPrivate(path, filename, mime) {
-  const headers = {};
-  const key = keys.get(S.userId);
-  if (key) headers["X-SmartPlate-Key"] = key;
-  const response = await fetch(path, { headers });
+  const response = await fetch(path, { headers: authHeaders("GET") });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || response.statusText);
@@ -250,10 +277,8 @@ function mergeUsers(open) {
 // Swiggy answers 409 with one of these when the user's own sign-in is missing or no longer
 // accepted: the fix is a Connect button, not a Retry.
 const SWIGGY_RECONNECT = new Set(["swiggy_not_connected", "swiggy_auth_expired"]);
-async function api(path, method = "GET", body, { timeoutMs } = {}) {
-  const opt = { method, headers: { "Content-Type": "application/json" } };
-  const k = S.userId ? keys.get(S.userId) : null;
-  if (k) opt.headers["X-SmartPlate-Key"] = k;
+async function api(path, method = "GET", body, { timeoutMs, consented } = {}) {
+  const opt = { method, headers: { "Content-Type": "application/json", ...authHeaders(method) } };
   if (body) opt.body = JSON.stringify(body);
   let timer = null;
   if (timeoutMs && typeof AbortController !== "undefined") {   // boot never waits forever
@@ -270,6 +295,11 @@ async function api(path, method = "GET", body, { timeoutMs } = {}) {
   } finally { if (timer) clearTimeout(timer); }
   if (!r.ok) {
     const data = await r.json().catch(() => ({}));
+    // Not asked yet (DPDP consent): show the notice once and, on "OK", record it and retry.
+    if (data.code === "consent_required" && !consented && S.userId && askConsent(data.notice)) {
+      await api(`/api/user/${S.userId}/privacy`, "POST", { purpose: data.purpose, granted: true }, { consented: true });
+      return api(path, method, body, { timeoutMs, consented: true });
+    }
     if (SWIGGY_RECONNECT.has(data.code) && S.swiggy) {
       S.swiggy.connected = false; S.swiggy.expired = data.code === "swiggy_auth_expired";
       S.liveCart = null; S.checkoutReview = null;
@@ -282,6 +312,11 @@ async function api(path, method = "GET", body, { timeoutMs } = {}) {
     throw err;
   }
   return r.json();
+}
+// A purpose's notice as a plain confirm (what is used, why, what happens without it).
+function askConsent(n) {
+  if (!n || typeof confirm !== "function") return false;
+  return confirm(`${n.title}\n\nWhat Ziggy uses: ${n.data.join("; ")}.\n\nWhy: ${n.why}\n\nWithout it: ${n.without}\n\nYou can switch this off any time in Me → Privacy. Full notice: ${location.origin}/privacy`);
 }
 // One message at a time, never stacked; an optional Undo runs through guard() like any tap.
 function toast(msg, undo) {
@@ -414,6 +449,7 @@ const TAB_ALIAS = { plan: "week", you: "more", me: "more", places: "saved" };
 async function boot() {
   ensureBusyBar();
   S.meta = await api("/api/meta", "GET", null, { timeoutMs: BOOT_TIMEOUT_MS });
+  await migrateKeys();
   S.users = mergeUsers(await api("/api/users", "GET", null, { timeoutMs: BOOT_TIMEOUT_MS }));
   const saved = Number(store.get("smartplate.user"));
   S.userId = S.users.find(u => u.id === saved)?.id || null;
@@ -651,7 +687,9 @@ const cartEligible = (c) => {
 async function loadAddresses() { S.swAddrs = await api(`/api/user/${S.userId}/swiggy/addresses`); render(); }
 async function openAddresses() { S.addrSheet = true; S.connectSheet = false; S.swAddrs = null; render(); await loadAddresses(); }
 async function connectSwiggy() {
-  const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", {});
+  if (!S.privacyNotice) S.privacyNotice = await api("/api/privacy/notice");
+  if (!askConsent(S.privacyNotice.purposes.swiggy)) return;   // the Swiggy notice, right before connecting
+  const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", { consent: true });
   rememberResume(); location.href = r.authorize_url;
 }
 // Everything read for one delivery address; dropped whenever the address changes.
@@ -2363,7 +2401,7 @@ function addressSheet() {
 function meScreen() {
   if (S.more) {
     const body = { settings: settingsPanel, connection: connectionPanel, recap: weekMoneyPanel, receipts: weekMoneyPanel, insights,
-      household: householdPanel, calendar: calendarPanel, profiles: profilesPanel }[S.more];
+      household: householdPanel, calendar: calendarPanel, profiles: profilesPanel, privacy: privacyPanel }[S.more];
     return `<button class="back secondary" data-go="more:">${ICON.back}Me</button>${body ? body() : ""}`;
   }
   const v = S.view, u = v.user || {}, b = v.budget || {}, sw = S.swiggy;
@@ -2373,7 +2411,7 @@ function meScreen() {
   const row = (go, label, value) => `<button class="set" data-go="more:${go}"><span>${label}</span><span><span>${value}</span>${ICON.right}</span></button>`;
   const rules = [{ veg: "Vegetarian", vegan: "Vegan", nonveg: "Non-veg" }[u.diet] || "", ...(u.allergens || []).map(a => `no ${a.replace("_", " ")}`)].filter(Boolean).join(" · ");
   return `<div class="row rise" style="flex-wrap:nowrap;gap:14px"><span class="avatar" style="width:56px;height:56px;font-size:22px;display:grid;place-items:center">${esc((u.name || "?").slice(0, 1).toUpperCase())}</span>
-      <span class="stack" style="gap:0"><b class="money" style="font-size:26px">${esc(u.name || "You")}</b><span class="muted">${keys.get(S.userId) ? (login ? `Signed in as ${esc(login)}` : "Private to this device") : "Shared sample profile"}</span></span></div>
+      <span class="stack" style="gap:0"><b class="money" style="font-size:26px">${esc(u.name || "You")}</b><span class="muted">${keys.has(S.userId) ? (login ? `Signed in as ${esc(login)}` : "Private to this device") : "Shared sample profile"}</span></span></div>
     <section class="card rise2 stats" aria-label="This week's money">
       <div class="stat"><span>Planned</span><b>${rupee0(b.spend)}</b></div><div class="stat"><span>Budget</span><b>${rupee0(b.budget)}</b></div>
       <div class="stat"><span>${(b.budget || 0) - (b.spend || 0) < 0 ? "Over" : "Left"}</span><b style="color:${(b.budget || 0) - (b.spend || 0) < 0 ? "var(--bad)" : "var(--leaf-ink)"}">${rupee0(Math.abs((b.budget || 0) - (b.spend || 0)))}</b></div></section>
@@ -2390,7 +2428,10 @@ function meScreen() {
       ${row("insights", "Nutrition", "Estimates")}
       ${row("household", "Household", v.household ? esc(v.household.name) : "Just you")}
       ${row("calendar", "Coming up", "Festivals, fasts")}
-      ${row("profiles", "Account &amp; devices", keys.get(S.userId) ? "Sign in anywhere" : "Profiles")}
+      ${row("profiles", "Account &amp; devices", keys.has(S.userId) ? "Sign in anywhere" : "Profiles")}
+      ${keys.has(S.userId) ? row("privacy", "Privacy", "Your choices") : ""}
+      <a class="set" href="/privacy"><span>Privacy notice</span><span>${ICON.right}</span></a>
+      <a class="set" href="/terms"><span>Terms of use</span><span>${ICON.right}</span></a>
       <a class="set" href="/credits"><span>Credits &amp; licences</span><span>${ICON.right}</span></a></section>`;
 }
 function calendarPanel() {
@@ -2561,7 +2602,7 @@ async function saveSettings(form) {
   const mode = form.elements?.mode?.value;
   adoptView(await api(`/api/user/${S.userId}/setup`, "PATCH", body));
   if (mode && mode !== S.view.plan.mode) adoptView(await api(`/api/plan/${S.planId}/optimize`, "POST", { mode }));
-  if (keys.get(S.userId)) keys.put(S.userId, keys.get(S.userId), S.view.user.name);
+  if (keys.has(S.userId)) keys.put(S.userId, keys.get(S.userId), S.view.user.name);
   S.users = mergeUsers(await api("/api/users")); S.orderReview = null;
   S.tab = "today"; S.more = null; toast("Saved. Upcoming meals re-planned."); render();
 }
@@ -2588,7 +2629,7 @@ function readPerson(form) {
 function householdPanel() {
   const h = S.view.household;
   if (!h) {
-    if (!keys.get(S.userId)) return `<h1 class="h1">Household</h1><section class="card"><p>Sample profiles are shared by every visitor. <button class="link" data-act="start-onboard">Set up your own profile</button> to plan for a household.</p></section>`;
+    if (!keys.has(S.userId)) return `<h1 class="h1">Household</h1><section class="card"><p>Sample profiles are shared by every visitor. <button class="link" data-act="start-onboard">Set up your own profile</button> to plan for a household.</p></section>`;
     return `<h1 class="h1">Household</h1><p class="sub">Cooking or ordering for more than you? Add the people you share meals with. Every shared meal meets all their allergies and diets, and you can split the cost.</p>
       <form id="hh-create" class="card"><label>Household name<input name="name" maxlength="40" value="Home" required></label>
         <button type="submit" class="secondary">Create household</button></form>`;
@@ -2625,10 +2666,12 @@ async function householdCall(path, method, body, msg) {
 /* ---- account: profiles, sign in anywhere, recovery, your data ---- */
 function profilesPanel() {
   const opts = S.users.map(u => `<button class="pick ${u.id === S.userId ? "current" : ""}" data-user="${u.id}"><span class="t"><b>${esc(u.name)}</b><span>${u.private ? "Private to this browser" : "Shared sample profile"}${u.id === S.userId ? " · open now" : ""}</span></span>${u.id === S.userId ? ICON.check : ICON.right}</button>`).join("");
-  const k = keys.get(S.userId);
+  const k = keys.has(S.userId);
+  const fresh = S.freshCode && S.freshCode.startsWith(`${S.userId}.`) ? S.freshCode : null;
   const recovery = k ? `<section class="card"><p class="k">Recovery code</p>
-      <p class="sub">This profile is private and its key lives only in this browser. To open it on another device, or after clearing your browser, you need this code. Keep it somewhere safe.</p>
-      <div class="row" style="flex-wrap:nowrap"><code class="code">${esc(`${S.userId}.${k}`)}</code><button class="small" data-act="copy-recovery">Copy</button></div>
+      ${fresh ? `<p class="sub">Save this code now: it opens this profile on another device or after clearing your browser, and Ziggy won't show it again.</p>
+      <div class="row" style="flex-wrap:nowrap"><code class="code">${esc(fresh)}</code><button class="small" data-act="copy-recovery">Copy</button></div>`
+      : `<p class="sub">Your recovery code was shown once, when this profile was made. For safety this browser no longer keeps it. Lost it? Make a new one below.</p>`}
       <details><summary>Replace a shared or lost code</summary><p class="fine">A new code invalidates all earlier codes and signs out every other device. Change your password too if someone else knows it.</p><button data-act="rotate-recovery">Generate a new recovery code</button></details></section>` : "";
   return `<h1 class="h1">Account &amp; devices</h1>
     ${accountCard()}
@@ -2643,9 +2686,30 @@ function profilesPanel() {
       <details><summary>Delete my Ziggy profile</summary><p class="fine">This permanently removes your profile, sign-in, device access and saved records from Ziggy. Your Swiggy account and existing orders stay. Download your data first if you want a copy.</p>
       <form id="delete-profile" class="stack"><label>Type DELETE to confirm<input id="delete-confirmation" autocomplete="off" required pattern="DELETE"></label><button class="ghost" type="submit">Permanently delete this profile</button></form></details></section>` : ""}`;
 }
+/* Privacy choices (privacy.py): each optional purpose switches off as easily as it went on. */
+function privacyPanel() {
+  const p = S.privacy;
+  if (!p) return `<h1 class="h1">Privacy</h1><div class="skeleton"><i></i><i></i></div>`;
+  const on = (k) => p.purposes[k] ? p.purposes[k].granted : (p.legacy && k !== "swiggy");
+  const rows = ["health", "learning", "swiggy"].map(k => { const n = p.notice.purposes[k];
+    return `<div class="set"><span class="stack" style="gap:2px"><b>${esc(n.title)}</b><span class="fine">${esc(n.why)} Without it: ${esc(n.without)}</span></span>
+      <button class="switch" role="switch" aria-checked="${on(k)}" aria-label="${esc(n.title)}" data-consent="${k}"><i></i></button></div>`; }).join("");
+  return `<h1 class="h1">Privacy</h1><p class="sub">Switching something off stops it and deletes the data it used.</p>
+    <section class="card tight">${rows}</section>
+    <section class="card"><p class="fine">See everything Ziggy holds, or delete it, in <button class="link" data-go="more:profiles" style="min-height:0;font-size:inherit">Account &amp; devices → Your data</button>. <a href="/privacy">Privacy notice</a> · <a href="/terms">Terms</a></p></section>`;
+}
+async function setConsent(purpose) {
+  const p = S.privacy, cur = p.purposes[purpose] ? p.purposes[purpose].granted : (p.legacy && purpose !== "swiggy");
+  if (!cur && !askConsent(p.notice.purposes[purpose])) return;
+  if (cur && !confirm(`Switch off “${p.notice.purposes[purpose].title}”? Ziggy deletes the data it used.`)) return;
+  const next = await api(`/api/user/${S.userId}/privacy`, "POST", { purpose, granted: !cur });
+  S.privacy = { ...p, ...next };
+  if (purpose === "swiggy" && cur) S.swiggy = await api(`/api/user/${S.userId}/swiggy`);
+  toast(cur ? "Switched off and deleted" : "Switched on"); render();
+}
 /* Sign in anywhere: an optional name + password for a private profile (accounts.py). */
 function accountCard() {
-  if (!keys.get(S.userId)) return `<section class="card"><p class="k">Sign in anywhere</p><p class="sub">Open this profile on the device that created it to add a sign-in.</p></section>`;
+  if (!keys.has(S.userId)) return `<section class="card"><p class="k">Sign in anywhere</p><p class="sub">Open this profile on the device that created it to add a sign-in.</p></section>`;
   const a = S.account;
   if (!a) return `<div class="skeleton"><i></i><i></i></div>`;
   const devs = a.devices.map(d => `<div class="mrow" style="cursor:default"><span class="t"><b>${esc(d.label)}${d.this_device ? " · this device" : ""}</b><span class="s">Last used ${esc(fmtDate(d.last_seen.slice(0, 10)))}</span></span>
@@ -2673,7 +2737,7 @@ async function signIn(form) {
   S.signinDraft = login;
   const device = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent || "") ? "Phone" : "Computer";
   const r = await api("/api/signin", "POST", { login, password, device });
-  keys.put(r.user_id, r.key, r.name);
+  keys.put(r.user_id, null, r.name);                         // access is in the session cookie now
   S.users = mergeUsers(await api("/api/users")); S.signin = false;
   await switchUser(r.user_id); toast(`Signed in. Hello, ${r.name.split(" ")[0]}.`);
 }
@@ -2703,7 +2767,8 @@ async function rotateRecoveryCode() {
   if (store.get(probe) !== marker) throw new Error("Enable browser storage before replacing your recovery code.");
   store.del(probe);
   const result = await api(`/api/user/${S.userId}/account/rotate-key`, "POST", { confirmation: "ROTATE" });
-  keys.put(result.user_id, result.key, result.name);
+  keys.put(result.user_id, null, result.name);
+  S.freshCode = `${result.user_id}.${result.key}`;          // shown once, not stored
   S.checkoutReview = null;
   S.account = await api(`/api/user/${S.userId}/account`);
   render(); toast("New recovery code saved here. Copy it somewhere safe.");
@@ -2718,14 +2783,11 @@ async function useRecoveryCode(code) {
   const m = /^\s*(\d+)\.([A-Za-z0-9_-]{16,})\s*$/.exec(code || "");
   if (!m) throw new Error("That doesn't look like a recovery code (it looks like 12.AbC…)");
   const id = Number(m[1]), key = m[2];
-  const prev = keys.all()[id];
-  keys.put(id, key, prev?.name);
-  try {
-    const r = await fetch(`/api/user/${id}/plan`, { headers: { "X-SmartPlate-Key": key } });
-    if (!r.ok) throw new Error(r.status === 401 ? "That code doesn't match a profile here" : "Profile not found");
-    const view = await r.json();
-    keys.put(id, key, view.user.name);
-  } catch (e) { if (prev) keys.put(id, prev.key, prev.name); else keys.drop(id); throw e; }
+  const t = csrfToken();
+  const r = await fetch("/api/session/claim", { method: "POST", body: JSON.stringify({ user_id: id }),
+    headers: { "Content-Type": "application/json", "X-Ziggy-Session": "cookie", "X-SmartPlate-Key": key, ...(t ? { "X-CSRF-Token": t } : {}) } });
+  if (!r.ok) throw new Error(r.status === 401 ? "That code doesn't match a profile here" : r.status === 429 ? "Too many tries. Wait a few minutes." : "Profile not found");
+  keys.put(id, null, (await r.json()).name);
   S.users = mergeUsers(await api("/api/users"));
   await switchUser(id); toast("Profile opened on this device");
 }
@@ -2793,7 +2855,13 @@ function onboardingScreen() {
           <label>Age<input id="ob-a" type="number" inputmode="numeric" min="18" max="100" value="${b.age ?? ""}"></label>
           <label>Sex (for the formula)<select id="ob-s"><option value="unspecified">Prefer not to say</option><option value="female" ${b.sex === "female" ? "selected" : ""}>Female</option><option value="male" ${b.sex === "male" ? "selected" : ""}>Male</option></select></label>
           <label>Activity<select id="ob-act">${[["sedentary", "Mostly sitting"], ["light", "Light"], ["moderate", "Moderate"], ["active", "Active"], ["athlete", "Athlete"]].map(([k, l]) => `<option value="${k}" ${(b.activity || "light") === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-        </div><p class="fine">Adults only. General wellness estimate, not medical advice.</p></details>`;
+        </div><p class="fine">Adults only. General wellness estimate, not medical advice.</p></details>
+      <section class="card stack consent" aria-label="Your data">
+        <p class="sub">Ziggy uses your answers only to plan and order your meals. It doesn't sell them, show ads or send them to any AI service. <a href="/privacy" target="_blank" rel="noopener">Read the privacy notice</a>.</p>
+        <label class="tick"><input type="checkbox" id="ob-c-health" ${d.consent?.health ? "checked" : ""}> Use my health details (medical filters, height &amp; weight) for nutrition. Optional.</label>
+        <label class="tick"><input type="checkbox" id="ob-c-learning" ${d.consent?.learning ? "checked" : ""}> Learn from the reasons I give when I rate a meal. Optional.</label>
+        <label class="tick"><input type="checkbox" id="ob-c-account" required ${d.consent?.account ? "checked" : ""}> I'm 18 or older and I agree to the <a href="/privacy" target="_blank" rel="noopener">privacy notice</a> and <a href="/terms" target="_blank" rel="noopener">terms</a>.</label>
+        <p class="fine">Change these any time in Me → Privacy, or delete everything in Account &amp; devices.</p></section>`;
   }
   const last = st === OB_STEPS.length - 1;
   return `<main class="onboard"><div class="ob-top"><button class="icon-btn" data-ob-nav="back" aria-label="${st ? "Back" : "Cancel"}">${ICON.back}</button>
@@ -2820,6 +2888,8 @@ function readOnboardInputs() {
     d.name = (val("ob-name") || "").trim();
     d.login = (val("ob-login") || "").trim();
     d.password = val("ob-pw") || d.password || "";
+    const box = (id) => !!document.getElementById(id)?.checked;
+    d.consent = { account: box("ob-c-account"), health: box("ob-c-health"), learning: box("ob-c-learning") };
     const w = val("ob-w"), h = val("ob-h"), a = val("ob-a");
     d.body = w && h && a ? { weight_kg: Number(w), height_cm: Number(h), age: Number(a), sex: val("ob-s"), activity: val("ob-act") } : null;
   }
@@ -2842,7 +2912,10 @@ async function onboardNav(dir) {
   if (o.step === OB_STEPS.length - 1) {
     if (d.login.length < 3) throw new Error("Choose a sign-in name (3 or more characters) so you can open this profile anywhere");
     if (d.password.length < 8) throw new Error("Use a password of at least 8 characters");
-    const body = { ...d, name: d.name || "Me" };
+    const c = d.consent || {};
+    if (!c.account) throw new Error("Tick “I'm 18 or older and I agree” to save your profile");
+    if (!c.health && (d.medical.length || d.body)) throw new Error("You added health details: tick “Use my health details” or remove them");
+    const body = { ...d, name: d.name || "Me", consent: { account: true, health: !!c.health, learning: !!c.learning } };
     delete body.meals;                     // the rhythm says which meals are planned
     if (!body.body) delete body.body;
     if (!body.daily_cap) delete body.daily_cap;
@@ -2851,7 +2924,7 @@ async function onboardNav(dir) {
     try { view = await api("/api/profiles", "POST", body); }
     finally { S.planning = false; }
     d.password = "";                                     // never kept in memory after use
-    if (view.access_key) keys.put(view.user.id, view.access_key, view.user.name);
+    if (view.access_key) { keys.put(view.user.id, null, view.user.name); S.freshCode = view.recovery_code; }
     S.users = mergeUsers(await api("/api/users"));
     S.onboard = null; S.userId = view.user.id; store.set("smartplate.user", String(S.userId));
     adoptView(view); S.exec = await api(`/api/plan/${S.planId}/orders`);
@@ -2986,6 +3059,7 @@ function wire() {
   on("[data-ob]", "click", (e) => { e.preventDefault(); const t = e.currentTarget; onboardChip(t.dataset.ob, t.dataset.val, t.dataset.multi === "1"); });
   on("[data-ob-budget]", "click", (e) => { e.preventDefault(); readOnboardInputs(); const d = S.onboard.d;
     d.weekly_budget = Math.min(100000, Math.max(250, (d.weekly_budget || 0) + Number(e.currentTarget.dataset.obBudget))); render(); });
+  on("[data-consent]", "click", (e) => { const t = e.currentTarget; guard(() => setConsent(t.dataset.consent)); });
   on("[data-ob-nav]", "click", (e) => { e.preventDefault(); guard(() => onboardNav(e.currentTarget.dataset.obNav)); });
   const obform = document.getElementById("obform");
   if (obform) obform.onsubmit = (e) => { e.preventDefault(); guard(() => onboardNav("next")); };
@@ -3029,7 +3103,7 @@ function wire() {
     "signin-close": async () => { S.signin = false; S.error = null; if (S.view) S.welcome = false; render(); },
     "sign-out": signOut,
     "rotate-recovery": rotateRecoveryCode,
-    "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); },
+    "copy-recovery": async () => { await navigator.clipboard.writeText(S.freshCode || ""); toast("Recovery code copied"); },
     "cancel-move": async () => { S.moving = null; render(); },
     "hh-edit-cancel": async () => { S.hhEdit = null; render(); },
     "hh-leave": () => householdCall("/leave", "POST", {}, "Stopped sharing. Your plan uses your own rules again."),
@@ -3128,7 +3202,8 @@ async function goTab(tab, sub = null) {
     [S.swiggy, S.swRules] = await Promise.all([api(`/api/user/${S.userId}/swiggy`),
       api(`/api/user/${S.userId}/swiggy/rules`).catch(() => ({ rules: [], issues: [] }))]);
   }
-  if (S.more === "profiles" || (tab === "more" && !sub && keys.get(S.userId) && !S.account)) S.account = keys.get(S.userId) ? await api(`/api/user/${S.userId}/account`).catch(() => null) : null;
+  if (S.more === "profiles" || (tab === "more" && !sub && keys.has(S.userId) && !S.account)) S.account = keys.has(S.userId) ? await api(`/api/user/${S.userId}/account`).catch(() => null) : null;
+  if (S.more === "privacy") S.privacy = await api(`/api/user/${S.userId}/privacy`);
   render();
   if (typeof window !== "undefined" && window.scrollTo) window.scrollTo(0, 0);
 }

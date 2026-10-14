@@ -21,8 +21,8 @@ def c(gt):
 
 
 def test_household_grocery_line_keeps_its_swap_and_its_scaling(c):
-    r = c.post("/api/profiles", json={"name": "Kavya", "diet": "veg", "weekly_budget": 3500,
-                                      "meals": ["lunch", "dinner"], "cook": "never"})
+    r = c.post("/api/profiles", json={**{"name": "Kavya", "diet": "veg", "weekly_budget": 3500,
+                                      "meals": ["lunch", "dinner"], "cook": "never"}, "consent": {"account": True, "health": True, "learning": True}})
     v = r.get_json(); h = {"X-SmartPlate-Key": v["access_key"]}
     uid, pid = v["user"]["id"], v["plan"]["id"]
     c.post(f"/api/user/{uid}/household", json={"name": "Home"}, headers=h)

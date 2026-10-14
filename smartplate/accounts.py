@@ -61,7 +61,8 @@ def insert_login(cur, user_id: int, login: str, password: str) -> None:
         raise ValueError("That sign-in name is taken. Try another.") from exc
 
 
-def summary(user_id: int, presented: str | None = None) -> dict:
+def summary(user_id: int, presented: str | None = None, device_id: int | None = None) -> dict:
+    """`device_id`: the sign-in this browser's cookie session was opened with (websession.py)."""
     here = access.digest(presented) if presented else None
     with db.cursor() as cur:
         user = cur.execute("SELECT access_hash FROM users WHERE id=?", (user_id,)).fetchone()
@@ -70,10 +71,12 @@ def summary(user_id: int, presented: str | None = None) -> dict:
                               "WHERE user_id=? ORDER BY last_seen_ts DESC", (user_id,)).fetchall()
     return {"private": bool(user and user["access_hash"]), "login": row["login"] if row else None,
             "devices": [{"id": d["id"], "label": d["label"] or "Browser", "since": d["created_ts"],
-                         "last_seen": d["last_seen_ts"], "this_device": d["token_hash"] == here} for d in devices]}
+                         "last_seen": d["last_seen_ts"],
+                         "this_device": d["token_hash"] == here or (device_id is not None and d["id"] == device_id)}
+                        for d in devices]}
 
 
-def set_login(user_id: int, body: dict, presented: str | None = None) -> dict:
+def set_login(user_id: int, body: dict, presented: str | None = None, keep_device_id: int | None = None) -> dict:
     """Create or change the sign-in. The caller already proved access to the profile."""
     with db.cursor() as cur:
         user = cur.execute("SELECT access_hash FROM users WHERE id=?", (user_id,)).fetchone()
@@ -93,8 +96,9 @@ def set_login(user_id: int, body: dict, presented: str | None = None) -> dict:
             # A new password signs out every other browser (L-03): a leaked password
             # must not keep working through the device tokens it already issued.
             keep = access.digest(presented) if presented else ""
-            cur.execute("DELETE FROM devices WHERE user_id=? AND token_hash<>?", (user_id, keep))
-    return summary(user_id, presented)
+            cur.execute("DELETE FROM devices WHERE user_id=? AND token_hash<>? AND id<>?",
+                        (user_id, keep, keep_device_id if keep_device_id is not None else -1))
+    return summary(user_id, presented, keep_device_id)
 
 
 def sign_in(body: dict, ip: str = "") -> dict:
@@ -111,8 +115,8 @@ def sign_in(body: dict, ip: str = "") -> dict:
         row = cur.execute("SELECT l.user_id, l.pw_hash, u.name FROM logins l JOIN users u ON u.id=l.user_id "
                           "WHERE l.login=?", (login,)).fetchone()
     if not check_password_hash(row["pw_hash"] if row else _DUMMY, pw[:MAX_PASSWORD]) or not row:
-        ratelimit.hit(f"signin:{login}:{ip}")
-        ratelimit.hit(f"signin-name:{login}")
+        ratelimit.hit(f"signin:{login}:{ip}", FAIL_LIMIT, FAIL_WINDOW_S)
+        ratelimit.hit(f"signin-name:{login}", NAME_LIMIT, NAME_WINDOW_S)
         raise ValueError("That name and password don't match.")
     token = secrets.token_urlsafe(24)
     label = body.get("device") if isinstance(body.get("device"), str) else ""
@@ -120,7 +124,8 @@ def sign_in(body: dict, ip: str = "") -> dict:
     with db.cursor() as cur:
         cur.execute("INSERT INTO devices(user_id, token_hash, label, created_ts, last_seen_ts) VALUES (?,?,?,?,?)",
                     (row["user_id"], access.digest(token), label.strip()[:60], now, now))
-    return {"user_id": row["user_id"], "name": row["name"], "key": token}
+        device = cur.execute("SELECT id FROM devices WHERE token_hash=?", (access.digest(token),)).fetchone()
+    return {"user_id": row["user_id"], "name": row["name"], "key": token, "device_id": device["id"]}
 
 
 def remove_device(user_id: int, device_id: int) -> dict:

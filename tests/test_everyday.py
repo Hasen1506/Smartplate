@@ -77,7 +77,7 @@ def test_variety_pref_no_longer_breaks_meal_targets(seeded):
 # Onboarding → a real plan
 # --------------------------------------------------------------------------- #
 def test_onboarding_creates_prorated_plan_for_rest_of_week(client, friday):
-    r = client.post("/api/profiles", json=dict(ASHA))
+    r = client.post("/api/profiles", json={**dict(ASHA), "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201
     v = r.get_json()
     assert v["plan"]["week_start"] == "2026-09-21"            # this week's Monday
@@ -95,8 +95,8 @@ def test_onboarding_creates_prorated_plan_for_rest_of_week(client, friday):
 
 def test_onboarding_rejects_bad_payload_without_creating_user(client):
     before = len(models.list_users())
-    assert client.post("/api/profiles", json={**ASHA, "diet": "keto"}).status_code == 400
-    assert client.post("/api/profiles", json={"name": "No budget"}).status_code == 400
+    assert client.post("/api/profiles", json={**{**ASHA, "diet": "keto"}, "consent": {"account": True, "health": True, "learning": True}}).status_code == 400
+    assert client.post("/api/profiles", json={**{"name": "No budget"}, "consent": {"account": True, "health": True, "learning": True}}).status_code == 400
     assert len(models.list_users()) == before
 
 
@@ -273,8 +273,8 @@ def test_saved_lists_liked_dishes_and_meals_had_newest_first(client):
 def test_saved_is_private_to_its_profile(seeded):
     app = create_app()
     c = app.test_client()
-    created = c.post("/api/profiles", json={"name": "Private", "diet": "veg", "weekly_budget": 2000,
-                                            "meals": ["dinner"]}).get_json()
+    created = c.post("/api/profiles", json={**{"name": "Private", "diet": "veg", "weekly_budget": 2000,
+                                            "meals": ["dinner"]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid = created["user"]["id"]
     assert c.get(f"/api/user/{uid}/saved").status_code == 401
     ok = c.get(f"/api/user/{uid}/saved", headers={"X-SmartPlate-Key": created["access_key"]})

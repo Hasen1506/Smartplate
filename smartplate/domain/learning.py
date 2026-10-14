@@ -34,6 +34,9 @@ def record(user_id: int, session_id: int, reasons: list, *, item_id=None, restau
     bad = [r for r in reasons if r not in REASONS]
     if bad:
         raise ValueError(f"Unknown reason {bad[0]!r}; use one of: {', '.join(REASONS)}")
+    from .. import privacy
+    if not privacy.granted(user_id, "learning"):     # the person said no to learning (DPDP consent)
+        return []
     with db.cursor() as cur:
         cur.execute("DELETE FROM rating_reasons WHERE user_id=? AND session_id=?", (user_id, session_id))
         for r in reasons:
@@ -44,6 +47,9 @@ def record(user_id: int, session_id: int, reasons: list, *, item_id=None, restau
 
 
 def _taps(user_id: int) -> list[dict]:
+    from .. import privacy
+    if not privacy.granted(user_id, "learning"):
+        return []
     with db.cursor() as cur:
         return [dict(r) for r in cur.execute("SELECT * FROM rating_reasons WHERE user_id=? ORDER BY id", (user_id,))]
 

@@ -108,8 +108,8 @@ def test_test_message_and_private_profiles_need_their_key(client, monkeypatch):
     client.post("/api/user/1/push/subscribe", json={"subscription": _browser_subscription()})
     svc = FakeService()
     assert push.test_message(1, sender=svc) == {"sent": 1, "devices": 1}
-    v = client.post("/api/profiles", json={"name": "P", "diet": "veg", "weekly_budget": 2000,
-                                           "meals": ["dinner"], "favourites": [6]}).get_json()
+    v = client.post("/api/profiles", json={**{"name": "P", "diet": "veg", "weekly_budget": 2000,
+                                           "meals": ["dinner"], "favourites": [6]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid = v["user"]["id"]
     assert client.post(f"/api/user/{uid}/push/subscribe", json={"subscription": _browser_subscription("https://updates.push.services.mozilla.com/wpush/v2/abc")}).status_code == 401
     assert client.post(f"/api/user/{uid}/push/subscribe", json={"subscription": _browser_subscription("https://updates.push.services.mozilla.com/wpush/v2/abc")},

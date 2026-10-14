@@ -359,8 +359,8 @@ def test_live_swiggy_never_carts_or_orders_without_approval(gt, monkeypatch, swi
     fake.strict = False               # random requests: unrecorded ones get Swiggy's refusal
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={"name": "Live", "diet": "veg", "weekly_budget": 2000,
-                                                 "meals": ["dinner"]}).get_json()
+    created = client.post("/api/profiles", json={**{"name": "Live", "diet": "veg", "weekly_budget": 2000,
+                                                 "meals": ["dinner"]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid, key = created["user"]["id"], created["access_key"]
     h = {"X-SmartPlate-Key": key}
     connect_swiggy(client, fake, uid, key)

@@ -36,7 +36,7 @@ def swiggy(monkeypatch):
 
 
 def _profile(client, **extra):
-    r = client.post("/api/profiles", json={**NEW, **extra})
+    r = client.post("/api/profiles", json={**{**NEW, **extra}, "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201, r.get_json()
     v = r.get_json()
     return v["user"]["id"], {"X-SmartPlate-Key": v["access_key"]}, v
@@ -50,7 +50,7 @@ def _cells(view):
 def test_h01_callback_from_another_browser_is_refused(client, swiggy):
     _allow_app_host()
     _secure_profile(client, 1)
-    url = client.post("/api/user/1/swiggy/connect", json={}, base_url=APP).get_json()["authorize_url"]
+    url = client.post("/api/user/1/swiggy/connect", json={"consent": True}, base_url=APP).get_json()["authorize_url"]
     q = swiggy.approve(url)
     victim = client.application.test_client()                      # no cookie from the attacker's start
     r = victim.get(f"/swiggy/callback?state={q['state']}&code=code-1", base_url=APP)
@@ -64,7 +64,7 @@ def test_h01_callback_from_another_browser_is_refused(client, swiggy):
 def test_h01_cookie_is_httponly_lax_and_cleared(client, swiggy):
     _allow_app_host()
     _secure_profile(client, 1)
-    r = client.post("/api/user/1/swiggy/connect", json={}, base_url=APP)
+    r = client.post("/api/user/1/swiggy/connect", json={"consent": True}, base_url=APP)
     cookie = r.headers["Set-Cookie"]
     assert "HttpOnly" in cookie and "SameSite=Lax" in cookie and "Secure" in cookie
     q = swiggy.approve(r.get_json()["authorize_url"])
@@ -282,11 +282,11 @@ def test_m04_forwarded_host_is_ignored_and_registrations_capped(client, swiggy, 
     monkeypatch.setattr(config, "ALLOWED_HOSTS", ())
     _secure_profile(client, 1)
     for host in ("evil.example", "evil2.example"):
-        url = client.post("/api/user/1/swiggy/connect", json={},
+        url = client.post("/api/user/1/swiggy/connect", json={"consent": True},
                           headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": host}).get_json()["authorize_url"]
         assert swiggy.approve(url)["redirect_uri"] == "http://localhost/swiggy/callback"
     assert swiggy.registrations == 1
-    r = client.post("/api/user/1/swiggy/connect", json={}, base_url="https://evil.example")   # Host header
+    r = client.post("/api/user/1/swiggy/connect", json={"consent": True}, base_url="https://evil.example")   # Host header
     assert r.status_code == 502 and swiggy.registrations == 1
     assert not swiggy_connect.redirect_allowed("https://evil.example/swiggy/callback")
     monkeypatch.setattr(config, "PUBLIC_URL", "https://smartplate.example")
@@ -464,7 +464,7 @@ def test_l07_type_errors_are_500_without_internals(client, monkeypatch):
 def test_l08_odd_token_replies_redirect_instead_of_json_400(client, swiggy, monkeypatch, token_reply):
     _allow_app_host()
     _secure_profile(client, 1)
-    url = client.post("/api/user/1/swiggy/connect", json={}, base_url=APP).get_json()["authorize_url"]
+    url = client.post("/api/user/1/swiggy/connect", json={"consent": True}, base_url=APP).get_json()["authorize_url"]
     q = swiggy.approve(url)
     original = swiggy.__call__
 
@@ -480,7 +480,7 @@ def test_l08_odd_token_replies_redirect_instead_of_json_400(client, swiggy, monk
 def test_l08_discovery_failure_after_token_keeps_the_connection(client, swiggy, monkeypatch):
     _allow_app_host()
     _secure_profile(client, 1)
-    url = client.post("/api/user/1/swiggy/connect", json={}, base_url=APP).get_json()["authorize_url"]
+    url = client.post("/api/user/1/swiggy/connect", json={"consent": True}, base_url=APP).get_json()["authorize_url"]
     q = swiggy.approve(url)
     original = swiggy.__call__
 
@@ -506,11 +506,11 @@ def test_l09_sample_profiles_cannot_be_renamed_or_published(client):
 def test_l10_budget_limits_are_the_same_everywhere(client, budget):
     assert client.patch("/api/user/2", json={"weekly_budget": budget}).status_code == 400
     assert client.patch("/api/user/2/setup", json={"weekly_budget": budget}).status_code == 400
-    assert client.post("/api/profiles", json={**NEW, "weekly_budget": budget}).status_code == 400
+    assert client.post("/api/profiles", json={**{**NEW, "weekly_budget": budget}, "consent": {"account": True, "health": True, "learning": True}}).status_code == 400
 
 
 def test_daily_limit_cannot_exceed_weekly_budget(client):
-    r = client.post("/api/profiles", json={**NEW, "weekly_budget": 2000, "daily_cap": 5000})
+    r = client.post("/api/profiles", json={**{**NEW, "weekly_budget": 2000, "daily_cap": 5000}, "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 400 and "weekly budget" in r.get_json()["error"]
     uid, h, _v = _profile(client, weekly_budget=2000)
     assert client.patch(f"/api/user/{uid}/setup", json={"daily_cap": 5000}, headers=h).status_code == 400

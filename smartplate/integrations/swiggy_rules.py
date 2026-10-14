@@ -121,6 +121,11 @@ def explain(error) -> dict:
     return {k: rule[k] for k in ("id", "whose", "title", "plain", "fix")}
 
 
+def _redact(text: str) -> str:
+    from .. import privacy
+    return privacy.redact(text)          # the problem log keeps no addresses, phones or tokens (#45)
+
+
 def note(user_id: int | None, error) -> None:
     """Keep this problem on the profile (best effort: logging a problem never fails a request)."""
     if not user_id:
@@ -133,7 +138,7 @@ def note(user_id: int | None, error) -> None:
             if not cur.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
                 return
             cur.execute("INSERT OR REPLACE INTO swiggy_issues(user_id, ts, rule, message) VALUES (?,?,?,?)",
-                        (user_id, now.isoformat(timespec="microseconds"), classify(error), str(error)[:300]))
+                        (user_id, now.isoformat(timespec="microseconds"), classify(error), _redact(str(error))[:300]))
             old = cur.execute("SELECT ts FROM swiggy_issues WHERE user_id=? ORDER BY ts DESC",
                               (user_id,)).fetchall()[KEEP:]
             for row in old:
