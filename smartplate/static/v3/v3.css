@@ -23,8 +23,10 @@
 .v3-rules .link{min-height:36px;font-size:13.5px;margin-left:4px}
 
 .v3-meals{gap:0;padding:6px 16px 12px}
-.v3-meal{display:grid;grid-template-columns:86px minmax(0,1fr);grid-template-areas:"n p" ". m" ". w";column-gap:10px;row-gap:4px;padding:12px 0;border-bottom:1px solid var(--line)}
+.v3-meal{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);grid-template-areas:"n m" "p p" "w w";column-gap:10px;row-gap:6px;padding:12px 0;border-bottom:1px solid var(--line)}
 .v3-meal-name{grid-area:n;font-weight:800;font-size:15px;align-self:center}
+.v3-meal-meta{justify-content:flex-end}
+.v3-qty.stepper.sm button{width:36px;height:36px;min-height:36px}
 .v3-meal-pick{grid-area:p;display:flex;align-items:center;gap:8px;min-width:0}
 .v3-meal-pick .v3-select{flex:1;min-width:0;min-height:44px;text-overflow:ellipsis}
 .v3-meal-meta{grid-area:m;display:flex;align-items:center;flex-wrap:wrap;gap:8px}

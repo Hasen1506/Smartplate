@@ -294,12 +294,12 @@ def test_first_run_two_questions_then_today_and_account_after_value(fresh, viewp
         page, errors = _page(browser, fresh["url"], viewport, theme)
         page.get_by_role("button", name="Get started").click()
         expect(page.get_by_role("heading", name="What do you eat?")).to_be_visible()
-        for k in ("Vegetarian", "Non-vegetarian", "Vegan"):            # nothing preselected
-            assert page.get_by_role("radio", name=k).get_attribute("aria-checked") == "false"
+        for k in ("veg", "nonveg", "vegan"):                          # nothing preselected
+            assert page.locator(f'[data-v3-ob="diet:{k}"]').get_attribute("aria-checked") == "false"
         expect(page.get_by_role("button", name="Continue")).to_be_disabled()
         shot(page, f"10-onboard-diet-{tag}")
         no_overflow(page)
-        page.get_by_role("radio", name="Vegetarian").click()
+        page.locator('[data-v3-ob="diet:veg"]').click()
         page.get_by_role("button", name="Peanut").click()
         page.get_by_role("button", name="Continue").click()
         expect(page.get_by_role("heading", name="Today's food budget")).to_be_visible()
@@ -324,7 +324,7 @@ def test_first_run_two_questions_then_today_and_account_after_value(fresh, viewp
         # first value: a typed favourite, picked → then the account is offered
         page.get_by_role("button", name="Add your favourite dishes").click()
         sheet = page.get_by_role("dialog", name="New item / restaurant")
-        sheet.get_by_role("button", name="Breakfast").click()
+        sheet.get_by_role("button", name="Breakfast", exact=True).click()
         sheet.get_by_role("textbox", name="Dish").fill("Cappuccino")
         sheet.get_by_label("Place (optional)").fill("Corner Cafe")
         sheet.get_by_label("Price you pay (₹)").fill("140")

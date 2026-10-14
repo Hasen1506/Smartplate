@@ -383,7 +383,7 @@
       ready = !!o.diet;
       body = `<h1 class="h1">What do you eat?</h1>
         <div class="stack" style="gap:10px" role="radiogroup" aria-label="Diet">${[["veg", "Vegetarian", "No meat, fish or egg", ""], ["nonveg", "Non-vegetarian", "Everything is on the menu", "nonveg"], ["vegan", "Vegan", "No animal products at all", ""]].map(([k, l, s, dot]) =>
-          `<button type="button" class="opt" role="radio" data-v3-ob="diet:${k}" aria-checked="${o.diet === k}" aria-pressed="${o.diet === k}"><span class="dot ${dot}"></span><span><b>${l}</b><span class="muted">${s}</span></span></button>`).join("")}</div>
+          `<button type="button" class="opt" role="radio" data-v3-ob="diet:${k}" aria-checked="${o.diet === k}"><span class="dot ${dot}"></span><span><b>${l}</b><span class="muted">${s}</span></span></button>`).join("")}</div>
         <p class="k">Anything you must avoid? (optional)</p>
         <div class="chips">${ALLERGY_LIST.map(a => `<button type="button" class="chip" data-v3-ob="allergen:${a}" aria-pressed="${o.allergens.includes(a)}">${cap1(a.replace("_", " "))}</button>`).join("")}</div>
         <p class="fine">Ziggy filters by dish name and Swiggy's veg mark. Menus don't list every ingredient, so check with the restaurant when it matters.</p>`;
