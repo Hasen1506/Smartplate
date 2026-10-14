@@ -241,10 +241,16 @@ def test_changing_address_stops_planning_from_the_old_address_menus(client, swig
     assert view["source"]["kind"] == "live" and live_catalog.has_live(3)
     with db.cursor() as cur:
         assert cur.execute("SELECT address_id FROM live_catalog_state WHERE user_id=3").fetchone()[0] == "addr-home"
-    client.post("/api/user/3/swiggy/address", json={"address_id": "addr-work"})
-    assert not live_catalog.has_live(3)                           # main: still planned from Adyar's menus
+    changed = client.post("/api/user/3/swiggy/address", json={"address_id": "addr-work"}).get_json()
+    # W7 (Oct 2026): the week is re-checked for the new address at once, so the catalogue is
+    # either re-read for addr-work or gone; it is never Adyar's (main: still planned from it).
+    assert changed["week"] and changed["week"]["plan_id"] == pid
+    with db.cursor() as cur:
+        row = cur.execute("SELECT address_id FROM live_catalog_state WHERE user_id=3").fetchone()
+    assert row is None or row[0] == "addr-work"
     source = client.get(f"/api/plan/{pid}").get_json()["source"]
-    assert source["kind"] == "sample" and source["connected"] is True
+    assert source["connected"] is True and source["kind"] in ("sample", "live")
+    assert source["kind"] != "live" or live_catalog.has_live(3)
 
 
 def test_live_catalogue_read_for_another_address_is_never_used(client, swiggy):
