@@ -227,6 +227,8 @@ def create_app() -> Flask:
             response.headers['Retry-After'] = str(error.retry_after)
         if error.code in ('swiggy_cart_other_address', 'price_unit_changed', 'cart_over_cap'):
             return response, 409        # the user's cart is for another of their addresses: their choice, not an outage
+        if error.code == 'restaurant_closed':
+            return response, 409        # the place is shut right now: information for the user, not an outage
         return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
     from . import db as _db

@@ -147,7 +147,8 @@ def test_browser_private_export_rotation_and_deletion(pilot, viewport, tmp_path)
             assert pilot["key"] not in downloaded.read_text() and pilot["fake"].token not in downloaded.read_text()
             page.get_by_text("Replace a shared or lost code", exact=True).click()
             page.get_by_role("button", name="Generate a new recovery code", exact=True).click()
-            pw.expect(page.get_by_text("New recovery code saved here. Copy it somewhere safe.", exact=True)).to_be_visible()
+            pw.expect(page.get_by_text("New recovery code saved here. Copy or download it now.", exact=True)).to_be_visible()   # W3 wording
+            pw.expect(page.get_by_role("button", name="Download as a file", exact=True)).to_be_visible()
             fresh = page.evaluate(f"JSON.parse(localStorage.getItem('smartplate.keys'))[{json.dumps(str(pilot['uid']))}].key")
             assert fresh != pilot["key"]
             assert pilot["client"].get(f"/api/user/{pilot['uid']}/plan").status_code == 401
