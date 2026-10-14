@@ -7,6 +7,7 @@ USER_TABLES = ("calendar_events", "leftovers", "receipts", "intake_log", "favour
                "swiggy_cart_intents", "swiggy_delivery_fees", "swiggy_photos", "swiggy_issues", "swiggy_meal_pools",
                "swiggy_bill_fees", "spend_ledger", "spend_sync", "events",
                "today_settings", "today_budget", "today_picks", "pool_typed", "pool_meta",   # v3 Today (today.py)
+               "today_cart_bills", "auto_cart",                     # real cart bills, auto-fill opt-ins (R2)
                "swiggy_history_suggestions", "typed_favourites", "manual_addresses")       # W7
 # A stable row order for the export (Postgres has no implicit insertion order).
 EXPORT_ORDER = {"favourites": "restaurant_id", "logins": "user_id", "swiggy_connections": "user_id",
@@ -17,6 +18,7 @@ EXPORT_ORDER = {"favourites": "restaurant_id", "logins": "user_id", "swiggy_conn
                 "swiggy_bill_fees": "address_id, provider_id, seen_ts", "spend_ledger": "iso_date, ref", "spend_sync": "user_id",
                 "today_settings": "user_id", "today_budget": "day", "today_picks": "day, meal",
                 "pool_meta": "meal, ref",
+                "today_cart_bills": "day, restaurant_id, item_id, qty", "auto_cart": "session_id",
                 "grocery_have": "plan_id, item", "grocery_swaps": "plan_id, token",
                 "push_sent": "subscription_id, session_id, at"}
 PRIVATE_COLUMNS = frozenset({"access_hash", "pw_hash", "token_hash", "access_token", "verifier",
@@ -52,7 +54,9 @@ def _household_people(cur, hid, user_id, columns):
 def ensure_tables():
     """Tables created on first use (v3 Today) must exist before export/delete read them."""
     from . import privacy, today
+    from .domain import autofill
     today.init_schema()
+    autofill.init_schema()
     privacy.init_schema()
 
 

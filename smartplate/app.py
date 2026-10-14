@@ -1077,6 +1077,43 @@ def create_app() -> Flask:
         except swiggy_live.CartChanged as exc:
             return jsonify(error="cart_changed", message=str(exc)), 409
 
+    # Plan-ahead carts (R2): opt in per meal or per day; /cron/tick fills the cart when the
+    # meal's window opens and says "pay in Swiggy". Ziggy never pays (domain/autofill).
+    @app.get("/api/session/<int:session_id>/auto-cart")
+    def auto_cart_status(session_id):
+        from .domain import autofill
+        return jsonify(autofill.status(session_id))
+
+    @app.post("/api/session/<int:session_id>/auto-cart")
+    def auto_cart_set(session_id):
+        from .domain import autofill
+        body = request.get_json() or {}
+        if body.get("on") is False:
+            return jsonify(autofill.disarm(session_id))
+        try:
+            return jsonify(autofill.arm(session_id, body.get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
+
+    @app.get("/api/plan/<int:plan_id>/auto-cart")
+    def auto_cart_plan(plan_id):
+        from .domain import autofill
+        return jsonify({"meals": autofill.for_plan(plan_id)})
+
+    @app.post("/api/plan/<int:plan_id>/auto-cart/day")
+    def auto_cart_day(plan_id):
+        from .domain import autofill
+        body = request.get_json() or {}
+        day = body.get("day")
+        if not isinstance(day, int) or isinstance(day, bool) or not 0 <= day <= 6:
+            raise ValueError("Choose a day of the week (0–6).")
+        if body.get("on") is False:
+            return jsonify(autofill.disarm_day(plan_id, day))
+        fps = body.get("fingerprints")
+        if not isinstance(fps, dict):
+            raise ValueError("Review each meal's Swiggy item first (fingerprints by meal).")
+        return jsonify(autofill.arm_day(plan_id, day, fps))
+
     @app.post("/api/user/<int:user_id>/swiggy/disconnect")
     def swiggy_disconnect(user_id):
         live_catalog.clear(user_id)          # no live menus without a live connection
