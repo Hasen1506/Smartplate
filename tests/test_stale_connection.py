@@ -3,7 +3,6 @@ occurs?" Reproduced with a database whose connections all go stale after an idle
 (as Neon's do when it suspends after 5 minutes), then fixed by replaying a request that
 committed nothing on a fresh pool (smartplate/resilience.py)."""
 import json
-import sqlite3
 
 import psycopg
 import pytest
