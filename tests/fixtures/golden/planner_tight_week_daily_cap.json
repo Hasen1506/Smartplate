@@ -43,11 +43,11 @@
   },
   "Mon 2026-11-02": {
    "breakfast": {
-    "cost": 105.0,
-    "item": "Egg Puff + Chai",
-    "kind": "delivery",
+    "cost": 35.0,
+    "item": "Cook: Masala oats + veg",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "Chai Kings",
+    "restaurant": "Home kitchen",
     "status": "active"
    },
    "dinner": {
@@ -59,11 +59,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
+    "cost": 115.72,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    }
   },
@@ -95,11 +95,11 @@
   },
   "Sun 2026-11-08": {
    "breakfast": {
-    "cost": 35.0,
-    "item": "Cook: Masala oats + veg",
-    "kind": "cook",
+    "cost": 105.0,
+    "item": "Egg Puff + Chai",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Chai Kings",
     "status": "active"
    },
    "dinner": {
@@ -111,11 +111,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 115.72,
-    "item": "Vegan Sambar Rice",
-    "kind": "delivery",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Home kitchen",
     "status": "active"
    }
   },

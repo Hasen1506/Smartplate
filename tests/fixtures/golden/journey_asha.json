@@ -4,8 +4,8 @@
    "budget": 2500.0,
    "daily_cap": null,
    "prorated": false,
-   "remaining": 29.93,
-   "spend": 2470.07,
+   "remaining": 31.23,
+   "spend": 2468.77,
    "weekly_budget": 2500.0
   },
   "counts": {
@@ -26,19 +26,19 @@
      "status": "active"
     },
     "dinner": {
-     "cost": 125.0,
-     "item": "Mini Tiffin",
-     "kind": "delivery",
-     "pinned": false,
-     "restaurant": "Adyar Ananda Bhavan",
-     "status": "active"
-    },
-    "lunch": {
-     "cost": 105.2,
+     "cost": 108.7,
      "item": "Curd Rice",
      "kind": "delivery",
      "pinned": false,
      "restaurant": "Sangeetha Veg",
+     "status": "active"
+    },
+    "lunch": {
+     "cost": 120.98,
+     "item": "Mini Tiffin",
+     "kind": "delivery",
+     "pinned": false,
+     "restaurant": "Adyar Ananda Bhavan",
      "status": "active"
     }
    },
@@ -52,19 +52,19 @@
      "status": "active"
     },
     "dinner": {
-     "cost": 125.0,
-     "item": "Mini Tiffin",
+     "cost": 119.57,
+     "item": "Vegan Sambar Rice",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Adyar Ananda Bhavan",
+     "restaurant": "Sangeetha Veg",
      "status": "active"
     },
     "lunch": {
      "cost": 120.98,
-     "item": "Masala Dosa",
+     "item": "Mini Tiffin",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Hotel Saravana Bhavan",
+     "restaurant": "Adyar Ananda Bhavan",
      "status": "active"
     }
    },
@@ -182,19 +182,19 @@
      "status": "active"
     },
     "dinner": {
-     "cost": 121.55,
-     "item": "Vegan Sambar Rice",
-     "kind": "delivery",
-     "pinned": false,
-     "restaurant": "Sangeetha Veg",
-     "status": "active"
-    },
-    "lunch": {
-     "cost": 96.3,
+     "cost": 99.45,
      "item": "Masala Chai + Bun Butter",
      "kind": "delivery",
      "pinned": false,
      "restaurant": "Chai Kings",
+     "status": "active"
+    },
+    "lunch": {
+     "cost": 123.05,
+     "item": "Masala Dosa",
+     "kind": "delivery",
+     "pinned": false,
+     "restaurant": "Hotel Saravana Bhavan",
      "status": "active"
     }
    }
@@ -216,7 +216,9 @@
   },
   "limits": {
    "left_day": null,
-   "left_week": 196.81
+   "left_week": 198.11,
+   "this_meal": 166.88,
+   "week_left": 31.23
   },
   "new": [
    [
@@ -298,8 +300,8 @@
    "budget": 2500.0,
    "daily_cap": null,
    "prorated": false,
-   "remaining": 29.06,
-   "spend": 2470.94,
+   "remaining": 30.0,
+   "spend": 2470.0,
    "weekly_budget": 2500.0
   },
   "counts": {
@@ -320,19 +322,19 @@
      "status": "active"
     },
     "dinner": {
-     "cost": 125.0,
-     "item": "Mini Tiffin",
-     "kind": "delivery",
-     "pinned": false,
-     "restaurant": "Adyar Ananda Bhavan",
-     "status": "active"
-    },
-    "lunch": {
-     "cost": 105.2,
+     "cost": 108.7,
      "item": "Curd Rice",
      "kind": "delivery",
      "pinned": false,
      "restaurant": "Sangeetha Veg",
+     "status": "active"
+    },
+    "lunch": {
+     "cost": 120.98,
+     "item": "Mini Tiffin",
+     "kind": "delivery",
+     "pinned": false,
+     "restaurant": "Adyar Ananda Bhavan",
      "status": "active"
     }
    },
@@ -346,19 +348,19 @@
      "status": "active"
     },
     "dinner": {
-     "cost": 125.0,
-     "item": "Mini Tiffin",
+     "cost": 119.57,
+     "item": "Vegan Sambar Rice",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Adyar Ananda Bhavan",
+     "restaurant": "Sangeetha Veg",
      "status": "active"
     },
     "lunch": {
      "cost": 120.98,
-     "item": "Masala Dosa",
+     "item": "Mini Tiffin",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Hotel Saravana Bhavan",
+     "restaurant": "Adyar Ananda Bhavan",
      "status": "active"
     }
    },
@@ -424,11 +426,11 @@
      "status": "active"
     },
     "dinner": {
-     "cost": 119.57,
-     "item": "Vegan Sambar Rice",
+     "cost": 97.83,
+     "item": "Masala Chai + Bun Butter",
      "kind": "delivery",
      "pinned": true,
-     "restaurant": "Sangeetha Veg",
+     "restaurant": "Chai Kings",
      "status": "active"
     },
     "lunch": {
@@ -484,11 +486,11 @@
      "status": "active"
     },
     "lunch": {
-     "cost": 96.3,
-     "item": "Masala Chai + Bun Butter",
+     "cost": 123.05,
+     "item": "Masala Dosa",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Chai Kings",
+     "restaurant": "Hotel Saravana Bhavan",
      "status": "active"
     }
    }
@@ -561,14 +563,14 @@
     [
      0,
      "lunch",
-     "Masala Dosa",
+     "Mini Tiffin",
      120.98
     ],
     [
      0,
      "dinner",
-     "Mini Tiffin",
-     125.0
+     "Vegan Sambar Rice",
+     119.57
     ],
     [
      1,
@@ -591,8 +593,8 @@
     [
      2,
      "lunch",
-     "Masala Chai + Bun Butter",
-     96.3
+     "Masala Dosa",
+     123.05
     ],
     [
      2,
@@ -615,8 +617,8 @@
     [
      3,
      "dinner",
-     "Vegan Sambar Rice",
-     119.57
+     "Masala Chai + Bun Butter",
+     97.83
     ],
     [
      4,
@@ -627,14 +629,14 @@
     [
      4,
      "lunch",
-     "Curd Rice",
-     105.2
+     "Mini Tiffin",
+     120.98
     ],
     [
      4,
      "dinner",
-     "Mini Tiffin",
-     125.0
+     "Curd Rice",
+     108.7
     ],
     [
      5,
@@ -662,7 +664,7 @@
     ]
    ],
    "order_count": 18,
-   "total": 2380.94
+   "total": 2380.0
   },
   "substituted": 1
  },
@@ -718,7 +720,7 @@
    "protein_g": 80,
    "sugar_g": 40
   },
-  "receipts_total": 2228.77,
+  "receipts_total": 2232.72,
   "rows": 17
  },
  "8_after_settings": {
@@ -726,8 +728,8 @@
    "budget": 1800.0,
    "daily_cap": 450.0,
    "prorated": false,
-   "remaining": -473.77,
-   "spend": 2273.77,
+   "remaining": -477.72,
+   "spend": 2277.72,
    "weekly_budget": 1800.0
   },
   "counts": {
@@ -748,20 +750,20 @@
      "status": "ordered"
     },
     "dinner": {
+     "cost": 108.7,
+     "item": "Curd Rice",
+     "kind": "delivery",
+     "pinned": false,
+     "restaurant": "Sangeetha Veg",
+     "status": "ordered"
+    },
+    "lunch": {
      "cost": 0.0,
      "item": "Skip",
      "kind": "skip",
      "pinned": false,
      "restaurant": "",
      "status": "past"
-    },
-    "lunch": {
-     "cost": 105.2,
-     "item": "Curd Rice",
-     "kind": "delivery",
-     "pinned": false,
-     "restaurant": "Sangeetha Veg",
-     "status": "ordered"
     }
    },
    "Mon 2026-11-02": {
@@ -774,19 +776,19 @@
      "status": "ordered"
     },
     "dinner": {
-     "cost": 97.83,
+     "cost": 119.57,
+     "item": "Vegan Sambar Rice",
+     "kind": "delivery",
+     "pinned": false,
+     "restaurant": "Sangeetha Veg",
+     "status": "ordered"
+    },
+    "lunch": {
+     "cost": 94.68,
      "item": "Masala Chai + Bun Butter",
      "kind": "delivery",
      "pinned": false,
      "restaurant": "Chai Kings",
-     "status": "ordered"
-    },
-    "lunch": {
-     "cost": 120.98,
-     "item": "Masala Dosa",
-     "kind": "delivery",
-     "pinned": false,
-     "restaurant": "Hotel Saravana Bhavan",
      "status": "ordered"
     }
    },
@@ -852,11 +854,11 @@
      "status": "ordered"
     },
     "dinner": {
-     "cost": 119.57,
-     "item": "Vegan Sambar Rice",
+     "cost": 97.83,
+     "item": "Masala Chai + Bun Butter",
      "kind": "delivery",
      "pinned": true,
-     "restaurant": "Sangeetha Veg",
+     "restaurant": "Chai Kings",
      "status": "ordered"
     },
     "lunch": {
@@ -912,11 +914,11 @@
      "status": "ordered"
     },
     "lunch": {
-     "cost": 96.3,
-     "item": "Masala Chai + Bun Butter",
+     "cost": 123.05,
+     "item": "Masala Dosa",
      "kind": "delivery",
      "pinned": false,
-     "restaurant": "Chai Kings",
+     "restaurant": "Hotel Saravana Bhavan",
      "status": "ordered"
     }
    }

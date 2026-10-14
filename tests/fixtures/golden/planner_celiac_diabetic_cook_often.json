@@ -3,8 +3,8 @@
   "budget": 3000.0,
   "daily_cap": null,
   "prorated": false,
-  "remaining": 52.21,
-  "spend": 2947.79,
+  "remaining": 9.81,
+  "spend": 2990.19,
   "weekly_budget": 3000.0
  },
  "counts": {
@@ -44,10 +44,10 @@
   "Mon 2026-11-02": {
    "breakfast": {
     "cost": 115.0,
-    "item": "Mini Tiffin",
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "dinner": {
@@ -59,11 +59,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 220.92,
-    "item": "Chana Masala Bowl",
+    "cost": 120.98,
+    "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "The Bowl Company",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    }
   },
@@ -77,11 +77,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 181.5,
-    "item": "Veg Meals",
+    "cost": 308.55,
+    "item": "Chicken Chettinad + Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Junior Kuppanna",
     "status": "active"
    },
    "lunch": {
@@ -137,47 +137,47 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 220.92,
-    "item": "Chana Masala Bowl",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "The Bowl Company",
-    "status": "active"
-   }
-  },
-  "Tue 2026-11-03": {
-   "breakfast": {
-    "cost": 243.1,
-    "item": "Rajma Chawal Bowl",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "The Bowl Company",
-    "status": "active"
-   },
-   "dinner": {
     "cost": 45.0,
     "item": "Cook: Dal + rice",
     "kind": "cook",
     "pinned": false,
     "restaurant": "Home kitchen",
     "status": "active"
-   },
-   "lunch": {
-    "cost": 232.44,
+   }
+  },
+  "Tue 2026-11-03": {
+   "breakfast": {
+    "cost": 215.47,
     "item": "Egg Curry Meals",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Junior Kuppanna",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 317.48,
+    "item": "Chicken Chettinad + Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Junior Kuppanna",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 178.8,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    }
   },
   "Wed 2026-11-04": {
    "breakfast": {
     "cost": 117.07,
-    "item": "Idli Sambar (4 pc)",
+    "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    },
    "dinner": {
@@ -199,9 +199,9 @@
   }
  },
  "heads_up": [
-  "budget: ₹52 left this week",
+  "budget: ₹10 left this week",
   "holiday: Sun 08 Nov: Diwali",
-  "nutrition: Protein runs low: about 55 g a day of 80 g",
+  "nutrition: Protein runs low: about 59 g a day of 80 g",
   "weather: Sat 07 Nov: rain likely (80%)",
   "weather: Tomorrow: rain likely (80%)",
   "weather: Wed 04 Nov: 38°C"
