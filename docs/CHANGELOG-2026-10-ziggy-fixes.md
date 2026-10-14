@@ -40,6 +40,24 @@ Vijay), **not done**. One line each; detail is in the commit messages and the do
 - W9's `swiggy_live` split re-applied after every merge; known-gap xfails removed for W6
   household, W7 out-of-area and W7 address change.
 
+## Round 2, front end / docs / clean-up (branch `ziggy/r2-frontend`)
+
+- **Usual meals, not pools.** Phone: each Today meal line has its own *Usual ▾* drawer (pick, add,
+  quantity, remove); meals not on today are under *Dinner (not today)*. Desktop (≥ 1024 px): the
+  three usual-meals panels stay side by side. Storage and API still say `pool`.
+- **"Ziggy" everywhere users look.** Download filenames and the anonymous community author no
+  longer say SmartPlate; `tests/test_ziggy_wording.py` guards static pages, manifest, served
+  pages and front-end strings. Package, repo, URLs, header, env vars, DB names and the Swiggy
+  OAuth client name are unchanged.
+- **No fixed ₹60 floor in the front end.** Classic onboarding warns only when the server sends
+  the person's floor (`S.view.meal_floor`).
+- **Left after fees.** Today's budget card shows "₹X left after fees", marked *estimate* or
+  *real bill* (server `budget.left_after_fees` / `left_estimated` when present, else budget −
+  `picked_bill`).
+- **Repo clean-up.** `docs/archive/design-audit/`, `docs/archive/project/` and the June brainstorm
+  deleted (≈ 6.2 MB; in git history at `9fc21e5`); `.gitignore` covers logs, local DBs, shots and
+  scratch dirs; `docs/branches-cleanup.md` lists the 31 remote branches to delete.
+
 ## sp-grill critiques (1–72)
 
 | # | Topic | Status | Note |
@@ -143,7 +161,7 @@ Vijay), **not done**. One line each; detail is in the commit messages and the do
 | 20 | Two budget numbers | fixed | W2 sheet money matches Today |
 | 21 | "≈₹125est." label | fixed | W4 labelled estimates with ranges |
 | 22 | Per-meal budget line wrong | fixed | W3 live per-meal line |
-| 23 | No sanity check on ₹300 | fixed | W3 onboarding warning + W4 low-budget heads-up (one ₹60 floor) |
+| 23 | No sanity check on ₹300 | fixed | W4 low-budget heads-up. Round 2: no fixed ₹60-a-meal floor; the front end warns only from the server's per-user floor (cheapest favourite with fees), the onboarding ₹60 warning is gone |
 | 24 | "Delivery ₹35 est." everywhere | fixed | W4 learned per restaurant, ₹17.11 default |
 | 25 | Account asked too early | fixed | W5 account offered after the first pick |
 | 26 | Non-veg preselected | fixed | W3 + W5 no diet default |
@@ -157,7 +175,7 @@ Vijay), **not done**. One line each; detail is in the commit messages and the do
 | 34 | Back leaves the app | fixed | W3 history |
 | 35 | Too many ways to change a meal | fixed | W5 one Swap |
 | 36 | Drag-and-drop editor | fixed | W5 |
-| 37 | Jargon ("pool" …) | founder decision | W3 says "usual lunches" in classic; v3 keeps "pools" per the sketch |
+| 37 | Jargon ("pool" …) | fixed | Founder (Round 2): "usual meals" everywhere users look; v3 Today says usual breakfasts / lunches / dinners |
 | 38 | Closed restaurants look open | fixed | W3 "Closed now / Opens at", 409 restaurant_closed |
 | 39 | Saved: two empty states | fixed | W3 |
 | 40 | Tab names vs docs | fixed | W5 `docs/IA.md` |

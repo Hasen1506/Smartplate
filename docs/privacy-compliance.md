@@ -90,10 +90,22 @@ Status of the timeline: <https://dpdprules.org/blog/dpdp-18-months-to-12-months-
 
 ## Decisions only the founder can take
 
-1. **Grievance / data contact.** Set `SMARTPLATE_PRIVACY_CONTACT` (an e-mail you read),
-   `SMARTPLATE_GRIEVANCE_NAME` and `SMARTPLATE_OPERATOR` (your legal name or company) in
-   Render → Environment. Until then the pages say the contact will be published before
-   launch, which is not enough once Rule 9 binds (13 May 2027) or before public users.
+1. **Grievance / data contact: decided (Oct 2026).** The operator values are below. They are
+   read from Render → Environment (they are not in the repo's Blueprint); the privacy and terms
+   pages fill them in at request time. Until all three are set on the service, the pages fall
+   back to "will be published before launch", which is not enough once Rule 9 binds
+   (13 May 2027) or before public users.
+
+   | Variable | Value | Shown on |
+   |---|---|---|
+   | `SMARTPLATE_OPERATOR` | `VijeyaHasen K H` | /privacy, /terms ("who runs Ziggy") |
+   | `SMARTPLATE_GRIEVANCE_NAME` | `VijeyaHasen K H` | /privacy (grievance officer) |
+   | `SMARTPLATE_PRIVACY_CONTACT` | `hasenhamesh15@gmail.com` | /privacy, /terms (mailto link) |
+   | `SMARTPLATE_PUSH_CONTACT` | `mailto:hasenhamesh15@gmail.com` | Web Push VAPID contact (not shown to users) |
+
+   Check after a deploy: open `/privacy` and confirm the name and e-mail appear instead of the
+   placeholder sentence. A dedicated address (e.g. `privacy@<your domain>`) can replace the
+   Gmail address later; change only the variable.
 2. **Retention of unused profiles.** Today: kept until the person deletes them. Ziggy has
    no e-mail, so it cannot give the 48-hour warning Rule 8(2) describes for the large
    platforms it applies to. Suggested: delete profiles unused for 12 months, announced on
