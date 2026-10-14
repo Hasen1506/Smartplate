@@ -30,6 +30,43 @@ import threading
 from .. import clock, config, db
 from . import swiggy_connect as sc, swiggy_rules
 from .swiggy_connect import SwiggyError
+from .swiggy_schema import (  # noqa: F401  (split out, grill #57; re-exported)
+    ALIASES,
+    FIELDS,
+    _shape,
+    _payload,
+    _find,
+    build_args,
+    MAX_PORTIONS,
+    _cart_item,
+    _get,
+    _flag,
+    IMAGE_HOSTS,
+    _image,
+    _categories,
+    _lists,
+    records,
+    _num,
+    _has_options,
+    _similar,
+)
+from .swiggy_money import (  # noqa: F401  (split out, grill #57; re-exported)
+    PAISE_THRESHOLD,
+    _PRICE_TEXT,
+    _price_raw,
+    infer_unit,
+    menu_unit,
+    rupees,
+    price_estimated,
+    cart_total,
+    BILL_FIELDS,
+    ROUNDING_TOLERANCE,
+    bill_breakdown,
+    CANCELLATION_RE,
+    cancellation_note,
+    _line_scale,
+    billed_delivery_fee,
+)
 
 ALLOWED = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu",
                      "get_food_cart", "update_food_cart", "flush_food_cart", "get_payment_options",
@@ -43,43 +80,6 @@ MENU_TTL = dt.timedelta(hours=6)
 CHECKOUT_QUOTE_TTL = dt.timedelta(minutes=5)
 MATCH_RESTAURANT = 0.6
 CHECKOUT_URL = "https://www.swiggy.com/checkout"
-
-ALIASES = {
-    "query": ["query", "searchQuery", "search_query", "keyword", "q", "restaurantName", "restaurant_name"],
-    "address": ["addressId", "address_id"],
-    "restaurant": ["restaurantId", "restaurant_id", "restId", "rest_id"],
-    "restaurant_scope": ["restaurantIdOfAddedItem", "restaurant_id_of_added_item"],
-    "restaurant_name": ["restaurantName", "restaurant_name"],
-    "cart_items": ["cartItems", "cart_items", "items"],
-    "item_id": ["menu_item_id", "menuItemId", "itemId", "item_id", "id"],
-    "quantity": ["quantity", "qty", "count"],
-    "payment_method": ["paymentMethod", "payment_method"],
-    "order_id": ["orderId", "order_id"],
-    "page": ["page"],
-    "page_size": ["pageSize"],
-    "offset": ["offset"],
-    "veg_filter": ["vegFilter"],
-}
-FIELDS = {
-    "id": ["id", "addressId", "address_id", "restaurantId", "restaurant_id", "restId", "itemId", "item_id",
-           "menuItemId", "menu_item_id"],
-    "menu_item_id": ["menu_item_id", "menuItemId"],
-    "name": ["name", "restaurantName", "itemName", "title"],
-    "label": ["annotation", "label", "tag", "addressTag", "addressCategory", "addressType", "type"],
-    "text": ["formattedAddress", "address", "addressLine", "addressLine1", "displayAddress", "area", "locality"],
-    "price": ["priceInPaise", "price_in_paise", "priceInRupees", "price_in_rupees", "price", "finalPrice", "defaultPrice", "cost"],
-    "rating": ["avgRating", "rating", "avg_rating"],
-    "eta": ["deliveryTimeMinutes", "deliveryTimeRange", "deliveryTime", "eta", "sla", "slaString", "delivery_time"],
-    "area": ["areaName", "locality", "area", "cuisines"],
-    "veg": ["isVeg", "veg", "is_veg"],
-    "to_pay": ["to_pay", "toPay", "totalPayable", "grandTotal", "billTotal"],
-    "stock": ["inStock", "in_stock"],
-    "variants": ["hasVariants", "has_variants"],
-    "addons": ["hasAddons", "has_addons"],
-    "restaurant_id": ["restaurant_id", "restaurantId"],
-    "availability": ["availabilityStatus", "availability_status"],
-    "distance": ["distance", "distanceKm", "distance_km"],
-}
 
 
 class CartChanged(SwiggyError):
@@ -157,17 +157,6 @@ def _tool(conn: dict, name: str) -> dict:
     return tool
 
 
-def _shape(value, depth=0):
-    """Field names and types only, never values: what a reply looked like."""
-    if depth > 4:
-        return "…"
-    if isinstance(value, dict):
-        return {k: _shape(v, depth + 1) for k, v in list(value.items())[:30]}
-    if isinstance(value, list):
-        return [_shape(value[0], depth + 1)] if value else []
-    return type(value).__name__
-
-
 def call(user_id: int, name: str, arguments: dict) -> object:
     """One tools/call. Order placement also requires the explicit deployment gate."""
     if name not in ALLOWED:
@@ -234,87 +223,9 @@ def call(user_id: int, name: str, arguments: dict) -> object:
     return data
 
 
-def _payload(result: dict):
-    if result.get("structuredContent") is not None:
-        return result["structuredContent"]
-    text = "\n".join(c.get("text", "") for c in result.get("content") or [] if c.get("type") == "text").strip()
-    try:
-        return json.loads(text)
-    except ValueError:
-        return {"text": text}
-
-
-def _find(props: dict, group: str) -> str | None:
-    lowered = {k.lower(): k for k in props}
-    return next((lowered[a.lower()] for a in ALIASES[group] if a.lower() in lowered), None)
-
-
-def build_args(tool: dict, values: dict) -> dict:
-    """Map SmartPlate's values ({group: value}) onto the tool's own parameter names."""
-    schema = tool.get("input_schema") or {}
-    props, required = schema.get("properties") or {}, set(schema.get("required") or [])
-    args = {}
-    for group, value in values.items():
-        key = _find(props, group) if props else None
-        if key and value is not None:
-            args[key] = value
-    missing = sorted(required - set(args))
-    if missing:
-        raise SwiggyError(f"Swiggy's {tool.get('name')} needs {', '.join(missing)}, which Ziggy doesn't "
-                          "know how to fill yet.")
-    return args
-
-
-MAX_PORTIONS = 8                 # a household meal; anything bigger is a party order, made in Swiggy
-
-
-def _cart_item(tool: dict, item_id, quantity: int = 1) -> dict:
-    props = ((tool.get("input_schema") or {}).get("properties") or {})
-    items_key = _find(props, "cart_items")
-    item_props = (((props.get(items_key) or {}).get("items") or {}).get("properties") or {}) if items_key else {}
-    id_key = _find(item_props, "item_id") or "menu_item_id"
-    qty_key = _find(item_props, "quantity") or "quantity"
-    return {id_key: item_id, qty_key: quantity}
-
-
 # --------------------------------------------------------------------------- #
 # Reading replies
 # --------------------------------------------------------------------------- #
-def _get(record: dict, field: str):
-    lowered = {k.lower(): k for k in record}
-    for alias in FIELDS[field]:
-        if alias.lower() in lowered:
-            value = record[lowered[alias.lower()]]
-            if value not in (None, ""):
-                return value
-    return None
-
-
-def _flag(value) -> bool | None:
-    if isinstance(value, str):
-        value = value.strip().lower()
-    if value in (True, 1, "1", "true"):
-        return True
-    if value in (False, 0, "0", "false"):
-        return False
-    return None
-
-
-# Dish photos: only Swiggy's own image CDN over HTTPS, so the page's CSP can allow exactly
-# that host (smartplate/app.py). get_restaurant_menu omits images by design (Swiggy docs);
-# search_menu returns `imageUrl`. Anything else is dropped, never proxied or guessed.
-IMAGE_HOSTS = ("media-assets.swiggy.com",)
-
-
-def _image(record: dict) -> str | None:
-    from urllib.parse import urlsplit
-    for key in ("imageUrl", "image_url", "image"):
-        value = record.get(key) if isinstance(record, dict) else None
-        if isinstance(value, str) and len(value) <= 600:
-            parts = urlsplit(value.strip())
-            if parts.scheme == "https" and parts.hostname in IMAGE_HOSTS and not parts.username:
-                return value.strip()
-    return None
 
 
 # Photos Swiggy showed are remembered per restaurant + dish name, so a planned dish (read
@@ -409,15 +320,6 @@ def dish_photos(user_id: int, item_ids) -> dict:
     return {str(k): v for k, v in out.items()}
 
 
-def _categories(record: dict) -> list[str]:
-    cats = record.get("categories") if isinstance(record, dict) else None
-    if isinstance(cats, str):
-        cats = [cats]
-    if not isinstance(cats, list):
-        return []
-    return [str(c)[:80] for c in cats if isinstance(c, (str, int)) and str(c).strip()][:6]
-
-
 def _name_allergens(name: str, veg, description: str | None = None) -> list[str]:
     """Allergens a dish *name* implies (shared food lexicon, templates and the recipe
     library). Swiggy menus list no allergens, so this can flag a likely allergen but never
@@ -482,262 +384,6 @@ def _screen(user: dict, rows: list[dict]) -> tuple[list[dict], list[dict], dict]
             continue
         shown.append({**item, "safety": allergens.safety_label(user, facts)})
     return shown, hidden, by_code
-
-
-def _lists(value, depth=0):
-    if depth > 6:
-        return
-    if isinstance(value, list):
-        if value and all(isinstance(v, dict) for v in value):
-            yield value
-        for v in value:
-            yield from _lists(v, depth + 1)
-    elif isinstance(value, dict):
-        for v in value.values():
-            yield from _lists(v, depth + 1)
-
-
-def records(data, *needs: str) -> list[dict]:
-    """The largest list of objects in a reply whose members carry all `needs` fields."""
-    best = []
-    for rows in _lists(data):
-        good = [r for r in rows if all(_get(r, f) is not None for f in needs)]
-        if len(good) > len(best):
-            best = good
-    return best
-
-
-# Swiggy documents menu `price` as a bare number with no unit. Its web data uses paise,
-# the MCP cart reads in rupees; neither is guaranteed. A unit-named field wins; otherwise
-# the unit is inferred (whole numbers whose typical value is ≥ 1000 are paise — a ₹1,000+
-# median dish is implausible) and the price is marked as an estimate.
-PAISE_THRESHOLD = 1000
-_PRICE_TEXT = re.compile(r"\s*(₹|rs\.?|inr)?\s*([\d,]+(?:\.\d+)?)\s*", re.IGNORECASE)
-
-
-def _price_raw(record: dict) -> tuple[float | None, str | None]:
-    """(number, unit) for the first price field; unit is None when the provider doesn't name it."""
-    if not isinstance(record, dict):
-        return None, None
-    lowered = {k.lower(): k for k in record}
-    for alias in FIELDS["price"]:
-        key = lowered.get(alias.lower())
-        if key is None:
-            continue
-        value, unit = record[key], None
-        if isinstance(value, bool) or value is None:
-            continue
-        if isinstance(value, str):
-            match = _PRICE_TEXT.fullmatch(value)
-            if not match:
-                continue
-            unit = "rupees" if match.group(1) else None
-            value = float(match.group(2).replace(",", ""))
-        elif isinstance(value, (int, float)):
-            value = float(value)
-        else:
-            continue
-        if not math.isfinite(value) or value < 0:
-            return None, None
-        if "paise" in key.lower():
-            unit = "paise"
-        elif "rupee" in key.lower():
-            unit = "rupees"
-        return value, unit
-    return None, None
-
-
-def infer_unit(values) -> str:
-    vals = [float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0]
-    if not vals or any(abs(v - round(v)) > 1e-9 for v in vals):      # paise are whole numbers
-        return "rupees"
-    return "paise" if statistics.median(vals) >= PAISE_THRESHOLD else "rupees"
-
-
-def menu_unit(rows) -> str:
-    """One unit for a whole menu, inferred from its unit-less prices together."""
-    return infer_unit([v for v, u in (_price_raw(r) for r in rows if isinstance(r, dict)) if v is not None and u is None])
-
-
-def rupees(record: dict, unit_hint: str | None = None) -> float | None:
-    """A rupee price from either form: named units are exact, bare numbers are inferred."""
-    value, unit = _price_raw(record)
-    if value is None:
-        return None
-    unit = unit or unit_hint or infer_unit([value])
-    return round(value / 100, 2) if unit == "paise" else round(value, 2)
-
-
-def price_estimated(record: dict) -> bool:
-    """True when the unit of this price was inferred rather than named by Swiggy."""
-    value, unit = _price_raw(record)
-    return value is not None and unit is None
-
-
-def cart_total(cart: dict, anchor: float | None = None) -> float | None:
-    """The payable total in rupees, or None when it can't be read unambiguously (L-05).
-
-    Unit-named fields are exact. A bare `to_pay` is read as rupees or paise only when
-    exactly one reading is plausible: against `anchor` (the reviewed dish price, in
-    rupees) it must cover the dish and stay within fees; without an anchor, a whole
-    number under 1000 is rupees (a cart under ₹10 isn't real) and anything else is
-    ambiguous. Ambiguous totals are never used to approve an order."""
-    pricing = cart.get("pricing") if isinstance(cart.get("pricing"), dict) else cart
-    for key, unit in (("toPayInPaise", "paise"), ("to_pay_in_paise", "paise"),
-                      ("toPayInRupees", "rupees"), ("to_pay_in_rupees", "rupees")):
-        for node in (pricing, cart):
-            value = node.get(key) if isinstance(node, dict) else None
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0:
-                return round(value / 100, 2) if unit == "paise" else round(float(value), 2)
-    raw = _num(pricing, "to_pay")
-    if raw is None:
-        raw = _num(cart, "to_pay")
-    if raw is None or raw <= 0:
-        return None
-    readings = {"rupees": round(raw, 2), "paise": round(raw / 100, 2)}
-    if anchor:
-        plausible = [v for v in readings.values() if anchor * 0.7 <= v <= anchor * 3 + 250]
-        return plausible[0] if len(plausible) == 1 else None
-    if abs(raw - round(raw)) > 1e-9 or raw < PAISE_THRESHOLD:
-        return readings["rupees"]
-    return None
-
-
-BILL_FIELDS = [   # (label, keys Swiggy may use) in display order; amounts as Swiggy returns them.
-    # Labels are the ones Swiggy's own bill uses ("GST & Other Charges" is Swiggy's
-    # documented `taxes_and_charges`, https://mcp.swiggy.com/builders/docs/reference/food/get_food_cart/).
-    ("Item Total", ("item_total", "itemTotal", "items_total", "subtotal", "sub_total")),
-    ("Delivery Fee", ("delivery_charge", "deliveryCharge", "delivery_fee", "deliveryFee")),
-    ("Platform Fee", ("platform_fee", "platformFee", "convenience_fee", "convenienceFee")),
-    ("Packaging Charges", ("packaging_charge", "packagingCharge", "packaging_charges", "packing_charges", "packingCharges")),
-    ("Small Cart Fee", ("small_cart_fee", "smallCartFee")),
-    ("GST & Other Charges", ("taxes_and_charges", "taxesAndCharges", "gst_and_other_charges", "gst", "taxes", "tax",
-                             "total_tax", "totalTax", "gst_and_restaurant_charges")),
-    ("Discount", ("discount", "total_discount", "totalDiscount", "coupon_discount")),
-]
-ROUNDING_TOLERANCE = 1.0          # Swiggy rounds the payable total to the rupee
-
-
-def bill_breakdown(cart: dict, anchor: float | None = None) -> dict | None:
-    """The cart's bill line by line, exactly as Swiggy returned it, to the paisa: item
-    total, delivery, fees, GST & Other Charges, discount and the payable total, with
-    Swiggy's own labels. Lines Swiggy did not return are left out (never guessed).
-
-    No line is ever invented. Swiggy rounds the payable total to the rupee, so the lines
-    can differ from it by under ₹1 (`rounding`, shown as a note). A larger gap means
-    Swiggy charged something it did not itemise: `unitemised` says so, and the bill is
-    not marked itemised; the amount is never presented as a Swiggy line."""
-    total = cart_total(cart, anchor)
-    if total is None:
-        return None
-    pricing = cart.get("pricing") if isinstance(cart.get("pricing"), dict) else cart
-    offers = cart.get("offers") if isinstance(cart.get("offers"), dict) else {}
-    raw = []
-    for label, keys in BILL_FIELDS:
-        for key in keys:
-            node = pricing if isinstance(pricing, dict) else {}
-            value = node.get(key)
-            if value is None and label == "Discount":
-                value = offers.get(key)          # coupon_discount lives under offers; > 0 means applied
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value:
-                raw.append((label, -abs(value) if label == "Discount" else float(value)))
-                break
-    scale = _line_scale(raw, total)
-    lines = [{"label": label, "amount": round(v / scale, 2)} for label, v in raw]
-    gap = round(total - sum(line["amount"] for line in lines), 2)
-    out = {"lines": lines, "to_pay": total, "source": "swiggy_cart"}
-    if lines and abs(gap) >= 0.01:
-        if abs(gap) < ROUNDING_TOLERANCE:
-            out["rounding"] = gap
-        else:
-            out["unitemised"] = gap
-    out["itemised"] = bool(lines) and "unitemised" not in out
-    return out
-
-
-CANCELLATION_RE = re.compile(r"[^.\n]*cancell?ation[^.\n]*(fee|charge)[^.\n]*\.?|[^.\n]*(fee|charge)[^.\n]*cancell?ed[^.\n]*\.?",
-                             re.IGNORECASE)
-
-
-def cancellation_note(data: object) -> str | None:
-    """Swiggy's own cancellation-fee sentence when its reply carries one (e.g. "100%
-    cancellation fee if cancelled after 60 seconds"), else None. Never paraphrased."""
-    stack, seen = [data], 0
-    while stack and seen < 5000:
-        node = stack.pop()
-        seen += 1
-        if isinstance(node, dict):
-            stack.extend(node.values())
-        elif isinstance(node, list):
-            stack.extend(node)
-        elif isinstance(node, str) and "cancel" in node.lower():
-            if node.lstrip().startswith(("{", "[")):
-                try:
-                    stack.append(json.loads(node))
-                    continue
-                except ValueError:
-                    pass
-            m = CANCELLATION_RE.search(node)
-            if m:
-                return re.sub(r"\s+", " ", m.group(0)).strip()[:200]
-    return None
-
-
-def _line_scale(raw: list, total: float) -> float:
-    """Lines come in the same unit as the cart (rupees or paise): use the reading whose
-    sum is closer to the payable total."""
-    raw_sum = sum(v for _, v in raw)
-    return 100.0 if raw and abs(raw_sum / 100 - total) < abs(raw_sum - total) else 1.0
-
-
-def billed_delivery_fee(cart: dict, anchor: float | None = None) -> float | None:
-    """The delivery fee on Swiggy's bill, in rupees: 0 when Swiggy billed free delivery,
-    None when the bill has no delivery line or its total can't be read unambiguously
-    (then nothing is learned)."""
-    bill = bill_breakdown(cart, anchor)
-    if bill is None:
-        return None
-    pricing = cart.get("pricing") if isinstance(cart.get("pricing"), dict) else cart
-    keys = dict(BILL_FIELDS)["Delivery Fee"]
-    value = next((pricing.get(k) for k in keys if isinstance(pricing, dict) and k in pricing), None)
-    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
-        return None
-    if value == 0:
-        return 0.0
-    line = next((l for l in bill["lines"] if l["label"] == "Delivery Fee"), None)
-    return line["amount"] if line else None
-
-
-def _num(data, field: str):
-    """The shallowest numeric `field` anywhere in a reply (e.g. the cart's amount to pay)."""
-    queue = [data]
-    while queue:
-        nxt = []
-        for node in queue:
-            if isinstance(node, dict):
-                v = _get(node, field)
-                if isinstance(v, (int, float)) and not isinstance(v, bool):
-                    return float(v) if math.isfinite(v) else None
-                if isinstance(v, str) and re.fullmatch(r"₹?\s*\d+(\.\d+)?", v.strip()):
-                    return float(v.strip().lstrip("₹").strip())
-                nxt += list(node.values())
-            elif isinstance(node, list):
-                nxt += node
-        queue = nxt
-    return None
-
-
-def _has_options(item: dict) -> bool:
-    """Variants or add-ons SmartPlate can't choose. A missing hasVariants/hasAddons flag
-    is not an option by itself: search_menu returns the option lists when they exist."""
-    return bool(item.get("variations") or item.get("variantsV2") or item.get("addons")
-                or _flag(_get(item, "variants")) is True or _flag(_get(item, "addons")) is True)
-
-
-def _similar(a: str, b: str) -> float:
-    norm = lambda s: re.sub(r"[^a-z0-9 ]", "", (s or "").lower()).strip()
-    a, b = norm(a), norm(b)
-    return 1.0 if a and (a in b or b in a) else difflib.SequenceMatcher(None, a, b).ratio()
 
 
 # --------------------------------------------------------------------------- #

@@ -52,7 +52,10 @@ def test_household_decide_for_me_is_safe_for_the_vegan_member(run_week):
 
 def test_low_weekly_money_goes_cheaper_instead_of_skipping_lunches(run_week):
     """usab #10: Priya at ₹1,500 had every lunch skipped while ₹125 dinners stayed."""
-    w = _planned(run_week, "student_veg")
+    # W4 prices platform fee + packaging + GST + delivery into every order (cheapest dish ≈ ₹108
+    # delivered), so ₹1,500 for 14 meals is below the shared low-budget floor; ₹1,900 keeps the
+    # original question (cheaper dishes, not skipped lunches) on the fee-inclusive prices.
+    w = _planned(run_week, "student_veg", budget=1900)
     v = w.view()
     lunches = [d["meals"]["lunch"] for d in v["grid"] if d["meals"].get("lunch")]
     assert sum(1 for c in lunches if c["kind"] == "delivery") >= 4, [c["item"] for c in lunches]

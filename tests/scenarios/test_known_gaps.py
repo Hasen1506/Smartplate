@@ -117,8 +117,7 @@ def test_a_pin_that_breaks_the_week_is_flagged(run_week):
 
 
 # ---- W6 · planner ---------------------------------------------------------------------------
-@gap("W6", "usab #16 + W10 simulation: a household of 4 with one vegan and ₹6,000 gets 12 of "
-           "14 meals skipped 'to stay within budget / rating floor' with ₹5,640 unspent")
+# Was a known gap, fixed by W6 (strict xfail removed at integration).
 def test_household_skips_are_not_blamed_on_the_budget(run_week):
     w = _planned(run_week, "household_mixed")
     v = w.view()
@@ -130,8 +129,7 @@ def test_household_skips_are_not_blamed_on_the_budget(run_week):
 
 
 # ---- W7 · platform truth ----------------------------------------------------------------------
-@gap_open("W7", "W10 simulation: after switching to the Minjur address the week still lists Wok "
-           "Street, which doesn't deliver there, until the user re-plans by hand")
+# Was a known gap, fixed by W7 (non-strict xfail removed at integration).
 def test_address_change_drops_places_that_dont_deliver_there(run_week):
     w = _planned(run_week, "student_veg")
     assert w.c.post(f"/api/user/{w.uid}/swiggy/address", json={"address_id": "addr-minjur"}).status_code == 200
@@ -139,8 +137,7 @@ def test_address_change_drops_places_that_dont_deliver_there(run_week):
     assert planned <= {PLACES["r-101"][0], PLACES["r-104"][0]}, planned
 
 
-@gap("W7", "W10 simulation: a restaurant outside the address shows the user raw provider JSON "
-           "('Swiggy said: {\"success\": false ...}') and a fix about clearing the cart")
+# Was a known gap, fixed by W7 (strict xfail removed at integration).
 def test_out_of_area_error_is_plain_language(run_week):
     w = run_week(PERSONAS["minjur_periurban"])
     w.open_app()

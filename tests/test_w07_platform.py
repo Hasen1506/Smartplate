@@ -94,9 +94,10 @@ def _dish(rid, dish):
 def _open(town, address="addr-omr"):
     from test_followups import _connect
     c = town["client"]
-    r = c.post("/api/profiles", json={"name": "Karthik", "diet": "veg", "weekly_budget": 1500,
+    r = c.post("/api/profiles", json={"name": "Karthik", "diet": "veg", "weekly_budget": 2500,   # W4 fees priced in
                                       "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"},
-                                      "cook": "never", "allergens": [], "medical": [], "favourites": []})
+                                      "cook": "never", "allergens": [], "medical": [], "favourites": [],
+                                      "consent": {"account": True}})
     assert r.status_code == 201, r.get_json()
     v = r.get_json()
     uid, plan = v["user"]["id"], v["plan"]["id"]
@@ -312,7 +313,8 @@ def test_typed_address_and_favourites_work_without_swiggy(gt):
     c = create_app().test_client()
     r = c.post("/api/profiles", json={"name": "Asha", "diet": "veg", "weekly_budget": 1200,
                                       "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"},
-                                      "cook": "never", "allergens": [], "medical": [], "favourites": []})
+                                      "cook": "never", "allergens": [], "medical": [], "favourites": [],
+                                      "consent": {"account": True}})
     uid = r.get_json()["user"]["id"]
     from test_followups import _secure_profile
     _secure_profile(c, uid)
