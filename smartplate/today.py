@@ -788,12 +788,19 @@ def view(user_id: int) -> dict:
     if priced:
         compare = {"swiggy": round(sum(_cost(p, p["qty"]) for p in priced), 2), "others": "coming",
                    "basis": "Dish prices on Swiggy's menu; fees, taxes and delivery show in the Swiggy cart."}
+    # The v3 budget card's "₹X left after fees" (estimate | real bill): only with a Swiggy pick;
+    # without one there are no fees and the plain "left" is already the whole story.
+    swiggy_bases = [p["total_basis"] for m, p in picks.items()
+                    if m in meals and p.get("total_basis") in ("estimate", "swiggy_cart")]
+    left = round(b["amount"] - picked, 2)
     return {
         "date": _today(), "weekday": clock.today().strftime("%A"),
         "meals": meals, "label": "+".join(LETTER[m] for m in meals),
         "budget": {**b, "presets": list(BUDGET_PRESETS), "picked": round(picked, 2),
                    "picked_dishes": round(dishes, 2),
-                   "left": round(b["amount"] - picked, 2), "unpriced": unknown,
+                   "left": left, "unpriced": unknown,
+                   "left_after_fees": left if swiggy_bases else None,
+                   "left_estimated": any(x == "estimate" for x in swiggy_bases) if swiggy_bases else None,
                    "fees_included": True,
                    "left_basis": ("Fees included: Swiggy picks at their whole bill (an estimate from your bills "
                                   "until the Swiggy cart shows the real one)."),

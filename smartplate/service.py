@@ -294,6 +294,11 @@ def plan_view(plan_id: int) -> dict:
             c["image"] = photos[c["item_id"]]
     from .domain import buildout
     view["buildout"] = buildout.summary(plan_id, decisions)
+    # The only "too little money" floor: this person's own cheapest favourite with its fees
+    # (founder, 14 Oct 2026); none without favourites. The onboarding budget step reads it.
+    cheap = spend.cheapest_meal(user)
+    view["meal_floor"] = ({"amount": cheap["cost"], "item": cheap["item"], "estimated": cheap["estimated"],
+                           "basis": f"{cheap['item']}, with delivery, fees & GST"} if cheap else None)
     from . import everyday
     view["next_up"] = everyday.next_up(view, at)
     view["heads_up"] = everyday.heads_up(view, user, plan, decisions, at)

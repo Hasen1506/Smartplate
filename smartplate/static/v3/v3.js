@@ -85,7 +85,7 @@
           <button type="button" data-v3-budget="${STEP}" aria-label="Raise today's budget by ${STEP} rupees">${ICON.plus}</button></span></div>
       <div class="chips" role="group" aria-label="Budget presets">${b.presets.map(n => `<button class="chip small" data-v3-preset="${n}" aria-pressed="${b.amount === n}">${money(n)}</button>`).join("")}
         <button class="chip small" data-v3-sheet="budget">Other…</button></div>
-      ${b.picked ? `<p class="v3-left-line">${leftLine(b)}</p>` : ""}<p class="fine">${b.picked ? `${money(b.picked)} picked` : "Nothing picked yet"}${b.unpriced?.length ? ` · ${b.unpriced.length} without a price` : ""}${b.source === "week" && b.basis ? ` · ${esc(b.basis)}` : ""}</p>${b.picked_bill != null ? `<p class="fine v3-bill-total">${b.bill_estimated ? "About " : ""}${money(b.picked_bill)} with Swiggy delivery, fees &amp; GST${b.bill_estimated ? " (estimate until Swiggy shows the bill)" : ""}</p>` : ""}${weekMoney()}</section>`;
+      ${b.picked ? `<p class="v3-left-line">${leftLine(b)}</p>` : ""}<p class="fine">${b.picked ? `${money(b.picked_dishes ?? b.picked)} picked` : "Nothing picked yet"}${b.unpriced?.length ? ` · ${b.unpriced.length} without a price` : ""}${b.source === "week" && b.basis ? ` · ${esc(b.basis)}` : ""}</p>${b.picked_bill != null ? `<p class="fine v3-bill-total">${b.bill_estimated ? "About " : ""}${money(b.picked_bill)} with Swiggy delivery, fees &amp; GST${b.bill_estimated ? " (estimate until Swiggy shows the bill)" : ""}</p>` : ""}${weekMoney()}</section>`;
   }
   // What's left of today's budget, net of Swiggy fees. The server's figure (budget.left_after_fees,
   // budget.left_estimated) wins; without it, today's budget minus the whole bill (picked_bill);

@@ -64,6 +64,43 @@ def test_decide_weighs_swiggy_dishes_with_their_fees(town):  # noqa: F811
     assert t["decided"]["spent"] == t["picks"]["breakfast"]["total"]
 
 
+def test_budget_card_fields_match_the_frontend(town):  # noqa: F811
+    """v3's card reads budget.left_after_fees / left_estimated: left (fees included) with an
+    estimate tag until the Swiggy cart shows the real bill; null without a Swiggy pick."""
+    from smartplate import today
+    c, uid = town["c"], town["uid"]
+    _typed(c, uid, "lunch", "Home Thali", 150)
+    lunch_ref = c.get(f"/api/user/{uid}/today").get_json()["pools"]["lunch"][0]["ref"]
+    t = c.post(f"/api/user/{uid}/today/pick", json={"meal": "lunch", "ref": lunch_ref}).get_json()
+    assert t["budget"]["left_after_fees"] is None and t["budget"]["left_estimated"] is None   # no fees: plain left
+    t = c.post(f"/api/user/{uid}/today/pool", json={"source": "swiggy", "meal": "breakfast", "restaurant_id": "r-101",
+                                                     "restaurant_name": "Annapoorna Tiffin Room", "item_id": "r-101-i5",
+                                                     "rating": 4.4, "eta_min": 25}).get_json()
+    ref = t["pools"]["breakfast"][0]["ref"]
+    t = c.post(f"/api/user/{uid}/today/pick", json={"meal": "breakfast", "ref": ref}).get_json()
+    b = t["budget"]
+    assert b["left_after_fees"] == b["left"] == round(b["amount"] - b["picked"], 2) and b["left_estimated"] is True
+    p = t["picks"]["breakfast"]
+    today.record_cart_bill(uid, p["restaurant_id"], p["item_id"], 1, 131.5)
+    b = c.get(f"/api/user/{uid}/today").get_json()["budget"]
+    assert b["left_after_fees"] == b["left"] == round(b["amount"] - 131.5 - 150, 2) and b["left_estimated"] is False
+
+
+def test_plan_view_sends_the_per_user_meal_floor(gt, monkeypatch):
+    """The onboarding warning reads S.view.meal_floor: this person's cheapest favourite with
+    fees, or nothing without favourites (no flat ₹60)."""
+    from smartplate.domain import spend
+    c = create_app().test_client()
+    uid = _profile(c)
+    monkeypatch.setattr(spend, "cheapest_meal", lambda user: None)
+    assert c.get(f"/api/user/{uid}/plan").get_json()["meal_floor"] is None
+    monkeypatch.setattr(spend, "cheapest_meal", lambda user: {"cost": 132.4, "item": "Mini Tiffin",
+                                                             "restaurant": "Annapoorna", "estimated": True})
+    floor = c.get(f"/api/user/{uid}/plan").get_json()["meal_floor"]
+    assert floor["amount"] == 132.4 and floor["item"] == "Mini Tiffin" and floor["estimated"] is True
+    assert floor["basis"] == "Mini Tiffin, with delivery, fees & GST"
+
+
 def test_no_bill_numbers_without_a_swiggy_pick(gt):
     c = create_app().test_client()
     uid = _profile(c)

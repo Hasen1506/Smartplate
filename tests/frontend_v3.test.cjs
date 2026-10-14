@@ -211,6 +211,18 @@ test('R2: "left" is net of fees — the server figure wins, a real bill says so,
   assert.doesNotMatch(html, /after fees/);
 });
 
+test('integration: the budget card reads the server payload — dishes picked, left after fees (server, fees included)', async () => {
+  // what today.view sends now: picked/left include fees, picked_dishes is the dish sum,
+  // left_after_fees = left, left_estimated until the Swiggy cart shows the real bill
+  const w = world({ today: { ...TODAY, picks: { breakfast: PONGAL }, budget: { ...TODAY.budget, picked: 234.19, picked_dishes: 180,
+    left: 365.81, left_after_fees: 365.81, left_estimated: true, picked_bill: 234.19, bill_estimated: true, fees_included: true } } });
+  await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
+  const html = run(w, 'tabBody()');
+  assert.match(html, /₹180 picked/, 'the dish sum, the fees are on the next line');
+  assert.match(html, /₹365\.81 left after fees|₹366 left after fees/);
+  assert.match(html, /class="tag  v3-left-tag">estimate</);
+});
+
 test('R2 usual meals: on a phone each meal line has its own drawer and there is no separate block', async () => {
   const w = world({ width: 375 }); await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
   let html = run(w, 'tabBody()');
