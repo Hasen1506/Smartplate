@@ -2,7 +2,7 @@
 
 > Living document. Captures the product direction, the research behind it, the open
 > design questions, and the build order. Derived from the design chats + the
-> wireframes in `project/`. Update as decisions land.
+> June wireframes (removed Oct 2026; in git history at `9fc21e5`, `docs/archive/project/`). Update as decisions land.
 
 ---
 
@@ -239,8 +239,9 @@ credit ledger** (§7).
 ## 11. Design audit
 
 A full-site UI/UX audit (booted the prototypes in headless Chromium, screenshotted every
-page/tab incl. mobile, graded P0–P3 by understanding/trust/conversion) lives in
-`docs/design-audit/README.md`, with screenshots in `docs/design-audit/assets/`. Three safe
+page/tab incl. mobile, graded P0–P3 by understanding/trust/conversion) lived in
+`docs/design-audit/` (removed Oct 2026 with its ~6 MB of screenshots; in git history at `9fc21e5`,
+`docs/archive/design-audit/`). Three safe
 copy/hierarchy fixes were applied on the spot; the rest are prioritised recommendations.
 
 ---

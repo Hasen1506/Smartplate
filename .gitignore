@@ -13,3 +13,21 @@ smartplate-trial.log
 swiggy-contract.local.json
 /data/epicure/
 test-artifacts/
+
+# Local runs: logs, databases, screenshots and scratch space never go in the repo (Oct 2026 clean-up)
+*.log
+smartplate.db*
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+scratch/
+.scratch/
+tmp/
+shots/
+*-shots/
+*-logs/
+playwright-report/
+.coverage
+htmlcov/
