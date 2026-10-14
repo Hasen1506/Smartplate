@@ -61,6 +61,50 @@ function setLook(kind, value) {
   applyLook(); render();
 }
 
+/* ---------------------------------------------------------------- language
+   A small string table, keyed by the English text so untranslated strings simply stay in
+   English. Tamil first (Chennai): the Today/Week/onboarding strings people read most.
+   Drafted by the team, NOT yet checked by a native copy editor: review before launch.
+   t("{x} left this week", { x: "₹120" }) fills {x} after translating. */
+const LANGS = [["en", "English"], ["ta", "தமிழ்"]];
+const I18N = { ta: {
+  "Today": "இன்று", "Week": "வாரம்", "Saved": "சேமித்தவை", "Main": "முதன்மை",
+  "Good morning": "காலை வணக்கம்", "Good afternoon": "மதிய வணக்கம்", "Good evening": "மாலை வணக்கம்",
+  "{x} left this week": "இந்த வாரம் {x} மீதம்", "{x} over this week's budget": "இந்த வார பட்ஜெட்டை விட {x} அதிகம்",
+  "see the week": "வாரத்தைப் பார்", "change budget": "பட்ஜெட்டை மாற்று", "Change budget": "பட்ஜெட்டை மாற்று",
+  "Nothing left to plan this week.": "இந்த வாரம் திட்டமிட எதுவும் இல்லை.", "Plan next week": "அடுத்த வாரத்தைத் திட்டமிடு",
+  "Week of {d}": "{d} வாரம்", "Re-plan": "மீண்டும் திட்டமிடு", "planned of {x}": "{x} இல் திட்டமிட்டது",
+  "{x} left": "{x} மீதம்", "{x} over": "{x} அதிகம்", "{o} to order · {c} to cook": "{o} ஆர்டர் · {c} சமையல்",
+  "Nothing planned.": "எதுவும் திட்டமிடவில்லை.", "today": "இன்று", "Order list": "ஆர்டர் பட்டியல்",
+  "Breakfast": "காலை உணவு", "Lunch": "மதிய உணவு", "Dinner": "இரவு உணவு",
+  "Order": "ஆர்டர்", "Cook": "சமையல்", "Skip": "தவிர்",
+  "What do you eat?": "நீங்கள் என்ன சாப்பிடுவீர்கள்?",
+  "Vegetarian": "சைவம்", "No meat, fish or egg": "இறைச்சி, மீன், முட்டை இல்லை",
+  "Non-vegetarian": "அசைவம்", "Everything is on the menu": "எல்லாமே சாப்பிடுவேன்",
+  "Vegan": "வீகன்", "No animal products at all": "பால் உட்பட எந்த விலங்குப் பொருளும் இல்லை",
+  "Anything you must avoid?": "தவிர்க்க வேண்டியவை ஏதேனும்?",
+  "Choose what you eat to continue.": "தொடர, நீங்கள் என்ன சாப்பிடுவீர்கள் என்பதைத் தேர்ந்தெடுக்கவும்.",
+  "How do your days usually go?": "உங்கள் நாட்கள் வழக்கமாக எப்படி இருக்கும்?",
+  "Weekly food budget": "வார உணவு பட்ஜெட்", "Enter an amount": "தொகையை உள்ளிடவும்",
+  "about {x} a meal for {n} meals": "{n} வேளைக்கு, ஒரு வேளைக்கு சுமார் {x}",
+  "Save your profile": "உங்கள் சுயவிவரத்தைச் சேமிக்கவும்",
+  "Continue": "தொடரவும்", "Plan my week": "என் வாரத்தைத் திட்டமிடு", "Back": "பின்செல்", "Cancel": "ரத்து செய்",
+  "Step {n} of {total}": "படி {n} / {total}",
+  "Your week of meals, already decided.": "உங்கள் வார உணவு, ஏற்கனவே முடிவு செய்யப்பட்டது.",
+  "Get started": "தொடங்கு", "I already have an account": "எனக்கு ஏற்கனவே கணக்கு உள்ளது",
+  "Language": "மொழி",
+} };
+const lang = () => { const l = store.get("ziggy.lang"); return I18N[l] ? l : "en"; };
+function t(en, vars) {
+  const l = lang(), s = (l !== "en" && I18N[l][en]) || en;
+  return vars ? s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : s;
+}
+function applyLang() {
+  if (typeof document !== "undefined" && document.documentElement?.setAttribute) document.documentElement.setAttribute("lang", lang() === "ta" ? "ta" : "en-IN");
+}
+applyLang();
+function setLang(l) { store.set("ziggy.lang", I18N[l] ? l : "en"); applyLang(); render(); }
+
 /* ---------------------------------------------------------------- formatting */
 // Exact to the paisa, as Swiggy returns it: ₹21.58 stays ₹21.58, ₹160 stays ₹160.
 const rupee = (n) => {
@@ -109,7 +153,7 @@ function minutesUntil(hhmm) {
 }
 function greeting() {
   const h = new Date().getHours();
-  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+  return t(h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening");
 }
 
 /* ---------------------------------------------------------------- icons */
@@ -905,12 +949,47 @@ function render() {
     + (S.checkoutReview ? checkoutReviewDialog() : "") + (S.dish ? dishSheet() : "") + (S.cookAlong ? cookAlongView() : "") + (S.budgetSheet ? budgetSheet() : "");
   // A sheet slides up once, when it opens; re-renders while it is open don't replay that.
   const open = [...(document.querySelectorAll?.(".sheet-bg[data-ov]") || [])];
-  open.forEach(el => { if (!S.openSheets?.has(el.dataset.ov)) el.classList.add("enter"); });
+  const before = S.openSheets || new Set(), added = open.filter(el => !before.has(el.dataset.ov));
+  open.forEach(el => { if (!before.has(el.dataset.ov)) el.classList.add("enter"); });
   S.openSheets = new Set(open.map(el => el.dataset.ov));
   S.fresh = null;
   wire();
+  if (added.length) focusSheet(added.at(-1));
+  else if (open.length < before.size) restoreFocus();
   syncHistory();
   queueQuick();
+}
+/* Focus follows sheets (keyboard and screen-reader users): an opened sheet takes focus (its
+   [autofocus] control, else the dialog itself, which announces its label); closing it puts
+   focus back on the control that opened it (found again by its data-* attribute, since
+   render() rebuilds the page), else on the main content. */
+function openerKey(el) {
+  const a = [...(el?.attributes || [])].find(x => x.name.startsWith("data-") && !x.name.startsWith("data-busy"));
+  if (!a) return el?.id ? `#${el.id}` : null;
+  const v = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(a.value) : a.value.replace(/["\\]/g, "\\$&");
+  return `[${a.name}="${v}"]`;
+}
+function focusSheet(bg) {
+  const dlg = bg?.querySelector?.("[role=dialog]");
+  if (!dlg || dlg.contains(document.activeElement)) return;
+  const target = dlg.querySelector("[autofocus]") || dlg;
+  if (target === dlg && !dlg.hasAttribute("tabindex")) dlg.setAttribute("tabindex", "-1");
+  target.focus?.({ preventScroll: true });
+}
+function restoreFocus() {
+  const top = [...(document.querySelectorAll?.("[role=dialog]") || [])].at(-1);
+  if (top) { focusSheet(top.closest(".sheet-bg") || top.parentElement); return; }
+  let el = null;
+  try { el = S.opener ? document.querySelector(S.opener) : null; } catch (_) { el = null; }
+  el = el || document.getElementById("main");
+  if (el && el.id === "main" && !el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+  el?.focus?.({ preventScroll: !!(el && el.id === "main") });
+}
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("click", (e) => {
+    const b = e.target?.closest?.("button, a, [role=button]");
+    if (b && !b.closest("[role=dialog]")) S.opener = openerKey(b);
+  }, true);
 }
 // Offline: say so, and how old the plan on screen is. Nothing is cached as if it were live.
 function offlineBar() {
@@ -955,11 +1034,16 @@ function rulesCard() {
 }
 
 /* ================================================================ WELCOME */
+// English / தமிழ், remembered on this device. Each option is labelled in its own language.
+function langSwitch(wrap = true) {
+  const seg = `<div class="seg" role="group" aria-label="Language · மொழி">${LANGS.map(([k, l]) => `<button data-lang="${k}" lang="${k}" aria-pressed="${lang() === k}">${l}</button>`).join("")}</div>`;
+  return wrap ? `<div class="lang-switch">${seg}</div>` : seg;
+}
 function welcomeScreen() {
   return `<main class="welcome">
     ${mascot("float")}
     <div class="wordmark" style="font-size:30px">ziggy</div>
-    <h1 class="hero-h">Your week of meals, already decided.</h1>
+    <h1 class="hero-h">${t("Your week of meals, already decided.")}</h1>
     <p class="sub" style="font-size:17px">${welcomeLede()}</p>
     <ul class="promise">
       <li><span><b>One tap to your Swiggy cart.</b> You check the bill and pay in Swiggy.</span></li>
@@ -975,8 +1059,9 @@ function welcomeScreen() {
         <button type="submit" class="primary">Sign in</button>
         <button type="button" class="ghost" data-act="signin-close">Cancel</button>
         <p class="fine">No sign-in yet? Open your profile where you made it, then Me → Account → Sign in anywhere.</p></form>`
-      : `<button class="primary big" data-act="start-onboard">Get started</button>
-         <button class="ghost big" data-act="signin-open">I already have an account</button>`}
+      : `<button class="primary big" data-act="start-onboard">${t("Get started")}</button>
+         <button class="ghost big" data-act="signin-open">${t("I already have an account")}</button>`}
+    ${langSwitch()}
     <p class="fine center">Every real order needs your OK, and you pay in Swiggy.</p>
   </main>`;
 }
@@ -991,10 +1076,10 @@ function topbar() {
   return `<header class="topbar">${mark()}${pill}<span class="spacer"></span>
     <button class="avatar" data-tab="more" aria-label="Me: settings, money and account" title="${esc(S.view.user?.name)}">${esc((S.view.user?.name || "?").slice(0, 1).toUpperCase())}</button></header>`;
 }
-const TABS = [["today", "Today", ICON.today], ["week", "Week", ICON.week], ["saved", "Saved", ICON.saved]];
+const TABS = [["today", "Today", ICON.today], ["week", "Week", ICON.week], ["saved", "Saved", ICON.saved]];   // labels go through t()
 function navBar() {
   return `<nav class="nav" aria-label="Main"><div class="brand-rail">${mark()}<span class="wordmark">ziggy</span></div>${TABS.map(([k, l, i]) =>
-    `<button class="tab" data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${i}<span>${l}</span></button>`).join("")}</nav>`;
+    `<button class="tab" data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${i}<span>${t(l)}</span></button>`).join("")}</nav>`;
 }
 /* ================================================================ WIDE SCREENS
    Beside the meals on a computer: the week's balance (money, nutrition against the
@@ -1051,10 +1136,10 @@ function todayScreen() {
   const left = (b.budget || 0) - (b.spend || 0);
   const first = v.user?.name && v.user.name !== "Me" ? `, ${esc(v.user.name.split(" ")[0])}` : "";
   return `<div class="rise"><h1 class="h1">${greeting()}${first}</h1>
-      <p class="muted">${left >= 0 ? `${rupee0(left)} left this week` : `${rupee0(-left)} over this week's budget`} · <button class="link" data-tab="week" style="min-height:0;font-size:inherit;color:inherit">see the week</button> · <button class="link" data-act="budget" style="min-height:0;font-size:inherit;color:inherit">change budget</button></p></div>
+      <p class="muted">${left >= 0 ? t("{x} left this week", { x: rupee0(left) }) : t("{x} over this week's budget", { x: rupee0(-left) })} · <button class="link" data-tab="week" style="min-height:0;font-size:inherit;color:inherit">${t("see the week")}</button> · <button class="link" data-act="budget" style="min-height:0;font-size:inherit;color:inherit">${t("change budget")}</button></p></div>
     ${realDishesState()}
     ${hungryCard(nu)}
-    ${nu ? nextUpCard(nu) : v.source?.kind === "none" ? "" : `<section class="empty rise2">${mascot()}<h2 class="h2">Nothing left to plan this week.</h2><button class="primary" data-act="newweek">Plan next week</button></section>`}
+    ${nu ? nextUpCard(nu) : v.source?.kind === "none" ? "" : `<section class="empty rise2">${mascot()}<h2 class="h2">${t("Nothing left to plan this week.")}</h2><button class="primary" data-act="newweek">${t("Plan next week")}</button></section>`}
     ${poolsNudge()}
     ${S.ask ? askReminders() : ""}
     ${liveCartBlock()}
@@ -1481,14 +1566,14 @@ function weekScreen() {
   const n = (k) => cells.filter(m => m.kind === k && m.status !== "past").length;
   const liveWx = v.weather_source === "live" && ctx.weather_source === "live" && ctx.temp_c;
   const fest = ctx.festival ? ` · ${esc(ctx.festival)}${ctx.festival_approx ? "*" : ""}` : "";
-  return `<div class="row rise" style="justify-content:space-between;align-items:flex-end"><h1 class="h1">Week of ${esc(fmtDate(v.plan.week_start))}</h1>
-      <button class="secondary small" data-act="reopt" title="Re-plan every meal that isn't kept, ordered or in your cart">Re-plan</button></div>
+  return `<div class="row rise" style="justify-content:space-between;align-items:flex-end"><h1 class="h1">${t("Week of {d}", { d: esc(fmtDate(v.plan.week_start)) })}</h1>
+      <button class="secondary small" data-act="reopt" title="Re-plan every meal that isn't kept, ordered or in your cart">${t("Re-plan")}</button></div>
     <section class="card rise" aria-label="Budget">
-      <div class="row" style="justify-content:space-between;align-items:baseline"><span><span class="money" style="font-size:26px">${est(b.spend || 0)}</span> <span class="muted">planned of ${rupee0(b.budget)}</span></span>
-        <b style="color:${left < 0 ? "var(--bad)" : "var(--leaf-ink)"}">${left < 0 ? `${rupee0(-left)} over` : `${rupee0(left)} left`}</b></div>
+      <div class="row" style="justify-content:space-between;align-items:baseline"><span><span class="money" style="font-size:26px">${est(b.spend || 0)}</span> <span class="muted">${t("planned of {x}", { x: rupee0(b.budget) })}</span></span>
+        <b style="color:${left < 0 ? "var(--bad)" : "var(--leaf-ink)"}">${left < 0 ? t("{x} over", { x: rupee0(-left) }) : t("{x} left", { x: rupee0(left) })}</b></div>
       <div class="bar"><i class="${left < 0 ? "over" : ""}" style="width:${pct}%"></i></div>
-      <span class="fine">${n("delivery")} to order · ${n("cook")} to cook${b.prorated ? ` · rest of the week only` : ""}${b.daily_cap ? ` · daily limit ${rupee0(b.daily_cap)}` : ""} · ${esc(v.plan.mode_label || "")}</span>
-      <div class="row" style="gap:8px;margin-top:10px"><button class="small secondary" data-act="budget">Change budget</button>${n("delivery") ? `<button class="small secondary" data-act="try-different" title="Swap the dishes Ziggy picked for others that still fit your rules and budget">Try different dishes</button>` : ""}</div></section>
+      <span class="fine">${t("{o} to order · {c} to cook", { o: n("delivery"), c: n("cook") })}${b.prorated ? ` · rest of the week only` : ""}${b.daily_cap ? ` · daily limit ${rupee0(b.daily_cap)}` : ""} · ${esc(v.plan.mode_label || "")}</span>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="small secondary" data-act="budget">${t("Change budget")}</button>${n("delivery") ? `<button class="small secondary" data-act="try-different" title="Swap the dishes Ziggy picked for others that still fit your rules and budget">Try different dishes</button>` : ""}</div></section>
     ${sourceLine(v.source)}
     ${S.moving ? `<div class="note" role="status"><span class="ic">${ICON.swap}</span><span style="flex:1">Tap the meal to swap it with, on any day.</span><button class="small ghost" data-act="cancel-move">Cancel</button></div>` : ""}
     ${day ? `<nav class="days rise2" aria-label="Days">${days.map((d, i) => {
@@ -1498,13 +1583,13 @@ function weekScreen() {
     }).join("")}</nav>
     <section class="card tight rise3" aria-label="${esc(day.day)}">
       <h3 class="k" style="padding:14px 0 2px">${esc(day.day)} ${esc(fmtDate(day.date))}${i18nToday(day)}${fest}${ctx.your_fast ? ` · ${esc(ctx.your_fast)} fast` : ""}${liveWx ? ` · ${esc(WX_ICON[ctx.weather] || "")} ${Math.round(ctx.temp_c)}°` : ""}</h3>
-      ${MEALS.filter(m => day.meals[m]).map(m => mealRow(day.meals[m], m)).join("") || `<p class="fine" style="padding:12px 0">Nothing planned.</p>`}</section>` : `<p class="fine rise2">Nothing planned this week yet.</p>`}
-    <button class="linkcard rise3" data-act="order-list"><span class="ico">${ICON.cart}</span><span class="t"><b>Order list</b><span>Every dish from your places: price, how many, one tap to have it</span></span>${ICON.right}</button>
+      ${MEALS.filter(m => day.meals[m]).map(m => mealRow(day.meals[m], m)).join("") || `<p class="fine" style="padding:12px 0">${t("Nothing planned.")}</p>`}</section>` : `<p class="fine rise2">Nothing planned this week yet.</p>`}
+    <button class="linkcard rise3" data-act="order-list"><span class="ico">${ICON.cart}</span><span class="t"><b>${t("Order list")}</b><span>Every dish from your places: price, how many, one tap to have it</span></span>${ICON.right}</button>
     <button class="linkcard rise3" data-week-view="groceries"><span class="ico leaf">${ICON.bag}</span><span class="t"><b>${cooks ? "Cooking &amp; groceries" : "Cook something"}</b><span>${cooks ? `${cooks} cook meal${cooks === 1 ? "" : "s"} · grocery list ${rupee(v.coach.basket.total)}` : "Type any dish: ingredients, Instamart, cook along"}</span></span>${ICON.right}</button>
     ${swiggyReady() || (S.meta.swiggy_provider === "simulated" && S.meta.fixture_data) ? `<button class="linkcard rise3" data-week-view="orders"><span class="ico">${ICON.cart}</span><span class="t"><b>Order several meals</b><span>Pick meals and days, check each real cart</span></span>${ICON.right}</button>` : ""}
-    <button class="ghost" data-act="newweek">Plan next week</button>`;
+    <button class="ghost" data-act="newweek">${t("Plan next week")}</button>`;
 }
-const i18nToday = (day) => day.date === todayIso() ? " · today" : "";
+const i18nToday = (day) => day.date === todayIso() ? ` · ${t("today")}` : "";
 
 /* ---- the order list: dish × price × quantity from your places, no feed ---- */
 const OL_SHOW = 30;
@@ -2392,7 +2477,8 @@ function meScreen() {
       <div class="stat"><span>${(b.budget || 0) - (b.spend || 0) < 0 ? "Over" : "Left"}</span><b style="color:${(b.budget || 0) - (b.spend || 0) < 0 ? "var(--bad)" : "var(--leaf-ink)"}">${rupee0(Math.abs((b.budget || 0) - (b.spend || 0)))}</b></div></section>
     <section class="card tight rise2">
       <div class="set-col"><span>Appearance</span><div class="seg" role="group" aria-label="Appearance">${THEMES.map(([k, l]) => `<button data-look="theme:${k}" aria-pressed="${theme === k}">${l}</button>`).join("")}</div></div>
-      <div class="set-col"><span>Colour</span><div class="seg" role="group" aria-label="Colour">${PALETTES.map(([k, l, sw]) => `<button data-look="palette:${k}" aria-pressed="${palette === k}"><span class="swatch" style="background:${sw}"></span>${l}</button>`).join("")}</div></div></section>
+      <div class="set-col"><span>Colour</span><div class="seg" role="group" aria-label="Colour">${PALETTES.map(([k, l, sw]) => `<button data-look="palette:${k}" aria-pressed="${palette === k}"><span class="swatch" style="background:${sw}"></span>${l}</button>`).join("")}</div></div>
+      <div class="set-col"><span>${t("Language")}</span>${langSwitch(false)}</div></section>
     <section class="card tight rise3">
       ${row("settings", "Food &amp; budget", esc(rules || "Your rules"))}
       ${row("connection", "Swiggy", swState)}
@@ -2770,10 +2856,10 @@ function onboardingScreen() {
   const bars = OB_STEPS.map((t, i) => `<span class="${i === st ? "on" : i < st ? "done" : ""}" title="${t}"></span>`).join("");
   let body = "";
   if (st === 0) {
-    body = `<h1 class="h1">What do you eat?</h1>
-      <div class="stack" style="gap:10px">${[["veg", "Vegetarian", "No meat, fish or egg", ""], ["nonveg", "Non-vegetarian", "Everything is on the menu", "nonveg"], ["vegan", "Vegan", "No animal products at all", ""]].map(([k, l, s, dot]) =>
-        `<button type="button" class="opt" data-ob="diet" data-val="${k}" data-multi="0" aria-pressed="${d.diet === k}"><span class="dot ${dot}"></span><span><b>${l}</b><span class="muted">${s}</span></span></button>`).join("")}</div>
-      <p class="k">Anything you must avoid?</p>
+    body = `<h1 class="h1">${t("What do you eat?")}</h1>
+      <div class="stack" style="gap:10px" role="group" aria-label="${t("What do you eat?")}">${[["veg", "Vegetarian", "No meat, fish or egg", ""], ["nonveg", "Non-vegetarian", "Everything is on the menu", "nonveg"], ["vegan", "Vegan", "No animal products at all", ""]].map(([k, l, s, dot]) =>
+        `<button type="button" class="opt" data-ob="diet" data-val="${k}" data-multi="0" aria-pressed="${d.diet === k}"><span class="dot ${dot}"></span><span><b>${t(l)}</b><span class="muted">${t(s)}</span></span></button>`).join("")}</div>
+      <p class="k">${t("Anything you must avoid?")}</p>
       <div class="chips">${ALLERGY_LIST.map(a => chip("allergens", a, cap1(a.replace("_", " ")), d.allergens.includes(a))).join("")}</div>
       <p class="fine">Ziggy filters by dish name. Menus don't list every ingredient, so check with the restaurant when it matters.</p>
       <details><summary>Medical needs or fasts (optional)</summary>
@@ -2782,14 +2868,14 @@ function onboardingScreen() {
         <div class="chips">${[["navratri", "Navratri"], ["ramadan", "Ramadan"], ["karva_chauth", "Karva Chauth"]].map(([k, l]) => chip("observances", k, l, d.observances.includes(k))).join("")}</div>
       </details>`;
   } else if (st === 1) {
-    body = `<h1 class="h1">How do your days usually go?</h1><p class="sub">Ziggy plans only what you tell it. Cook meals get a recipe and one grocery list.</p>
-      ${MEALS.map(m => `<div class="card rhythm"><b>${cap1(m)}</b>
-        <div class="seg" role="group" aria-label="${cap1(m)}">${[["order", "Order"], ["cook", "Cook"], ["skip", "Skip"]].map(([k, l]) => `<button type="button" data-ob="rh_${m}" data-val="${k}" data-multi="0" aria-pressed="${d.rhythm[m] === k}">${l}</button>`).join("")}</div></div>`).join("")}
+    body = `<h1 class="h1">${t("How do your days usually go?")}</h1><p class="sub">Ziggy plans only what you tell it. Cook meals get a recipe and one grocery list.</p>
+      ${MEALS.map(m => `<div class="card rhythm"><b>${t(cap1(m))}</b>
+        <div class="seg" role="group" aria-label="${t(cap1(m))}">${[["order", "Order"], ["cook", "Cook"], ["skip", "Skip"]].map(([k, l]) => `<button type="button" data-ob="rh_${m}" data-val="${k}" data-multi="0" aria-pressed="${d.rhythm[m] === k}">${t(l)}</button>`).join("")}</div></div>`).join("")}
       <p class="k">On order days, swap in a cheap home-cook sometimes?</p>
       <div class="chips">${[["never", "No"], ["sometimes", "1–2× a week"], ["often", "3–5× a week"], ["most", "Most days"]].map(([k, l]) => chip("cook", k, l, d.cook === k, false)).join("")}</div>`;
   } else if (st === 2) {
     const meals = obMeals(d);
-    body = `<h1 class="h1">Weekly food budget</h1><p class="sub">Delivery, fees and groceries all count. Swiggy's cart shows the exact total before you pay.</p>
+    body = `<h1 class="h1">${t("Weekly food budget")}</h1><p class="sub">Delivery, fees and groceries all count. Swiggy's cart shows the exact total before you pay.</p>
       <section class="card" style="align-items:center;padding:26px 18px">
         <div class="stepper"><button type="button" data-ob-budget="-250" aria-label="Lower budget by 250 rupees">${ICON.minus}</button>
           <label class="sr" for="ob-budget">Weekly budget in rupees</label><input id="ob-budget" class="money" type="number" inputmode="numeric" min="100" max="100000" value="${d.weekly_budget ?? ""}" style="font-size:44px;width:190px;text-align:center;border:0;background:transparent;min-height:60px">
@@ -2802,7 +2888,7 @@ function onboardingScreen() {
         <p class="fine">Useful when money is tight until payday.</p></details>`;
   } else {
     const b = d.body || {};
-    body = `<h1 class="h1">Save your profile</h1><p class="sub">So you can open Ziggy on any device. No email needed.</p>
+    body = `<h1 class="h1">${t("Save your profile")}</h1><p class="sub">So you can open Ziggy on any device. No email needed.</p>
       <section class="card stack">
         <label>Your name<input id="ob-name" maxlength="80" value="${esc(d.name)}" placeholder="Me" autocomplete="given-name"></label>
         <label>Sign-in name<input id="ob-login" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="64" value="${esc(d.login || "")}" required></label>
@@ -2819,18 +2905,18 @@ function onboardingScreen() {
         </div><p class="fine">Adults only. General wellness estimate, not medical advice.</p></details>`;
   }
   const last = st === OB_STEPS.length - 1;
-  return `<main class="onboard"><div class="ob-top"><button class="icon-btn" data-ob-nav="back" aria-label="${st ? "Back" : "Cancel"}">${ICON.back}</button>
-      <div class="ob-bars" aria-label="Step ${st + 1} of ${OB_STEPS.length}">${bars}</div><span class="fine">${st + 1}/${OB_STEPS.length}</span></div>
+  return `<main class="onboard"><div class="ob-top"><button class="icon-btn" data-ob-nav="back" aria-label="${t(st ? "Back" : "Cancel")}">${ICON.back}</button>
+      <div class="ob-bars" role="img" aria-label="${t("Step {n} of {total}", { n: st + 1, total: OB_STEPS.length })}">${bars}</div><span class="fine">${st + 1}/${OB_STEPS.length}</span></div>
     ${errbar(false)}<form class="stack rise" id="obform" novalidate style="gap:16px">${body}</form>
     <div class="grow"></div>
-    ${st === 0 && !d.diet ? `<p class="fine center" id="ob-need">Choose what you eat to continue.</p>` : ""}
-    <button class="primary big" data-ob-nav="next" ${st === 0 && !d.diet ? 'disabled aria-describedby="ob-need"' : ""}>${last ? "Plan my week" : "Continue"}</button></main>`;
+    ${st === 0 && !d.diet ? `<p class="fine center" id="ob-need">${t("Choose what you eat to continue.")}</p>` : ""}
+    <button class="primary big" data-ob-nav="next" ${st === 0 && !d.diet ? 'disabled aria-describedby="ob-need"' : ""}>${t(last ? "Plan my week" : "Continue")}</button></main>`;
 }
 /* Budget step: the per-meal line and the "too little to eat on" warning, recomputed on every
    keystroke (not only on the ± buttons and chips). */
 const MEAL_FLOOR = 60;          // ₹ a meal: below this, delivered meals near you rarely fit
 const obMeals = (d) => MEALS.filter(m => d.rhythm[m] !== "skip").length * 7 || 1;
-const obPerMeal = (weekly, meals) => weekly ? `about ${rupee0(weekly / meals)} a meal for ${meals} meals` : "Enter an amount";
+const obPerMeal = (weekly, meals) => weekly ? t("about {x} a meal for {n} meals", { x: rupee0(weekly / meals), n: meals }) : t("Enter an amount");
 function obFloorWarn(weekly, meals) {
   if (!weekly || weekly / meals >= MEAL_FLOOR) return "";
   const need = Math.ceil((MEAL_FLOOR * meals) / 250) * 250, fit = Math.max(0, Math.floor(weekly / MEAL_FLOOR));
@@ -2943,6 +3029,7 @@ function wire() {
   on("[data-saved-tab]", "click", (e) => { S.savedTab = e.currentTarget.dataset.savedTab; render(); });
   on("[data-sheet-tab]", "click", (e) => { S.sheet.tab = e.currentTarget.dataset.sheetTab; render(); });
   on("[data-sheet-place]", "click", (e) => { S.sheet.place = e.currentTarget.dataset.sheetPlace; render(); });
+  on("[data-lang]", "click", (e) => setLang(e.currentTarget.dataset.lang));
   on("[data-look]", "click", (e) => { const [k, v] = e.currentTarget.dataset.look.split(":"); setLook(k, v); });
   on("[data-pin]", "click", (e) => { e.stopPropagation(); const sid = Number(e.currentTarget.dataset.pin); guard(() => togglePin(sid), "Keep this meal"); });
   on("[data-filter]", "click", (e) => toggleFilter(e.currentTarget.dataset.filter));

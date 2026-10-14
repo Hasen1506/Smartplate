@@ -74,9 +74,12 @@ test('Swiggy setup shows the exact callback and reconnect state safely', async (
   assert.match(html, /exact-match allowlisted HTTPS redirect/);
   assert.match(html, /smartplate\.onrender\.com\/swiggy\/callback/);
   assert.ok(!html.includes('<unsafe>'));
-  // the quick Connect sheet says the same, and never offers a sign-in that cannot work
+  // the developer detail is folded away under "Technical details" (W3: plain words first)
+  assert.match(html, /<details><summary>Technical details<\/summary>[^]*exact-match allowlisted/);
+  // the quick Connect sheet says it plainly (no developer wording), and never offers a sign-in that cannot work
   const sheet = vm.runInContext('connectSheet()', context);
-  assert.match(sheet, /hasn't approved connecting/);
+  assert.match(sheet, /Swiggy sign-in is opening soon/);
+  assert.doesNotMatch(sheet, /allowlisted|Builders Club|callback|<code>/);
   assert.ok(!sheet.includes('data-act="swiggy-connect"') && !sheet.includes('<unsafe>'));
 });
 
@@ -1250,8 +1253,11 @@ test('expenses say which amounts are real Swiggy bills', async () => {
 
 test('offline says so and how old the plan is; the over-budget choice gives both options equal weight', async () => {
   const { context } = fixture(); await context.bootPromise;
-  vm.runInContext("S.offline = true; S.loadedAt = new Date(2026, 10, 2, 13, 5)", context);
+  vm.runInContext("S.offline = true; S.loadedAt = new Date(); S.loadedAt.setHours(13, 5, 0, 0)", context);
   assert.match(vm.runInContext('offlineBar()', context), /You're offline\. Showing your plan as loaded at 1:05/);
+  // a copy from another day says which day (W3: an offline reload can show yesterday's plan)
+  vm.runInContext("S.loadedAt = new Date(2020, 10, 2, 13, 5)", context);
+  assert.match(vm.runInContext('offlineBar()', context), /loaded at 2 Nov, 1:05/);
   const warn = vm.runInContext("budgetWarn(9, { message: 'This cart takes the week ₹80 over.' })", context);
   assert.match(warn, /<button data-over-ok="9">Approve anyway<\/button>/);
   assert.match(warn, /<button data-replan="9">Re-plan the rest<\/button>/);

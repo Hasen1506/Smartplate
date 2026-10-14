@@ -545,3 +545,6 @@ ul.olist{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
 /* A closed place: greyed (name in the secondary ink, icon faded), no Menu button. */
 .mrow.closed .t b{color:var(--ink2)}
 .mrow.closed .ico{opacity:.5;filter:grayscale(1)}
+.lang-switch{display:flex;justify-content:center}
+/* Tamil: the brand fonts carry Latin only, so Tamil falls back to the phone's Tamil font. */
+:root[lang="ta"]{--display:"Bricolage Grotesque","Noto Sans Tamil","Latha",ui-rounded,system-ui,sans-serif;--body:"Figtree","Noto Sans Tamil","Latha",ui-sans-serif,system-ui,sans-serif}
