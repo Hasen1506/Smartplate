@@ -402,7 +402,9 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
 
     # A meal the user said they order (rhythm "order") is never turned into a cook day:
     # the flexible "cook 1–2× a week" days only go to meals they didn't say they order.
-    cook = None if rhythm(user).get(meal) == "order" else _cook_candidate(user, session, ctx)
+    # Tight Week (asked for explicitly) still offers a labelled home-cook instead of a skip.
+    ordered = rhythm(user).get(meal) == "order" and not ctx.get("tight")
+    cook = None if ordered else _cook_candidate(user, session, ctx)
     if cook:
         cands.append(cook)
 
