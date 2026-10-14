@@ -6,7 +6,7 @@ from flask import Flask, Response, g, jsonify, redirect, request, send_from_dire
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
+from . import access, accounts, config, everyday, observability, ops, profile_data, push, ratelimit, service
 from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, week_orders
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
@@ -74,6 +74,7 @@ def create_app() -> Flask:
     initialize()
     app = Flask(__name__, static_folder=None)
     app.config['MAX_CONTENT_LENGTH'] = 256 * 1024
+    observability.init_app(app)              # request ids, JSON logs, latency, optional Sentry (W9)
     if config.BEHIND_PROXY:                  # one trusted hop sets X-Forwarded-For/Proto/Host
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
@@ -83,8 +84,10 @@ def create_app() -> Flask:
         @app.before_request
         def database_keepalive():
             # Started by the process that serves requests, never by a gunicorn --preload
-            # master (db_pg._after_fork_in_child). A no-op once it runs.
-            db_pg.ensure_keepalive()
+            # master (db_pg._after_fork_in_child). A no-op once it runs. Only people's
+            # requests count as activity: a scheduler's /cron/tick or a health check must
+            # not keep a free Neon database awake all day.
+            db_pg.ensure_keepalive(activity=not request.path.startswith(ops.NOT_ACTIVITY))
 
     @app.before_request
     def validate_request():
@@ -1007,6 +1010,7 @@ def create_app() -> Flask:
     def health():
         return jsonify({"ok": True, "app": "smartplate", "version": "1.1.0"})
 
+    ops.init_app(app)                        # /cron/tick, /admin/metrics, analytics events (W9)
     return app
 
 
