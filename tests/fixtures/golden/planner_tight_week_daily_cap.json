@@ -3,13 +3,13 @@
   "budget": 1400.0,
   "daily_cap": 250.0,
   "prorated": false,
-  "remaining": 0.28,
-  "spend": 1399.72,
+  "remaining": 5.0,
+  "spend": 1395.0,
   "weekly_budget": 1400.0
  },
  "counts": {
-  "cook": 13,
-  "delivery": 8,
+  "cook": 12,
+  "delivery": 9,
   "ordered": 0,
   "skip": 0,
   "snoozed": 0
@@ -33,8 +33,8 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 115.72,
-    "item": "Vegan Sambar Rice",
+    "cost": 100.0,
+    "item": "Curd Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
@@ -42,32 +42,6 @@
    }
   },
   "Mon 2026-11-02": {
-   "breakfast": {
-    "cost": 105.0,
-    "item": "Egg Puff + Chai",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Chai Kings",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   }
-  },
-  "Sat 2026-11-07": {
    "breakfast": {
     "cost": 35.0,
     "item": "Cook: Masala oats + veg",
@@ -85,11 +59,37 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
+    "cost": 115.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   }
+  },
+  "Sat 2026-11-07": {
+   "breakfast": {
+    "cost": 35.0,
+    "item": "Cook: Masala oats + veg",
     "kind": "cook",
     "pinned": false,
     "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 105.0,
+    "item": "Egg Puff + Chai",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Chai Kings",
     "status": "active"
    }
   },
@@ -111,8 +111,8 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 115.72,
-    "item": "Vegan Sambar Rice",
+    "cost": 100.0,
+    "item": "Curd Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
@@ -121,11 +121,11 @@
   },
   "Thu 2026-11-05": {
    "breakfast": {
-    "cost": 105.0,
-    "item": "Egg Puff + Chai",
-    "kind": "delivery",
+    "cost": 35.0,
+    "item": "Cook: Masala oats + veg",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "Chai Kings",
+    "restaurant": "Home kitchen",
     "status": "active"
    },
    "dinner": {
@@ -137,7 +137,7 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 94.68,
+    "cost": 90.0,
     "item": "Masala Chai + Bun Butter",
     "kind": "delivery",
     "pinned": false,
@@ -147,11 +147,11 @@
   },
   "Tue 2026-11-03": {
    "breakfast": {
-    "cost": 110.5,
-    "item": "Curd Rice",
-    "kind": "delivery",
+    "cost": 35.0,
+    "item": "Cook: Masala oats + veg",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Home kitchen",
     "status": "active"
    },
    "dinner": {
@@ -163,33 +163,33 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
+    "cost": 105.0,
+    "item": "Egg Puff + Chai",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Chai Kings",
     "status": "active"
    }
   },
   "Wed 2026-11-04": {
    "breakfast": {
-    "cost": 101.8,
-    "item": "Curd Rice",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Sangeetha Veg",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
+    "cost": 35.0,
+    "item": "Cook: Masala oats + veg",
     "kind": "cook",
     "pinned": false,
     "restaurant": "Home kitchen",
     "status": "active"
    },
+   "dinner": {
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
    "lunch": {
-    "cost": 96.3,
+    "cost": 90.0,
     "item": "Masala Chai + Bun Butter",
     "kind": "delivery",
     "pinned": false,
@@ -199,18 +199,19 @@
   }
  },
  "heads_up": [
-  "budget: ₹0 left this week",
+  "budget: ₹5 left this week",
   "holiday: Sun 08 Nov: Diwali",
-  "saving: Ordering a little earlier saves ₹65 this week",
+  "low_budget: ₹1,400 covers about 16 delivered meals a week",
+  "weather: Sat 07 Nov: rain likely (80%)",
   "weather: Tomorrow: rain likely (80%)",
   "weather: Wed 04 Nov: 38°C"
  ],
  "mode": "survival",
  "recommendation": {
-  "floor": 2443.0,
+  "floor": 2135.0,
   "suggested_rating_floor": 4.4,
-  "usual": 6069.0,
-  "variety": 6368.0
+  "usual": 5355.0,
+  "variety": 5615.0
  },
  "week_start": "2026-11-02"
 }

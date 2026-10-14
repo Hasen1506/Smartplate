@@ -43,12 +43,19 @@ def test_community_lists_no_invented_members_or_counts(client):
     assert not {"campus_survivor", "veg_athlete"} & {t["author"] for t in service.list_community()}
 
 
-def test_budget_recommendation_uses_swiggys_price_for_live_dishes(seeded):
+def test_budget_recommendation_uses_swiggys_price_for_live_dishes(seeded, monkeypatch):
+    from smartplate.domain import fees, surge
     from smartplate.kernel import recommender
     live = {"price": 180, "delivery_fee": 30, "city": "live:3", "source": "live"}
     assert recommender._expected_cost(live, "dinner") == 210
+    # with its fee model a live dish's expected cost includes platform fee, packaging and GST
+    priced = {**live, "fees": fees.pricing_for(None, {})}
+    assert recommender._expected_cost(priced, "dinner") == round(210 + fees.DEFAULT_FIXED + 0.05 * 180, 2)
     sample = {**live, "city": "Chennai", "source": "sample"}
-    assert recommender._expected_cost(sample, "dinner") > 210      # the labelled sample keeps its demo surge
+    assert recommender._expected_cost(sample, "dinner") == 210     # surge model archived, off by default
+    monkeypatch.setattr(surge, "ENABLED", True)
+    assert recommender._expected_cost(sample, "dinner") > 210      # switched on, the labelled sample keeps its demo surge
+    assert recommender._expected_cost(live, "dinner") == 210       # ...and live dishes never get it
 
 
 def test_invented_members_are_removed_from_an_existing_database_on_start(seeded):

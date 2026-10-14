@@ -67,6 +67,12 @@ class Version:
         # one) may stop a solve, never the wall clock of a busy CI runner
         monkeypatch.setattr(cfg, "SOLVER_TIME_LIMIT_S", 300.0, raising=False)
         monkeypatch.setattr(cfg, "SOLVER_MAX_NODES", 3000, raising=False)
+        surge = importlib.import_module(f"{self.pkg}.domain.surge")
+        if hasattr(surge, "ENABLED"):
+            # W4 (critiques 6/52) archived the demo surge model behind a flag, off by default: an
+            # intentional, documented change (docs/testing/ground-truth.md). The baselines always
+            # price it in, so compare like with like: the current tree runs with it switched on here.
+            monkeypatch.setattr(surge, "ENABLED", True)
         opt = importlib.import_module(f"{self.pkg}.kernel.optimizer")
         if not hasattr(opt, "_tiebreak"):
             # Baselines predate the planner's tie-break. Give them the same one, so two
