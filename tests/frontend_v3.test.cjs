@@ -115,3 +115,21 @@ test('?ui=classic (ziggy.ui=classic) keeps the previous Today and three tabs', a
   assert.equal(run(w, 'ZiggyV3.body("today")'), null);
   assert.equal(run(w, 'ZiggyV3.nutritionOn()'), true);
 });
+
+test('integration: v3 Today shows the W4 weekly target vs real spend and the low-budget warning', async () => {
+  const w = world(); await w.context.bootPromise;
+  await run(w, 'ZiggyV3._test.load()');
+  run(w, `S.view.budget = { spend: 0, budget: 4200, kind: 'target', actual: { amount: 340, orders: 2, complete: false } };
+    S.view.heads_up = [{ kind: 'low_budget', title: '₹300 covers about 3 delivered meals a week', body: 'Plan 3 delivered meals and cook the rest.' }];`);
+  const html = run(w, 'tabBody()');
+  assert.match(html, /This week: ₹340 spent on Swiggy of a ₹4,200 target \(so far/);
+  assert.match(html, /₹300 covers about 3 delivered meals a week/);
+});
+
+test('integration: a live menu lists the W1 hidden dishes with their reasons', async () => {
+  const w = world(); await w.context.bootPromise;
+  const html = run(w, `ZiggyV3._test.hiddenList({ hidden_items: [{ name: 'Kozhi <i>Varuval</i>', reason: 'The name says “kozhi” (chicken, not veg)' }] })`);
+  assert.match(html, /1 dish hidden for you/);
+  assert.match(html, /Kozhi &lt;i&gt;Varuval&lt;\/i&gt;<\/b> — The name says “kozhi”/);
+  assert.equal(run(w, 'ZiggyV3._test.hiddenList({ hidden_items: [] })'), '');
+});

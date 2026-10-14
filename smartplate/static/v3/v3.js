@@ -70,7 +70,15 @@
           <button type="button" data-v3-budget="${STEP}" aria-label="Raise today's budget by ${STEP} rupees">${ICON.plus}</button></span></div>
       <div class="chips" role="group" aria-label="Budget presets">${b.presets.map(n => `<button class="chip small" data-v3-preset="${n}" aria-pressed="${b.amount === n}">${money(n)}</button>`).join("")}
         <button class="chip small" data-v3-sheet="budget">Other…</button></div>
-      <p class="fine">${b.picked ? `${money(b.picked)} picked · <b>${b.left >= 0 ? `${money(b.left)} left` : `${money(-b.left)} over`}</b>` : "Nothing picked yet"}${b.unpriced?.length ? ` · ${b.unpriced.length} without a price` : ""}${b.source === "week" && b.basis ? ` · ${esc(b.basis)}` : ""}</p></section>`;
+      <p class="fine">${b.picked ? `${money(b.picked)} picked · <b>${b.left >= 0 ? `${money(b.left)} left` : `${money(-b.left)} over`}</b>` : "Nothing picked yet"}${b.unpriced?.length ? ` · ${b.unpriced.length} without a price` : ""}${b.source === "week" && b.basis ? ` · ${esc(b.basis)}` : ""}</p>${weekMoney()}</section>`;
+  }
+  // W4: the week's target against real Swiggy bills (plan view budget.kind/actual), and the
+  // low-budget heads-up. Read from S.view; nothing shown when the plan doesn't carry them.
+  function weekMoney() {
+    const wb = S.view?.budget, a = wb?.actual;
+    const line = wb?.kind === "target" && a ? `<p class="fine v3-week-money">This week: ${money(a.amount)} spent on Swiggy of a ${money(wb.budget)} target${a.complete ? "" : " (so far, from the bills Ziggy has seen)"}</p>` : "";
+    const low = (S.view?.heads_up || []).find(h => h.kind === "low_budget");
+    return line + (low ? `<div class="note warn" role="note"><span style="flex:1"><b>${esc(low.title)}</b> ${esc(low.body || "")}</span></div>` : "");
   }
   function rulesRow(d) {
     const r = d.rules, chips = [];
@@ -244,6 +252,13 @@
       ${d.picks[meal] ? `<button class="ghost small" data-v3-swapto="${meal}|">Clear ${meal}</button>` : ""}
       <p class="k">More ways</p><div class="row">${classic}</div>`, `swap ${meal}`);
   }
+  // W1: dishes left out for this person, each with its reason (never silently dropped).
+  function hiddenList(menu) {
+    const h = menu?.hidden_items || [];
+    if (!h.length) return "";
+    return `<details class="v3-hidden"><summary class="fine">${h.length} dish${h.length === 1 ? "" : "es"} hidden for you</summary>
+      <ul class="fine">${h.slice(0, 60).map(i => `<li><b>${esc(i.name)}</b> — ${esc(i.reason || "Not checked")}</li>`).join("")}</ul></details>`;
+  }
   function addSheet() {
     const s = st().sheet, d = st().data, meal = s.meal;
     const tab = s.tab || (d.swiggy.connected && d.swiggy.address ? "swiggy" : "type");
@@ -257,7 +272,8 @@
           <p class="k">${esc(menu.restaurant.name)}${s.place?.rating ? ` · ${s.place.rating}★` : ""}${s.place?.eta ? ` · ${esc(String(s.place.eta))}` : ""}</p>
           <div class="stack v3-menu" style="gap:6px">${menu.items.slice(0, 60).map(i => `<button class="pick v3-swap-row" data-v3-additem="${esc(i.id)}" ${i.has_options || i.in_stock === false ? "disabled" : ""}>
             <span class="vegdot ${i.veg ? "veg" : "nonveg"}" aria-label="${i.veg ? "Vegetarian" : "Not marked vegetarian"}"></span>
-            <span class="t"><b>${esc(i.name)}</b><span>${i.price != null ? `₹${Math.round(i.price)}` : "Price in cart"}${i.has_options ? " · has options, order in Swiggy" : ""}${i.in_stock === false ? " · out of stock" : ""}</span></span>${ICON.plus}</button>`).join("")}</div>`;
+            <span class="t"><b>${esc(i.name)}</b><span>${i.price != null ? `₹${Math.round(i.price)}` : "Price in cart"}${i.has_options ? " · has options, order in Swiggy" : ""}${i.in_stock === false ? " · out of stock" : ""}${i.safety?.note ? ` · ${esc(i.safety.note)}` : ""}</span></span>${ICON.plus}</button>`).join("")}</div>
+          ${hiddenList(menu)}`;
       } else {
         body = `<form id="v3-search" class="row"><label class="sr" for="v3-q">Search Swiggy</label><input id="v3-q" type="search" placeholder="A restaurant or a dish" value="${esc(s.q || "")}" minlength="2" maxlength="80" style="flex:1;min-width:0">
           <button class="secondary small" type="submit">${ICON.search}<span>Search</span></button></form>
@@ -550,6 +566,6 @@
     },
     // After any plan change, re-read Today.
     invalidate() { if (S.v3) S.v3.data = null; },
-    _test: { load, post, decide, share, startOnboard, finishOb, obTap, today, cookScreen, overlays },
+    _test: { load, post, decide, share, startOnboard, finishOb, obTap, today, cookScreen, overlays, hiddenList },
   };
 })();
