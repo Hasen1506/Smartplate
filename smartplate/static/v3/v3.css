@@ -44,6 +44,7 @@
 .v3-actions .primary{font-size:16px}
 .v3-actions button span{overflow:hidden;text-overflow:ellipsis}
 @media (max-width:420px){.v3-actions button svg{display:none}.v3-actions button{font-size:14.5px;padding:0 6px}}
+.v3-cart{display:flex;flex-direction:column;gap:12px}.v3-cart:empty{display:none}
 .v3-compare{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;padding:10px 14px;border-radius:16px;background:var(--raised)}
 .v3-compare .fine{flex-basis:100%}
 
@@ -77,7 +78,7 @@
 .v3-cols,.v3-left,.v3-side{display:contents}
 .v3-head{order:1}.v3-mode{order:2}.v3-setup{order:3}.v3-side > *{order:4}.v3-meals{order:5}.v3-actions{order:6}
 @media (max-width:420px){.v3-actions button svg{display:none}.v3-actions button{font-size:14.5px;padding:0 6px}}
-.v3-compare{order:7}.v3-save{order:8}.v3-pools-h{order:9}.v3-pools{order:10}
+.v3-compare{order:7}.v3-cart{order:7}.v3-save{order:8}.v3-pools-h{order:9}.v3-pools{order:10}
 .v3-side > .v3-rules{order:4}
 .body:has(.v3-today) .aside{display:none}
 @media (min-width:900px){

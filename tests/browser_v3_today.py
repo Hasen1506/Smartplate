@@ -259,6 +259,8 @@ def test_today_favourites_first_journey(town, viewport, theme):
         review.get_by_role("button", name="Add to Swiggy cart").click()
         expect(page.locator(".toast")).to_contain_text("Added to your Swiggy cart")
         assert w["fake"].cart_items == [("r-101-i5", 2)]
+        cart = page.locator(".v3-cart section", has_text="In your Swiggy cart")
+        expect(cart).to_contain_text("Ven Pongal")                      # Swiggy's real bill, on Today
 
         # Cook tab: type any dish → ingredients with Instamart links
         nav.get_by_role("button", name="Cook").click()

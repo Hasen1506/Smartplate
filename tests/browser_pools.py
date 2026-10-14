@@ -86,7 +86,8 @@ def test_meal_pools_drive_the_plan_and_any_nearby_dish_can_be_picked(town_world,
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         bag = {str(w["uid"]): {"key": w["key"], "name": "Priya"}}
-        page.add_init_script(f"""localStorage.setItem('smartplate.keys', {json.dumps(json.dumps(bag))});
+        page.add_init_script(f"""localStorage.setItem('ziggy.ui', 'classic');  /* classic Today, kept behind the v3 flag (docs/IA.md) */
+localStorage.setItem('smartplate.keys', {json.dumps(json.dumps(bag))});
             localStorage.setItem('smartplate.user', {json.dumps(str(w['uid']))});""")
         try:
             page.goto(w["url"])

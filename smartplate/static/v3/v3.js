@@ -127,6 +127,13 @@
       ${rows ? `<ul class="v3-pool-list">${rows}</ul>` : `<p class="fine">No dishes yet. Add the ones you'd actually have for ${meal}.</p>`}
       <button class="secondary small" data-v3-add="${meal}">${ICON.plus}New item / restaurant</button></section>`;
   }
+  // The Swiggy cart, its real bill, checkout and tracking: the classic block, always shown
+  // here (the classic Today hides it when its meal card already shows the bill).
+  function cartBlock() {
+    const keep = S.carts;
+    S.carts = null;
+    try { return `<div class="v3-cart">${liveCartBlock()}</div>`; } finally { S.carts = keep; }
+  }
   function setupCard(d) {
     const fav = MEAL_ORDER.some(m => (d.pools[m] || []).length);
     if (d.swiggy.connected && d.swiggy.address && fav) return "";
@@ -166,6 +173,7 @@
           <span class="fine">Only when you ask. Picks from your pools within your rules and ${money(d.budget.amount)}.</span></div></section>
       ${actions(d)}
       ${compareRow(d)}
+      ${cartBlock()}
       ${saveCard(d)}</div>
       <div class="v3-side"><div class="v3-top">${budgetCard(d)}${weatherCard(d.weather)}</div>${rulesRow(d)}</div></div>
       <h2 class="k v3-pools-h">Your pools</h2>
