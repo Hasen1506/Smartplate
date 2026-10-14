@@ -15,6 +15,7 @@ import datetime as dt
 import hashlib
 import math
 import re
+import time
 
 import pulp
 
@@ -40,11 +41,13 @@ MAX_FAVOURITE_CANDIDATES = 40
 # (fewest skips is solved before anything else — docs/planner-objective.md).
 POOL_FALLBACK_PEN = 1.0
 FALLBACK_PER_MEAL = 12
-# Diet mix (usab #11): a non-veg eater gets at least this share of non-veg dishes among
-# the lunches and dinners that have one on offer, unless they set prefs.nonveg_share. Soft: each meal
-# short costs DIET_MIX_PEN (more than a typical price gap, less than any skip).
+# Diet mix (usab #11): Ravi (non-veg) got two non-veg meals in 14 because the planner only
+# offered each meal its cheapest few dishes, which were all veg. A non-veg eater's lunches
+# and dinners now always include the best non-veg dishes too; taste and money then choose.
+# (A share constraint or a per-dish "non-veg" weight made the week 10-50x slower to prove
+# in CBC — W6 measurement — and the candidate fix alone gives a mixed week.)
+# prefs.nonveg_share = 0 turns it off.
 NONVEG_SHARE = 0.5
-DIET_MIX_PEN = 0.5
 
 
 TIEBREAK = 1e-4    # above CBC's integrality/optimality tolerances, far below any real preference
@@ -581,7 +584,15 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
     )
 
 
-SKIP_PENALTY = {"comfort": 5.0, "balanced": 3.0, "survival": 1.6}
+# Rule 4 (no silent skips, docs/planner-objective.md) in Comfort and Balanced: a skip the
+# money could avoid costs LEX_SKIP_PEN, far above what a week's preference terms can add up
+# to (each meal's cost/taste/nutrition swing is a few units), so the solver fills every
+# meal the money covers — one solve instead of a "fewest skips" stage, which made the
+# follow-up solve 10-50x slower to prove (W6 measurement). It was 5 / 3, so a ₹1,500 week
+# skipped lunches with money left. Tight Week keeps its staged solve (skips, then extra cooks).
+LEX_SKIP_PEN = 20.0
+SKIP_PENALTY = {"comfort": LEX_SKIP_PEN, "balanced": LEX_SKIP_PEN, "survival": 1.6}
+SKIP_STAGE = False             # True: also solve "fewest skips" first in every mode (exact, slower)
 # Tight Week's budget home-cook: the effort on top of a regular cook day. Large enough
 # that a delivery the money covers is preferred, smaller than any skip.
 BUDGET_COOK_PENALTY = 0.6
@@ -743,26 +754,6 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
                 prob += short >= tgt - prot
                 obj_terms.append(config.PROTEIN_EVEN_W * short / max(tgt, 1.0))
 
-    # Diet mix (usab #11): a non-veg eater's week isn't all veg just because veg is cheaper.
-    share = nonveg_share(user)
-    if share > 0:
-        nv, deliv = [], []
-        for s in active:
-            cands = cand_map[s["id"]]
-            if s["meal"] == "breakfast":
-                continue                                  # breakfast is tiffin: no mix asked of it
-            if not any(c["kind"] == "delivery" and c.get("nonveg") for c in cands):
-                continue
-            for i, c in enumerate(cands):
-                if c["kind"] == "delivery":
-                    deliv.append(x[(s["id"], i)])
-                    if c.get("nonveg"):
-                        nv.append(x[(s["id"], i)])
-        if nv:
-            short = pulp.LpVariable("nonveg_short", lowBound=0)
-            prob += pulp.lpSum(nv) + short >= share * pulp.lpSum(deliv)
-            obj_terms.append(DIET_MIX_PEN * short)
-
     prob += pulp.lpSum(obj_terms)
     committed = committed_spend(plan_id)
     fixed_by_day = {}
@@ -853,9 +844,9 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     # so a plan never depends on load); the time limit only guards a pathological solve.
     solver = pulp.PULP_CBC_CMD(msg=False, gapRel=config.SOLVER_GAP, timeLimit=config.SOLVER_TIME_LIMIT_S,
                                maxNodes=config.SOLVER_MAX_NODES)
-    if skip_vars:
-        # No mode skips a meal the money left could still cover (docs/planner-objective.md,
-        # rule 4 — it was Tight Week only, so ₹1,500 balanced weeks skipped every lunch). Lexicographic:
+    stages = []                    # (stage, seconds, proven) — diagnostics (LAST_SOLVE["stages"])
+    if skip_vars and (ctx["tight"] or SKIP_STAGE):
+        # Tight Week never skips a meal the money left could still cover. Lexicographic:
         # first the fewest skips the budget, the daily cap and the variety rules allow,
         # then the fewest extra home-cooks (they only stand in for a skip, never for a
         # delivery the money covers), then the best week within both. (A flat skip
@@ -867,12 +858,17 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
             if not group:
                 continue
             prob.setObjective(pulp.lpSum(group))
+            t0 = time.perf_counter()
             prob.solve(solver)
+            stages.append((name, round(time.perf_counter() - t0, 3), prob.sol_status == pulp.LpSolutionOptimal))
             if prob.sol_status in (pulp.LpSolutionOptimal, pulp.LpSolutionIntegerFeasible):
                 prob += pulp.lpSum(group) <= sum(round(v.value() or 0) for v in group), name
         prob.setObjective(objective)
+    t0 = time.perf_counter()
     prob.solve(solver)
-    LAST_SOLVE.update(proven_optimal=prob.sol_status == pulp.LpSolutionOptimal, status=pulp.LpStatus[prob.status])
+    stages.append(("week", round(time.perf_counter() - t0, 3), prob.sol_status == pulp.LpSolutionOptimal))
+    LAST_SOLVE.update(proven_optimal=prob.sol_status == pulp.LpSolutionOptimal, status=pulp.LpStatus[prob.status],
+                      stages=stages)
 
     _label_budget_skips(active, cand_map, x, room, dcap, fixed_by_day, rename=ctx["tight"])
     if ctx["tight"]:

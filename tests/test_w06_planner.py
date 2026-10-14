@@ -438,3 +438,25 @@ def test_non_veg_week_is_not_all_veg(gt):
     delivered = [c["item"] for d in view["grid"] for c in d["meals"].values() if c["kind"] == "delivery"]
     nonveg = [n for n in delivered if not veg.get(n, 1)]
     assert len(nonveg) >= len(delivered) // 2, delivered
+
+
+@pytest.mark.parametrize("body", [
+    {"name": "B", "diet": "nonveg", "weekly_budget": 3500, "meals": ["breakfast", "lunch", "dinner"],
+     "cook": "sometimes", "favourites": [1, 2, 3, 4, 5, 6]},
+    {"name": "D", "diet": "nonveg", "weekly_budget": 1400, "daily_cap": 250,
+     "meals": ["breakfast", "lunch", "dinner"], "cook": "sometimes"},
+])
+def test_week_replan_proves_optimal_fast_with_production_settings(gt, monkeypatch, body):
+    """grill #55: with production solver settings (0.1% gap, 20,000 nodes, 10 s backstop) a
+    fresh week solve is proven optimal well inside the time limit. A week-wide non-veg
+    share row made the first profile hit the 10 s limit, and the second one did before W6.
+    Deterministic part: proven optimal; the time bound is generous (measured ≈0.2–0.5 s)."""
+    from smartplate import config, everyday
+    monkeypatch.setattr(config, "SOLVER_GAP", 0.001)
+    monkeypatch.setattr(config, "SOLVER_MAX_NODES", 20000)
+    monkeypatch.setattr(config, "SOLVER_TIME_LIMIT_S", 10)
+    pid = everyday.create_profile(dict(body))["plan"]["id"]
+    t0 = time.perf_counter()
+    optimizer.optimize(pid, stable=False)
+    assert optimizer.LAST_SOLVE["proven_optimal"]
+    assert time.perf_counter() - t0 < 6.0
