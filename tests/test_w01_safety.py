@@ -395,3 +395,20 @@ def test_medical_filters_off_refuses_new_conditions_but_keeps_saved_ones(gt, mon
     assert allergens.violates(user, rasmalai)                                        # still enforced
     monkeypatch.setattr(config, "MEDICAL_FILTERS", True)
     assert profile.validate_setup({"medical": ["diabetes"]})["medical"] == ["diabetes"]
+
+
+def test_a_menu_is_screened_for_its_reader_and_a_shared_meal_for_everyone(town):
+    """Arjun (non-veg) eats with Meera (vegan, dairy allergy). His own menu shows a ghee dosa;
+    choosing it for a meal they share is refused, and the reason names her."""
+    c, fake = town["c"], town["fake"]
+    _connect(c, fake, uid=3)
+    assert c.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"}).status_code == 200
+    menu = c.get("/api/user/3/swiggy/live-menu",
+                 query_string={"restaurant_id": "r-101", "restaurant_name": "Annapoorna Tiffin Room"}).get_json()
+    ghee = next(i for i in menu["items"] if i["name"] == "Ghee Roast Dosa")
+    plan = c.get("/api/user/3/plan").get_json()
+    sid = next(cell["session_id"] for d in plan["grid"] for cell in d["meals"].values()
+               if cell.get("session_id") and not cell.get("past"))
+    r = c.post(f"/api/session/{sid}/choose-live", json={
+        "restaurant_id": "r-101", "restaurant_name": "Annapoorna Tiffin Room", "item_id": ghee["id"]})
+    assert r.status_code == 400 and "Meera" in r.get_json()["error"], r.get_json()

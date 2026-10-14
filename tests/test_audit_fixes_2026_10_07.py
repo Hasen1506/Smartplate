@@ -378,10 +378,8 @@ def test_l05_cart_total_units_are_never_guessed_for_checkout():
 def test_live_menu_shows_prices_in_either_unit(client, swiggy, monkeypatch):
     _connect(client, swiggy, uid=3)
     client.post("/api/user/3/swiggy/address", json={"address_id": "addr-home"})
-    # Arjun shares meals with a vegan (Meera), so a ghee dish is now left out of his menu by
-    # the one shared checker (W1 fail-closed); a plain idli keeps this a test of price units.
-    for prices, expected in (({"Idli Vada": 156, "Dosai": 95}, [156, 95]),
-                             ({"Idli Vada": 15600, "Dosai": 9500}, [156, 95])):
+    for prices, expected in (({"Ghee Pongal": 156, "Dosai": 95}, [156, 95]),
+                             ({"Ghee Pongal": 15600, "Dosai": 9500}, [156, 95])):
         original = FakeLive.tool
 
         def bare(self, name, args, prices=prices, original=original):

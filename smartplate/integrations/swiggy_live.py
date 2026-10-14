@@ -455,8 +455,12 @@ def _provider_facts(row: dict) -> dict | None:
 
 def _screen(user: dict, rows: list[dict]) -> tuple[list[dict], list[dict], dict]:
     """(shown items each with a `safety` label, hidden items with their reason, counts by
-    reason code), using the one safety checker every path shares (allergens.check)."""
+    reason code), using the one safety checker every path shares (allergens.check).
+
+    A menu is browsed by one person, so it is screened for that person; a dish they then
+    choose for a meal they share is checked for everyone eating it (everyday.choose)."""
     from ..domain import allergens
+    user = {**(user or {}), "household_members": []}
     shown, hidden, by_code = [], [], {}
     for item in rows:
         facts = _dish_facts(item["name"], item.get("veg"), item.get("description"), item.get("provider_facts"))
@@ -1344,7 +1348,8 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
               "image": _image(item), "handoff_url": timing.swiggy_handoff(place["name"], str(_get(item, "name")))}
     blocked = None
     from ..domain import allergens
-    verdict = allergens.check(user, _dish_facts(str(_get(item, "name")), _row_veg(item),
+    verdict = allergens.check({**user, "household_members": []},       # this person's own order
+                              _dish_facts(str(_get(item, "name")), _row_veg(item),
                                                  item.get("description") if isinstance(item.get("description"), str)
                                                  else None))
     if verdict["status"] in ("unsafe", "unknown"):
