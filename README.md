@@ -25,6 +25,8 @@ worth building, connector or app, who pays, and how do we keep it simple?", see
 
 ## What using it feels like
 
+> **Superseded (14 Oct 2026):** the navigation described here is replaced by [docs/IA.md](docs/IA.md), the single source of truth for Ziggy's tabs and screens. Kept for history.
+
 Three tabs (Today, Week, Saved) and your avatar for everything else (Me). Light, dark
 or your phone's setting, and an optional Zomato-red-to-Swiggy-orange colour mesh.
 

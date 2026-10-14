@@ -1,5 +1,7 @@
 # Using Ziggy as a real person would: UX review, 9 October 2026
 
+> **Superseded (14 Oct 2026):** the navigation described here is replaced by [docs/IA.md](IA.md), the single source of truth for Ziggy's tabs and screens. Kept for history.
+
 ## How this was done
 
 I set up a new profile from scratch in Chromium, at phone size (390 px) and computer size
