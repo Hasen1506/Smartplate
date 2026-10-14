@@ -1,15 +1,24 @@
 """Push reminders at the order-by time, even when the app is closed.
 
-A browser that opts in gives us a Web Push subscription (endpoint + keys). A single
-background thread wakes every minute, works out each subscriber's reminders from their
-current plan (the same list as the calendar file, domain/reminders.py), and sends the
-ones that are now due. Each reminder is sent at most once per subscription; if the
-server was asleep, one that is up to 20 minutes late is still sent, older ones are
-dropped (an "order now" nudge an hour late is noise).
+A browser that opts in gives us a Web Push subscription (endpoint + keys). Each
+subscriber's reminders come from their current plan (the same list as the calendar file,
+domain/reminders.py); the due ones are sent once per subscription.
 
-Hosting note: the thread only runs while the server is awake. Render's free plan
-sleeps after ~15 minutes without visits, so reliable reminders need an always-on
-instance. The calendar file keeps working either way.
+Two things drive the sending, and either is enough on its own:
+  * a background thread in the web process, every PUSH_TICK_S seconds, while it is awake;
+  * POST /cron/tick (smartplate/ops.py), called by a free external scheduler every 5 min
+    (docs/reliability.md). It wakes a sleeping Render instance and sends what is due, so
+    reminders no longer depend on someone having visited in the last 15 minutes.
+Both may run at once: a reminder is *claimed* in push_sent before it is sent (the
+primary key makes the claim atomic), so it is never sent twice.
+
+Nothing is dropped silently any more (grill #22). A reminder is
+  * on time   - up to LATE_OK after its time: sent as is;
+  * late      - later than that but before the meal's window closes: sent, saying it
+                is late and why;
+  * missed    - after the meal's window closed: not sent (an "order lunch" nudge at 4 pm
+                is noise), but recorded as missed in push_sent so it shows up in
+                /admin/metrics instead of vanishing.
 """
 import datetime as dt
 import logging
@@ -18,7 +27,9 @@ import threading
 from . import clock, config, db, vault
 from .integrations import webpush
 
-LATE_OK = dt.timedelta(minutes=20)
+LATE_OK = dt.timedelta(minutes=20)        # later than this, the reminder says it is late
+LOOKBACK = dt.timedelta(hours=12)         # how far back a server that slept looks for unsent reminders
+QUIET_MAX = dt.timedelta(minutes=30)      # a tick re-reads the database at least this often
 log = logging.getLogger("smartplate.push")
 _worker: threading.Thread | None = None
 _stop = threading.Event()
@@ -83,10 +94,42 @@ def status(user_id: int, endpoint: str | None = None) -> dict:
             "this_device": bool(endpoint) and any(r["endpoint"] == endpoint for r in rows)}
 
 
-def due(at: dt.datetime | None = None) -> list[tuple[dict, dict]]:
-    """(subscription, reminder) pairs to send now: due, not too late, not sent yet."""
+def meal_closes(r: dict) -> dt.datetime | None:
+    """When the reminder's meal window closes (after that a nudge is pointless)."""
+    from .domain import models
+    try:
+        window = models.MEAL_WINDOWS[r["meal"]]
+        close_min = window[3] if len(window) > 3 else window[1] + 60
+        return dt.datetime.combine(dt.date.fromisoformat(r["date"]), dt.time()) + dt.timedelta(minutes=close_min)
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+
+
+def classify(r: dict, at: dt.datetime) -> str:
+    """on_time | late | missed, for a reminder whose time has come."""
+    when = dt.datetime.fromisoformat(r["at"])
+    if at - when <= LATE_OK:
+        return "on_time"
+    closes = meal_closes(r)
+    if closes is not None and at >= closes:
+        return "missed"
+    if closes is None and at - when > LOOKBACK:
+        return "missed"
+    return "late"
+
+
+def _upcoming(uid: int, since: dt.datetime) -> list[dict]:
     from . import service
     from .domain import reminders
+    from .runtime import user_lock
+    with user_lock(uid):                              # only this profile's requests wait (M-05)
+        return reminders.upcoming(service.current_plan(uid), since)
+
+
+def due(at: dt.datetime | None = None, _next: list | None = None) -> list[tuple[dict, dict]]:
+    """(subscription, reminder) pairs whose time has come and that were never sent or
+    recorded. Each reminder carries `outcome` (on_time | late | missed) and `late_min`.
+    `_next`, when given, receives the earliest reminder time still in the future."""
     at = at or clock.now()
     with db.cursor() as cur:
         subs = [db.row_to_dict(r) for r in cur.execute("SELECT * FROM push_subscriptions ORDER BY user_id, id")]
@@ -97,60 +140,156 @@ def due(at: dt.datetime | None = None) -> list[tuple[dict, dict]]:
         uid = sub["user_id"]
         if uid not in views:
             try:
-                from .runtime import user_lock
-                with user_lock(uid):                  # only this profile's requests wait (M-05)
-                    views[uid] = reminders.upcoming(service.current_plan(uid), at - LATE_OK)
+                views[uid] = _upcoming(uid, at - LOOKBACK)
             except Exception:                         # a deleted profile, a plan that can't solve
                 log.exception("push: reminders for user %s failed", uid)
                 views[uid] = []
+        try:
+            subscribed = dt.datetime.fromisoformat(sub["created_ts"])
+        except (TypeError, ValueError):
+            subscribed = None
         for r in views[uid]:
-            if dt.datetime.fromisoformat(r["at"]) <= at and (sub["id"], r["session_id"]) not in sent:
-                out.append((sub, r))
+            when = dt.datetime.fromisoformat(r["at"])
+            if when > at:
+                if _next is not None:
+                    _next.append(when)
+                continue
+            if (sub["id"], r["session_id"]) in sent:
+                continue
+            if subscribed is not None and when < subscribed:
+                continue                              # due before this device opted in: not its reminder
+            out.append((sub, {**r, "outcome": classify(r, at),
+                              "late_min": max(0, int((at - when).total_seconds() // 60))}))
     return out
 
 
-def send_due(at: dt.datetime | None = None, sender=None, pairs=None) -> int:
-    """Send every due reminder once. `sender` is the delivery seam for tests."""
+def payload_for(r: dict) -> dict:
+    title, body = r["title"], r["body"]
+    if r.get("outcome") == "late":
+        title = f"Late reminder: {title}"
+        body = (f"Sorry, this is {r['late_min']} min late (Ziggy's server was asleep). " + body).strip()
+    return {"title": title, "body": body, "url": r.get("link") or "/?tab=today",
+            "tag": f"smartplate-{r['session_id']}"}
+
+
+def _claim(sub: dict, r: dict, at: dt.datetime, outcome: str) -> bool:
+    """Record the reminder before sending it. False: another tick already has it."""
+    with db.cursor() as cur:
+        if cur.execute("SELECT 1 FROM push_sent WHERE subscription_id=? AND session_id=?",
+                       (sub["id"], r["session_id"])).fetchone():
+            return False
+        cur.execute("INSERT OR IGNORE INTO push_sent(subscription_id, session_id, at, sent_ts, outcome) "
+                    "VALUES (?,?,?,?,?)", (sub["id"], r["session_id"], r["at"], at.isoformat(timespec="seconds"), outcome))
+        return cur.rowcount == 1
+
+
+def _settle(sub: dict, r: dict, outcome: str | None) -> None:
+    """Final state of a claimed reminder; None releases the claim so the next tick retries."""
+    with db.cursor() as cur:
+        if outcome is None:
+            cur.execute("DELETE FROM push_sent WHERE subscription_id=? AND session_id=? AND at=? AND outcome='sending'",
+                        (sub["id"], r["session_id"], r["at"]))
+        else:
+            cur.execute("UPDATE push_sent SET outcome=? WHERE subscription_id=? AND session_id=? AND at=?",
+                        (outcome, sub["id"], r["session_id"], r["at"]))
+
+
+def deliver(at: dt.datetime | None = None, sender=None, pairs=None) -> dict:
+    """Send every due reminder once; record missed ones. Returns counts by outcome."""
     sender = sender or webpush.send
     at = at or clock.now()
-    count = 0
+    stats = {"sent": 0, "late": 0, "missed": 0, "failed": 0, "rejected": 0, "gone": 0, "busy": 0}
     for sub, r in (due(at) if pairs is None else pairs):
         with db.cursor() as cur:
             active = cur.execute("SELECT 1 FROM push_subscriptions WHERE id=? AND user_id=? AND endpoint=?",
                                  (sub["id"], sub["user_id"], sub["endpoint"])).fetchone()
         if not active:  # profile deleted or alerts disabled after the due snapshot
             continue
+        outcome = r.get("outcome", "on_time")
+        if outcome == "missed":
+            if _claim(sub, r, at, "missed"):
+                stats["missed"] += 1
+                log.info("push: reminder for meal %s missed (%s min late, meal window closed)",
+                         r["session_id"], r.get("late_min"))
+            continue
         wait = _backoff.get(sub["id"])
         if wait and wait[0] > at:
             continue
-        payload = {"title": r["title"], "body": r["body"], "url": r["link"] or "/?tab=today",
-                   "tag": f"smartplate-{r['session_id']}"}
+        if not _claim(sub, r, at, "sending"):
+            continue                                  # another tick (thread or cron) has it
         try:
-            code = sender(sub["endpoint"], sub["p256dh"], sub["auth"], payload,
+            code = sender(sub["endpoint"], sub["p256dh"], sub["auth"], payload_for(r),
                           private_b64u=vapid_private(), contact=config.PUSH_CONTACT)
         except Exception:                             # network trouble: try again next tick
             log.warning("push: delivery to %s failed", sub["endpoint"][:40], exc_info=True)
+            _settle(sub, r, None)
+            stats["failed"] += 1
             continue
-        with db.cursor() as cur:
-            if code in (404, 410):                    # the browser unsubscribed; forget it
+        if code in (404, 410):                        # the browser unsubscribed; forget it
+            with db.cursor() as cur:
                 cur.execute("DELETE FROM push_subscriptions WHERE id=?", (sub["id"],))
                 cur.execute("DELETE FROM push_sent WHERE subscription_id=?", (sub["id"],))
-                continue
-            if code == 429 or code >= 500:            # push service busy: back off, don't hammer it
-                tries = (wait[1] if wait else 0) + 1
-                _backoff[sub["id"]] = (at + min(BACKOFF_FIRST * 2 ** (tries - 1), BACKOFF_MAX), tries)
-                continue
-            if not 200 <= code < 300:                 # 400/413 etc.: this payload will never be accepted
-                cur.execute("INSERT OR IGNORE INTO push_sent(subscription_id, session_id, at, sent_ts) VALUES (?,?,?,?)",
-                            (sub["id"], r["session_id"], r["at"], at.isoformat(timespec="seconds")))
-                log.warning("push: %s rejected a reminder with HTTP %s; not retrying", sub["endpoint"][:40], code)
-                continue
-            _backoff.pop(sub["id"], None)
-            if 200 <= code < 300:
-                cur.execute("INSERT OR IGNORE INTO push_sent(subscription_id, session_id, at, sent_ts) VALUES (?,?,?,?)",
-                            (sub["id"], r["session_id"], r["at"], at.isoformat(timespec="seconds")))
-                count += 1
-    return count
+            stats["gone"] += 1
+            continue
+        if code == 429 or code >= 500:                # push service busy: back off, don't hammer it
+            tries = (wait[1] if wait else 0) + 1
+            _backoff[sub["id"]] = (at + min(BACKOFF_FIRST * 2 ** (tries - 1), BACKOFF_MAX), tries)
+            _settle(sub, r, None)
+            stats["busy"] += 1
+            continue
+        if not 200 <= code < 300:                     # 400/413 etc.: this payload will never be accepted
+            _settle(sub, r, "rejected")
+            stats["rejected"] += 1
+            log.warning("push: %s rejected a reminder with HTTP %s; not retrying", sub["endpoint"][:40], code)
+            continue
+        _backoff.pop(sub["id"], None)
+        _settle(sub, r, "late" if outcome == "late" else "sent")
+        stats["late" if outcome == "late" else "sent"] += 1
+    return stats
+
+
+def send_due(at: dt.datetime | None = None, sender=None, pairs=None) -> int:
+    """Send every due reminder once (late ones say so). Returns how many were delivered.
+    `sender` is the delivery seam for tests."""
+    stats = deliver(at, sender=sender, pairs=pairs)
+    return stats["sent"] + stats["late"]
+
+
+# --------------------------------------------------------------------------- #
+# Ticks: the in-process thread and POST /cron/tick share this.
+# --------------------------------------------------------------------------- #
+_tick_lock = threading.Lock()
+_quiet_until: list = [None]       # nothing can be due before this (no database read needed)
+
+
+def invalidate() -> None:
+    """A plan or subscription may have changed: the next tick reads the database."""
+    _quiet_until[0] = None
+
+
+def tick(at: dt.datetime | None = None, sender=None, *, force: bool = False) -> dict:
+    """One sending round. Skips the database while nothing can be due (so an external
+    pinger every 5 minutes doesn't keep a free Neon database awake all day), and never
+    runs twice at once in this process (the push_sent claim covers other processes)."""
+    at = at or clock.now()
+    if not config.PUSH_ENABLED:
+        return {"ok": True, "skipped": "push disabled"}
+    quiet = _quiet_until[0]
+    if not force and quiet is not None and at < quiet:
+        return {"ok": True, "skipped": "nothing due", "next_check": quiet.isoformat(timespec="seconds")}
+    if not _tick_lock.acquire(blocking=False):
+        return {"ok": True, "skipped": "a tick is already running"}
+    try:
+        upcoming: list = []
+        pairs = due(at, _next=upcoming)               # per-profile locks inside, never the whole API
+        stats = deliver(at, sender=sender, pairs=pairs) if pairs else {}
+        retry_soon = any(stats.get(k) for k in ("failed", "busy"))
+        nxt = min([at + QUIET_MAX] + upcoming)
+        _quiet_until[0] = None if retry_soon else nxt
+        return {"ok": True, "checked_at": at.isoformat(timespec="seconds"), **stats,
+                "next_check": None if retry_soon else nxt.isoformat(timespec="seconds")}
+    finally:
+        _tick_lock.release()
 
 
 def test_message(user_id: int, sender=None) -> dict:
@@ -171,9 +310,7 @@ def test_message(user_id: int, sender=None) -> dict:
 def _loop():
     while not _stop.wait(config.PUSH_TICK_S):
         try:
-            pairs = due()                             # per-profile locks inside, never the whole API
-            if pairs:                                 # network calls happen outside the lock
-                send_due(pairs=pairs)
+            tick()
         except Exception:
             log.exception("push: tick failed")
 
