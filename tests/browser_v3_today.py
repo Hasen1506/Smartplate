@@ -40,6 +40,7 @@ expect = pw.expect
 PHONE = {"width": 375, "height": 812}
 DESKTOP = {"width": 1280, "height": 900}
 SHOTS = os.environ.get("V3_SHOTS")
+BOOT_MS = 20_000          # first paint / first plan on a loaded CI box; every later wait uses the 5 s default
 
 
 def shot(page, name):
@@ -154,12 +155,12 @@ def test_today_favourites_first_journey(town, viewport, theme):
     with pw.sync_playwright() as p:
         browser = _launch(p)
         page, errors = _page(browser, w["url"], viewport, theme, profile=w)
-        expect(page.get_by_role("navigation", name="Main")).to_be_visible()
+        expect(page.get_by_role("navigation", name="Main")).to_be_visible(timeout=BOOT_MS)
         nav = page.get_by_role("navigation", name="Main")
         for label in ("Today", "Week", "Cook", "Saved"):
             expect(nav.get_by_role("button", name=label)).to_be_visible()
         today = page.locator(".v3-today")
-        expect(today.get_by_text("Today's budget")).to_be_visible()
+        expect(today.get_by_text("Today's budget")).to_be_visible(timeout=BOOT_MS)
         expect(today.locator(".v3-budget .v3-big")).to_have_text("₹600")
         expect(today.locator(".v3-budget")).to_contain_text("(B+L)")
         expect(today.get_by_label("Weather today")).to_be_visible()
@@ -284,6 +285,10 @@ def test_today_favourites_first_journey(town, viewport, theme):
         expect(page.get_by_label("Show nutrition")).to_be_checked()
         shot(page, f"05-week-{tag}")
         no_overflow(page)
+        # Saved → My meals: no drag-and-drop board; it points to the pools on Today
+        nav.get_by_role("button", name="Saved").click()
+        expect(page.get_by_text("Your meal pools are on Today")).to_be_visible()
+        assert page.locator("[data-drop]").count() == 0
         assert not errors, errors
         browser.close()
 
@@ -294,7 +299,7 @@ def test_first_run_two_questions_then_today_and_account_after_value(fresh, viewp
     with pw.sync_playwright() as p:
         browser = _launch(p)
         page, errors = _page(browser, fresh["url"], viewport, theme)
-        page.get_by_role("button", name="Get started").click()
+        page.get_by_role("button", name="Get started").click(timeout=BOOT_MS)
         expect(page.get_by_role("heading", name="What do you eat?")).to_be_visible()
         for k in ("veg", "nonveg", "vegan"):                          # nothing preselected
             assert page.locator(f'[data-v3-ob="diet:{k}"]').get_attribute("aria-checked") == "false"
@@ -314,7 +319,7 @@ def test_first_run_two_questions_then_today_and_account_after_value(fresh, viewp
         contrast_ok(page)
         page.get_by_role("button", name="Show my day").click()
         today = page.locator(".v3-today")
-        expect(today.locator(".v3-budget .v3-big")).to_have_text("₹600")
+        expect(today.locator(".v3-budget .v3-big")).to_have_text("₹600", timeout=BOOT_MS)   # the profile plans first
         expect(today.get_by_role("heading", name="Get set up")).to_be_visible()
         expect(today.get_by_text("Swiggy sign-in is opening soon")).to_be_visible()
         expect(today.get_by_label("Your rules")).to_contain_text("No peanut")
@@ -350,10 +355,10 @@ def test_classic_today_is_kept_behind_a_flag(town):
         browser = _launch(p)
         page, errors = _page(browser, town["url"], PHONE, profile=town, query="/?ui=classic")
         nav = page.get_by_role("navigation", name="Main")
-        expect(nav.get_by_role("button", name="Saved")).to_be_visible()
+        expect(nav.get_by_role("button", name="Saved")).to_be_visible(timeout=BOOT_MS)
         expect(nav.get_by_role("button", name="Cook")).to_have_count(0)
         expect(page.locator(".v3-today")).to_have_count(0)
         page.goto(town["url"] + "/?ui=v3")
-        expect(page.locator(".v3-today")).to_be_visible()
+        expect(page.locator(".v3-today")).to_be_visible(timeout=BOOT_MS)
         assert not errors, errors
         browser.close()

@@ -517,8 +517,20 @@
     },
     body(tab) {
       if (!ON) return null;
+      const v = S.userId ? st() : null, back = v && v.seenTab !== tab;
+      if (v) v.seenTab = tab;
+      // Coming back to Today re-reads it (pools, cart or the address may have changed elsewhere).
+      if (tab === "today" && back && v.data && !v.loading) setTimeout(() => guard(load, "Load today"), 0);
       if (tab === "today") return today();
       if (tab === "cook") return cookScreen();
+      if (tab === "saved") {
+        // The drag-and-drop pool board is classic-only: pools live on Today now.
+        const t = S.savedTab || (swiggyReady() ? "meals" : "places");
+        if (t !== "meals" || !swiggyReady()) return null;
+        return savedScreen().replace(poolsBoard(), `<section class="card rise3"><h2 class="h3">Your meal pools are on Today</h2>
+          <p class="fine">Breakfast, lunch and dinner pools: tap + New item / restaurant to add a dish. No dragging.</p>
+          <button class="secondary small" data-tab="today">Open Today</button></section>`);
+      }
       return null;
     },
     screen() { return ON ? onboardScreen() : null; },
