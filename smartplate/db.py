@@ -335,6 +335,24 @@ CREATE TABLE IF NOT EXISTS app_secrets (         -- generated keys when no env s
     name TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS typed_favourites (     -- places/dishes the user typed in, no platform needed (domain/typed_in.py)
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    meal TEXT NOT NULL,
+    restaurant_name TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    price REAL,
+    platform TEXT NOT NULL DEFAULT 'swiggy',
+    added_ts TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS manual_addresses (     -- a delivery area typed in without connecting Swiggy (domain/typed_in.py)
+    user_id INTEGER PRIMARY KEY,
+    label TEXT NOT NULL,
+    text TEXT NOT NULL,
+    updated_ts TEXT NOT NULL
+);
 """
 
 # Columns added after the first trial shipped. CREATE TABLE IF NOT EXISTS does not
