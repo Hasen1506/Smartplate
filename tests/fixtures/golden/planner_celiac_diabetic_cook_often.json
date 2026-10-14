@@ -3,8 +3,8 @@
   "budget": 3000.0,
   "daily_cap": null,
   "prorated": false,
-  "remaining": 235.0,
-  "spend": 2765.0,
+  "remaining": 10.0,
+  "spend": 2990.0,
   "weekly_budget": 3000.0
  },
  "counts": {
@@ -17,32 +17,6 @@
  "grid": {
   "Fri 2026-11-06": {
    "breakfast": {
-    "cost": 145.0,
-    "item": "Pesarattu + Chutney",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Murugan Idli Shop",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   }
-  },
-  "Mon 2026-11-02": {
-   "breakfast": {
     "cost": 115.0,
     "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
@@ -51,37 +25,63 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 210.0,
-    "item": "Chana Masala Bowl",
+    "cost": 270.0,
+    "item": "Chicken Tikka Rice Bowl",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "The Bowl Company",
     "status": "active"
    },
    "lunch": {
+    "cost": 150.0,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   }
+  },
+  "Mon 2026-11-02": {
+   "breakfast": {
     "cost": 115.0,
     "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
    }
   },
   "Sat 2026-11-07": {
    "breakfast": {
-    "cost": 135.0,
-    "item": "Ghee Pongal",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "dinner": {
     "cost": 220.0,
     "item": "Rajma Chawal Bowl",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "The Bowl Company",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 255.0,
+    "item": "Chicken Chettinad + Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Junior Kuppanna",
     "status": "active"
    },
    "lunch": {
@@ -155,11 +155,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 150.0,
-    "item": "Veg Meals",
+    "cost": 255.0,
+    "item": "Chicken Chettinad + Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Junior Kuppanna",
     "status": "active"
    },
    "lunch": {
@@ -173,35 +173,34 @@
   },
   "Wed 2026-11-04": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Mini Tiffin",
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "dinner": {
-    "cost": 210.0,
-    "item": "Chana Masala Bowl",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "The Bowl Company",
-    "status": "active"
-   },
-   "lunch": {
     "cost": 110.0,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
     "status": "active"
+   },
+   "lunch": {
+    "cost": 115.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
    }
   }
  },
  "heads_up": [
-  "budget: ₹235 left this week",
+  "budget: ₹10 left this week",
   "holiday: Sun 08 Nov: Diwali",
-  "nutrition: Protein runs low: about 55 g a day of 80 g",
   "weather: Sat 07 Nov: rain likely (80%)",
   "weather: Tomorrow: rain likely (80%)",
   "weather: Wed 04 Nov: 38°C"

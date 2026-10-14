@@ -25,19 +25,19 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 115.0,
-    "item": "Mini Tiffin",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "lunch": {
     "cost": 100.0,
     "item": "Curd Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 115.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    }
   },
@@ -51,19 +51,19 @@
     "status": "active"
    },
    "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
     "cost": 115.0,
     "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 115.0,
-    "item": "Masala Dosa",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    }
   },
@@ -77,19 +77,19 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 135.0,
-    "item": "Ghee Pongal",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "lunch": {
     "cost": 140.0,
     "item": "Parotta + Veg Kurma",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 135.0,
+    "item": "Ghee Pongal",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    }
   },
@@ -137,11 +137,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
+    "cost": 115.0,
+    "item": "Masala Dosa",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    }
   },

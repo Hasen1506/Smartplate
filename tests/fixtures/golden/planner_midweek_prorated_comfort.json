@@ -3,8 +3,8 @@
   "budget": 1500.0,
   "daily_cap": null,
   "prorated": true,
-  "remaining": 390.0,
-  "spend": 1110.0,
+  "remaining": 100.0,
+  "spend": 1400.0,
   "weekly_budget": 2100.0
  },
  "counts": {
@@ -18,19 +18,19 @@
  "grid": {
   "Fri 2026-11-06": {
    "dinner": {
+    "cost": 210.0,
+    "item": "Chana Masala Bowl",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "The Bowl Company",
+    "status": "active"
+   },
+   "lunch": {
     "cost": 115.0,
     "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 100.0,
-    "item": "Curd Rice",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Sangeetha Veg",
     "status": "active"
    }
   },
@@ -54,34 +54,34 @@
   },
   "Sat 2026-11-07": {
    "dinner": {
-    "cost": 110.0,
-    "item": "Vegan Sambar Rice",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Sangeetha Veg",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 115.0,
-    "item": "Masala Dosa",
+    "cost": 150.0,
+    "item": "Veg Meals",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
-   }
-  },
-  "Sun 2026-11-08": {
-   "dinner": {
+   },
+   "lunch": {
     "cost": 115.0,
     "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
+   }
+  },
+  "Sun 2026-11-08": {
+   "dinner": {
+    "cost": 150.0,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
    },
    "lunch": {
-    "cost": 100.0,
-    "item": "Curd Rice",
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
@@ -126,11 +126,11 @@
   },
   "Wed 2026-11-04": {
    "dinner": {
-    "cost": 115.0,
-    "item": "Masala Dosa",
+    "cost": 210.0,
+    "item": "Chana Masala Bowl",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "The Bowl Company",
     "status": "active"
    },
    "lunch": {
@@ -144,6 +144,7 @@
   }
  },
  "heads_up": [
+  "budget: ₹100 left this week",
   "holiday: Sun 08 Nov: Diwali",
   "weather: Sat 07 Nov: rain likely (80%)",
   "weather: Today: 38°C"
