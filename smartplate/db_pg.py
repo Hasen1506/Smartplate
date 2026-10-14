@@ -447,15 +447,16 @@ def warm() -> float:
 # keeps the web instance awake; without this the keep-alive would keep Neon awake 24/7.
 # 0 = always ping (the default off Render).
 KEEPALIVE_IDLE_S = float(os.environ.get("SMARTPLATE_PG_KEEPALIVE_IDLE", "600" if os.environ.get("RENDER") else "0"))
-_last_activity = [time.monotonic()]
+_activity_clock = time.monotonic          # a seam for tests (never patch time.monotonic itself)
+_last_activity = [_activity_clock()]
 
 
 def note_activity() -> None:
-    _last_activity[0] = time.monotonic()
+    _last_activity[0] = _activity_clock()
 
 
 def _idle() -> bool:
-    return KEEPALIVE_IDLE_S > 0 and time.monotonic() - _last_activity[0] > KEEPALIVE_IDLE_S
+    return KEEPALIVE_IDLE_S > 0 and _activity_clock() - _last_activity[0] > KEEPALIVE_IDLE_S
 
 
 def _keep_alive_loop(stop: threading.Event) -> None:

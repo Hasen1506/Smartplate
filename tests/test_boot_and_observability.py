@@ -96,7 +96,8 @@ def test_keepalive_lets_the_database_sleep_when_nobody_uses_the_app(monkeypatch)
     monkeypatch.setattr(db_pg, "KEEPALIVE_S", 0.01)
     monkeypatch.setattr(db_pg, "KEEPALIVE_IDLE_S", 600)
     clock = [1000.0]
-    monkeypatch.setattr(db_pg.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(db_pg, "_activity_clock", lambda: clock[0])
+    monkeypatch.setattr(db_pg, "_last_activity", [0.0])
     db_pg.note_activity()
     clock[0] += 601                                        # 10 min with no person using the app
     t = threading.Thread(target=db_pg._keep_alive_loop, args=(stop,), daemon=True)
