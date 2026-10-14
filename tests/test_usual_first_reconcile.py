@@ -120,4 +120,6 @@ def test_exclusion_still_hard_for_truly_unsafe_items():
     # instruct is the soft refinement; a >20g-sugar dish is still hard-excluded
     user = {"medical": ["diabetes"]}
     unsafe = {"sugar_g": 45, "allergens": [], "tags": ["sweet"]}
-    assert allergens.violates(user, unsafe) == "unsafe for diabetes"
+    # (reason text is plain words since W1's shared checker; the rule is unchanged)
+    assert allergens.violates(user, unsafe) == "About 45 g sugar (more than 20 g) (diabetes)"
+    assert allergens.check(user, unsafe)["code"] == "diabetes"

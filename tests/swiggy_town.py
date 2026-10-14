@@ -61,28 +61,59 @@ PLACES = {
         ("Kothu Parotta", 15000, True, "Parotta", True, False),
     ]),
 }
+# A hostile seventh place (usability review, 11 Oct 2026): Tamil and Hindi non-veg names with
+# NO veg mark (veg None: the key is left out of the reply), mis-marked dishes, peanut and
+# cashew dishes under Indian names, and desserts with no nutrition template. Only in the
+# town when a test asks for it (TownFake(hostile=True)), so the other walkthroughs and
+# goldens are unchanged.
+HOSTILE = {
+    "r-107": ("Kadal Kozhi Mess", "Royapuram", 4.6, 25, ["Chettinad", "Seafood"], True, [
+        ("Kozhi Varuval", 18000, None, "Starters", True, False),          # chicken, no mark
+        ("Eral Thokku", 26000, None, "Seafood", False, False),            # prawn, no mark
+        ("Nandu Masala", 32000, None, "Seafood", False, False),           # crab, no mark
+        ("Meen Kuzhambu Meals", 22000, None, "Meals", False, False),      # fish, no mark
+        ("Aatu Kari Kuzhambu", 30000, None, "Curries", False, False),     # mutton, no mark
+        ("Nattukozhi Biryani", 28000, None, "Biryani", True, False),      # country chicken, no mark
+        ("Murgh Biryani", 26000, True, "Biryani", False, False),          # chicken, WRONGLY marked veg
+        ("Muttai Dosa", 9000, True, "Dosa", False, False),                # egg dosa, wrongly marked veg
+        ("Chef Special Thattu", 21000, None, "Specials", False, False),   # no mark, name says nothing
+        ("Verkadalai Sundal", 6000, True, "Snacks", False, False),        # peanut (Tamil)
+        ("Satay Veg Bowl", 22500, True, "Bowls", False, False),           # peanut sauce
+        ("Moongphali Chaat Meals", 15000, True, "Meals", False, False),   # peanut (Hindi)
+        ("Kaju Kari Meals", 19000, True, "Meals", False, False),          # cashew curry
+        ("Badam Halwa", 12000, True, "Sweets", False, False),             # almond, sweet
+        ("Mor Kuzhambu Rice", 13000, True, "Rice", False, False),         # buttermilk (dairy)
+        ("Rava Kichadi", 11000, True, "Tiffin", False, False),            # semolina (gluten)
+        ("Kesari", 6000, True, "Sweets", False, False),                   # sweet, no template
+        ("Rasmalai", 9000, True, "Sweets", False, False),                 # sweet + dairy
+        ("Sakkarai Pongal", 9000, True, "Tiffin", False, False),          # sweet pongal
+        ("Gulab Jamun", 7000, True, "Sweets", False, False),
+        ("Idli Sambar", 7000, True, "Tiffin", False, False),              # the plain control
+        ("Veg Meals", 15000, True, "Meals", True, False),                 # the plain control
+    ]),
+}
 QUERY_WORDS = {"meals": None}          # "meals" is Swiggy's broad query: every place answers
 
 
 class TownFake(FakeLive):
     """FakeLive's sign-in and checkout, with many restaurants and full menus."""
 
-    def __init__(self):
+    def __init__(self, hostile: bool = False):
         super().__init__()
+        self.places = {**PLACES, **(HOSTILE if hostile else {})}
         self.cart_rid, self.cart_items = None, []          # [(menu_item_id, quantity)]
         self.searches = []
 
-    @staticmethod
-    def _items(rid):
-        return [(f"{rid}-i{n}",) + row for n, row in enumerate(PLACES[rid][6])]
+    def _items(self, rid):
+        return [(f"{rid}-i{n}",) + row for n, row in enumerate(self.places[rid][6])]
 
     def _row(self, rid):
-        name, area, rating, eta, cuisines, is_open, _ = PLACES[rid]
+        name, area, rating, eta, cuisines, is_open, _ = self.places[rid]
         return {"id": rid, "name": name, "cuisines": cuisines, "avgRating": rating, "areaName": area,
                 "deliveryTimeMinutes": eta, "availabilityStatus": "OPEN" if is_open else "CLOSED"}
 
     def _find(self, item_id):
-        for rid in PLACES:
+        for rid in self.places:
             for row in self._items(rid):
                 if row[0] == item_id:
                     return rid, row
@@ -92,18 +123,19 @@ class TownFake(FakeLive):
         if name == "search_restaurants":
             q = args["query"].strip().lower()
             self.searches.append(q)
-            hits = [rid for rid, p in PLACES.items()
+            hits = [rid for rid, p in self.places.items()
                     if q in QUERY_WORDS or q in p[0].lower() or any(q in c.lower() for c in p[4])
                     or any(q in d[0].lower() for d in p[6])]
             return ok({"restaurants": [self._row(rid) for rid in hits], "dishes": []})
         if name == "get_restaurant_menu":
             rid = args["restaurantId"]
-            if rid not in PLACES:
+            if rid not in self.places:
                 return {"structuredContent": {"success": False, "error": {"message": "Restaurant not found"}},
                         "isError": True}
-            p = PLACES[rid]
-            items = [{"id": iid, "name": d, "price": paise, "inStock": 1, "isVeg": veg, "hasVariants": opts,
-                      "hasAddons": False, "categories": [cat], "isBestseller": best}
+            p = self.places[rid]
+            items = [{"id": iid, "name": d, "price": paise, "inStock": 1, "hasVariants": opts,
+                      "hasAddons": False, "categories": [cat], "isBestseller": best,
+                      **({} if veg is None else {"isVeg": veg})}       # no mark: the key is absent
                      for iid, d, paise, veg, cat, best, opts in self._items(rid)]
             cats = list(dict.fromkeys(i["categories"][0] for i in items))
             return ok({"restaurant": {"id": rid, "name": p[0], "areaName": p[1], "avgRating": p[2], "isOpen": p[5]},
@@ -114,18 +146,19 @@ class TownFake(FakeLive):
             scope = args.get("restaurantIdOfAddedItem")
             veg_only = args.get("vegFilter") == 1
             items = []
-            for rid in PLACES:
+            for rid in self.places:
                 if scope and rid != scope:
                     continue
                 for iid, d, paise, veg, cat, best, opts in self._items(rid):
                     if q in d.lower() and (veg or not veg_only):
                         items.append({"menu_item_id": iid, "name": d, "price": paise, "restaurant_id": rid,
-                                      "restaurant_name": PLACES[rid][0], "inStock": 1, "hasVariants": opts,
-                                      "hasAddons": False, "isVeg": veg, "isBestseller": best})
+                                      "restaurant_name": self.places[rid][0], "inStock": 1, "hasVariants": opts,
+                                      "hasAddons": False, "isBestseller": best,
+                                      **({} if veg is None else {"isVeg": veg})})
             return ok({"items": items, "query": args["query"], "totalItems": len(items), "hasMore": False})
         if name == "update_food_cart":
             rid = args["restaurantId"]
-            assert rid in PLACES, rid
+            assert rid in self.places, rid
             rows = [(i["menu_item_id"], i["quantity"]) for i in args["cartItems"]]
             assert all(self._find(i)[0] == rid for i, _ in rows), "dish from another restaurant"
             self.cart_rid, self.cart_items = rid, rows
@@ -143,7 +176,7 @@ class TownFake(FakeLive):
                 out.append({"menu_item_id": iid, "name": d, "quantity": qty, "subtotal": line, "total": line,
                             "final_price": line, "is_veg": veg, "in_stock": True})
             return {"structuredContent": {"success": True, "data": {"addressId": args["addressId"], "data": {
-                "restaurant": {"id": self.cart_rid, "name": PLACES[self.cart_rid][0]}, "items": out,
+                "restaurant": {"id": self.cart_rid, "name": self.places[self.cart_rid][0]}, "items": out,
                 "pricing": {"item_total": total, "delivery_charge": 35, "to_pay": total + 35}}}}}
         if name == "flush_food_cart":
             self.cart_rid, self.cart_items, self.cart = None, [], None

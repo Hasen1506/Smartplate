@@ -409,12 +409,70 @@ def _categories(record: dict) -> list[str]:
     return [str(c)[:80] for c in cats if isinstance(c, (str, int)) and str(c).strip()][:6]
 
 
-def _name_allergens(name: str, veg) -> list[str]:
-    """Allergens a dish *name* implies (live_catalog's templates). Swiggy menus list no
-    allergens, so this can flag a likely allergen but never establish that a dish is free of one."""
+def _name_allergens(name: str, veg, description: str | None = None) -> list[str]:
+    """Allergens a dish *name* implies (shared food lexicon, templates and the recipe
+    library). Swiggy menus list no allergens, so this can flag a likely allergen but never
+    establish that a dish is free of one."""
+    return list(_dish_facts(name, veg, description)["allergens"])
+
+
+def _dish_facts(name: str, veg, description: str | None = None, provider: dict | None = None) -> dict:
     from ..domain import live_catalog
-    est = live_catalog.estimate(name, veg)
-    return list(est["allergens"]) if est else []
+    est = (live_catalog.estimate(name, veg, description, provider)
+           or live_catalog.unestimated(name, veg, description, provider))
+    return {**est, "name": name, "description": description or ""}
+
+
+def _row_veg(row: dict):
+    """Swiggy's veg mark for a dish; a dish with a non-veg option counts as non-veg."""
+    veg = _flag(_get(row, "veg"))
+    for var in row.get("variations") or [] if isinstance(row, dict) else []:
+        if isinstance(var, dict) and _flag(var.get("isVeg")) is False:
+            return False
+    return veg
+
+
+def _provider_facts(row: dict) -> dict | None:
+    """Allergen or calorie fields, if Swiggy ever sends them (sp-grill #40: the documented
+    menu shapes have neither today, see docs/safety/fail-closed.md)."""
+    if not isinstance(row, dict):
+        return None
+    out = {}
+    for key in ("allergens", "allergenInfo", "allergen_info"):
+        val = row.get(key)
+        if isinstance(val, list) and all(isinstance(a, str) for a in val):
+            from ..domain import profile
+            out["allergens"] = [a.strip().lower().replace(" ", "_") for a in val
+                                if a.strip().lower().replace(" ", "_") in profile.ALLERGENS]
+            break
+    for key in ("kcal", "calories", "energyKcal", "energy_kcal"):
+        val = row.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool) and 0 < val < 5000:
+            out["kcal"] = float(val)
+            break
+    return out or None
+
+
+def _screen(user: dict, rows: list[dict]) -> tuple[list[dict], list[dict], dict]:
+    """(shown items each with a `safety` label, hidden items with their reason, counts by
+    reason code), using the one safety checker every path shares (allergens.check).
+
+    A menu is browsed by one person, so it is screened for that person; a dish they then
+    choose for a meal they share is checked for everyone eating it (everyday.choose)."""
+    from ..domain import allergens
+    user = {**(user or {}), "household_members": []}
+    shown, hidden, by_code = [], [], {}
+    for item in rows:
+        facts = _dish_facts(item["name"], item.get("veg"), item.get("description"), item.get("provider_facts"))
+        v = allergens.check(user, facts)
+        if v["status"] in ("unsafe", "unknown"):
+            by_code[v["code"]] = by_code.get(v["code"], 0) + 1
+            hidden.append({"id": item["id"], "name": item["name"], "price": item.get("price"),
+                           "veg": item.get("veg"), "code": v["code"], "status": v["status"],
+                           "reason": allergens.reason_text(v)})
+            continue
+        shown.append({**item, "safety": allergens.safety_label(user, facts)})
+    return shown, hidden, by_code
 
 
 def _lists(value, depth=0):
@@ -919,9 +977,14 @@ def _read_menu(user_id: int, conn: dict, restaurant_id: str) -> tuple[dict, list
                                "sections_total": (first or {}).get("totalCategories")}
 
 
-def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
+def live_menu(user_id: int, restaurant_id: str, restaurant_name: str, *, screen: bool = True) -> dict:
     """Browse the exact provider restaurant ID, with a fresh menu for this address: every
-    section Swiggy returns (up to MENU_PAGES pages), each dish once, with its sections."""
+    section Swiggy returns (up to MENU_PAGES pages), each dish once, with its sections.
+
+    With `screen` (every view the person sees), dishes that break their diet, allergies or
+    health filters, or that Ziggy can't vouch for, are moved to `hidden_items`, each with
+    its reason. The live catalogue reads the whole menu (screen=False); the planner then
+    applies the same checker to every dish it considers."""
     if not restaurant_id or not restaurant_name:
         raise ValueError("Choose a restaurant from live Swiggy search")
     conn = _conn(user_id)
@@ -951,17 +1014,18 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
                 if c not in known["categories"]:
                     known["categories"].append(c)
             continue
-        veg = _flag(_get(row, "veg"))
+        veg = _row_veg(row)
         if user["diet"] in ("veg", "vegan") and veg in (False, 0):
             hidden += 1
-            continue
         name = str(_get(row, "name"))
+        desc = row.get("description") if isinstance(row.get("description"), str) else None
         item = {"id": iid, "name": name,
                 "price": rupees(row, unit), "price_estimated": price_estimated(row) and not verified, "veg": veg,
                 "in_stock": _flag(_get(row, "stock")),
                 "has_options": _flag(_get(row, "variants")) is True or _flag(_get(row, "addons")) is True,
                 "categories": list(sections), "bestseller": row.get("isBestseller") is True,
-                "image": _image(row), "name_allergens": _name_allergens(name, veg)}
+                "image": _image(row), "name_allergens": _name_allergens(name, veg, desc),
+                "description": desc, "provider_facts": _provider_facts(row)}
         by_id[iid] = item
         items.append(item)
     labels = body.get("categoryLabels")
@@ -971,9 +1035,14 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
             if c not in categories:
                 categories.append(c)
     remember_photos(user_id, restaurant_id, items)
+    not_for_you, by_code = [], {}
+    if screen:
+        items, not_for_you, by_code = _screen(user, items)
     total = body.get("totalItems")
     return {"restaurant": place, "address": conn.get("address_label") or _address(conn),
             "items": items, "categories": categories, "hidden_nonveg": hidden,
+            # every dish left out for this person, with the reason in plain words
+            "hidden": len(not_for_you), "hidden_items": not_for_you, "hidden_by": by_code,
             "total_items": total if isinstance(total, int) and not isinstance(total, bool) else None,
             "truncated": bool(body.get("truncated")) or bool(notes["cut"]) or notes["more_sections"],
             "cut_sections": notes["cut"], "more_sections": notes["more_sections"],
@@ -1008,27 +1077,30 @@ def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, q
             continue
         if _get(row, "restaurant_id") is not None and str(_get(row, "restaurant_id")) != restaurant_id:
             continue
-        veg = _flag(_get(row, "veg"))
+        veg = _row_veg(row)
         if vegetarian and veg is False:
             hidden += 1
-            continue
         item_id = str(_get(row, "menu_item_id"))
         if item_id in seen:
             continue
         seen.add(item_id)
         name = str(_get(row, "name"))
+        desc = row.get("description") if isinstance(row.get("description"), str) else None
         items.append({"id": item_id, "name": name, "price": rupees(row, unit),
                       "price_estimated": price_estimated(row), "veg": veg,
                       "in_stock": _flag(_get(row, "stock")), "has_options": _has_options(row),
                       "categories": _categories(row), "bestseller": row.get("isBestseller") is True,
-                      "image": _image(row), "name_allergens": _name_allergens(name, veg)})
+                      "image": _image(row), "name_allergens": _name_allergens(name, veg, desc),
+                      "description": desc, "provider_facts": _provider_facts(row)})
     remember_photos(user_id, restaurant_id, items)
+    items, not_for_you, by_code = _screen(models.get_user(user_id), items)
     more = body.get("hasMore") is True
     next_offset = body.get("nextOffset") if more else None
     if more and (not isinstance(next_offset, int) or isinstance(next_offset, bool) or not offset < next_offset <= 10000):
         raise SwiggyError("Swiggy returned unusable menu pagination. Search again later.")
     return {"restaurant": menu["restaurant"], "items": items, "query": query, "has_more": more,
-            "next_offset": next_offset, "hidden_nonveg": hidden, "fetched": clock.now().isoformat(timespec="minutes")}
+            "next_offset": next_offset, "hidden_nonveg": hidden, "hidden": len(not_for_you),
+            "hidden_items": not_for_you, "hidden_by": by_code, "fetched": clock.now().isoformat(timespec="minutes")}
 
 
 def find_restaurant(user_id: int, name: str) -> dict:
@@ -1078,9 +1150,12 @@ def menu_for(user_id: int, restaurant: str, *, fresh: bool = False) -> dict:
     be filtered here; the app says so."""
     from ..domain import models
     m = menu(user_id, restaurant, fresh=fresh)
-    diet = (models.get_user(user_id) or {}).get("diet")
-    items = [i for i in m["items"] if not (diet in ("veg", "vegan") and i["veg"] is False)]
-    return {**m, "items": items, "hidden_nonveg": len(m["items"]) - len(items), "diet": diet}
+    user = models.get_user(user_id) or {}
+    diet = user.get("diet")
+    marked = sum(1 for i in m["items"] if diet in ("veg", "vegan") and i["veg"] is False)
+    items, not_for_you, by_code = _screen(user, m["items"])
+    return {**m, "items": items, "hidden_nonveg": marked, "hidden": len(not_for_you),
+            "hidden_items": not_for_you, "hidden_by": by_code, "diet": diet}
 
 
 def _planned(session_id: int) -> tuple[int, dict]:
@@ -1272,7 +1347,17 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
               "price_estimated": price_estimated(item),
               "image": _image(item), "handoff_url": timing.swiggy_handoff(place["name"], str(_get(item, "name")))}
     blocked = None
-    if _safety_blocked(user):
+    from ..domain import allergens
+    verdict = allergens.check({**user, "household_members": []},       # this person's own order
+                              _dish_facts(str(_get(item, "name")), _row_veg(item),
+                                                 item.get("description") if isinstance(item.get("description"), str)
+                                                 else None))
+    if verdict["status"] in ("unsafe", "unknown"):
+        # The same checker as the menu and the planner: a mis-marked "Chicken 65 (veg)" or
+        # an unmarked Kozhi Varuval is never carted for a vegetarian (sp-grill #38).
+        blocked = (f"Not for your diet, allergies or health filters: {allergens.reason_text(verdict)}. "
+                   "Check the ingredients with the restaurant in Swiggy.")
+    elif _safety_blocked(user):
         blocked = SAFETY_NOTE
     elif _get(item, "stock") not in (True, 1):
         blocked = "Swiggy did not confirm this dish is in stock. Refresh the menu or check it in Swiggy."

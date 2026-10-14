@@ -63,6 +63,12 @@ PRODUCTION = _production()
 # SMARTPLATE_FIXTURE_DATA=1, which is ignored in production.
 FIXTURE_DATA = os.environ.get("SMARTPLATE_FIXTURE_DATA") == "1" and not PRODUCTION
 
+# Health-condition filters (diabetes, blood pressure, celiac) in onboarding and settings
+# (sp-grill #41: health claims). "off" archives them for the consumer beta: new conditions are
+# refused with a plain message, while conditions people already saved keep being enforced
+# (fail-closed) until they remove them. Default "on" until the founder decides.
+MEDICAL_FILTERS = os.environ.get("SMARTPLATE_MEDICAL_FILTERS", "on").lower() != "off"
+
 # Brain selection — "deterministic" (free, default) or "llm" (optional, paid).
 AGENT_BRAIN = os.environ.get("SMARTPLATE_BRAIN", "deterministic")
 

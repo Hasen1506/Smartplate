@@ -507,11 +507,6 @@
     "Ghee Pongal",
     140.0,
     true
-   ],
-   [
-    "Peanut Chutney Dosa",
-    130.0,
-    true
    ]
   ],
   "menu": [
@@ -522,10 +517,13 @@
    [
     "Ghee Pongal",
     140.0
-   ],
+   ]
+  ],
+  "menu_hidden": [
    [
     "Peanut Chutney Dosa",
-    130.0
+    "allergen:peanut",
+    "The name says “peanut” (peanut allergy)"
    ]
   ],
   "restaurants": [
