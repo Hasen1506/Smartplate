@@ -237,8 +237,11 @@ def week_recap(user: dict, week_start: str | None = None) -> dict:
            "best_day": None, "worst_day": None, "kept": None, "over": None, "share_text": None,
            "basis": "Real Swiggy bills only. Plan estimates are never counted as spent or kept. "
                     "Food bought outside Swiggy isn't seen."}
-    spent_days = [d for d in by_day]
-    if spent_days and act["orders"]:
+    # best / worst among days with real orders: a day with none may have been cooked at home or
+    # bought outside Swiggy, which Ziggy can't see, so it is never called "best"
+    spent_days = [d for d in by_day if d["spent"] > 0]
+    out["no_order_days"] = sum(1 for d in by_day if d["spent"] == 0)
+    if spent_days:
         out["best_day"] = max(spent_days, key=lambda d: (d["vs_share"], d["date"]))
         out["worst_day"] = min(spent_days, key=lambda d: (d["vs_share"], d["date"]))
     if not act["complete"]:
@@ -347,10 +350,17 @@ def suggest(user: dict, *, cut: float | None = None, target: float | None = None
             "suggested": proposed, "saving_per_week": max(0.0, saving), "clamped": clamped,
             "floor": floor, "cheapest_meal": cheap, "max_cut_target": max_cut_target, "reasons": reasons,
             "trade_offs": trade,
-            "headline": (f"You spent ₹{spent:,.0f} in the last {round(covered_days / 7)} weeks "
+            "headline": (f"You spent ₹{spent:,.0f} in the last {_span(covered_days)} "
                          f"(₹{weekly:,.0f} a week). Aim for ₹{proposed:,.0f} a week?"),
             "complete": bool(s) and dt.date.fromisoformat(s["synced_ts"][:10]) >= today,
             "basis": "Real Swiggy bills and order history only."}
+
+
+def _span(days: int) -> str:
+    weeks = days / 7
+    if days < 14 or abs(weeks - round(weeks)) > 0.15:
+        return f"{days} days"
+    return f"{round(weeks)} weeks"
 
 
 def low_budget_check(user: dict, weekly_budget: float | None = None) -> dict | None:

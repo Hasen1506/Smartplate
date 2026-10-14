@@ -252,7 +252,7 @@ def test_sunday_recap_from_real_bills_only(seeded, monkeypatch):
     assert r["finished"] and r["complete"]
     assert r["target"] == 1500 and r["actual"] == 1160 and r["kept"] == 340
     assert r["share_text"] == "₹340 kept this week on Ziggy — that's a movie."
-    assert r["best_day"]["date"] in {"2026-11-03", "2026-11-05", "2026-11-07", "2026-11-08"}   # a no-order day
+    assert r["best_day"]["date"] == "2026-11-02" and r["no_order_days"] == 4      # best among days with orders
     assert r["worst_day"]["date"] == "2026-11-06"
     # plan estimates never become kept money: planned decisions exist but do not move `actual`
     assert user and r["basis"].startswith("Real Swiggy bills only")
@@ -388,3 +388,22 @@ def test_live_review_over_the_cap_is_not_orderable_and_offers_the_split(client, 
     assert big["orderable"] is False and big["fingerprint"] is None
     assert big["cart_cap"]["mode"] == "split" and [c["quantity"] for c in big["cart_cap"]["carts"]] == [4, 4]
     assert "₹1,000" in big["reason"]
+
+
+def test_golden_money_week(seeded, monkeypatch):
+    """Golden: one real week of bills → recap, suggestion and a fee breakdown, exactly."""
+    from gt_support import assert_golden
+    with db.cursor() as cur:
+        cur.execute("UPDATE users SET weekly_budget=1500 WHERE id=3")
+    _week_of_orders(monkeypatch, [("2026-11-02", 185.06), ("2026-11-03", 240), ("2026-11-05", 410.5),
+                                  ("2026-11-07", 320)])
+    monkeypatch.setattr(spend, "cheapest_meal", lambda user: {"cost": 131.25, "item": "Mini Tiffin",
+                                                              "restaurant": "Hotel Saravana Bhavan", "estimated": False})
+    m = {"restaurants": {"r-1": {"fixed": 11.06, "delivery": 6.0, "bills": 1}}, "user": None}
+    assert_golden("money_week_w04", {
+        "recap": spend.week_recap(models.get_user(3), "2026-11-02"),
+        "suggestion": spend.suggest(models.get_user(3)),
+        "estimate_learned": fees.breakdown({"fees": fees.pricing_for("r-1", m)}, 250),
+        "estimate_default": fees.breakdown({"fees": fees.pricing_for("r-2", m)}, 250),
+        "split": checkout.split_for_cap(250, 5),
+    })
