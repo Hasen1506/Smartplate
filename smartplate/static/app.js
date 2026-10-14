@@ -2638,8 +2638,10 @@ function profilesPanel() {
   const opts = S.users.map(u => `<button class="pick ${u.id === S.userId ? "current" : ""}" data-user="${u.id}"><span class="t"><b>${esc(u.name)}</b><span>${u.private ? "Private to this browser" : "Shared sample profile"}${u.id === S.userId ? " · open now" : ""}</span></span>${u.id === S.userId ? ICON.check : ICON.right}</button>`).join("");
   const k = keys.get(S.userId);
   const recovery = k ? `<section class="card"><p class="k">Recovery code</p>
-      <p class="sub">This profile is private and its key lives only in this browser. To open it on another device, or after clearing your browser, you need this code. Keep it somewhere safe.</p>
-      <div class="row" style="flex-wrap:nowrap"><code class="code">${esc(`${S.userId}.${k}`)}</code><button class="small" data-act="copy-recovery">Copy</button></div>
+      <p class="sub">This profile is private and its key lives only in this browser. If you clear your browser or lose this phone, this code is the only way back in${S.account?.login ? " without your password" : ""}. Save it now: copy it into a password manager, or download it.</p>
+      <details class="recovery"><summary>Show recovery code</summary><code class="code">${esc(`${S.userId}.${k}`)}</code></details>
+      <div class="row"><button class="small secondary" data-act="copy-recovery">Copy code</button><button class="small secondary" data-act="download-recovery">Download as a file</button></div>
+      <p class="fine">Anyone with this code can open your profile. Don't share it.</p>
       <details><summary>Replace a shared or lost code</summary><p class="fine">A new code invalidates all earlier codes and signs out every other device. Change your password too if someone else knows it.</p><button data-act="rotate-recovery">Generate a new recovery code</button></details></section>` : "";
   return `<h1 class="h1">Account &amp; devices</h1>
     ${accountCard()}
@@ -2669,7 +2671,8 @@ function accountCard() {
       <label>${a.login ? "New password" : "Password"}<input id="acct-pw" type="password" autocomplete="new-password" required minlength="8" maxlength="200"></label>
       <button type="submit" class="secondary">${a.login ? "Change password" : "Save sign-in"}</button></form>
     ${devs ? `<p class="k">Signed-in devices</p><div>${devs}</div>` : ""}
-    <button class="ghost small" data-act="sign-out">${a.devices.some(d => d.this_device) ? "Sign out of this device" : "Forget this profile on this browser"}</button></section>`;
+    <button class="ghost small" data-act="sign-out">Sign out of this device</button>
+    ${a.login ? "" : `<p class="fine">You haven't set a sign-in yet: after signing out, only the recovery code opens this profile again.</p>`}</section>`;
 }
 async function saveAccount() {
   const login = document.getElementById("acct-login").value, password = document.getElementById("acct-pw").value;
@@ -2722,7 +2725,7 @@ async function rotateRecoveryCode() {
   keys.put(result.user_id, result.key, result.name);
   S.checkoutReview = null;
   S.account = await api(`/api/user/${S.userId}/account`);
-  render(); toast("New recovery code saved here. Copy it somewhere safe.");
+  render(); toast("New recovery code saved here. Copy or download it now.");
 }
 async function removeDevice(id) {
   const mine = S.account?.devices.find(d => d.id === Number(id))?.this_device;
@@ -2751,7 +2754,7 @@ const OB_STEPS = ["What you eat", "Your days", "Budget", "Save"];
 const BUDGET_PRESETS = [1500, 3000, 5000];
 function startOnboard() {
   S.onboard = { step: 0,
-    d: { name: "", diet: "nonveg", allergens: [], medical: [], observances: [], meals: ["lunch", "dinner"], cook: "sometimes",
+    d: { name: "", diet: null, allergens: [], medical: [], observances: [], meals: ["lunch", "dinner"], cook: "sometimes",
       rhythm: { breakfast: "skip", lunch: "order", dinner: "order" },
       favourites: [], weekly_budget: 3000, daily_cap: null, goal: "none", body: null } };
   S.welcome = false; S.sheet = null; S.connectSheet = false; S.error = null; render();
@@ -2782,13 +2785,14 @@ function onboardingScreen() {
       <p class="k">On order days, swap in a cheap home-cook sometimes?</p>
       <div class="chips">${[["never", "No"], ["sometimes", "1–2× a week"], ["often", "3–5× a week"], ["most", "Most days"]].map(([k, l]) => chip("cook", k, l, d.cook === k, false)).join("")}</div>`;
   } else if (st === 2) {
-    const meals = MEALS.filter(m => d.rhythm[m] !== "skip").length * 7 || 1;
+    const meals = obMeals(d);
     body = `<h1 class="h1">Weekly food budget</h1><p class="sub">Delivery, fees and groceries all count. Swiggy's cart shows the exact total before you pay.</p>
       <section class="card" style="align-items:center;padding:26px 18px">
         <div class="stepper"><button type="button" data-ob-budget="-250" aria-label="Lower budget by 250 rupees">${ICON.minus}</button>
           <label class="sr" for="ob-budget">Weekly budget in rupees</label><input id="ob-budget" class="money" type="number" inputmode="numeric" min="100" max="100000" value="${d.weekly_budget ?? ""}" style="font-size:44px;width:190px;text-align:center;border:0;background:transparent;min-height:60px">
           <button type="button" data-ob-budget="250" aria-label="Raise budget by 250 rupees">${ICON.plus}</button></div>
-        <span class="muted">${d.weekly_budget ? `about ${rupee0(d.weekly_budget / meals)} a meal for ${meals} meals` : "Enter an amount"}</span></section>
+        <span class="muted" id="ob-per" aria-live="polite">${obPerMeal(d.weekly_budget, meals)}</span></section>
+      <div id="ob-floor">${obFloorWarn(d.weekly_budget, meals)}</div>
       <div class="chips" style="justify-content:center">${BUDGET_PRESETS.map(n => chip("budgetpick", n, rupee0(n), d.weekly_budget === n, false)).join("")}</div>
       <details ${d.daily_cap ? "open" : ""}><summary>Also cap a single day (optional)</summary>
         <label>₹ per day<input id="ob-daily" type="number" inputmode="numeric" min="0" max="20000" value="${d.daily_cap ?? ""}" placeholder="no daily limit"></label>
@@ -2816,7 +2820,30 @@ function onboardingScreen() {
       <div class="ob-bars" aria-label="Step ${st + 1} of ${OB_STEPS.length}">${bars}</div><span class="fine">${st + 1}/${OB_STEPS.length}</span></div>
     ${errbar(false)}<form class="stack rise" id="obform" novalidate style="gap:16px">${body}</form>
     <div class="grow"></div>
-    <button class="primary big" data-ob-nav="next">${last ? "Plan my week" : "Continue"}</button></main>`;
+    ${st === 0 && !d.diet ? `<p class="fine center" id="ob-need">Choose what you eat to continue.</p>` : ""}
+    <button class="primary big" data-ob-nav="next" ${st === 0 && !d.diet ? 'disabled aria-describedby="ob-need"' : ""}>${last ? "Plan my week" : "Continue"}</button></main>`;
+}
+/* Budget step: the per-meal line and the "too little to eat on" warning, recomputed on every
+   keystroke (not only on the ± buttons and chips). */
+const MEAL_FLOOR = 60;          // ₹ a meal: below this, delivered meals near you rarely fit
+const obMeals = (d) => MEALS.filter(m => d.rhythm[m] !== "skip").length * 7 || 1;
+const obPerMeal = (weekly, meals) => weekly ? `about ${rupee0(weekly / meals)} a meal for ${meals} meals` : "Enter an amount";
+function obFloorWarn(weekly, meals) {
+  if (!weekly || weekly / meals >= MEAL_FLOOR) return "";
+  const need = Math.ceil((MEAL_FLOOR * meals) / 250) * 250, fit = Math.max(0, Math.floor(weekly / MEAL_FLOOR));
+  return `<div class="note warn" role="alert"><span style="flex:1"><b>${rupee0(weekly)} is ${rupee0(weekly / meals)} a meal.</b>
+    A meal near you usually costs ${rupee0(MEAL_FLOOR)} or more, so this covers about ${fit} of your ${meals} meals.
+    Raise it, order fewer meals (Back), or cook more of them.</span>
+    <button type="button" class="small secondary" data-ob="budgetpick" data-val="${need}" data-multi="0">Use ${rupee0(need)}</button></div>`;
+}
+function obBudgetInput(el) {
+  const d = S.onboard?.d; if (!d) return;
+  const b = Math.round(Number(el.value)); d.weekly_budget = b > 0 ? b : null;
+  const meals = obMeals(d);
+  const per = document.getElementById("ob-per"); if (per) per.textContent = obPerMeal(d.weekly_budget, meals);
+  const warn = document.getElementById("ob-floor");
+  if (warn) { warn.innerHTML = obFloorWarn(d.weekly_budget, meals); warn.querySelectorAll("[data-ob]").forEach(btn => btn.addEventListener("click", (e) => { e.preventDefault(); onboardChip("budgetpick", btn.dataset.val, false); })); }
+  document.querySelectorAll('[data-ob="budgetpick"]').forEach(c => { if (!c.closest("#ob-floor")) c.setAttribute("aria-pressed", String(Number(c.dataset.val) === d.weekly_budget)); });
 }
 function planningScreen() {
   const d = S.onboard?.d || {};
@@ -2848,6 +2875,7 @@ async function onboardNav(dir) {
     o.step -= 1; S.error = null; render(); return;
   }
   const d = o.d;
+  if (o.step === 0 && !d.diet) throw new Error("Choose what you eat: vegetarian, non-vegetarian or vegan");
   if (o.step === 1 && MEALS.every(m => d.rhythm[m] === "skip")) throw new Error("Pick at least one meal you order or cook");
   if (o.step === 2) {
     if (!d.weekly_budget) throw new Error("Enter a weekly budget greater than ₹0");
@@ -3003,6 +3031,8 @@ function wire() {
   on("[data-ob-budget]", "click", (e) => { e.preventDefault(); readOnboardInputs(); const d = S.onboard.d;
     d.weekly_budget = Math.min(100000, Math.max(250, (d.weekly_budget || 0) + Number(e.currentTarget.dataset.obBudget))); render(); });
   on("[data-ob-nav]", "click", (e) => { e.preventDefault(); guard(() => onboardNav(e.currentTarget.dataset.obNav)); });
+  const obBudget = document.getElementById("ob-budget");
+  if (obBudget) obBudget.oninput = () => obBudgetInput(obBudget);
   const obform = document.getElementById("obform");
   if (obform) obform.onsubmit = (e) => { e.preventDefault(); guard(() => onboardNav("next")); };
   const acts = {
@@ -3045,7 +3075,17 @@ function wire() {
     "signin-close": async () => { S.signin = false; S.error = null; if (S.view) S.welcome = false; render(); },
     "sign-out": signOut,
     "rotate-recovery": rotateRecoveryCode,
-    "copy-recovery": async () => { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied"); },
+    "copy-recovery": async () => {
+      try { await navigator.clipboard.writeText(`${S.userId}.${keys.get(S.userId)}`); toast("Recovery code copied. Paste it somewhere safe."); }
+      catch { throw new Error("Couldn't copy here. Open “Show recovery code” and copy it by hand, or download it"); }
+    },
+    "download-recovery": async () => {
+      const text = `Ziggy recovery code\n\n${S.userId}.${keys.get(S.userId)}\n\nOpen Ziggy → Me → Account & devices → "Open a profile from another device" and paste this code.\nAnyone with this code can open your profile: keep it private.\n`;
+      const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+      const a = document.createElement("a"); a.href = url; a.download = "ziggy-recovery-code.txt";
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast("Recovery code downloaded");
+    },
     "cancel-move": async () => { S.moving = null; render(); },
     "hh-edit-cancel": async () => { S.hhEdit = null; render(); },
     "hh-leave": () => householdCall("/leave", "POST", {}, "Stopped sharing. Your plan uses your own rules again."),

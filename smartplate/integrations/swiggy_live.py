@@ -933,7 +933,7 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
             or not _get(provider_restaurant, "name")):
         raise SwiggyError("Swiggy did not verify this exact restaurant for your address. Search again.")
     if provider_restaurant.get("isOpen") is False:
-        raise SwiggyError("This restaurant is closed right now. Search again later.")
+        raise SwiggyError("This restaurant is closed right now. Search again later.", code="restaurant_closed")
     place = {"id": restaurant_id, "name": str(_get(provider_restaurant, "name")),
              "area": _get(provider_restaurant, "area"), "rating": _get(provider_restaurant, "rating")}
     items, by_id, hidden = [], {}, 0
