@@ -20,7 +20,7 @@ const TODAY = {
   price_compare: null, swiggy: { connected: false, address: null }, account_saved: false, share_text: 'Today',
 };
 
-function world({ ui = null, today = TODAY } = {}) {
+function world({ ui = null, today = TODAY, width = null } = {}) {
   const calls = [];
   const element = { innerHTML: '', classList: { toggle() {}, add() {} }, appendChild() {}, remove() {}, addEventListener() {}, setAttribute() {} };
   const store = { 'smartplate.user': '2' };
@@ -44,6 +44,7 @@ function world({ ui = null, today = TODAY } = {}) {
     fetch: async (url, options) => { calls.push({ url, options });
       return { ok: !!replies[url], status: replies[url] ? 200 : 404, json: async () => replies[url] || { error: 'Unexpected route' } }; },
     setTimeout: () => {}, clearTimeout: () => {}, console,
+    ...(width ? { matchMedia: (q) => ({ matches: width >= Number(/min-width:\s*(\d+)/.exec(q)?.[1] || 0), addEventListener() {} }) } : {}),
   });
   vm.runInContext(v3, context);
   vm.runInContext(app, context);
@@ -60,7 +61,9 @@ test('v3 is on by default: four tabs with Cook, and Today is the v3 screen', asy
   assert.match(html, /Today's budget/);
   assert.match(html, /₹600/);
   assert.match(html, /\(B\+L\)/);
-  assert.match(html, /Breakfast pool/);
+  assert.match(html, /Usual breakfasts/);
+  assert.match(html, /Your usual meals/);
+  assert.doesNotMatch(html.replace(/<[^>]+>/g, ' '), /\bpools?\b/i, 'the founder\'s word is "usual meals"');
   assert.match(html, /Decide for me/);
   assert.doesNotMatch(html, /v3-compare/, 'no price row without data');
   assert.doesNotMatch(html, /Hungry now/, 'old entry points are not on v3 Today');
@@ -157,7 +160,7 @@ test('integration: suggested favourites ask consent first, then list this meal\'
   assert.doesNotMatch(html, /Veg Biryani/, 'a dinner suggestion is not offered for breakfast');
   assert.match(html, /Masala Dosa/);
   assert.ok(!html.includes('<b>Hut</b>'), 'escaped');
-  assert.match(html, /Add ticked to breakfast pool/);
+  assert.match(html, /Add ticked to your usual breakfasts/);
   assert.match(html, /Powered by Swiggy/);
   assert.match(html, /data-v3-act="sugg-delete"/);
 });
@@ -188,6 +191,51 @@ test('integration: a Swiggy pick shows its whole bill (W4 charges); typed picks 
   assert.match(html, /₹180 <span class="v3-bill"[^>]*>· ~₹234 with delivery, fees &amp; GST \(estimate\)/);
   assert.equal((html.match(/class="v3-bill"/g) || []).length, 1, 'no fees invented for the typed pick');
   assert.match(html, /About ₹384 with Swiggy delivery, fees &amp; GST \(estimate until Swiggy shows the bill\)/);
+  assert.match(html, /<b class="v3-left">₹216 left after fees<\/b> <span class="tag  v3-left-tag">estimate<\/span>/, '600 − 384.19, marked an estimate');
+});
+
+test('R2: "left" is net of fees — the server figure wins, a real bill says so, no Swiggy pick = plain left', async () => {
+  const typed = { ...TODAY.pools.breakfast[0], qty: 1, how: 'you', reasons: [] };
+  let w = world({ today: { ...TODAY, picks: { breakfast: PONGAL }, budget: { ...TODAY.budget, picked: 180, left: 420, picked_bill: 234.19, bill_estimated: true, left_after_fees: 351.5, left_estimated: false } } });
+  await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
+  let html = run(w, 'tabBody()');
+  assert.match(html, /₹351\.5 left after fees|₹352 left after fees/);
+  assert.match(html, /class="tag good v3-left-tag">real bill</);
+  w = world({ today: { ...TODAY, picks: { breakfast: PONGAL }, budget: { ...TODAY.budget, amount: 200, picked: 180, left: 20, picked_bill: 234.19, bill_estimated: true } } });
+  await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
+  assert.match(run(w, 'tabBody()'), /₹34\.19 over after fees|₹34 over after fees/);
+  w = world({ today: { ...TODAY, picks: { breakfast: typed }, budget: { ...TODAY.budget, picked: 140, left: 460, picked_bill: null } } });
+  await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
+  html = run(w, 'tabBody()');
+  assert.match(html, /<b class="v3-left">₹460 left<\/b>/);
+  assert.doesNotMatch(html, /after fees/);
+});
+
+test('R2 usual meals: on a phone each meal line has its own drawer and there is no separate block', async () => {
+  const w = world({ width: 375 }); await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
+  let html = run(w, 'tabBody()');
+  assert.doesNotMatch(html, /class="v3-pools"/, 'no separate usual-meals block on a phone');
+  assert.match(html, /data-v3-usual="breakfast" aria-expanded="false"[^>]*>Usual \(1\)/);
+  assert.match(html, /data-v3-usual="lunch" aria-expanded="false"/);
+  assert.match(html, /Dinner \(not today\)<\/span><button[^>]*data-v3-usual="dinner"/, 'a meal that is not on today stays reachable');
+  assert.doesNotMatch(html, /id="v3-usual-breakfast"/, 'closed until tapped');
+  run(w, 'S.v3.usualOpen = { breakfast: true }');
+  html = run(w, 'tabBody()');
+  assert.match(html, /data-v3-usual="breakfast" aria-expanded="true"/);
+  const drawer = html.slice(html.indexOf('id="v3-usual-breakfast"'));
+  assert.match(drawer, /aria-label="Your usual breakfasts"/);
+  assert.match(drawer, /Cappuccino/);
+  assert.match(drawer, /data-v3-remove="breakfast\|t:1"[^>]*aria-label="Remove Cappuccino from your usual breakfasts"/);
+  assert.match(drawer, /data-v3-add="breakfast"[^>]*>.*New item \/ restaurant/);
+  assert.ok(html.indexOf('id="v3-usual-breakfast"') < html.indexOf('data-v3-meal="lunch"'), 'the drawer opens under its own meal line');
+});
+
+test('R2 usual meals: from 1024 px the three panels sit side by side and the lines have no drawer', async () => {
+  const w = world({ width: 1280 }); await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
+  const html = run(w, 'tabBody()');
+  assert.match(html, /class="v3-pools"/);
+  for (const h of ['Usual breakfasts', 'Usual lunches', 'Usual dinners']) assert.match(html, new RegExp(`<h2 class="h3" id="v3-pool-[a-z]+">${h}</h2>`));
+  assert.doesNotMatch(html, /data-v3-usual=/);
 });
 
 test('integration: Sunday recap card shows only real numbers', async () => {

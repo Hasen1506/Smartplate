@@ -1,8 +1,10 @@
 /* Ziggy v3 — the founder's sketch (13 Oct 2026), on top of the dark redesign.
    Navigation is written down once, in docs/IA.md. In short:
      Today — today's budget (± and presets), weather, your rules as chips, one line per meal
-             ("Breakfast: 1× Cappuccino ▾"), Place order / Send details / Cook it, and your
-             Breakfast / Lunch / Dinner pools (side by side on a computer). Nothing is decided
+             ("Breakfast: 1× Cappuccino ▾"), Place order / Send details / Cook it, and your usual
+             meals (founder, Oct 2026: "usual meals", not "pools"). On a phone each meal line has
+             its own "Usual ▾" drawer (pick, add, remove); from 1024 px the three usual-meals
+             panels sit side by side below. Nothing is decided
              for you: "Decide for me" runs only when you tap it and pick how.
      Week  — the week plan, with nutrition as an opt-in.
      Cook  — type any dish: ingredients scaled, Instamart links, cook along.
@@ -31,6 +33,19 @@
     return S.v3;
   };
   const money = (n) => rupee0(n);
+  // "Usual meals" (the founder's word; the API and storage still say pool).
+  const USUAL = { breakfast: "usual breakfasts", lunch: "usual lunches", dinner: "usual dinners" };
+  const usual = (meal) => USUAL[meal] || `usual ${meal}s`;
+  // Phones get a drawer per meal line; computers (≥ 1024 px) the three panels side by side.
+  const WIDE_Q = "(min-width:1024px)";
+  const wide = () => (typeof matchMedia === "function" ? matchMedia(WIDE_Q).matches : true);
+  let watching = false;
+  function watchWidth() {
+    if (watching || typeof matchMedia !== "function") return;
+    watching = true;
+    const mq = matchMedia(WIDE_Q), again = () => { if (S.v3?.data && (S.tab || "today") === "today") render(); };
+    if (mq.addEventListener) mq.addEventListener("change", again); else if (mq.addListener) mq.addListener(again);
+  }
   const T = (sheet) => { st().sheet = sheet; render(); };
 
   /* -------------------------------------------------------------- data */
@@ -70,7 +85,17 @@
           <button type="button" data-v3-budget="${STEP}" aria-label="Raise today's budget by ${STEP} rupees">${ICON.plus}</button></span></div>
       <div class="chips" role="group" aria-label="Budget presets">${b.presets.map(n => `<button class="chip small" data-v3-preset="${n}" aria-pressed="${b.amount === n}">${money(n)}</button>`).join("")}
         <button class="chip small" data-v3-sheet="budget">Other…</button></div>
-      <p class="fine">${b.picked ? `${money(b.picked)} picked · <b>${b.left >= 0 ? `${money(b.left)} left` : `${money(-b.left)} over`}</b>` : "Nothing picked yet"}${b.unpriced?.length ? ` · ${b.unpriced.length} without a price` : ""}${b.source === "week" && b.basis ? ` · ${esc(b.basis)}` : ""}</p>${b.picked_bill != null ? `<p class="fine v3-bill-total">${b.bill_estimated ? "About " : ""}${money(b.picked_bill)} with Swiggy delivery, fees &amp; GST${b.bill_estimated ? " (estimate until Swiggy shows the bill)" : ""}</p>` : ""}${weekMoney()}</section>`;
+      ${b.picked ? `<p class="v3-left-line">${leftLine(b)}</p>` : ""}<p class="fine">${b.picked ? `${money(b.picked)} picked` : "Nothing picked yet"}${b.unpriced?.length ? ` · ${b.unpriced.length} without a price` : ""}${b.source === "week" && b.basis ? ` · ${esc(b.basis)}` : ""}</p>${b.picked_bill != null ? `<p class="fine v3-bill-total">${b.bill_estimated ? "About " : ""}${money(b.picked_bill)} with Swiggy delivery, fees &amp; GST${b.bill_estimated ? " (estimate until Swiggy shows the bill)" : ""}</p>` : ""}${weekMoney()}</section>`;
+  }
+  // What's left of today's budget, net of Swiggy fees. The server's figure (budget.left_after_fees,
+  // budget.left_estimated) wins; without it, today's budget minus the whole bill (picked_bill);
+  // with no Swiggy pick there are no fees, so the plain figure is already net.
+  function leftLine(b) {
+    const net = b.left_after_fees != null ? Number(b.left_after_fees) : b.picked_bill != null ? b.amount - b.picked_bill : null;
+    if (net == null) return `<b class="v3-left">${b.left >= 0 ? `${money(b.left)} left` : `${money(-b.left)} over`}</b>`;
+    const est = b.left_estimated != null ? !!b.left_estimated : !!b.bill_estimated;
+    const n = Math.round(net * 100) / 100;
+    return `<b class="v3-left">${n >= 0 ? `${money(n)} left after fees` : `${money(-n)} over after fees`}</b> <span class="tag ${est ? "" : "good"} v3-left-tag">${est ? "estimate" : "real bill"}</span>`;
   }
   // W4: the week's target against real Swiggy bills (plan view budget.kind/actual), and the
   // low-budget heads-up. Read from S.view; nothing shown when the plan doesn't carry them.
@@ -111,14 +136,23 @@
     const why = p && p.reasons?.length ? `<p class="fine v3-why">${esc(p.reasons.join(" · "))}</p>` : "";
     const how = p ? (p.how === "ziggy" ? `<span class="tag hot">Ziggy picked</span>` : p.how === "surprise" ? `<span class="tag hot">Surprise</span>` : "") : "";
     const select = pool.length || p
-      ? `<label class="sr" for="${id}">${label} from your pool</label><select id="${id}" class="v3-select" data-v3-pick="${meal}">
-          <option value="" ${p ? "" : "selected"}>${pool.length ? "Pick from your pool" : "Nothing in the pool"}</option>${opts}
+      ? `<label class="sr" for="${id}">${label} from your usual meals</label><select id="${id}" class="v3-select" data-v3-pick="${meal}">
+          <option value="" ${p ? "" : "selected"}>${pool.length ? `Pick from your ${usual(meal)}` : `No ${usual(meal)} yet`}</option>${opts}
           ${p && !pool.some(e => e.ref === p.ref) ? `<option value="${esc(p.ref)}" selected>${esc(entryLabel(p))}</option>` : ""}</select>`
-      : `<button class="secondary small" data-v3-add="${meal}">${ICON.plus}Add to ${meal} pool</button>`;
+      : `<button class="secondary small" data-v3-add="${meal}">${ICON.plus}Add a usual ${meal}</button>`;
     return `<div class="v3-meal" data-v3-meal="${meal}"><span class="v3-meal-name">${label}</span>
       <div class="v3-meal-pick">${select}${qty}</div>
       <div class="v3-meal-meta">${p?.price != null ? `<span class="fine">${money(p.price * p.qty)}${p.price_basis ? ` <i>(${esc(p.price_basis)})</i>` : ""}${p.bill ? ` <span class="v3-bill" title="${esc(p.bill.label)}">· ${p.bill.estimated ? "~" : ""}${money(p.bill.total)} with delivery, fees &amp; GST${p.bill.estimated ? " (estimate)" : ""}</span>` : ""}</span>` : ""}${how}
-        <button class="link small" data-v3-swap="${meal}" aria-haspopup="dialog" aria-label="Swap ${meal}: other options">${ICON.swap}Swap</button></div>${why}</div>`;
+        ${wide() ? "" : usualBtn(meal, pool.length)}<button class="link small" data-v3-swap="${meal}" aria-haspopup="dialog" aria-label="Swap ${meal}: other options">${ICON.swap}Swap</button></div>${why}${wide() ? "" : usualDrawer(d, meal)}</div>`;
+  }
+  // Phone: the meal's usual meals open under its line (a dropdown drawer), not as a separate block.
+  function usualBtn(meal, n) {
+    const open = !!st().usualOpen?.[meal];
+    return `<button class="link small v3-usual-btn" data-v3-usual="${meal}" aria-expanded="${open}" aria-controls="v3-usual-${meal}">Usual${n ? ` (${n})` : ""} <span aria-hidden="true">${open ? "▴" : "▾"}</span><span class="sr"> ${usual(meal)}</span></button>`;
+  }
+  function usualDrawer(d, meal) {
+    if (!st().usualOpen?.[meal]) return "";
+    return `<div class="v3-usual" id="v3-usual-${meal}" role="region" aria-label="Your ${usual(meal)}">${usualList(d, meal)}</div>`;
   }
   // W2: a meal's Swiggy cart opens a while before its order-by time; paying earlier would
   // deliver now. The plan's cell for today's meal carries order.cart_state / label.
@@ -144,7 +178,7 @@
     return `<div class="v3-compare" role="note" aria-label="Price compare"><span><b>Swiggy</b> ${money(c.swiggy)}</span>
       <span class="muted">Other apps · coming</span><span class="fine">${esc(c.basis)}</span></div>`;
   }
-  function poolCard(d, meal) {
+  function usualList(d, meal) {
     const pool = d.pools[meal] || [];
     const rows = pool.map(e => {
       const off = e.reasons.length > 0;
@@ -153,11 +187,20 @@
             e.eta_min != null ? `${e.eta_min} min` : null, e.source === "typed" ? "typed by you" : null, e.kind === "cook" ? "cook" : null].filter(Boolean).map(esc).join(" · ")}</span>
           ${off ? `<span class="v3-reason">${esc(e.reasons.join(" · "))}</span>` : ""}</div>
         <div class="v3-pool-btns"><span class="stepper sm"><button type="button" data-v3-qty="${meal}|${esc(e.ref)}|-1" aria-label="One fewer ${esc(e.name)}" ${e.qty <= 1 ? "disabled" : ""}>${ICON.minus}</button><button type="button" data-v3-qty="${meal}|${esc(e.ref)}|1" aria-label="One more ${esc(e.name)}" ${e.qty >= 8 ? "disabled" : ""}>${ICON.plus}</button></span>
-          <button class="icon-btn" data-v3-remove="${meal}|${esc(e.ref)}" aria-label="Remove ${esc(e.name)} from ${meal} pool">${ICON.close}</button></div></li>`;
+          <button class="icon-btn" data-v3-remove="${meal}|${esc(e.ref)}" aria-label="Remove ${esc(e.name)} from your ${usual(meal)}">${ICON.close}</button></div></li>`;
     }).join("");
-    return `<section class="card v3-pool" aria-labelledby="v3-pool-${meal}"><h2 class="h3" id="v3-pool-${meal}">${cap1(meal)} pool</h2>
-      ${rows ? `<ul class="v3-pool-list">${rows}</ul>` : `<p class="fine">No dishes yet. Add the ones you'd actually have for ${meal}.</p>`}
-      <button class="secondary small" data-v3-add="${meal}">${ICON.plus}New item / restaurant</button></section>`;
+    return `${rows ? `<ul class="v3-pool-list">${rows}</ul>` : `<p class="fine">No dishes yet. Add the ones you'd actually have for ${meal}.</p>`}
+      <button class="secondary small" data-v3-add="${meal}">${ICON.plus}New item / restaurant</button>`;
+  }
+  function poolCard(d, meal) {
+    return `<section class="card v3-pool" aria-labelledby="v3-pool-${meal}"><h2 class="h3" id="v3-pool-${meal}">${cap1(usual(meal))}</h2>
+      ${usualList(d, meal)}</section>`;
+  }
+  // Phone: usual meals for a meal that isn't on today (say dinner on a B+L day) stay reachable.
+  function otherUsual(d) {
+    const rest = MEAL_ORDER.filter(m => !d.meals.includes(m));
+    if (!rest.length) return "";
+    return `<div class="v3-other-usual">${rest.map(m => `<div class="v3-other-row"><span class="fine">${cap1(m)} (not today)</span>${usualBtn(m, (d.pools[m] || []).length)}</div>${usualDrawer(d, m)}`).join("")}</div>`;
   }
   // The Swiggy cart, its real bill, checkout and tracking: the classic block, always shown
   // here (the classic Today hides it when its meal card already shows the bill).
@@ -190,6 +233,7 @@
   /* -------------------------------------------------------------- screens */
   function today() {
     const v = st();
+    watchWidth();
     if (!v.data && !v.loading && !v.error) setTimeout(() => guard(load, "Load today"), 0);
     if (!v.data) return `<div class="v3-today">${v.error ? `<div class="errbar" role="alert"><div class="msg">${esc(v.error)}</div><button class="small" data-v3-act="reload">Retry</button></div>`
       : `<div class="skeleton" aria-busy="true"><i></i><i></i><i></i></div>`}</div>`;
@@ -202,15 +246,15 @@
       ${setupCard(d)}
       <section class="card v3-meals" aria-label="Today's meals">${d.meals.map(m => mealLine(d, m)).join("")}
         <div class="row v3-decide"><button class="secondary small" data-v3-sheet="decide">Decide for me</button>
-          <span class="fine">Only when you ask. Picks from your pools within your rules and ${money(d.budget.amount)}.</span></div></section>
+          <span class="fine">Only when you ask. Picks from your usual meals within your rules and ${money(d.budget.amount)}.</span></div>${wide() ? "" : otherUsual(d)}</section>
       ${actions(d)}
       ${compareRow(d)}
       ${cartBlock()}
       ${recapCard(d)}
       ${saveCard(d)}</div>
       <div class="v3-side"><div class="v3-top">${budgetCard(d)}${weatherCard(d.weather)}</div>${rulesRow(d)}</div></div>
-      <h2 class="k v3-pools-h">Your pools</h2>
-      <div class="v3-pools">${MEAL_ORDER.map(m => poolCard(d, m)).join("")}</div>
+      ${wide() ? `<h2 class="k v3-pools-h">Your usual meals</h2>
+      <div class="v3-pools">${MEAL_ORDER.map(m => poolCard(d, m)).join("")}</div>` : ""}
     </div>`;
   }
   function cookScreen() {
@@ -251,7 +295,7 @@
     const r = st().data.rules;
     return sheet("rules", "Your rules", `<p class="k">Minimum rating</p><div class="chips">${MIN_RATINGS.map(([v, l]) => `<button class="chip" data-v3-rule="min_rating:${v}" aria-pressed="${Number(r.min_rating) === v}">${l}</button>`).join("")}</div>
       <p class="k">Delivery time</p><div class="chips">${MAX_ETAS.map(([v, l]) => `<button class="chip" data-v3-rule="max_eta:${v}" aria-pressed="${Number(r.max_eta) === v}">${l}</button>`).join("")}</div>
-      <p class="fine">Dishes outside these stay in your pools, greyed out with the reason. Rating and time are what Swiggy showed when you added the dish.</p>
+      <p class="fine">Dishes outside these stay in your usual meals, greyed out with the reason. Rating and time are what Swiggy showed when you added the dish.</p>
       <p class="k">Diet and allergies</p><p class="fine">${esc({ veg: "Vegetarian", vegan: "Vegan", nonveg: "Non-vegetarian" }[r.diet] || r.diet)}${r.allergens.length ? ` · avoiding ${esc(r.allergens.join(", ").replace(/_/g, " "))}` : ""}. A dish not marked vegetarian is treated as not vegetarian.</p>
       <button class="secondary" data-go="more:settings">Change diet or allergies</button>`, "rules");
   }
@@ -272,7 +316,7 @@
       cell ? `<button class="secondary small" data-sheet="${cell.session_id}">Change in the week plan (cook, keep, skip)</button>` : "",
       swiggyReady() && !cell ? `<button class="secondary small" data-hungry="${meal}">Add ${meal} to the week plan now</button>` : "",
     ].filter(Boolean).join("");
-    return sheet("swap", `Swap ${meal}`, `${ok.length ? `<p class="k">From your ${meal} pool</p><div class="stack" style="gap:6px">${ok.map(row).join("")}</div>` : `<p class="fine">Nothing in your ${meal} pool passes your rules yet.</p>`}
+    return sheet("swap", `Swap ${meal}`, `${ok.length ? `<p class="k">From your ${usual(meal)}</p><div class="stack" style="gap:6px">${ok.map(row).join("")}</div>` : `<p class="fine">None of your ${usual(meal)} passes your rules yet.</p>`}
       ${off.length ? `<details><summary>${off.length} greyed out by your rules</summary><ul class="fine v3-off-list">${off.map(e => `<li>${esc(e.name)} — ${esc(e.reasons.join(" · "))}</li>`).join("")}</ul></details>` : ""}
       ${d.picks[meal] ? `<button class="ghost small" data-v3-swapto="${meal}|">Clear ${meal}</button>` : ""}
       <p class="k">More ways</p><div class="row">${classic}</div>`, `swap ${meal}`);
@@ -296,7 +340,7 @@
     s.suggShown = items;
     return `<section class="v3-sugg stack" aria-label="Suggestions from your Swiggy orders"><p class="k">From your Swiggy orders</p>
       ${items.length ? `<form id="v3-sugg" class="stack" style="gap:6px">${items.map((i, n) => `<label class="tick v3-sugg-row"><input type="checkbox" data-v3-sugg="${n}"> <span><b>${esc(i.item_name)}</b> <span class="fine">${esc([i.restaurant_name, `${i.times}× ordered`, i.rating != null ? `${i.rating}★` : null].filter(Boolean).join(" · "))}</span></span></label>`).join("")}
-        <button class="secondary small" type="submit">Add ticked to ${meal} pool</button></form>`
+        <button class="secondary small" type="submit">Add ticked to your ${usual(meal)}</button></form>`
         : `<p class="fine">Nothing new for ${meal} in your recent Swiggy orders.</p>`}
       <p class="fine">${esc(g.note)}${g.attribution ? ` ${esc(g.attribution)}.` : ""} <button class="link small" data-v3-act="sugg-delete">Delete these suggestions</button></p></section>`;
   }
@@ -304,7 +348,7 @@
     const s = st().sheet, d = st().data, meal = s.meal;
     const tab = s.tab || (d.swiggy.connected && d.swiggy.address ? "swiggy" : "type");
     const tabs = `<div class="seg" role="group" aria-label="How to add">${d.swiggy.connected && d.swiggy.address ? `<button data-v3-addtab="swiggy" aria-pressed="${tab === "swiggy"}">Search Swiggy</button>` : ""}<button data-v3-addtab="type" aria-pressed="${tab === "type"}">Type it in</button></div>`;
-    const meals = `<div class="chips" role="group" aria-label="Which pool">${MEAL_ORDER.map(m => `<button class="chip small" data-v3-addmeal="${m}" aria-pressed="${m === meal}">${cap1(m)}</button>`).join("")}</div>`;
+    const meals = `<div class="chips" role="group" aria-label="Which meal">${MEAL_ORDER.map(m => `<button class="chip small" data-v3-addmeal="${m}" aria-pressed="${m === meal}">${cap1(m)}</button>`).join("")}</div>`;
     let body;
     if (tab === "swiggy") {
       const res = s.results, menu = s.menu;
@@ -329,7 +373,7 @@
         <label>Price you pay (₹)<input id="v3-t-price" type="number" inputmode="numeric" min="1" max="20000"></label></div>
         <fieldset class="v3-fs"><legend class="k">Vegetarian?</legend><div class="chips">${[["1", "Yes"], ["0", "No"], ["", "Not sure"]].map(([v, l]) => `<label class="chip small"><input type="radio" name="v3-t-veg" value="${v}" ${v === "" ? "checked" : ""}> ${l}</label>`).join("")}</div></fieldset>
         <fieldset class="v3-fs"><legend class="k">I usually</legend><div class="chips">${[["order", "Order it"], ["cook", "Cook it"]].map(([v, l]) => `<label class="chip small"><input type="radio" name="v3-t-kind" value="${v}" ${v === "order" ? "checked" : ""}> ${l}</label>`).join("")}</div></fieldset>
-        <button class="primary" type="submit">Add to ${meal} pool</button>
+        <button class="primary" type="submit">Add to your ${usual(meal)}</button>
         <p class="fine">Typed dishes are yours: Ziggy can share or cook them, but can only put Swiggy menu dishes in a cart.</p></form>`;
     }
     return sheet("add", "New item / restaurant", `${meals}${d.swiggy.connected ? suggBlock(s, meal) : ""}${tabs}${body}`, "add a dish");
@@ -433,14 +477,14 @@
     const r = await post("/pool/suggested", { meal: s.meal, items });
     const a = r.suggested_added || { swiggy: [], typed: [], refused: [] };
     const n = a.swiggy.length + a.typed.length;
-    toast([n ? `${n} added to your ${s.meal} pool` : null, a.typed.length ? `${a.typed.join(", ")}: typed in (not on the menu now)` : null,
+    toast([n ? `${n} added to your ${usual(s.meal)}` : null, a.typed.length ? `${a.typed.join(", ")}: typed in (not on the menu now)` : null,
       a.refused.length ? `Not added: ${a.refused.join("; ")}` : null].filter(Boolean).join(". "));
   }
   async function addItem(itemId) {
     const s = st().sheet, item = s.menu.items.find(i => i.id === itemId);
     const eta = Number(/\d+/.exec(String(s.place.eta || ""))?.[0]) || null;
     await post("/pool", { source: "swiggy", meal: s.meal, restaurant_id: s.menu.restaurant.id, restaurant_name: s.menu.restaurant.name,
-      item_id: itemId, rating: s.place.rating, eta_min: eta }, `${item.name} added to your ${s.meal} pool`);
+      item_id: itemId, rating: s.place.rating, eta_min: eta }, `${item.name} added to your ${usual(s.meal)}`);
   }
   async function addTyped() {
     const s = st().sheet, val = (id) => document.getElementById(id)?.value;
@@ -449,7 +493,7 @@
     const name = (val("v3-t-name") || "").trim();
     await post("/pool", { source: "typed", meal: s.meal, name, restaurant_name: val("v3-t-place") || "",
       price: val("v3-t-price") ? Number(val("v3-t-price")) : null, veg: vegRaw === "" || vegRaw == null ? null : vegRaw === "1",
-      kind: radio("v3-t-kind") || "order" }, `${name} added to your ${s.meal} pool`);
+      kind: radio("v3-t-kind") || "order" }, `${name} added to your ${usual(s.meal)}`);
     st().sheet = null; render();
   }
   async function decide() {
@@ -577,7 +621,10 @@
     on("[data-v3-qty]", "click", (e) => { const [meal, ref, dn] = e.currentTarget.dataset.v3Qty.split("|"), cur = v().data.pools[meal].find(x => x.ref === ref);
       guard(() => post("/pool/qty", { meal, ref, qty: Math.max(1, Math.min(8, cur.qty + Number(dn))) }), "Change quantity"); });
     on("[data-v3-remove]", "click", (e) => { const [meal, ref] = e.currentTarget.dataset.v3Remove.split("|");
-      guard(() => post("/pool/remove", { meal, ref }, `Removed from your ${meal} pool`), "Remove a dish"); });
+      guard(() => post("/pool/remove", { meal, ref }, `Removed from your ${usual(meal)}`), "Remove a dish"); });
+    on("[data-v3-usual]", "click", (e) => { const m = e.currentTarget.dataset.v3Usual, v0 = v();
+      v0.usualOpen = { ...(v0.usualOpen || {}), [m]: !v0.usualOpen?.[m] }; render();
+      document.querySelector?.(`[data-v3-usual="${m}"]`)?.focus?.(); });
     on("[data-v3-swap]", "click", (e) => T({ kind: "swap", meal: e.currentTarget.dataset.v3Swap }));
     on("[data-v3-swapto]", "click", (e) => { const [meal, ref] = e.currentTarget.dataset.v3Swapto.split("|");
       guard(async () => { await post("/pick", { meal, ref: ref || null }); T(null); }, `Swap ${meal}`); });
@@ -589,7 +636,7 @@
     on("[data-v3-addmeal]", "click", (e) => { v().sheet.meal = e.currentTarget.dataset.v3Addmeal; render(); });
     on("[data-v3-hist]", "click", (e) => { const q = e.currentTarget.dataset.v3Hist; guard(() => searchSwiggy(q), `Search Swiggy for “${q}”`); });
     on("[data-v3-place]", "click", (e) => { const d = e.currentTarget.dataset; guard(() => openPlace(d.v3Place, d.v3Pname, d.v3Prating, d.v3Peta), `Open “${d.v3Pname}”`); });
-    on("[data-v3-additem]", "click", (e) => { const id = e.currentTarget.dataset.v3Additem; guard(() => addItem(id), "Add to your pool"); });
+    on("[data-v3-additem]", "click", (e) => { const id = e.currentTarget.dataset.v3Additem; guard(() => addItem(id), "Add to your usual meals"); });
     on("[data-v3-recap-share]", "click", (e) => { const text = e.currentTarget.dataset.v3RecapShare;
       guard(async () => { if (typeof navigator !== "undefined" && navigator.share) { try { await navigator.share({ text }); return; } catch (_) { return; } }
         window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener"); }, "Share"); });
@@ -610,9 +657,9 @@
     const search = document.getElementById("v3-search");
     if (search) search.onsubmit = (e) => { e.preventDefault(); const q = document.getElementById("v3-q").value; guard(() => searchSwiggy(q), `Search Swiggy for “${q}”`); };
     const sugg = document.getElementById("v3-sugg");
-    if (sugg) sugg.onsubmit = (e) => { e.preventDefault(); guard(addSugg, "Add suggestions to your pool"); };
+    if (sugg) sugg.onsubmit = (e) => { e.preventDefault(); guard(addSugg, "Add suggestions to your usual meals"); };
     const typed = document.getElementById("v3-typed");
-    if (typed) typed.onsubmit = (e) => { e.preventDefault(); guard(addTyped, "Add to your pool"); };
+    if (typed) typed.onsubmit = (e) => { e.preventDefault(); guard(addTyped, "Add to your usual meals"); };
     const save = document.getElementById("v3-save");
     if (save) save.onsubmit = (e) => { e.preventDefault(); guard(() => saveAccount(save), "Save sign-in"); };
   }
@@ -636,8 +683,8 @@
         // The drag-and-drop pool board is classic-only: pools live on Today now.
         const t = S.savedTab || (swiggyReady() ? "meals" : "places");
         if (t !== "meals" || !swiggyReady()) return null;
-        return savedScreen().replace(poolsBoard(), `<section class="card rise3"><h2 class="h3">Your meal pools are on Today</h2>
-          <p class="fine">Breakfast, lunch and dinner pools: tap + New item / restaurant to add a dish. No dragging.</p>
+        return savedScreen().replace(poolsBoard(), `<section class="card rise3"><h2 class="h3">Your usual meals are on Today</h2>
+          <p class="fine">Usual breakfasts, lunches and dinners: tap + New item / restaurant to add a dish. No dragging.</p>
           <button class="secondary small" data-tab="today">Open Today</button></section>`);
       }
       return null;
