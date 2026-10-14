@@ -732,9 +732,16 @@ async function toggleLiveFavourite(id, name) {
   const r = await api(`/api/user/${S.userId}/swiggy/favourites`, "POST", { restaurant_id: id, restaurant_name: name });
   S.liveFavourites = r.restaurants; toast(r.favourite ? `${name} saved. Ziggy plans from your saved places.` : `${name} removed from Saved`); render();
 }
+const closedError = (e) => e?.code === "restaurant_closed" || /\bclosed right now\b/i.test(e?.message || "");
 async function openLivePlace(id, name, dish) {
   S.sheet = null; S.liveLoading = name; S.liveBrowseMenu = null; S.menuCat = null; render();
   try { S.liveBrowseMenu = await api(`/api/user/${S.userId}/swiggy/live-menu?restaurant_id=${encodeURIComponent(id)}&restaurant_name=${encodeURIComponent(name)}`); }
+  catch (e) {
+    if (!closedError(e)) throw e;
+    // Not an error to retry: the place is shut. Grey it out and say so.
+    S.closedPlaces = new Set([...(S.closedPlaces || []), String(id)]);
+    S.liveLoading = null; render(); toast(`${name} is closed right now. Try it later, or pick another place.`); return;
+  }
   finally { S.liveLoading = null; }
   render();
   if (dish) await searchLiveDishes(dish);
@@ -2045,7 +2052,7 @@ function poolsBoard() {
       return `<section class="pool card" data-drop="${m}" aria-label="${cap1(m)} pool"><div class="row" style="justify-content:space-between"><h3 class="h3">${cap1(m)}</h3><span class="tag">${list.length ? `${list.length} dish${list.length > 1 ? "es" : ""}` : planned.has(m) ? "Any of your places" : "Not planned"}</span></div>
         <ul class="plist">${list.map(d => poolChip(m, d)).join("") || `<li class="pempty">Drop dishes here</li>`}</ul></section>`; }).join("")}</div>
     <div><h2 class="h2">From your places</h2><p class="fine">Real menus for ${esc(P.address || "your address")}. Drag a dish onto a meal, or tap B, L or D.</p></div>
-    ${favs.some(f => !f.saved) ? `<p class="fine">${favs.some(f => f.saved) ? "Your saved places first, then the" : "You haven't saved any places yet. These are the"} places Ziggy found near you. Adding a dish saves its place.</p>` : ""}
+    ${favs.some(f => !f.saved) ? `<p class="fine">${favs.some(f => f.saved) ? "Your saved places first, then other places Ziggy found near you." : "Places Ziggy found near you."} Adding a dish saves its place.</p>` : ""}
     ${favs.length ? favs.map(f => poolPlace(f)).join("") : `<p class="fine">Search Swiggy above, or see every place nearby, then open a menu.</p>`}
   </section>`;
 }
@@ -2150,23 +2157,30 @@ function wirePoolDrag() {
     document.addEventListener("pointercancel", up);
   }));
 }
+// Swiggy lists closed places too (availabilityStatus "CLOSED"). They're shown greyed with
+// when they open, if Swiggy says, and no Menu button: opening one would only fail.
+const isClosed = (p) => !!p && (S.closedPlaces?.has(String(p.id)) || /^(closed|offline|unavailable|unserviceable)$/i.test(String(p.availability || "")));
+const opensText = (p) => { const t = p.opens_at || p.next_open; return t ? `Opens ${/^\d{1,2}:\d{2}$/.test(String(t)) ? `at ${t}` : String(t)}` : "Closed now"; };
 function placeRow(p, { starred, live }) {
+  const closed = live && isClosed(p);
   const letter = esc(String(p.name || "?").replace(/^the\s+/i, "").charAt(0).toUpperCase());
   const eta = live && p.eta != null ? (/^\d+$/.test(String(p.eta)) ? `${p.eta} min` : String(p.eta)) : "";
   const km = live && Number.isFinite(Number(p.distance)) && p.distance !== null && p.distance !== "" ? `${Number(p.distance).toFixed(1)} km` : "";
   const meta = live ? [p.area, p.rating ? `${p.rating}★` : "", eta, km].filter(Boolean).map(String).map(esc).join(" · ")
     : [p.rating ? `${Number(p.rating).toFixed(1)}★` : "", p.eta_min ? `${p.eta_min} min` : "", p.dishes_fit != null ? `${p.dishes_fit} of ${p.dishes_total} fit you` : ""].filter(Boolean).join(" · ");
   const star = live ? `data-live-fav="${esc(p.id)}" data-live-name="${esc(p.name)}"` : `data-fav="${p.id}"`;
-  return `<div class="mrow" style="cursor:default"><span class="ico lilac" aria-hidden="true" style="border-radius:50%;font-weight:800">${letter}</span>
-    <span class="t"><b>${esc(p.name)}${p.sponsored ? ` <span class="tag" title="Swiggy shows this place as an ad">Ad</span>` : ""}</b><span class="s">${meta || (live ? "Saved on Swiggy" : "")}</span></span>
-    ${live ? `<button class="small secondary" data-live-place="${esc(p.id)}" data-live-name="${esc(p.name)}">Menu</button>` : ""}
+  return `<div class="mrow${closed ? " closed" : ""}" style="cursor:default"><span class="ico lilac" aria-hidden="true" style="border-radius:50%;font-weight:800">${letter}</span>
+    <span class="t"><b>${esc(p.name)}${p.sponsored ? ` <span class="tag" title="Swiggy shows this place as an ad">Ad</span>` : ""}${closed ? ` <span class="tag">Closed</span>` : ""}</b><span class="s">${closed ? `${esc(opensText(p))}${meta ? ` · ${meta}` : ""}` : meta || (live ? "Saved on Swiggy" : "")}</span></span>
+    ${live && !closed ? `<button class="small secondary" data-live-place="${esc(p.id)}" data-live-name="${esc(p.name)}">Menu</button>` : ""}
     <button class="heart" ${star} aria-pressed="${starred}" aria-label="${starred ? "Remove" : "Save"} ${esc(p.name)}">${ICON.heart}</button></div>`;
 }
+// The one "nothing saved" sentence, wherever Saved is empty (it used to say two different things).
+const NO_SAVED_PLACES = "You haven't saved any places yet. Tap ♥ on a place you like and Ziggy plans from it.";
 function savedPlaces() {
   if (swiggyReady()) {
     const fav = S.liveFavourites;
     if (!fav) return `<div class="skeleton"><i></i><i></i><i></i></div>`;
-    return `<section class="card tight rise3">${fav.map(p => placeRow(p, { starred: true, live: true })).join("") || `<p class="fine" style="padding:16px 0">Nothing saved yet. Search Swiggy above and tap ♥ on places you like: Ziggy plans from them.</p>`}</section>
+    return `<section class="card tight rise3">${fav.map(p => placeRow(p, { starred: true, live: true })).join("") || `<p class="fine" style="padding:16px 0">${NO_SAVED_PLACES}</p>`}</section>
       <p class="fine">Ziggy plans your meals from these places. ${fav.length ? `<button class="link" data-act="live-menus" style="min-height:0;font-size:inherit">Re-plan from them now</button>` : ""}</p>`;
   }
   const P = S.places;
@@ -2175,7 +2189,7 @@ function savedPlaces() {
   const connect = S.swiggy && !S.swiggy.connected && swiggySignInOpen()
     ? `<div class="note"><span class="ic">${ICON.place}</span><span style="flex:1">Connect Swiggy to search and save real places near you.</span><button class="small" data-act="connect-open">Connect</button></div>` : "";
   if (!P.length) return connect + `<p class="fine">No places yet.</p>`;
-  return `${connect}<section class="card tight rise3">${favs.map(p => placeRow(p, { starred: true, live: false })).join("") || `<p class="fine" style="padding:16px 0">No saved places yet. Tap ♥ on places you like below.</p>`}</section>
+  return `${connect}<section class="card tight rise3">${favs.map(p => placeRow(p, { starred: true, live: false })).join("") || `<p class="fine" style="padding:16px 0">${NO_SAVED_PLACES}</p>`}</section>
     ${rest.length ? `<p class="k">Nearby</p><section class="card tight">${rest.map(p => placeRow(p, { starred: false, live: false })).join("")}</section>` : ""}
     <p class="fine">Plans come mostly from saved places, plus a few new ones as your variety setting allows.</p>`;
 }
@@ -2222,7 +2236,7 @@ function liveResultsBlock() {
   const starred = new Set((S.liveFavourites || []).map(x => x.id));
   const fastOk = (r) => !S.filters.fast || (etaMinutes(r.eta) != null && etaMinutes(r.eta) <= FAST_MIN);
   const cuisineOk = (r) => !S.cuisine || (r.cuisines || []).includes(S.cuisine);
-  const shown = results.filter(r => fastOk(r) && cuisineOk(r));
+  const shown = results.filter(r => fastOk(r) && cuisineOk(r)).sort((a, b) => isClosed(a) - isClosed(b));
   const anyEta = results.some(r => etaMinutes(r.eta) != null);
   const cuisines = [...new Set(results.flatMap(r => r.cuisines || []))];     // Swiggy's own labels, never a fixed list
   return `<section class="stack" aria-label="Swiggy results"><div class="row" style="justify-content:space-between"><p class="k">${S.liveResults.browse ? `Places Swiggy lists near ${esc(S.liveResults.address || "you")} · ${results.length}` : `Swiggy results for ${esc(S.liveResults.query)}`}</p>
