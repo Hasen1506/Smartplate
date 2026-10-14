@@ -570,7 +570,7 @@ def create_app() -> Flask:
     def receipts_csv(user_id):
         from .domain.receipts import export_csv
         return Response(export_csv(user_id), mimetype="text/csv",
-                        headers={"Content-Disposition": "attachment; filename=smartplate_expenses.csv"})
+                        headers={"Content-Disposition": "attachment; filename=ziggy_expenses.csv"})
 
     # ---- calendar (.ics ingest) ---- #
     @app.post("/api/user/<int:user_id>/calendar/ics")
@@ -720,7 +720,7 @@ def create_app() -> Flask:
     @app.get("/api/user/<int:user_id>/data.json")
     def export_profile(user_id):
         response = jsonify(profile_data.export(user_id))
-        response.headers['Content-Disposition'] = f'attachment; filename=smartplate-profile-{user_id}.json'
+        response.headers['Content-Disposition'] = f'attachment; filename=ziggy-profile-{user_id}.json'
         return response
 
     @app.delete("/api/user/<int:user_id>")
@@ -767,7 +767,7 @@ def create_app() -> Flask:
         view = service.current_plan(user_id)
         body = reminders.to_ics(reminders.upcoming(view), plan_id=view["plan"]["id"], name=view["user"]["name"])
         return Response(body, mimetype="text/calendar", headers={
-            "Content-Disposition": "attachment; filename=smartplate-reminders.ics"})
+            "Content-Disposition": "attachment; filename=ziggy-reminders.ics"})
 
     # ---- push reminders at the order-by time (push.py) ---- #
     @app.get("/api/user/<int:user_id>/push")

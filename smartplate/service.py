@@ -700,7 +700,7 @@ def grocery_basket(plan_id: int) -> dict:
     return plan_view(plan_id)["coach"]["basket"]
 
 
-ANONYMOUS_AUTHOR = "A SmartPlate user"
+ANONYMOUS_AUTHOR = "A Ziggy user"
 
 
 def list_community(city=None):
