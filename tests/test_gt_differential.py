@@ -62,6 +62,9 @@ class Version:
     def activate(self, monkeypatch):
         cfg, clock = self.mod["config"], self.mod["clock"]
         monkeypatch.setattr(cfg, "DB_PATH", self.db_path)
+        # a baseline is always compared on its own SQLite file, also on the Postgres run
+        # (conftest's sqlite_only switch only reaches the current tree's config)
+        monkeypatch.setattr(cfg, "DATABASE_URL", "", raising=False)
         monkeypatch.setattr(cfg, "WEATHER_PROVIDER", "simulated")
         monkeypatch.setattr(cfg, "SWIGGY_PROVIDER", "simulated")
         monkeypatch.setattr(clock, "now", lambda: self.at)

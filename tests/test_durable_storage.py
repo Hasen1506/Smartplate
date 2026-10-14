@@ -285,3 +285,11 @@ def test_sqlite_to_postgres_copies_every_record(tmp_path, monkeypatch):
 def closing_sqlite(path):
     from contextlib import closing
     return closing(sqlite3.connect(path))
+
+
+def test_a_column_named_text_is_not_rewritten_as_a_type():
+    """manual_addresses has a column called `text`: only its type gets Postgres' collation."""
+    out = db_pg.translate_ddl("CREATE TABLE IF NOT EXISTS t (\n id INTEGER PRIMARY KEY,\n text TEXT NOT NULL,\n"
+                              " n REAL, UNIQUE(id, text))")
+    assert '\n    text TEXT COLLATE "C" NOT NULL' in out and "UNIQUE(id, text)" in out
+    assert "n DOUBLE PRECISION" in out and out.count("COLLATE") == 1

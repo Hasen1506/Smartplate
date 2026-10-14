@@ -47,6 +47,8 @@ class NeonLikeDatabase:
                 return iter(self._cur)
 
         class Conn:
+            real = conn
+
             def cursor(self):
                 return Cur(conn.cursor())
 
@@ -59,7 +61,8 @@ class NeonLikeDatabase:
 def neon(seeded, monkeypatch):
     fake = NeonLikeDatabase(db.connect)
     monkeypatch.setattr(db, "connect", fake.connect)
-    monkeypatch.setattr(db, "_changes", lambda c: c.total_changes)
+    real_changes = db._changes
+    monkeypatch.setattr(db, "_changes", lambda c: real_changes(getattr(c, "real", c)))   # SQLite or Postgres
     monkeypatch.setattr(db, "on_stale_connection", fake.replace_pool)
     return fake
 

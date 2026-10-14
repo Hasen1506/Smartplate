@@ -77,6 +77,10 @@ def copy(source: Path, *, replace: bool = False, dry_run: bool = False, out=prin
         swiggy_connect.init_schema()
         from smartplate import today                  # v3 Today tables (docs/IA.md)
         today.init_schema()
+        from smartplate import privacy, ratelimit, websession
+        from smartplate.domain import autofill
+        for module in (autofill, privacy, ratelimit, websession):   # tables runtime/profile_data create
+            module.init_schema()
         with closing(sqlite3.connect(upgraded)) as src:
             src.row_factory = sqlite3.Row
             tables = _tables(src)
