@@ -945,6 +945,9 @@ function render() {
     app.innerHTML = storageBanner() + onboardingScreen().replace('<main class="onboard">', `<main class="onboard${arrive ? " anim" : ""}">`); wire(); syncHistory(); return;
   }
   if (S.welcome || !S.view) { app.innerHTML = storageBanner() + welcomeScreen(); wire(); syncHistory(); return; }
+  // Re-rendering rebuilds the page: remember where focus was inside an open sheet to put it back.
+  const act = document.activeElement, inSheet = act?.closest?.(".sheet-bg[data-ov]");
+  const keep = inSheet ? { ov: inSheet.dataset.ov, key: act.matches?.("[role=dialog]") ? null : openerKey(act) } : null;
   const viewKey = [S.tab, S.more, S.weekView, S.savedTab].join("|");
   const arrive = viewKey !== S.viewKey; S.viewKey = viewKey;
   app.innerHTML = storageBanner() + offlineBar() + `<div class="shell">${navBar()}<div class="col">${topbar()}`
@@ -962,6 +965,12 @@ function render() {
   wire();
   if (added.length) focusSheet(added.at(-1));
   else if (open.length < before.size) restoreFocus();
+  else if (keep) {
+    const bg = open.find(el => el.dataset.ov === keep.ov);
+    let el = null;
+    try { el = bg && keep.key ? bg.querySelector(keep.key) : null; } catch (_) { el = null; }
+    if (el && !el.disabled) el.focus?.({ preventScroll: true }); else if (bg) focusSheet(bg);
+  }
   syncHistory();
   queueQuick();
 }

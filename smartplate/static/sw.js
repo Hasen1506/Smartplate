@@ -57,11 +57,13 @@ self.addEventListener("fetch", (e) => {
     if (cacheableApi(url)) e.respondWith(apiRead(e.request));
     return;
   }
-  const key = e.request.mode === "navigate" ? "/" : e.request;
+  // Fingerprinted assets (/static/app.js?v=<hash>) are kept under their plain path, so the
+  // newest copy replaces the last one and an offline reload finds it whatever the hash.
+  const key = e.request.mode === "navigate" ? "/" : url.pathname.startsWith("/static/") ? url.pathname : e.request;
   e.respondWith(fetch(e.request).then((res) => {
-    if (res.ok) caches.open(CACHE).then((c) => c.put(key, res.clone()));
+    if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(key, copy)); }
     return res;
-  }).catch(() => caches.match(key)));
+  }).catch(() => caches.match(key, { cacheName: CACHE, ignoreSearch: true })));
 });
 
 /* Push reminders: the server sends {title, body, url, tag}, encrypted end to end. */
