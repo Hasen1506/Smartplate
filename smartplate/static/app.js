@@ -2210,7 +2210,9 @@ function filterChip(key, label, extra = "") {
   return `<button class="chip" data-filter="${key}" aria-pressed="${!!S.filters[key]}" ${extra}>${label}</button>`;
 }
 // Swiggy's brand rules: "Powered by Swiggy" next to its results, the cart and the order (W7).
-const poweredBySwiggy = () => `<p class="fine" data-attribution="swiggy" style="text-align:right;opacity:.8">Powered by Swiggy</p>`;
+// Exact wording, >=14px, full contrast. TODO(founder): add Swiggy's official square logo
+// (brand-guidelines.md asks for logo + phrase in visual UIs) once the asset is downloaded.
+const poweredBySwiggy = () => `<p data-attribution="swiggy" style="text-align:right;font-size:14px;margin:8px 0">Powered by Swiggy</p>`;
 function liveResultsBlock() {
   const results = S.liveResults.restaurants || [];
   const starred = new Set((S.liveFavourites || []).map(x => x.id));

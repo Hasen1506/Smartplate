@@ -162,16 +162,15 @@ URI to [Swiggy Builders Club](https://mcp.swiggy.com/builders/docs/operate/acces
 An approval for another hostname or path does not cover this URL. Swiggy creates
 the OAuth client ID through dynamic client registration, so there is no separate
 client ID to apply for; provider onboarding and redirect approval still apply.
-As of 30 September 2026, Swiggy's sign-in page rejects the current Render callback
-with “Onrender isn't whitelisted yet”; the earlier approval email did not identify
-the URI. The optional `SMARTPLATE_SWIGGY_CALLBACK_PATH=/auth/swiggy/callback` supports that
-path if Swiggy has approved the resulting URL on a host you control. Set
-`SMARTPLATE_PUBLIC_URL` to that host's public HTTPS origin only when it actually
-routes to this app. Never point OAuth at a proposed or third-party domain. Until
-the approved URI and live contract are verified, use the manual Swiggy hand-off.
-Once Swiggy has approved this deployment's exact callback, set
-`SMARTPLATE_SWIGGY_REDIRECT_APPROVED=1`; until then the app tells visitors that
-connecting Swiggy is not available on that server yet, instead of promising real restaurants.
+Status (Oct 2026): Swiggy has whitelisted the Render callback
+`https://smartplate-xgxd.onrender.com/swiggy/callback` and sign-in works there (the
+30 September "Onrender isn't whitelisted yet" rejection is resolved). Approval is derived:
+`/api/meta` reports `swiggy_redirect_approved: true` when this deployment's callback is in
+`SMARTPLATE_SWIGGY_APPROVED_REDIRECTS` (default: that Render URI). For any other host Swiggy
+confirms in writing, add its exact callback there (or set `SMARTPLATE_SWIGGY_REDIRECT_APPROVED=1`).
+The optional `SMARTPLATE_SWIGGY_CALLBACK_PATH=/auth/swiggy/callback` supports that path on a
+host you control. Never point OAuth at a proposed or third-party domain. Until a server is
+approved the app tells visitors that connecting Swiggy is not available there yet.
 
 `/healthz`, `/readyz` and `/api/meta` report whether the database survives a restart
 (`database.persistent` / `storage.persistent`). It is persistent with `DATABASE_URL`
@@ -259,8 +258,10 @@ instead of silently ordered.
 |---|---|---|
 | `PORT` | `5057` | HTTP port |
 | `SMARTPLATE_BRAIN` | `deterministic` | `llm` opts into the paid narrator (off the critical path) |
-| `SMARTPLATE_SWIGGY` | `simulated` | `live` enables MCP sign-in after provider approval; current Render origin is rejected by Swiggy |
-| `SMARTPLATE_LIVE_ORDERS` | `off` | `on` permits explicitly approved Cash on Delivery placement after durable storage and provider validation |
+| `SMARTPLATE_SWIGGY_MODE` | `live_cart` | One Swiggy mode, reported by `/api/meta` as `swiggy_mode`: `demo` (no Swiggy calls), `live_read` (sign-in, menus, history; no cart writes), `live_cart` (fill the user's reviewed cart; they pay in Swiggy), `live_order` (also place a user-approved COD order) |
+| `SMARTPLATE_SWIGGY_APPROVED_REDIRECTS` | the Render callback | Comma-separated exact callback URIs Swiggy has whitelisted; `swiggy_redirect_approved` is derived from it |
+| `SMARTPLATE_SWIGGY` | `simulated` | Legacy: only the old simulated order saga in fixture test runs. It never governed real sign-in or carts |
+| `SMARTPLATE_LIVE_ORDERS` | `off` | Legacy alias: `on` = mode `live_order` when `SMARTPLATE_SWIGGY_MODE` is unset |
 | `DATABASE_URL` | unset | Postgres connection URL (e.g. Neon, see “Keep your data”). Set: all data lives in Postgres and survives restarts; TLS is required unless the URL says otherwise. Unset: SQLite at `SMARTPLATE_DB` |
 | `SMARTPLATE_PG_POOL_MAX` | `8` | Most Postgres connections the app holds (one gunicorn worker × 8 threads) |
 | `SMARTPLATE_PG_SCHEMA` | `public` | Postgres schema to use |
@@ -292,11 +293,14 @@ charged amount or nutrition of the food received.
 With a sign-in (Me → Swiggy), Ziggy reads saved addresses,
 searches real restaurants, shows menus, maintains favourites and puts an exact
 reviewed dish in the cart. It can place a user-confirmed Cash on Delivery order
-only when `SMARTPLATE_LIVE_ORDERS=on`; otherwise checkout remains in Swiggy.
+only in mode `live_order`; otherwise checkout and payment remain in Swiggy. Nothing is
+ever paid without the person's explicit approval in Ziggy.
 These flows have automated API and real Chromium desktop/phone walkthrough tests
-against an isolated fake server. The real sign-in last checked on 30 September failed
-at Swiggy's allowlist page, so the first authenticated menu and cart calls remain
-to be tested after provider approval.
+against an isolated fake server, and were used for real on the Render deployment in
+October 2026 (real carts filled 8–9 Oct). With consent, Ziggy can also suggest favourites
+from the last 15 Swiggy orders (`/api/user/<id>/favourites/suggested`). Without Swiggy, a
+typed address and typed favourites work (`/manual-address`, `/typed-favourites`). Swiggy
+data in the UI carries "Powered by Swiggy". See docs/research/platform-2026-10.md.
 The simulated auto-ordering path (idempotent, spend-limited) remains under More. No
 background worker places orders. See [the integration notes](docs/vendor/swiggy/README.md).
 
