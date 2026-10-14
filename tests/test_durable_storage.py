@@ -34,8 +34,8 @@ def client(seeded):
 
 
 def _private_profile(client, name="Kept across restarts"):
-    made = client.post("/api/profiles", json={"name": name, "diet": "veg", "weekly_budget": 1800,
-                                              "meals": ["lunch", "dinner"], "favourites": [6]}).get_json()
+    made = client.post("/api/profiles", json={**{"name": name, "diet": "veg", "weekly_budget": 1800,
+                                              "meals": ["lunch", "dinner"], "favourites": [6]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid, headers = made["user"]["id"], {"X-SmartPlate-Key": made["access_key"]}
     assert client.post(f"/api/user/{uid}/account", headers=headers,
                        json={"login": f"restart-{uid}", "password": "a-long-password"}).status_code == 200
@@ -265,8 +265,8 @@ def test_sqlite_to_postgres_copies_every_record(tmp_path, monkeypatch):
         assert pg_client.post("/api/signin", json={"login": f"restart-{uid}",
                                                    "password": "a-long-password"}).status_code == 200
         # new rows continue after the copied ids
-        made = pg_client.post("/api/profiles", json={"name": "After the move", "diet": "veg",
-                                                     "weekly_budget": 1500, "meals": ["dinner"]}).get_json()
+        made = pg_client.post("/api/profiles", json={**{"name": "After the move", "diet": "veg",
+                                                     "weekly_budget": 1500, "meals": ["dinner"]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
         assert made["user"]["id"] > uid
 
         with pytest.raises(SystemExit, match="already holds SmartPlate data"):

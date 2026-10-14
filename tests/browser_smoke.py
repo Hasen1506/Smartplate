@@ -28,8 +28,8 @@ def pilot(seeded, monkeypatch):
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={"name": "Browser test profile", "diet": "veg",
-        "weekly_budget": 2000, "meals": ["dinner"], "favourites": []}).get_json()
+    created = client.post("/api/profiles", json={**{"name": "Browser test profile", "diet": "veg",
+        "weekly_budget": 2000, "meals": ["dinner"], "favourites": []}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid = created["user"]["id"]
     _connect(client, fake, uid=uid)
     key = client.environ_base["HTTP_X_SMARTPLATE_KEY"]

@@ -217,11 +217,14 @@ def call(user_id: int, name: str, arguments: dict) -> object:
         logging.getLogger(__name__).warning("Could not record Swiggy response shape for %s", name)
     if result.get("isError"):
         text = data.get("text") if isinstance(data, dict) else None
-        raise SwiggyError(f"Swiggy said: {(text or json.dumps(data))[:240]}")
+        # Never the raw reply: it can hold addresses and phone numbers (grill #45).
+        from .. import privacy
+        raise SwiggyError(f"Swiggy said: {privacy.redact(text or 'the request failed')[:240]}")
     if isinstance(data, dict) and data.get("success") is False:
         error = data.get("error") or {}
         message = error.get("message") if isinstance(error, dict) else str(error)
-        raise SwiggyError(f"Swiggy said: {(message or 'The request failed')[:240]}")
+        from .. import privacy
+        raise SwiggyError(f"Swiggy said: {privacy.redact(message or 'The request failed')[:240]}")
     return data
 
 

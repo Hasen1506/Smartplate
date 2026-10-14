@@ -6,7 +6,7 @@ from flask import Flask, Response, g, jsonify, redirect, request, send_from_dire
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, accounts, config, errors, everyday, profile_data, push, ratelimit, service, websession
+from . import access, accounts, config, errors, everyday, privacy, profile_data, push, ratelimit, service, websession
 from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, week_orders
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
@@ -190,6 +190,13 @@ def create_app() -> Flask:
         response = jsonify(error=str(error))
         response.headers['Retry-After'] = str(error.wait_s)
         return response, 429
+
+    @app.errorhandler(privacy.ConsentRequired)
+    def consent_required(error):
+        # Not refused, just not asked yet: the app shows this notice and asks once (DPDP s.5-6).
+        return jsonify(error=str(error), code="consent_required", purpose=error.purpose,
+                       notice=privacy.PURPOSES[error.purpose], notice_version=privacy.NOTICE_VERSION,
+                       policy_url="/privacy"), 409
 
     @app.errorhandler(swiggy_connect.SwiggyError)
     def swiggy_error(error):
@@ -595,7 +602,10 @@ def create_app() -> Flask:
     @app.post("/api/profiles")
     def create_profile():
         ratelimit.check(f"profiles:{request.remote_addr}", 20, 3600)
-        view = everyday.create_profile(request.get_json())
+        body = request.get_json()
+        choices = privacy.read_signup(body)            # the notice was shown and agreed to (DPDP s.5-6)
+        view = everyday.create_profile(body)
+        privacy.save_signup(view["user"]["id"], choices)
         if _wants_session() and view.get("access_key"):
             websession.bind(_session_for_binding(), view["user"]["id"])
         return jsonify(view), 201
@@ -691,11 +701,30 @@ def create_app() -> Flask:
     def delete_profile(user_id):
         result = profile_data.delete(user_id, request.get_json().get("confirmation"))
         websession.revoke_user(user_id)            # no browser keeps a hold on a deleted profile
+        privacy.note_erasure(user_id)              # proof of erasure, kept one year (Rule 8(3))
         return jsonify(result)
+
+    # ---- privacy notice and consent (privacy.py, DPDP Act 2023 + Rules 2025) ---- #
+    @app.get("/api/privacy/notice")
+    def privacy_notice():
+        return jsonify(privacy.notice())
+
+    @app.get("/api/user/<int:user_id>/privacy")
+    def privacy_state(user_id):
+        return jsonify({**privacy.state(user_id), "notice": privacy.notice()})
+
+    @app.post("/api/user/<int:user_id>/privacy")
+    def privacy_choice(user_id):
+        body = request.get_json()
+        if not access.is_private(user_id):
+            raise ValueError("Shared sample profiles have no consent settings. Set up your own profile.")
+        return jsonify(privacy.set_choice(user_id, body.get("purpose"), body.get("granted")))
 
     @app.patch("/api/user/<int:user_id>/setup")
     def update_setup(user_id):
-        return jsonify(everyday.update_setup(user_id, request.get_json()))
+        body = request.get_json()
+        privacy.check_setup_change(user_id, body)      # health details need the health consent
+        return jsonify(everyday.update_setup(user_id, body))
 
     @app.post("/api/user/<int:user_id>/favourites/<int:restaurant_id>")
     def toggle_favourite(user_id, restaurant_id):
@@ -752,6 +781,12 @@ def create_app() -> Flask:
     @app.post("/api/user/<int:user_id>/swiggy/connect")
     def swiggy_start(user_id):
         ratelimit.check(f"swiggy-connect:{user_id}", 10, 3600)
+        if (request.get_json(silent=True) or {}).get("consent") is True:
+            # The Swiggy notice was shown right before this tap (what is read, why, how to stop).
+            with _db.cursor() as cur:
+                privacy.init_schema()
+                privacy.record(cur, user_id, "swiggy", True, "swiggy-connect")
+        privacy.require(user_id, "swiggy")
         nonce = secrets.token_urlsafe(32)
         response = jsonify(authorize_url=swiggy_connect.start(user_id, _swiggy_callback_url(), nonce))
         # Ties Swiggy's redirect back to THIS browser (H-01). Lax is sent on the top-level
@@ -932,6 +967,7 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy/order-history")
     def swiggy_order_history(user_id):
+        privacy.require(user_id, "swiggy")        # reading past orders is part of the Swiggy consent
         return jsonify(swiggy_live.live_order_history(user_id))
 
     @app.get("/api/session/<int:session_id>/swiggy-cart/preview")
@@ -1100,6 +1136,14 @@ def create_app() -> Flask:
     @app.get("/credits")
     def credits():
         return send_from_directory(STATIC_DIR, "credits.html")
+
+    @app.get("/privacy")
+    def privacy_page():
+        return Response(privacy.page("privacy"), mimetype="text/html")
+
+    @app.get("/terms")
+    def terms_page():
+        return Response(privacy.page("terms"), mimetype="text/html")
 
     @app.get("/api/health")
     def health():

@@ -19,7 +19,7 @@ def client(seeded):
 
 
 def _private(client):
-    v = client.post("/api/profiles", json=dict(NEW)).get_json()
+    v = client.post("/api/profiles", json={**dict(NEW), "consent": {"account": True, "health": True, "learning": True}}).get_json()
     return v["user"]["id"], {"X-SmartPlate-Key": v["access_key"]}
 
 
@@ -141,8 +141,8 @@ def test_third_party_failures_do_not_lock_out_the_owner(client):
 
 def test_new_profiles_are_rate_limited_per_address(client):
     for _ in range(20):
-        assert client.post("/api/profiles", json=dict(NEW)).status_code == 201
-    assert client.post("/api/profiles", json=dict(NEW)).status_code == 429
+        assert client.post("/api/profiles", json={**dict(NEW), "consent": {"account": True, "health": True, "learning": True}}).status_code == 201
+    assert client.post("/api/profiles", json={**dict(NEW), "consent": {"account": True, "health": True, "learning": True}}).status_code == 429
 
 
 def test_vault_seals_and_rejects_foreign_keys(seeded, monkeypatch):

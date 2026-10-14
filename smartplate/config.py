@@ -136,6 +136,13 @@ def secret_problem(secret: str | None = None) -> str | None:
     if len(value) < MIN_SECRET_LENGTH:
         return f"SMARTPLATE_SECRET is shorter than {MIN_SECRET_LENGTH} characters"
     return None
+# Privacy notice details only the founder can give (shown on /privacy and /terms; DPDP Rule 9
+# requires a published contact who can answer questions about processing).
+OPERATOR = os.environ.get("SMARTPLATE_OPERATOR", "").strip()            # legal name running Ziggy
+PRIVACY_CONTACT = os.environ.get("SMARTPLATE_PRIVACY_CONTACT", "").strip()   # e.g. privacy@yourdomain.in
+GRIEVANCE_NAME = os.environ.get("SMARTPLATE_GRIEVANCE_NAME", "").strip()     # the person who answers
+BACKUP_WINDOW = os.environ.get("SMARTPLATE_BACKUP_WINDOW", "6 hours on Neon's free plan").strip()
+
 # Behind one reverse proxy (Render, Codespaces): trust its X-Forwarded-* headers.
 BEHIND_PROXY = os.environ.get("SMARTPLATE_BEHIND_PROXY", "1" if os.environ.get("RENDER") else "0") == "1"
 

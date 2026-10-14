@@ -37,7 +37,7 @@ SETUP = {"name": "Priya", "diet": "veg", "weekly_budget": 1500, "cook": "sometim
 
 
 def _new_profile(client):
-    r = client.post("/api/profiles", json=dict(SETUP))
+    r = client.post("/api/profiles", json={**dict(SETUP), "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201, r.get_json()
     body = r.get_json()
     client.environ_base["HTTP_X_SMARTPLATE_KEY"] = body["access_key"]
@@ -205,7 +205,7 @@ def test_no_live_pick_possible_says_why_and_never_fakes_one(prod, swiggy):
 def test_profile_created_with_sign_in_opens_on_another_device(prod):
     app = create_app()
     first = app.test_client()
-    r = first.post("/api/profiles", json={**SETUP, "login": "Priya@Example.com", "password": "long enough pw"})
+    r = first.post("/api/profiles", json={**{**SETUP, "login": "Priya@Example.com", "password": "long enough pw"}, "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201, r.get_json()
     body = r.get_json()
     assert body["login"] == "priya@example.com"
@@ -218,9 +218,9 @@ def test_profile_created_with_sign_in_opens_on_another_device(prod):
 
 def test_bad_or_taken_sign_in_creates_no_profile(prod):
     client = create_app().test_client()
-    assert client.post("/api/profiles", json={**SETUP, "login": "priya", "password": "short"}).status_code == 400
-    assert client.post("/api/profiles", json={**SETUP, "login": "priya", "password": "long enough pw"}).status_code == 201
-    taken = client.post("/api/profiles", json={**SETUP, "login": "PRIYA", "password": "another long pw"})
+    assert client.post("/api/profiles", json={**{**SETUP, "login": "priya", "password": "short"}, "consent": {"account": True, "health": True, "learning": True}}).status_code == 400
+    assert client.post("/api/profiles", json={**{**SETUP, "login": "priya", "password": "long enough pw"}, "consent": {"account": True, "health": True, "learning": True}}).status_code == 201
+    taken = client.post("/api/profiles", json={**{**SETUP, "login": "PRIYA", "password": "another long pw"}, "consent": {"account": True, "health": True, "learning": True}})
     assert taken.status_code == 400 and "taken" in taken.get_json()["error"]
     with db.cursor() as cur:
         assert cur.execute("SELECT COUNT(*) n FROM users").fetchone()["n"] == 1

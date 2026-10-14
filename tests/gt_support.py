@@ -344,7 +344,7 @@ def connect_swiggy(client, fake, uid: int, key: str) -> None:
     from test_followups import APP, _allow_app_host
     _allow_app_host()
     headers = {"X-SmartPlate-Key": key}
-    url = client.post(f"/api/user/{uid}/swiggy/connect", json={}, base_url=APP, headers=headers).get_json()["authorize_url"]
+    url = client.post(f"/api/user/{uid}/swiggy/connect", json={"consent": True}, base_url=APP, headers=headers).get_json()["authorize_url"]
     q = fake.approve(url)
     r = client.get(f"/swiggy/callback?state={q['state']}&code=code-1", base_url=APP, headers=headers)
     assert r.status_code == 302 and r.headers["Location"].endswith("swiggy=connected"), r.headers.get("Location")

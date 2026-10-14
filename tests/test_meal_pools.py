@@ -15,9 +15,9 @@ def town(gt, monkeypatch):
     fake = TownFake()
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     client = create_app().test_client()
-    uid = client.post("/api/profiles", json={"name": "Priya", "diet": "veg", "weekly_budget": 3500,
+    uid = client.post("/api/profiles", json={**{"name": "Priya", "diet": "veg", "weekly_budget": 3500,
         "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "order"}, "cook": "never",
-        "allergens": [], "medical": [], "favourites": []}).get_json()["user"]["id"]
+        "allergens": [], "medical": [], "favourites": []}, "consent": {"account": True, "health": True, "learning": True}}).get_json()["user"]["id"]
     _connect(client, fake, uid=uid)
     assert client.post(f"/api/user/{uid}/swiggy/address", json={"address_id": "addr-home"}).status_code == 200
     plan = client.get(f"/api/user/{uid}/plan").get_json()["plan"]["id"]

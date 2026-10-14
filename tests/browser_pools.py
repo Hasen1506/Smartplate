@@ -45,10 +45,10 @@ def town_world(frozen, monkeypatch):
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     app = create_app()
     client = app.test_client()
-    uid = client.post("/api/profiles", json={
+    uid = client.post("/api/profiles", json={**{
         "name": "Priya", "diet": "veg", "weekly_budget": 3500, "cook": "never",
         "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "order"},
-        "login": "priya@example.com", "password": "priya-long-password"}).get_json()["user"]["id"]
+        "login": "priya@example.com", "password": "priya-long-password"}, "consent": {"account": True, "health": True, "learning": True}}).get_json()["user"]["id"]
     _connect(client, fake, uid=uid)
     assert client.post(f"/api/user/{uid}/swiggy/address", json={"address_id": "addr-home"}).status_code == 200
     key = client.environ_base["HTTP_X_SMARTPLATE_KEY"]

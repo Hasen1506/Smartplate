@@ -32,7 +32,12 @@ def initialize():
         else:
             removed = cleanup.remove_seeded_samples()
             cleanup.replan(removed["replanned_plans"])
-        from . import vault
+        from . import privacy, ratelimit, vault, websession
+        ratelimit.init_schema()
+        websession.init_schema()
+        privacy.init_schema()
+        websession.purge_idle()                 # sessions unused for 60 days
+        privacy.purge_expired()                 # consent records of erased profiles after one year
         if config.SECRET:                       # after a key rotation: re-seal tokens under the new key
             vault.reseal_all()
         festivals.ensure_calendar()             # the real India holiday calendar

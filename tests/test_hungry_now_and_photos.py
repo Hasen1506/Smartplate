@@ -35,9 +35,9 @@ def world(gt, monkeypatch):
     fake.dishes = {"Masala Dosa": 12000, "Veg Meals": 18000, "Paneer Butter Masala": 22000}
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     client = create_app().test_client()
-    uid = client.post("/api/profiles", json={"name": "Arun", "diet": "veg", "weekly_budget": 3000,
+    uid = client.post("/api/profiles", json={**{"name": "Arun", "diet": "veg", "weekly_budget": 3000,
         "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"}, "cook": "sometimes",
-        "allergens": [], "medical": [], "favourites": []}).get_json()["user"]["id"]
+        "allergens": [], "medical": [], "favourites": []}, "consent": {"account": True, "health": True, "learning": True}}).get_json()["user"]["id"]
     _connect(client, fake, uid=uid)
     assert client.post(f"/api/user/{uid}/swiggy/address", json={"address_id": "addr-home"}).status_code == 200
     assert client.post(f"/api/user/{uid}/swiggy/favourites", json={

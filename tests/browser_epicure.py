@@ -25,9 +25,9 @@ pw = pytest.importorskip("playwright.sync_api")
 def kitchen(seeded):
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={"name": "Kavya", "diet": "veg", "allergens": ["dairy"],
+    created = client.post("/api/profiles", json={**{"name": "Kavya", "diet": "veg", "allergens": ["dairy"],
                                                  "weekly_budget": 2500, "meals": ["lunch", "dinner"],
-                                                 "cook": "sometimes"}).get_json()
+                                                 "cook": "sometimes"}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid, key = created["user"]["id"], created["access_key"]
     h = {"X-SmartPlate-Key": key}
     cells = [c for d in created["grid"] for c in d["meals"].values() if c["status"] == "active"]

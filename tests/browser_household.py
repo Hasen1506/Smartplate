@@ -24,8 +24,8 @@ pw = pytest.importorskip("playwright.sync_api")
 def home(gt):
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={"name": "Kavya", "diet": "nonveg", "weekly_budget": 3500,
-                                                 "meals": ["lunch", "dinner"], "cook": "never"}).get_json()
+    created = client.post("/api/profiles", json={**{"name": "Kavya", "diet": "nonveg", "weekly_budget": 3500,
+                                                 "meals": ["lunch", "dinner"], "cook": "never"}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     server = make_server("127.0.0.1", 0, app, threaded=True)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()

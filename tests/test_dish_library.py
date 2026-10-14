@@ -94,9 +94,9 @@ def test_a_library_dish_is_a_home_cook_recipe_without_made_up_numbers(library):
 def test_cook_a_typed_dish_for_a_meal(gt, library):
     from smartplate.app import create_app
     c = create_app().test_client()
-    made = c.post("/api/profiles", json={"name": "Asha", "diet": "veg", "weekly_budget": 3000,
+    made = c.post("/api/profiles", json={**{"name": "Asha", "diet": "veg", "weekly_budget": 3000,
                                          "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "order"},
-                                         "cook": "never", "allergens": [], "medical": [], "favourites": []})
+                                         "cook": "never", "allergens": [], "medical": [], "favourites": []}, "consent": {"account": True, "health": True, "learning": True}})
     uid = made.get_json()["user"]["id"]
     c.environ_base["HTTP_X_SMARTPLATE_KEY"] = made.get_json()["access_key"]
     found = c.get(f"/api/user/{uid}/dishes?q=pongal").get_json()

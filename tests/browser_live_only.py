@@ -59,10 +59,10 @@ def prod_world(frozen, monkeypatch):
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={
+    created = client.post("/api/profiles", json={**{
         "name": "Arun", "diet": "veg", "weekly_budget": 3000, "cook": "never",
         "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"},
-        "login": "arun@example.com", "password": "arun-long-password"}).get_json()
+        "login": "arun@example.com", "password": "arun-long-password"}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid = created["user"]["id"]
     key = created["access_key"]
     client.environ_base["HTTP_X_SMARTPLATE_KEY"] = key

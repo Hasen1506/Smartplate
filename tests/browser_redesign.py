@@ -67,9 +67,9 @@ def world(gt, monkeypatch):
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={"name": "Arun", "diet": "nonveg", "weekly_budget": 3000,
+    created = client.post("/api/profiles", json={**{"name": "Arun", "diet": "nonveg", "weekly_budget": 3000,
         "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"}, "cook": "sometimes",
-        "allergens": [], "medical": [], "favourites": []}).get_json()
+        "allergens": [], "medical": [], "favourites": []}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid = created["user"]["id"]
     _connect(client, fake, uid=uid)
     key = client.environ_base["HTTP_X_SMARTPLATE_KEY"]

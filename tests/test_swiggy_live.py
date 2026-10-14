@@ -370,8 +370,8 @@ def test_live_menu_needs_a_connection_and_is_private(client, swiggy):
     body = r.get_json()                       # not connected is the user's to fix: 409 + Connect, never 502
     assert r.status_code == 409 and body["error"] == "swiggy_not_connected"
     assert "Connect your Swiggy account" in body["message"] and body["action"]["act"] == "swiggy-connect"
-    v = client.post("/api/profiles", json={"name": "P", "diet": "veg", "weekly_budget": 2000,
-                                           "meals": ["dinner"], "favourites": [6]}).get_json()
+    v = client.post("/api/profiles", json={**{"name": "P", "diet": "veg", "weekly_budget": 2000,
+                                           "meals": ["dinner"], "favourites": [6]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     assert client.get(f"/api/user/{v['user']['id']}/swiggy/addresses").status_code == 401
 
 

@@ -31,7 +31,7 @@ def app_client(gt):
 def _profile(c, **over):
     body = {"name": "Kavya", "diet": "nonveg", "weekly_budget": 3500, "meals": ["lunch", "dinner"],
             "cook": "sometimes", **over}
-    r = c.post("/api/profiles", json=body)
+    r = c.post("/api/profiles", json={**body, "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201, r.get_json()
     v = r.get_json()
     return v, {"X-SmartPlate-Key": v["access_key"]}
