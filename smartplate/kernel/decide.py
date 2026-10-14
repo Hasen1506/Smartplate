@@ -85,7 +85,8 @@ def candidates_for_slot(slot: dict, menu: list[dict], *, mode: str, people: list
     qty_each = max(1, int(rules.get("qty") or 1)) if n_people == 1 else 1
     min_rating = float(rules.get("min_rating") or 0)
     max_price = rules.get("max_price_per_meal")
-    hidden = {"rating": 0, "price": 0, "meal": 0, "disliked": 0}
+    max_eta = rules.get("max_eta")                 # Today's "max delivery time" rule (0/None = no limit)
+    hidden = {"rating": 0, "price": 0, "meal": 0, "disliked": 0, "eta": 0}
     eligible_any = False
     by_place: dict = {}
     for it in menu:
@@ -105,8 +106,15 @@ def candidates_for_slot(slot: dict, menu: list[dict], *, mode: str, people: list
                 it, meal, favourited_for_slot=pooled):
             hidden["meal"] += 1
             continue
-        if (it.get("restaurant_rating") or 0) < min_rating:
-            hidden["rating"] += 1
+        rating = it.get("restaurant_rating")
+        # A dish the person put in their own list with no known rating (typed in) is theirs:
+        # unknown stays unknown, it isn't hidden as "below the rating". Everything else is.
+        if (rating is None and not pooled) or (rating is not None and rating < min_rating):
+            if min_rating:
+                hidden["rating"] += 1
+                continue
+        if max_eta and it.get("eta_min") is not None and it["eta_min"] > float(max_eta):
+            hidden["eta"] += 1
             continue
         if max_price is not None and it["price"] > float(max_price):
             hidden["price"] += 1
@@ -140,7 +148,8 @@ def candidates_for_slot(slot: dict, menu: list[dict], *, mode: str, people: list
         fee = float(dishes[0]["item"].get("delivery_fee") or 0)
         shared = [d for d in dishes if d["safe_for"] == everyone]
         for d in shared:
-            cands.append(_delivery(slot, [(d, n_people * qty_each, everyone)], fee, eaters, min_rating, history,
+            q = (int(d["item"].get("qty") or qty_each)) if n_people == 1 else n_people * qty_each
+            cands.append(_delivery(slot, [(d, q, everyone)], fee, eaters, min_rating, history,
                                    pool_cheapest, pool_unsafe_for))
         if not shared and n_people > 1 and set().union(*(d["safe_for"] for d in dishes)) == everyone:
             # Greedy cover: the dish safe for most of those not yet covered (then best liked, cheapest).
@@ -169,7 +178,8 @@ def candidates_for_slot(slot: dict, menu: list[dict], *, mode: str, people: list
             return [], f"Nothing at your places is safe for {name} ({_diet_word(who)}) for {meal}."
         return [], f"No single place has a safe {meal} for everyone eating."
     hid = [f"{n} {w}" for w, n in (("below your min rating", hidden["rating"]), ("over your price a meal",
-                                    hidden["price"]), ("not a whole " + meal, hidden["meal"]),
+                                    hidden["price"]), ("over your delivery time", hidden["eta"]),
+                                   ("not a whole " + meal, hidden["meal"]),
                                    ("you said not again", hidden["disliked"])) if n]
     where = "your places" if mode in ("favourites_only", "favourites_plus_cook") else "your places or new ones"
     return [], (f"Nothing from {where} fits {meal}" + (f" ({'; '.join(hid)})" if hid else "") + ".")

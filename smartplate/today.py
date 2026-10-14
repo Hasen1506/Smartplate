@@ -20,8 +20,6 @@ created on first use (init_schema), like integrations/swiggy_connect.py does.
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
-import itertools
 import json
 
 from . import clock, db
@@ -401,109 +399,150 @@ def _cost(e: dict, qty: int) -> float:
     return (e.get("price") or 0) * qty
 
 
-def _candidates(user: dict, rules: dict, mode: str, pool: dict) -> dict:
-    """{meal: [entry]} that pass every hard and soft rule, for one Decide-for-me mode."""
-    from .domain import live_catalog, reverse_mode
-    out = {}
+# "Decide for me" runs on the one engine, kernel/decide.py (W6): the same modes, rules and
+# objective as /api/user/<id>/decide/today and /api/plan/<id>/decide. This module only
+# turns Today's own data (the pools, today's budget, the min-rating / max-time rules) into
+# that engine's inputs and saves its answer as today's picks.
+ENGINE_MODE = {"favourites": "favourites_only", "favourites_cook": "favourites_plus_cook",
+               "favourites_new": "favourites_plus_new", "surprise": "surprise_me"}
+UI_MODE = {v: k for k, v in ENGINE_MODE.items()}
+
+
+def _engine_inputs(user: dict, rules: dict, mode: str, pool: dict) -> tuple[list, dict, dict]:
+    """(menu, {meal: pooled dish ids}, {dish id: Today entry}) for the engine.
+
+    The person's pool dishes that pass every rule are the favourites (tier "pool"). Typed
+    dishes are labelled theirs, priced as they typed them, with no rating or delivery time
+    (unknown stays unknown). With a live Swiggy menu, "+ new places" and "surprise" may add
+    other dishes from it; a pool dish greyed out by a rule never comes back that way."""
+    from .domain import live_catalog
+    menu, pool_ids, entries, greyed = [], {m: set() for m in MEALS}, {}, set()
     for meal in MEALS:
-        cands = [dict(e, fav=True) for e in pool[meal] if not e["reasons"] and e.get("price") is not None
-                 and e["kind"] == "order"]
-        if mode in ("favourites_cook", "surprise"):
-            cands += [dict(e, fav=True) for e in pool[meal] if not e["reasons"] and e["kind"] == "cook"
-                      and e.get("price") is not None]
-            for r in reverse_mode.safe_recipes(user, meal)[:6]:
-                cands.append({"ref": f"cook:{r['key']}", "source": "cook", "kind": "cook", "name": r["name"],
-                              "recipe_key": r["key"], "price": r["cost"], "qty": 1, "fav": False,
-                              "price_basis": "grocery estimate", "rating": None})
-        if mode in ("favourites_new", "surprise") and live_catalog.has_live(user["id"]):
-            from .domain import allergens as allergen_rules
-            have = {e.get("item_id") for e in cands}
-            with db.cursor() as cur:
-                rows = cur.execute(
-                    "SELECT m.name, m.price, m.veg, m.allergens, m.provider_item_id, r.provider_id, r.name AS rname, "
-                    "r.rating FROM menu_items m JOIN restaurants r ON r.id=m.restaurant_id "
-                    "WHERE r.city=? AND r.rating>=? ORDER BY r.rating DESC, m.price, m.name",
-                    (live_catalog.city_key(user["id"]), rules["min_rating"] or 0)).fetchall()
-            added = 0
-            for r in rows:
-                if added >= NEW_PLACES_PER_MEAL or str(r["provider_item_id"]) in have:
-                    continue
-                item = {"name": r["name"], "veg": r["veg"], "allergens": db.jl(r["allergens"])}
-                if allergen_rules.violates(user, item):
-                    continue
-                cands.append({"ref": f"sw:{r['provider_id']}:{r['provider_item_id']}", "source": "swiggy",
-                              "kind": "order", "name": r["name"], "restaurant": r["rname"],
-                              "restaurant_id": str(r["provider_id"]), "item_id": str(r["provider_item_id"]),
-                              "price": r["price"], "veg": bool(r["veg"]), "rating": r["rating"], "qty": 1,
-                              "fav": False, "new": True})
-                added += 1
-        out[meal] = cands
-    return out
+        for e in pool[meal]:
+            if e["reasons"] or e.get("price") is None or e["kind"] != "order":
+                greyed.add(e["ref"])
+                continue
+            pool_ids[meal].add(e["ref"])
+            if e["ref"] in entries:
+                continue
+            entries[e["ref"]] = e
+            menu.append({"id": e["ref"], "name": e["name"], "price": float(e["price"]),
+                         "veg": 1 if e.get("veg") else 0,
+                         "allergens": _name_allergens(e["name"], e.get("veg")),
+                         "restaurant_id": e.get("restaurant_id") or f"typed:{e.get('restaurant') or ''}",
+                         "restaurant_name": e.get("restaurant") or "Your own dish",
+                         "restaurant_rating": e.get("rating"), "eta_min": e.get("eta_min"),
+                         "delivery_fee": 0.0, "tags": [], "qty": e.get("qty") or 1})
+    greyed -= set(entries)
+    if mode in ("favourites_plus_new", "surprise_me") and live_catalog.has_live(user["id"]):
+        from .kernel import decide as engine
+        for it in engine.gather(user)["menu"]:
+            ref = f"sw:{it.get('restaurant_provider_id')}:{it.get('provider_item_id')}"
+            if ref in entries or ref in greyed or not it.get("provider_item_id"):
+                continue
+            entries[ref] = {"ref": ref, "source": "swiggy", "kind": "order", "name": it["name"],
+                            "restaurant": it.get("restaurant_name"),
+                            "restaurant_id": str(it.get("restaurant_provider_id")),
+                            "item_id": str(it["provider_item_id"]), "price": it["price"],
+                            "veg": bool(it.get("veg")), "rating": it.get("restaurant_rating"), "qty": 1,
+                            "new": True}
+            menu.append({**it, "id": ref, "eta_min": None, "delivery_fee": 0.0})   # dish prices, like the pool
+    return menu, pool_ids, entries
 
 
-def _recent_refs(user_id: int) -> set:
-    since = (clock.today() - dt.timedelta(days=2)).isoformat()
-    with db.cursor() as cur:
-        return {r["ref"] for r in cur.execute("SELECT ref FROM today_picks WHERE user_id=? AND day>=? AND day<?",
-                                              (user_id, since, _today())).fetchall()}
+def _cook_for(user: dict, pool: dict):
+    """The person's own cook dish for the meal (typed in), else the cheapest safe recipe."""
+    from .domain import reverse_mode
+
+    def cook(meal):
+        mine = next((e for e in pool[meal] if e["kind"] == "cook" and not e["reasons"]
+                     and e.get("price") is not None), None)
+        if mine:
+            return {"name": mine["name"], "key": mine["ref"], "cost": mine["price"], "_entry": mine}
+        return reverse_mode.cook_candidate(user, meal)
+    return cook
 
 
 def decide(user_id: int, mode: str) -> dict:
-    """Fill today's open meals from candidates that pass every rule and fit the budget left.
-    Objective, in order: fill as many meals as possible; prefer favourites; prefer higher-rated;
-    avoid what was picked in the last two days; then spend less. "surprise" replaces the
-    preference order with a seeded shuffle (same day + person → same answer; ask again → next)."""
-    if mode not in MODES:
+    """Fill today's open meals with kernel/decide.py, inside today's budget left and the
+    person's Today rules. Objective (docs/planner-objective.md): safe > within the money >
+    favourites (what the mode allows) > no silent skips > cheapest among equally liked >
+    variety. "surprise" is seeded (same day + person → same answer; ask again → next)."""
+    from .kernel import decide as engine
+    engine_mode = ENGINE_MODE.get(mode) or (mode if mode in engine.MODES else None)
+    if not engine_mode:
         raise ValueError("Choose how Ziggy should decide")
+    ui_mode = UI_MODE[engine_mode]
     user = _user(user_id)
     rules = settings(user_id)
     meals = meals_today(user)
     picks = _picks(user_id)
     open_meals = [m for m in meals if m not in picks]
     if not open_meals:
-        return {**view(user_id), "decided": {"mode": mode, "filled": [], "note": "Every meal today is already picked."}}
+        return {**view(user_id), "decided": {"mode": ui_mode, "filled": [],
+                                             "note": "Every meal today is already picked."}}
     budget = budget_for(user)["amount"]
-    left = budget - sum(_cost(p, p["qty"]) for p in picks.values())
-    cands = _candidates(user, rules, mode, pools(user, rules))
-    recent = _recent_refs(user_id)
-    seed = None
-    if mode == "surprise":
+    left = max(0.0, budget - sum(_cost(p, p["qty"]) for p in picks.values()))
+    pool = pools(user, rules)
+    menu, pool_ids, entries = _engine_inputs(user, rules, engine_mode, pool)
+    seed = f"{user_id}:{_today()}"
+    if engine_mode == "surprise_me":
         with db.cursor() as cur:
             n = cur.execute("SELECT COUNT(*) AS n FROM today_picks WHERE user_id=? AND how=?",
                             (user_id, "surprise")).fetchone()["n"]
-        seed = f"{user_id}:{_today()}:{n}"
+        seed += f":{n}"
+    eng_rules = {**engine.rules_for(user), "min_rating": rules["min_rating"] or 0, "max_eta": rules["max_eta"] or None,
+                 "daily_cap": None,
+                 # choosing "+ cook at home" for today is the person asking to cook today
+                 "cook_cap": 99}
+    me = {k: user.get(k) for k in ("id", "name", "diet", "allergens", "medical")}
+    day = clock.today().isoformat()
+    slots = [{"day": day, "meal": m, "eaters": [me]} for m in open_meals]
+    from .domain import taste
+    try:
+        sig = taste.signals(user_id)
+    except Exception:
+        sig = {"history": {}, "liked": set(), "disliked": set()}
+    cook_for = _cook_for(user, pool)
+    cooks = {}
 
-    def score(e, meal):
-        if seed:
-            return int(hashlib.sha256(f"{seed}:{meal}:{e['ref']}".encode()).hexdigest()[:8], 16) / 16 ** 8
-        return (2.0 if e.get("fav") else 0) + (e.get("rating") or 0) / 5 - (1.0 if e["ref"] in recent else 0)
-
-    options = [[None] + sorted(cands[m], key=lambda e: (-score(e, m), _cost(e, e["qty"]), e["name"]))[:15]
-               for m in open_meals]
-    best, best_key = None, None
-    for combo in itertools.product(*options):
-        spend = sum(_cost(e, e["qty"]) for e in combo if e)
-        if spend > left + 1e-9:
-            continue
-        key = (sum(1 for e in combo if e), round(sum(score(e, m) for e, m in zip(combo, open_meals) if e), 6),
-               -spend)
-        if best_key is None or key > best_key:
-            best, best_key = combo, key
-    filled, missing = [], []
+    def remember_cook(meal):
+        c = cook_for(meal)
+        cooks[meal] = c
+        return c
+    out = engine.plan(slots, menu, mode=engine_mode, people=[me], places=set(), pools=pool_ids, money=left,
+                      rules=eng_rules, history=sig.get("history"), liked=sig.get("liked") or set(),
+                      disliked=sig.get("disliked") or set(), cook_for=remember_cook, seed=seed,
+                      money_word="today's", method="exact" if len(slots) <= engine.EXACT_MAX_SLOTS else "auto")
+    filled, missing, reasons, why = [], [], {}, {}
+    how = "surprise" if engine_mode == "surprise_me" else "ziggy"
     with db.cursor() as cur:
-        for meal, e in zip(open_meals, best or [None] * len(open_meals)):
-            if e:
-                _save_pick(cur, user_id, meal, e, e["qty"], "surprise" if mode == "surprise" else "ziggy")
-                filled.append(meal)
+        for p in out["picks"]:
+            meal = p["meal"]
+            if p["kind"] == "delivery":
+                e = entries[p["item_id"]]
+                qty = (p.get("lines") or [{}])[0].get("qty") or e.get("qty") or 1
+            elif p["kind"] == "cook":
+                c = cooks.get(meal) or {}
+                e = c.get("_entry") or {"ref": f"cook:{p.get('recipe_key')}", "source": "cook", "kind": "cook",
+                                         "name": p["name"], "recipe_key": p.get("recipe_key"), "price": p["cost"],
+                                         "price_basis": "grocery estimate", "rating": None}
+                qty = 1
             else:
                 missing.append(meal)
+                reasons[meal] = (p.get("reason") or "").removeprefix("Skipped: ")
+                continue
+            _save_pick(cur, user_id, meal, e, _qty(qty), how)
+            filled.append(meal)
+            why[meal] = p.get("why")
     note = None
     if missing:
-        why = ("nothing in your pool passes your rules" if not any(cands[m] for m in missing)
-               else f"nothing left fits ₹{max(0, left):,.0f}")
-        note = f"Couldn't fill {', '.join(missing)}: {why}. Add dishes to the pool or change today's budget."
-    return {**view(user_id), "decided": {"mode": mode, "label": MODES[mode], "filled": filled, "missing": missing,
-                                         "note": note}}
+        note = (f"Couldn't fill {' and '.join(missing)}: "
+                + " ".join(reasons[m][:1].upper() + reasons[m][1:] for m in missing)
+                + " Add dishes to the pool or change today's budget.")
+    return {**view(user_id), "decided": {"mode": ui_mode, "engine_mode": engine_mode, "label": MODES[ui_mode],
+                                         "filled": filled, "missing": missing, "reasons": reasons, "why": why,
+                                         "note": note, "spent": out["spent"], "money": out["money"]}}
 
 
 # --------------------------------------------------------------------------- read model

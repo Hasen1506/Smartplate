@@ -392,7 +392,10 @@ def create_app() -> Flask:
     @app.post("/api/plan")
     def create_plan():
         body = request.get_json(force=True, silent=True) or {}
-        pid = service.create_plan(int(body["user_id"]), body.get("mode"))
+        uid = body.get("user_id")
+        if isinstance(uid, bool) or not isinstance(uid, (int, str)) or not str(uid).strip().isdigit():
+            raise ValueError("user_id must be a profile id")
+        pid = service.create_plan(int(uid), body.get("mode"))
         return jsonify(service.plan_view(pid))
 
     @app.get("/api/plan/<int:plan_id>")

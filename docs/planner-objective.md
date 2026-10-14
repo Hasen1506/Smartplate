@@ -147,3 +147,20 @@ start (founder answer #55), not for plan quality.
    (e.g. from a search). Reading new places per decision is a Swiggy call per tap.
 3. **Rule 4 vs your list.** A meal with its own list now falls back to other dishes at the
    same places rather than skipping. If Vijay wants "my list or nothing", that is one flag.
+
+## One "Decide for me" engine (integration, Oct 2026)
+
+`kernel/decide.py` is the only engine. v3 Today's button (`POST /api/user/<id>/today/decide`,
+`smartplate/today.py`) is a thin wrapper: it maps the v3 mode keys (`favourites`,
+`favourites_cook`, `favourites_new`, `surprise`) to the engine's (`favourites_only`,
+`favourites_plus_cook`, `favourites_plus_new`, `surprise_me`; both spellings are accepted),
+passes the Today pool as the favourites (tier *pool*, typed dishes included with no invented
+rating), today's budget left as the money, and the Today rules (min rating, max delivery
+time) as engine rules, then saves the engine's answer as today's picks with its one-line
+*why*. Differences that are data, not logic: on Today, "places" is empty (favourites = the
+Today pool; "+ new places" adds live Swiggy dishes only when a live menu exists), choosing
+"+ cook at home" lifts the weekly cook-day cap for today, and the daily limit is replaced by
+today's budget. Rule changes in the engine: `max_eta` (hide a dish whose known delivery time
+is over the limit; the week sets none) and a pooled dish with an unknown rating is not hidden
+by the rating rule. W5's "avoid what was picked in the last two days" score is dropped in
+favour of the engine's history/recency terms.
