@@ -100,6 +100,8 @@ def validate_member(body: dict, *, partial: bool = False) -> dict:
     for key, allowed in (("allergens", profile.ALLERGENS), ("medical", profile.MEDICAL)):
         if key in body or not partial:
             out[key] = profile._choices(body.get(key, []), key, allowed)
+    if out.get("medical"):
+        profile.medical_allowed()
     if "meals" in body:
         meals = profile._choices(body["meals"], "meal", profile.MEALS)
         if not meals:

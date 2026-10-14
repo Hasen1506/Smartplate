@@ -378,3 +378,20 @@ def test_property_screen_and_planner_agree(person, dish):
     shown, hidden, _ = swiggy_live._screen(person, [{"id": "x", "name": name, "veg": veg}])
     stored = {**_facts(name, veg), "sugar_g": _facts(name, veg)["sugar_g"] or 0}     # as the DB keeps it
     assert bool(hidden) == bool(allergens.violates(person, stored))
+
+
+# --------------------------------------------------------------------------- #
+# 5. Health-condition filters can be archived for the beta (#41)
+# --------------------------------------------------------------------------- #
+def test_medical_filters_off_refuses_new_conditions_but_keeps_saved_ones(gt, monkeypatch):
+    from smartplate.domain import profile
+    monkeypatch.setattr(config, "MEDICAL_FILTERS", False)
+    with pytest.raises(ValueError, match="paused in this beta"):
+        profile.validate_setup({"medical": ["diabetes"]})
+    assert profile.validate_setup({"medical": []})["medical"] == []                 # removing one still works
+    user = models.get_user(1)                                                        # saved: peanut + diabetes
+    assert "diabetes" in user["medical"]
+    rasmalai = {"name": "Rasmalai", "veg": 1, "sugar_g": 5}
+    assert allergens.violates(user, rasmalai)                                        # still enforced
+    monkeypatch.setattr(config, "MEDICAL_FILTERS", True)
+    assert profile.validate_setup({"medical": ["diabetes"]})["medical"] == ["diabetes"]
