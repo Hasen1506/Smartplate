@@ -61,6 +61,8 @@ def _launch(playwright):
 @pytest.fixture
 def world(gt, monkeypatch):
     monkeypatch.setattr(config, "SWIGGY_PROVIDER", "live")
+    from smartplate.domain import timing
+    monkeypatch.setattr(timing, "CART_WINDOW_MIN", 600)   # W2 cart window: not what this suite tests; at 8:00 the lunch cart is open
     fake = MenuFake()
     fake.dishes = {"Ghee Roast Dosa": 14000, "Masala Dosa": 12000, "Chicken Biryani": 26000,
                    "Paneer Butter Masala": 22000, "Veg Meals": 18000, "Filter Coffee": 4000}

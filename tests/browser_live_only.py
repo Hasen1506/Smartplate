@@ -50,6 +50,8 @@ def prod_world(frozen, monkeypatch):
     monkeypatch.setattr(config, "FIXTURE_DATA", False)
     monkeypatch.setattr(config, "WEATHER_PROVIDER", "simulated")
     monkeypatch.setattr(config, "SWIGGY_PROVIDER", "live")
+    from smartplate.domain import timing
+    monkeypatch.setattr(timing, "CART_WINDOW_MIN", 600)   # W2 cart window: not what this suite tests; at 8:00 the lunch cart is open
     monkeypatch.setattr(config, "SWIGGY_REDIRECT_APPROVED", True)
     monkeypatch.setattr(config, "PUSH_ENABLED", False)
     ratelimit.reset()

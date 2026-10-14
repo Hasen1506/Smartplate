@@ -38,6 +38,7 @@ def _page(browser, w, *, signed_in=True):
     page.route("https://fonts.googleapis.com/**", lambda r: r.fulfill(status=200, content_type="text/css", body=""))
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
+    page.add_init_script("if (location.protocol.startsWith('http')) localStorage.setItem('ziggy.ui', 'classic');")   # W3 fixed the classic screens; v3 is the default (docs/IA.md)
     if signed_in:
         bag = {str(w["uid"]): {"key": w["key"], "name": "Priya"}}
         page.add_init_script(f"""if (location.protocol.startsWith('http') && !localStorage.getItem('smartplate.keys')) {{

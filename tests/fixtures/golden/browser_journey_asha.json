@@ -2,27 +2,27 @@
  "after_settings": {
   "Fri 2026-11-06": {
    "breakfast": {
-    "cost": 145.0,
-    "item": "Pesarattu + Chutney",
+    "cost": 115.0,
+    "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "ordered"
    },
    "dinner": {
+    "cost": 100.0,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "ordered"
+   },
+   "lunch": {
     "cost": 0.0,
     "item": "Skip",
     "kind": "skip",
     "pinned": false,
     "restaurant": "",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 115.72,
-    "item": "Vegan Sambar Rice",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Sangeetha Veg",
     "status": "active"
    }
   },
@@ -36,39 +36,13 @@
     "status": "ordered"
    },
    "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 120.98,
-    "item": "Masala Dosa",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
-    "status": "ordered"
-   }
-  },
-  "Sat 2026-11-07": {
-   "breakfast": {
-    "cost": 110.5,
+    "cost": 100.0,
     "item": "Curd Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
     "status": "ordered"
    },
-   "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
-    "pinned": false,
-    "restaurant": "",
-    "status": "active"
-   },
    "lunch": {
     "cost": 0.0,
     "item": "Skip",
@@ -78,33 +52,7 @@
     "status": "active"
    }
   },
-  "Sun 2026-11-08": {
-   "breakfast": {
-    "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Murugan Idli Shop",
-    "status": "ordered"
-   },
-   "dinner": {
-    "cost": 101.79,
-    "item": "Masala Chai + Bun Butter",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Chai Kings",
-    "status": "ordered"
-   },
-   "lunch": {
-    "cost": 157.8,
-    "item": "Veg Meals",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
-    "status": "ordered"
-   }
-  },
-  "Thu 2026-11-05": {
+  "Sat 2026-11-07": {
    "breakfast": {
     "cost": 90.0,
     "item": "Masala Chai + Bun Butter",
@@ -114,11 +62,63 @@
     "status": "ordered"
    },
    "dinner": {
-    "cost": 119.57,
+    "cost": 140.0,
+    "item": "Parotta + Veg Kurma",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "ordered"
+   },
+   "lunch": {
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
+    "pinned": false,
+    "restaurant": "",
+    "status": "active"
+   }
+  },
+  "Sun 2026-11-08": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "ordered"
+   },
+   "dinner": {
+    "cost": 110.0,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
-    "pinned": true,
+    "pinned": false,
     "restaurant": "Sangeetha Veg",
+    "status": "ordered"
+   },
+   "lunch": {
+    "cost": 150.0,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "ordered"
+   }
+  },
+  "Thu 2026-11-05": {
+   "breakfast": {
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "ordered"
+   },
+   "dinner": {
+    "cost": 90.0,
+    "item": "Masala Chai + Bun Butter",
+    "kind": "delivery",
+    "pinned": true,
+    "restaurant": "Chai Kings",
     "status": "ordered"
    },
    "lunch": {
@@ -132,41 +132,41 @@
   },
   "Tue 2026-11-03": {
    "breakfast": {
-    "cost": 35.0,
-    "item": "Cook: Masala oats + veg",
-    "kind": "cook",
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "",
     "status": "active"
    },
    "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 178.8,
+    "cost": 150.0,
     "item": "Veg Meals",
     "kind": "delivery",
-    "pinned": true,
+    "pinned": false,
     "restaurant": "Hotel Saravana Bhavan",
+    "status": "ordered"
+   },
+   "lunch": {
+    "cost": 140.0,
+    "item": "Parotta + Veg Kurma",
+    "kind": "delivery",
+    "pinned": true,
+    "restaurant": "Sangeetha Veg",
     "status": "ordered"
    }
   },
   "Wed 2026-11-04": {
    "breakfast": {
-    "cost": 101.8,
-    "item": "Curd Rice",
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Murugan Idli Shop",
     "status": "ordered"
    },
    "dinner": {
-    "cost": 121.55,
+    "cost": 110.0,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": true,
@@ -174,7 +174,7 @@
     "status": "ordered"
    },
    "lunch": {
-    "cost": 123.05,
+    "cost": 115.0,
     "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,
@@ -184,40 +184,40 @@
   }
  },
  "approval": {
-  "order_count": 19,
-  "placed": 13,
-  "substituted": 1,
-  "total": 2408.69
+  "order_count": 20,
+  "placed": 16,
+  "substituted": 0,
+  "total": 2430.0
  },
  "expenses": {
-  "rows": 13,
-  "total": 1600.84
+  "rows": 16,
+  "total": 1930.0
  },
  "rated": "Idli Sambar (4 pc)",
  "week": {
   "Fri 2026-11-06": {
    "breakfast": {
-    "cost": 145.0,
-    "item": "Pesarattu + Chutney",
+    "cost": 115.0,
+    "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    },
    "dinner": {
-    "cost": 125.0,
+    "cost": 100.0,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 115.0,
     "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 126.24,
-    "item": "Filter Coffee + Vada",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Third Wave Coffee",
     "status": "active"
    }
   },
@@ -231,45 +231,45 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 125.0,
-    "item": "Mini Tiffin",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 120.98,
-    "item": "Masala Dosa",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
-    "status": "active"
-   }
-  },
-  "Sat 2026-11-07": {
-   "breakfast": {
-    "cost": 110.5,
+    "cost": 100.0,
     "item": "Curd Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Sangeetha Veg",
     "status": "active"
    },
-   "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
+   "lunch": {
+    "cost": 115.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   }
+  },
+  "Sat 2026-11-07": {
+   "breakfast": {
+    "cost": 155.0,
+    "item": "Ghee Podi Dosa",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 140.0,
+    "item": "Parotta + Veg Kurma",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "lunch": {
-    "cost": 173.55,
-    "item": "Veg Meals",
+    "cost": 135.0,
+    "item": "Ghee Pongal",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    }
   },
@@ -283,15 +283,15 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 101.79,
-    "item": "Masala Chai + Bun Butter",
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Chai Kings",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "lunch": {
-    "cost": 157.8,
+    "cost": 150.0,
     "item": "Veg Meals",
     "kind": "delivery",
     "pinned": false,
@@ -309,7 +309,7 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 119.57,
+    "cost": 110.0,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
@@ -317,17 +317,17 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 126.24,
-    "item": "Filter Coffee + Vada",
-    "kind": "delivery",
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
     "pinned": false,
-    "restaurant": "Third Wave Coffee",
+    "restaurant": "",
     "status": "active"
    }
   },
   "Tue 2026-11-03": {
    "breakfast": {
-    "cost": 149.18,
+    "cost": 135.0,
     "item": "Ghee Pongal",
     "kind": "delivery",
     "pinned": false,
@@ -335,41 +335,41 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
+    "cost": 150.0,
+    "item": "Veg Meals",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    },
    "lunch": {
-    "cost": 107.28,
-    "item": "Masala Chai + Bun Butter",
+    "cost": 140.0,
+    "item": "Parotta + Veg Kurma",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Chai Kings",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    }
   },
   "Wed 2026-11-04": {
    "breakfast": {
-    "cost": 101.8,
-    "item": "Curd Rice",
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "dinner": {
-    "cost": 121.55,
-    "item": "Vegan Sambar Rice",
+    "cost": 90.0,
+    "item": "Masala Chai + Bun Butter",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Chai Kings",
     "status": "active"
    },
    "lunch": {
-    "cost": 123.05,
+    "cost": 115.0,
     "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,

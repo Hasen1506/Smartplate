@@ -155,7 +155,7 @@
     return `<section class="card v3-setup" aria-labelledby="v3-setup-h"><h2 class="h3" id="v3-setup-h">Get set up</h2><ol>${step1}${step2}</ol></section>`;
   }
   function saveCard(d) {
-    if (d.account_saved || !Object.keys(d.picks).length || !keys.get(S.userId) || store.get(`ziggy.v3.saved-later.${S.userId}`)) return "";
+    if (d.account_saved || !Object.keys(d.picks).length || !keys.has(S.userId) || store.get(`ziggy.v3.saved-later.${S.userId}`)) return "";
     return `<section class="card v3-save" aria-labelledby="v3-save-h"><h2 class="h3" id="v3-save-h">Keep this on every device?</h2>
       <p class="fine">Save a sign-in name and password. No email needed.</p>
       <form id="v3-save" class="stack"><label>Sign-in name<input id="v3-login" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="64" required></label>
@@ -394,7 +394,7 @@
   /* -------------------------------------------------------------- onboarding (≤ 2 questions before value) */
   function startOnboard() {
     if (!ON) return false;
-    S.v3ob = { step: 0, diet: null, allergens: [], budget: null, meals: [] };
+    S.v3ob = { step: 0, diet: null, allergens: [], budget: null, meals: [], consent: false };
     S.welcome = false; S.sheet = null; S.connectSheet = false; S.error = null; S.onboard = null; render();
     return true;
   }
@@ -412,7 +412,7 @@
         <div class="chips">${ALLERGY_LIST.map(a => `<button type="button" class="chip" data-v3-ob="allergen:${a}" aria-pressed="${o.allergens.includes(a)}">${cap1(a.replace("_", " "))}</button>`).join("")}</div>
         <p class="fine">Ziggy filters by dish name and Swiggy's veg mark. Menus don't list every ingredient, so check with the restaurant when it matters.</p>`;
     } else {
-      ready = o.budget >= 50 && o.meals.length > 0;
+      ready = o.budget >= 50 && o.meals.length > 0 && o.consent;
       body = `<h1 class="h1">Today's food budget</h1><p class="sub">For the meals you'll order or cook today. Change it any day.</p>
         <section class="card" style="align-items:center;padding:22px 18px">
           <div class="stepper"><button type="button" data-v3-ob="budget:-${STEP}" aria-label="Lower budget by ${STEP} rupees">${ICON.minus}</button>
@@ -420,7 +420,10 @@
             <button type="button" data-v3-ob="budget:${STEP}" aria-label="Raise budget by ${STEP} rupees">${ICON.plus}</button></div></section>
         <div class="chips" style="justify-content:center">${[300, 600, 1000].map(n => `<button type="button" class="chip" data-v3-ob="preset:${n}" aria-pressed="${o.budget === n}">${money(n)}</button>`).join("")}</div>
         <p class="k">Which meals today?</p>
-        <div class="chips">${MEAL_ORDER.map(m => `<button type="button" class="chip" data-v3-ob="meal:${m}" aria-pressed="${o.meals.includes(m)}">${cap1(m)}</button>`).join("")}</div>`;
+        <div class="chips">${MEAL_ORDER.map(m => `<button type="button" class="chip" data-v3-ob="meal:${m}" aria-pressed="${o.meals.includes(m)}">${cap1(m)}</button>`).join("")}</div>
+        <section class="card stack consent" aria-label="Your data">
+          <p class="fine">Ziggy uses your answers only to plan and order your meals. It doesn't sell them, show ads or send them to any AI service. <a href="/privacy" target="_blank" rel="noopener">Privacy notice</a>.</p>
+          <label class="tick"><input type="checkbox" id="v3-ob-consent" data-v3-obc="1" ${o.consent ? "checked" : ""}> I'm 18 or older and I agree to the <a href="/privacy" target="_blank" rel="noopener">privacy notice</a> and <a href="/terms" target="_blank" rel="noopener">terms</a>.</label></section>`;
     }
     return `<main class="onboard v3-ob"><div class="ob-top"><button class="icon-btn" data-v3-ob="nav:back" aria-label="${o.step ? "Back" : "Cancel"}">${ICON.back}</button>
         <div class="ob-bars" aria-label="Step ${o.step + 1} of 2">${bars}</div><span class="fine">${o.step + 1}/2</span></div>
@@ -431,6 +434,8 @@
   function readOb() {
     const o = S.v3ob, el = document.getElementById("v3-ob-budget");
     if (el) { const n = Math.round(Number(el.value)); o.budget = n > 0 ? n : null; }
+    const c = document.getElementById("v3-ob-consent");
+    if (c) o.consent = !!c.checked;
   }
   async function obTap(arg) {
     const o = S.v3ob, [k, v] = arg.split(":");
@@ -451,14 +456,16 @@
     const o = S.v3ob;
     if (!(o.budget >= 50 && o.budget <= 20000)) throw new Error("Today's budget must be between ₹50 and ₹20,000");
     if (!o.meals.length) throw new Error("Pick at least one meal for today");
+    if (!o.consent) throw new Error("Please read the privacy notice and tick “I'm 18 or older and I agree”");
     const rhythm = Object.fromEntries(MEAL_ORDER.map(m => [m, o.meals.includes(m) ? "order" : "skip"]));
     S.planning = true; render();
     let view;
     try {
       view = await api("/api/profiles", "POST", { name: "Me", diet: o.diet, allergens: o.allergens, medical: [],
-        weekly_budget: o.budget * 7, rhythm, cook: "sometimes" });
+        weekly_budget: o.budget * 7, rhythm, cook: "sometimes", consent: { account: true } });
     } finally { S.planning = false; }
-    if (view.access_key) keys.put(view.user.id, view.access_key, view.user.name);
+    // W8: the browser keeps no key (cookie session); the recovery code is shown once in Me → Account.
+    if (view.access_key) { keys.put(view.user.id, null, view.user.name); S.freshCode = view.recovery_code; }
     S.users = mergeUsers(await api("/api/users"));
     S.v3ob = null; S.userId = view.user.id; store.set("smartplate.user", String(S.userId));
     adoptView(view);
@@ -475,7 +482,10 @@
     const v = () => st();
     on("[data-v3-ob]", "click", (e) => { e.preventDefault(); const a = e.currentTarget.dataset.v3Ob; guard(() => obTap(a)); });
     const obIn = document.getElementById("v3-ob-budget");
-    if (obIn) obIn.oninput = () => { readOb(); const b = document.querySelector('[data-v3-ob="nav:next"]'); if (b) b.disabled = !(S.v3ob.budget >= 50 && S.v3ob.meals.length); };
+    const obReady = () => { readOb(); const b = document.querySelector('[data-v3-ob="nav:next"]'); if (b) b.disabled = !(S.v3ob.budget >= 50 && S.v3ob.meals.length && S.v3ob.consent); };
+    if (obIn) obIn.oninput = obReady;
+    const obC = document.getElementById("v3-ob-consent");
+    if (obC) obC.onchange = obReady;                 // W8: the notice must be agreed to before a profile exists
     if (!S.userId) return;
     on("[data-v3-mode]", "click", (e) => { v().mode = e.currentTarget.dataset.v3Mode; render(); });
     on("[data-v3-budget]", "click", (e) => { const n = Number(e.currentTarget.dataset.v3Budget);

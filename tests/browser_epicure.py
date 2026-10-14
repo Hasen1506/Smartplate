@@ -125,7 +125,7 @@ def test_browser_out_of_stock_swap_more_like_this_and_credits(kitchen, viewport)
             page.get_by_role("button", name="Me: settings, money and account", exact=True).click()
             page.get_by_role("link", name="Credits & licences").click()
             pw.expect(page.get_by_role("heading", name="Epicure ingredient embeddings")).to_be_visible()
-            pw.expect(page.get_by_role("link", name="Creative Commons Attribution 4.0 International (CC BY 4.0)")).to_be_visible()
+            pw.expect(page.locator("#epicure").get_by_role("link", name="Creative Commons Attribution 4.0 International (CC BY 4.0)")).to_be_visible()   # W8 credits the recipe set (#dishes) under the same licence
             _no_overflow(page)
             assert not errors
             assert page.evaluate("policyViolations") == []

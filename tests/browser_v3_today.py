@@ -75,7 +75,7 @@ def town(frozen, monkeypatch):
     client = app.test_client()
     r = client.post("/api/profiles", json={
         "name": "Priya", "diet": "veg", "weekly_budget": 4200, "cook": "never",
-        "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "skip"}})
+        "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "skip"}, "consent": {"account": True}})
     uid = r.get_json()["user"]["id"]
     _connect(client, fake, uid=uid)
     key = client.environ_base["HTTP_X_SMARTPLATE_KEY"]
@@ -188,7 +188,7 @@ def test_today_favourites_first_journey(town, viewport, theme):
         sheet.get_by_role("button", name="Add to lunch pool").click()
         expect(page.locator(".toast")).to_contain_text("Chicken Burrito added")
         lunch_pool = page.locator(".v3-pool", has=page.get_by_role("heading", name="Lunch pool"))
-        expect(lunch_pool.locator(".v3-pool-item.off")).to_contain_text("Not marked veg")
+        expect(lunch_pool.locator(".v3-pool-item.off")).to_contain_text("The name says “chicken” (not veg)")   # W1 reason
         page.locator('.v3-pool [data-v3-add="lunch"]').click()
         sheet = page.get_by_role("dialog", name="New item / restaurant")
         sheet.get_by_role("button", name="Type it in").click()
@@ -314,6 +314,8 @@ def test_first_run_two_questions_then_today_and_account_after_value(fresh, viewp
         page.get_by_role("button", name="₹600").click()
         page.get_by_role("button", name="Breakfast").click()
         page.get_by_role("button", name="Lunch").click()
+        expect(page.get_by_role("button", name="Show my day")).to_be_disabled()       # W8: notice not agreed yet
+        page.locator("#v3-ob-consent").check()
         shot(page, f"11-onboard-budget-{tag}")
         no_overflow(page)
         contrast_ok(page)
