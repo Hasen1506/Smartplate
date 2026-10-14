@@ -56,7 +56,8 @@ def _open(browser, k, viewport):
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     bag = {str(k["uid"]): {"key": k["key"], "name": "Kavya"}}
-    page.add_init_script(f"""
+    page.add_init_script(f"""localStorage.setItem('ziggy.ui', 'classic');  /* classic Today, kept behind the v3 flag (docs/IA.md) */
+
         if (!localStorage.getItem('smartplate.keys')) {{
           localStorage.setItem('smartplate.keys', {json.dumps(json.dumps(bag))});
           localStorage.setItem('smartplate.user', {json.dumps(str(k['uid']))});

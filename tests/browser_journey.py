@@ -67,7 +67,8 @@ def test_browser_golden_first_week(server):
         page.route("https://fonts.gstatic.com/**", lambda r: r.fulfill(status=204, body=""))
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.add_init_script("globalThis.policyViolations = [];"
+        page.add_init_script("localStorage.setItem('ziggy.ui', 'classic');"   # classic Today behind the v3 flag (docs/IA.md)
+                               "globalThis.policyViolations = [];"
                              "document.addEventListener('securitypolicyviolation', e => policyViolations.push(e.violatedDirective));")
         transcript = {}
         try:

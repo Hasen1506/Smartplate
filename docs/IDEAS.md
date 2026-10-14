@@ -260,6 +260,8 @@ Ideas met while building this (not built):
 
 ## Dark redesign: three places, honest money, one-tap changes (Oct 8, 2026)
 
+> **Superseded (14 Oct 2026):** the navigation described here is replaced by [docs/IA.md](IA.md), the single source of truth for Ziggy's tabs and screens. Kept for history.
+
 Built: the Dark v2 tokens app-wide; Today / Plan / You (bottom tabs on phones, a sidebar from
 1024 px); the next pick on Today with its reasons in plain words and one saffron action;
 Swiggy's real bill drawn line by line once a cart is checked; estimates grey with "est.",

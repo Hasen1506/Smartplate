@@ -43,7 +43,8 @@ def _missing(key: str, value) -> tuple:
                    missing=key, id=value), 404
 
 
-ASSETS = {"app.js": "text/javascript", "styles.css": "text/css"}
+ASSETS = {"app.js": "text/javascript", "styles.css": "text/css",
+          "v3/v3.js": "text/javascript", "v3/v3.css": "text/css"}    # v3 Today (docs/IA.md)
 
 
 def _fingerprinted_assets() -> dict:
@@ -1207,4 +1208,6 @@ def create_app() -> Flask:
         return jsonify({"ok": True, "app": "smartplate", "version": "1.1.0"})
 
     ops.init_app(app)                        # /cron/tick, /admin/metrics, analytics events (W9)
+    from . import today_api                 # v3 Today: budget, pools, picks, Decide for me
+    app.register_blueprint(today_api.bp)
     return app

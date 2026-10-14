@@ -978,6 +978,7 @@ function welcomeLede() {
 function render() {
   const app = document.getElementById("app");
   if (S.planning) { app.innerHTML = planningScreen(); wire(); syncHistory(); return; }
+  const v3 = globalThis.ZiggyV3?.screen?.(); if (v3 != null) { app.innerHTML = storageBanner() + v3; wire(); syncHistory(); return; }
   if (S.onboard) {
     const step = `ob${S.onboard.step}`, arrive = step !== S.viewKey; S.viewKey = step;
     app.innerHTML = storageBanner() + onboardingScreen().replace('<main class="onboard">', `<main class="onboard${arrive ? " anim" : ""}">`); wire(); syncHistory(); return;
@@ -993,7 +994,7 @@ function render() {
     + (S.sheet ? sheetDialog() : "") + (S.addrSheet ? addressSheet() : "") + (S.connectSheet ? connectSheet() : "")
     + (S.liveBrowseMenu || S.liveLoading ? menuSheet() : "")
     + (S.orderReview ? orderReviewDialog() : "") + (S.liveOrderReview ? liveOrderReviewDialog() : "")
-    + (S.checkoutReview ? checkoutReviewDialog() : "") + (S.dish ? dishSheet() : "") + (S.cookAlong ? cookAlongView() : "") + (S.budgetSheet ? budgetSheet() : "");
+    + (S.checkoutReview ? checkoutReviewDialog() : "") + (S.dish ? dishSheet() : "") + (S.cookAlong ? cookAlongView() : "") + (S.budgetSheet ? budgetSheet() : "") + (globalThis.ZiggyV3?.overlays?.() || "");
   // A sheet slides up once, when it opens; re-renders while it is open don't replay that.
   const open = [...(document.querySelectorAll?.(".sheet-bg[data-ov]") || [])];
   const before = S.openSheets || new Set(), added = open.filter(el => !before.has(el.dataset.ov));
@@ -1129,7 +1130,7 @@ function topbar() {
   return `<header class="topbar">${mark()}${pill}<span class="spacer"></span>
     <button class="avatar" data-tab="more" aria-label="Me: settings, money and account" title="${esc(S.view.user?.name)}">${esc((S.view.user?.name || "?").slice(0, 1).toUpperCase())}</button></header>`;
 }
-const TABS = [["today", "Today", ICON.today], ["week", "Week", ICON.week], ["saved", "Saved", ICON.saved]];   // labels go through t()
+const TABS = globalThis.ZiggyV3?.tabs?.(ICON) || [["today", "Today", ICON.today], ["week", "Week", ICON.week], ["saved", "Saved", ICON.saved]];   // labels go through t()
 function navBar() {
   return `<nav class="nav" aria-label="Main"><div class="brand-rail">${mark()}<span class="wordmark">ziggy</span></div>${TABS.map(([k, l, i]) =>
     `<button class="tab" data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${i}<span>${t(l)}</span></button>`).join("")}</nav>`;
@@ -1168,7 +1169,7 @@ function balanceAside() {
         ${b.daily_cap ? `<span class="fine">Daily cap ${rupee0(b.daily_cap)}</span>` : ""}</div></div>
       <div class="mix" role="img" aria-label="${mix.map(([l, x]) => `${l} ${x}`).join(", ")}">${mix.filter(([, x]) => x).map(([, x, k]) => `<i class="${k}" style="flex:${x / total}"></i>`).join("")}</div>
       <div class="mix-key">${mix.map(([l, x, k]) => `<span><i class="${k}"></i>${l} ${x}</span>`).join("")}</div></section>
-    ${bars ? `<section class="card"><p class="k">Nutrition · a day, on average</p>${bars}
+    ${bars && globalThis.ZiggyV3?.nutritionOn?.() !== false ? `<section class="card"><p class="k">Nutrition · a day, on average</p>${bars}
       <p class="fine">From the meals in your plan${v.source?.kind === "live" ? ", estimated from dish names" : ""}. Skipped meals add nothing.</p></section>` : ""}
     <section class="card"><p class="k">Day by day</p><div class="glance">${glance}</div>
       <div class="mix-key"><span><i class="o"></i>Order</span><span><i class="c"></i>Cook</span><span><i class="done"></i>Had</span></div></section>
@@ -1177,6 +1178,7 @@ function balanceAside() {
   </aside>`;
 }
 function tabBody() {
+  const v3 = globalThis.ZiggyV3?.body?.(S.tab); if (v3 != null) return v3;      // v3 Today + Cook (static/v3)
   if (S.tab === "week") return weekScreen();
   if (S.tab === "saved") return savedScreen();
   if (S.tab === "more") return meScreen();
@@ -1638,7 +1640,7 @@ function weekScreen() {
       <div class="bar"><i class="${left < 0 ? "over" : ""}" style="width:${pct}%"></i></div>
       <span class="fine">${t("{o} to order · {c} to cook", { o: n("delivery"), c: n("cook") })}${b.prorated ? ` · rest of the week only` : ""}${b.daily_cap ? ` · daily limit ${rupee0(b.daily_cap)}` : ""} · ${esc(v.plan.mode_label || "")}</span>
       <div class="row" style="gap:8px;margin-top:10px"><button class="small secondary" data-act="budget">${t("Change budget")}</button>${n("delivery") ? `<button class="small secondary" data-act="try-different" title="Swap the dishes Ziggy picked for others that still fit your rules and budget">Try different dishes</button>` : ""}</div></section>
-    ${sourceLine(v.source)}
+    ${sourceLine(v.source)}${globalThis.ZiggyV3?.weekTop?.() || ""}
     ${S.moving ? `<div class="note" role="status"><span class="ic">${ICON.swap}</span><span style="flex:1">Tap the meal to swap it with, on any day.</span><button class="small ghost" data-act="cancel-move">Cancel</button></div>` : ""}
     ${day ? `<nav class="days rise2" aria-label="Days">${days.map((d, i) => {
       const allPast = Object.values(d.meals).every(m => m.status === "past");
@@ -2930,6 +2932,7 @@ async function useRecoveryCode(code) {
 const OB_STEPS = ["What you eat", "Your days", "Budget", "Save"];
 const BUDGET_PRESETS = [1500, 3000, 5000];
 function startOnboard() {
+  if (globalThis.ZiggyV3?.startOnboard?.()) return;
   S.onboard = { step: 0,
     d: { name: "", diet: null, allergens: [], medical: [], observances: [], meals: ["lunch", "dinner"], cook: "sometimes",
       rhythm: { breakfast: "skip", lunch: "order", dinner: "order" },
@@ -3298,6 +3301,7 @@ function wire() {
       catch { throw new Error("Couldn't copy here. Select the list and copy it instead"); }
     },
   };
+  globalThis.ZiggyV3?.wire?.(on, acts);
   on("[data-act]", "click", (e) => { e.preventDefault(); const a = e.currentTarget.dataset.act, f = acts[a]; if (f) guard(f, ACT_LABELS[a]); });
   const deleteForm = document.getElementById("delete-profile");
   if (deleteForm) deleteForm.onsubmit = (e) => { e.preventDefault(); guard(() => deleteProfile(deleteForm)); };
@@ -3338,6 +3342,7 @@ function wire() {
 }
 function onMealTap(sid) {
   sid = Number(sid);
+  if (!S.moving && globalThis.ZiggyV3?.onMealTap?.(sid)) return;
   if (S.moving) {
     if (S.moving === sid) { S.moving = null; render(); return; }
     guard(() => swapMeals(S.moving, sid)); return;
