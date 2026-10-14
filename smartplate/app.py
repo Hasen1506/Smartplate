@@ -6,7 +6,7 @@ from flask import Flask, Response, g, jsonify, redirect, request, send_from_dire
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
+from . import access, accounts, config, errors, everyday, profile_data, push, ratelimit, service
 from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, week_orders
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
@@ -87,6 +87,12 @@ def create_app() -> Flask:
             db_pg.ensure_keepalive()
 
     @app.before_request
+    def assign_request_id():
+        # One id per request, echoed in the X-Request-ID header and in error replies, so a
+        # person can quote it and the log line can be found without exposing internals (#65).
+        g.request_id = errors.request_id(request.headers.get("X-Request-ID"))
+
+    @app.before_request
     def validate_request():
         # The trial is same-origin and single-process. Prevent another browser
         # origin from using the private forwarded port to edit the plan.
@@ -132,20 +138,27 @@ def create_app() -> Flask:
 
     @app.errorhandler(ValueError)
     def invalid_input(error):
-        # ValueError is the app's "your input can't be used" signal; its text is written for people.
-        return jsonify(error=str(error)), 400
+        # Ziggy's own `raise ValueError("…")` text is written for people and is shown. A
+        # ValueError from anywhere else (a parser, a driver, int("x")) may carry internals:
+        # the person gets a generic sentence plus the request id; the detail is logged (#65).
+        message = errors.public_message(error)
+        rid = g.get("request_id")
+        if message is not None:
+            return jsonify(error=message), 400
+        app.logger.info("Rejected input on %s [%s]: %s: %s", request.path, rid, type(error).__name__, error)
+        return jsonify(error=errors.GENERIC, code="invalid_input", request_id=rid), 400
 
     @app.errorhandler(KeyError)
     def missing_field(error):
         # Usually a missing request field; never echo internal key names or data (L-07).
-        app.logger.info("KeyError on %s: %r", request.path, error)
-        return jsonify(error="A required field is missing or unknown."), 400
+        app.logger.info("KeyError on %s [%s]: %r", request.path, g.get("request_id"), error)
+        return jsonify(error="A required field is missing or unknown.", request_id=g.get("request_id")), 400
 
     @app.errorhandler(TypeError)
     def server_bug(error):
         # A TypeError is a server bug, not a user mistake: log it and answer 500 (L-07).
-        app.logger.exception("Unhandled TypeError on %s", request.path)
-        return jsonify(error="Something went wrong on our side. Try again."), 500
+        app.logger.exception("Unhandled TypeError on %s [%s]", request.path, g.get("request_id"))
+        return jsonify(error="Something went wrong on our side. Try again.", request_id=g.get("request_id")), 500
 
     def swiggy_owner():
         """The profile a Swiggy route acts for, so its problem log can be kept."""
@@ -203,6 +216,8 @@ def create_app() -> Flask:
 
     @app.after_request
     def response_headers(response):
+        if g.get('request_id'):
+            response.headers['X-Request-ID'] = g.request_id
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['X-Frame-Options'] = 'DENY'
@@ -296,7 +311,6 @@ def create_app() -> Flask:
             "weather_provider": config.WEATHER_PROVIDER,
             "catalog_city": everyday.CITY,
             "fixture_data": config.FIXTURE_DATA,
-            "features": _FEATURE_MAP,
             # Epicure ingredient embeddings: swaps, "more like this", cuisine tilt
             "epicure": {"available": epicure.get() is not None, "cuisines": flavour.CUISINES},
         })
@@ -1008,30 +1022,3 @@ def create_app() -> Flask:
         return jsonify({"ok": True, "app": "smartplate", "version": "1.1.0"})
 
     return app
-
-
-_FEATURE_MAP = {
-    "5.1": [
-        {"id": 1, "name": "Allergy & medical hard-exclusions", "where": "domain/allergens.py"},
-        {"id": 2, "name": "Calendar integration", "where": "integrations/calendar_sync.py"},
-        {"id": 3, "name": "Idempotency keys on order placement", "where": "integrations/swiggy_mcp.py"},
-        {"id": 4, "name": "Explainability log per decision", "where": "kernel/explainability.py"},
-        {"id": 5, "name": "Pause / snooze / cooked", "where": "kernel/scheduler.py"},
-    ],
-    "5.2": [
-        {"id": 6, "name": "Nutrition layer", "where": "domain/nutrition.py"},
-        {"id": 7, "name": "Household / group mode", "where": "domain/household.py"},
-        {"id": 8, "name": "Leftover & home-cooking awareness", "where": "domain/leftovers.py"},
-        {"id": 9, "name": "Festival / cultural calendar", "where": "domain/festivals.py"},
-        {"id": 10, "name": "Weather adaptation", "where": "domain/weather.py"},
-        {"id": 11, "name": "Surge prediction", "where": "domain/surge.py"},
-    ],
-    "5.3": [
-        {"id": 12, "name": "Reverse mode (Instamart cook days)", "where": "domain/reverse_mode.py"},
-        {"id": 13, "name": "Community plan templates", "where": "domain/community.py"},
-        {"id": 14, "name": "Receipt / expense surface", "where": "domain/receipts.py"},
-        {"id": 15, "name": "Health / longevity integration", "where": "domain/health.py"},
-        {"id": 16, "name": "Carbon / sustainability scoring", "where": "domain/carbon.py"},
-        {"id": 17, "name": "Cooking-mode coach", "where": "domain/cooking_coach.py"},
-    ],
-}

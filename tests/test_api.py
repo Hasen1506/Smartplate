@@ -33,8 +33,8 @@ def test_meta_reports_zero_cost_brain(client):
     m = client.get("/api/meta").get_json()
     assert m["brain"] == "deterministic"
     assert m["brain_cost_per_decision"] == 0.0
-    assert set(m["features"].keys()) == {"5.1", "5.2", "5.3"}
-    assert sum(len(v) for v in m["features"].values()) == 17
+    # The brainstorm's internal feature catalogue is not published (grill #32).
+    assert "features" not in m and "§" not in str(m) and "Carbon" not in str(m)
 
 
 def test_plan_view_shape(client):
