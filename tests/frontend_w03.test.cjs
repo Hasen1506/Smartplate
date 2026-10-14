@@ -246,6 +246,9 @@ test('recovery code is hidden until asked, with Copy and Download; the button sa
   const { context } = fixture({}, { storage: { 'smartplate.keys': JSON.stringify({ 2: { key: 'abcdefghijklmnopqrst', name: 'Meera' } }) } });
   await context.bootPromise;
   run(context, 'S.account = { login: null, devices: [{ id: 1, label: "Phone", last_seen: "2026-11-02T08:00", this_device: false }] }');
+  // W8: the browser no longer keeps the key; the code exists only right after it was made or rotated.
+  assert.doesNotMatch(run(context, 'profilesPanel()'), /data-act="copy-recovery"/);
+  run(context, 'S.freshCode = "2.abcdefghijklmnopqrst"');
   const html = run(context, 'profilesPanel()');
   assert.match(html, /<details class="recovery"><summary>Show recovery code<\/summary><code class="code">2\.abcdefghijklmnopqrst<\/code><\/details>/);
   assert.match(html, /data-act="copy-recovery">Copy code/);
