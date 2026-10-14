@@ -193,3 +193,24 @@ def test_sentry_dsn_without_the_package_warns_and_carries_on(monkeypatch, caplog
         return real_import(name, *a, **kw)
     monkeypatch.setattr(builtins, "__import__", no_sentry)
     assert observability.init_sentry("https://key@o0.ingest.sentry.io/0") is False
+
+
+def test_sentry_is_on_with_a_dsn_and_installed_by_create_app(monkeypatch):
+    """sentry-sdk[flask] ships in requirements.txt; a DSN switches it on at app start."""
+    import sentry_sdk
+    seen = {}
+    monkeypatch.setattr(sentry_sdk, "init", lambda **kw: seen.update(kw))
+    monkeypatch.setattr(config, "SENTRY_DSN", "https://key@o0.ingest.sentry.io/0")
+    assert observability.init_sentry() is True
+    assert seen["dsn"].startswith("https://key@") and seen["send_default_pii"] is False
+    assert any(type(i).__name__ == "FlaskIntegration" for i in seen["integrations"])
+    seen.clear()
+    from smartplate.app import create_app
+    create_app()
+    assert seen.get("dsn", "").startswith("https://key@")
+
+
+def test_sentry_sdk_is_pinned_in_requirements():
+    import pathlib
+    reqs = (pathlib.Path(__file__).resolve().parent.parent / "requirements.txt").read_text()
+    assert "sentry-sdk[flask]==" in reqs

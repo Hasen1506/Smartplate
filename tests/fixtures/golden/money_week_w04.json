@@ -122,10 +122,11 @@
   "estimate_total": 1402.88,
   "extra_fees": 45.19,
   "fits": false,
-  "message": "5 × this dish is about ₹1,358 with fees, above Swiggy's ₹1,000 limit for orders placed from Ziggy. Order it as 2 carts (3 + 2), one after the other: about ₹45 more in delivery and platform fees. Or order it in one go in the Swiggy app.",
+  "message": "5 × this dish is about ₹1,358 with fees, above Swiggy's ₹1,000 limit for orders placed from Ziggy, so Ziggy splits it into 2 carts (3 + 2), one after the other, each for your approval: about ₹45 more in delivery and platform fees.",
   "mode": "split"
  },
  "suggestion": {
+  "asked": true,
   "available": true,
   "avg_order": 288.89,
   "basis": "Real Swiggy bills and order history only.",
@@ -137,18 +138,55 @@
   },
   "clamped": false,
   "complete": true,
+  "default_pct": 15,
   "floor": 525.0,
-  "headline": "You spent ₹1,156 in the last 8 days (₹1,011 a week). Aim for ₹860 a week?",
-  "max_cut_target": 758.34,
+  "headline": "You spent ₹1,156 in the last 8 days (₹1,011 a week).",
+  "options": [
+   {
+    "below_floor": false,
+    "default": false,
+    "label": "10% less: ₹920 a week (₹91 less)",
+    "pct": 10,
+    "saving_month": 395,
+    "saving_week": 91.12,
+    "target": 920,
+    "what_changes": [
+     "About 1 of your ~4 weekly orders at your cheapest favourite (Mini Tiffin, ₹131) instead of your average ₹289 order",
+     "Or cook 1 meal a week instead of ordering"
+    ]
+   },
+   {
+    "below_floor": false,
+    "default": true,
+    "label": "15% less: ₹860 a week (₹151 less)",
+    "pct": 15,
+    "saving_month": 655,
+    "saving_week": 151.12,
+    "target": 860,
+    "what_changes": [
+     "About 1 of your ~4 weekly orders at your cheapest favourite (Mini Tiffin, ₹131) instead of your average ₹289 order",
+     "Or cook 1 meal a week instead of ordering"
+    ]
+   },
+   {
+    "below_floor": false,
+    "default": false,
+    "label": "20% less: ₹810 a week (₹201 less)",
+    "pct": 20,
+    "saving_month": 872,
+    "saving_week": 201.12,
+    "target": 810,
+    "what_changes": [
+     "About 2 of your ~4 weekly orders at your cheapest favourite (Mini Tiffin, ₹131) instead of your average ₹289 order",
+     "Or cook 1 meal a week instead of ordering"
+    ]
+   }
+  ],
   "orders_per_week": 3.5,
   "reasons": [],
   "saving_per_week": 151.12,
   "spent_4w": 1155.56,
   "suggested": 860,
-  "trade_offs": [
-   "About 1 of your ~4 weekly orders at your cheapest favourite (₹131) instead of your average ₹289 order.",
-   "Or cook 1 of those meals instead of ordering."
-  ],
   "weekly_spend": 1011.12,
   "weeks": 1.1
  }

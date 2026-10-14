@@ -94,15 +94,13 @@ def test_no_surge_saving_is_claimed(run_week):
     assert claims == []
 
 
-@gap("W4", "usab #18 / grill #27: a profile made a minute ago is told 'Your usual week costs "
-           "about ₹X'; there is no usual yet")
+# Was a known gap (usab #18 / grill #27), fixed in round 2: "your usual week" only with order history.
 def test_no_usual_week_claim_without_order_history(run_week):
     w = _planned(run_week, "student_veg")
     assert not [m for m in dishonest_messages(w.view()) if "usual week" in m]
 
 
-@gap("W4", "usab #17: on a ₹300 week a second ₹265 pin takes the week to ₹530 with no "
-           "over-budget prompt or warning")
+# Was a known gap (usab #17), fixed in round 2: a pin that takes the week over the target is flagged.
 def test_a_pin_that_breaks_the_week_is_flagged(run_week):
     w = _planned(run_week, "low_budget")
     cells = [c for _, _, c in w.cells(w.view()) if c["status"] == "active"]

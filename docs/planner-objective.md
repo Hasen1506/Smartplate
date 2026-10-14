@@ -10,6 +10,14 @@ week plan).*
 **Plan the meals you said you order, from what you like, inside your money, without ever
 breaking a safety rule.** Money is the limit. Your choice is the objective.
 
+**Favourites first (founder decision, 14 Oct 2026).** Your favourites take priority whenever
+the money allows. Ziggy never *silently* swaps a favourite for a cheaper dish and never
+silently skips one to save money: when a meal's own favourites don't fit, the meal stays
+open and you choose how to build out the week (below). A cheaper dish is planned only when
+you pick that scenario, or when you chose a *Decide for me* mode (which is you asking Ziggy
+to choose). There is no automatic "cut 15%" target: the 10 / 15 / 20% options, in rupees,
+appear only when you ask to spend less.
+
 ## The order of priority (lexicographic, not a weighted soup)
 
 A lower rule never buys a higher one.
@@ -19,16 +27,40 @@ A lower rule never buys a higher one.
 | 1 | **Safe** | filter | Never break a diet, allergy or medical rule of *anyone eating* that meal (household members too). Unknown counts as unsafe. Applied before anything else. |
 | 2 | **Within the money** | hard limit | Today's money (Today) or this week's money left (Week), delivery fee included; the daily limit too, if you set one. |
 | 3 | **Favourites** | what may be planned | Only what the mode you picked allows (below). Inside that, the dish with the higher *favourite score* wins. |
-| 4 | **No silent skips** | ranked above the score | Fill every meal you said you order. A cheaper dish from your places beats a skip. A meal is skipped only when nothing allowed fits, and the reason says which rule it was. |
+| 4 | **No silent skips, no silent swaps** | ranked above the score | Fill every meal you said you order with what rule 3 allows. If a meal's favourites don't fit the money, it is left **open with a build-out set** (never quietly skipped, never quietly swapped). A cheaper dish from your places is used only when you pick it there or chose a Decide-for-me mode, or when none of the meal's favourites is safe for someone eating (and the reason says so). Every open or skipped meal says which rule it was. |
 | 5 | **Cheapest among equals** | tie-break | Two dishes you like about the same (favourite scores within 0.05): the cheaper one. |
 | – | **Variety** | cap | A dish at most twice a week (your setting) and once a day. A short meal list of your own may repeat as often as it has to. |
 
-Rule 3 decides *what is allowed*; rule 4 sits above the favourite *score*. That is the
-founder's "a cheaper favourite beats a skip". So the key that compares two plans is:
+Rule 3 decides *what is allowed*; rule 4 sits above the favourite *score*. In *Decide for
+me* (the person asked Ziggy to choose) a cheaper dish at your places beats a skip; in the
+week plan the person chooses it from the build-out set. So the key that compares two plans is:
 
 ```
 (meals filled ↑,  favourite score ↑,  cost ↓,  repeats ↓)
 ```
+
+## When favourites don't fit: the build-out set
+
+`smartplate/domain/buildout.py` · `GET /api/plan/<id>/buildout` · `POST /api/plan/<id>/buildout`
+(`plan_view.buildout` and a heads-up on the plan). The planner leaves a meal open with a
+reason that starts "Your favourites for this meal don't fit …" and offers scenarios, each with
+its effect in ₹; nothing changes until the person picks one, and every scenario is re-derived
+when applied (a stale id is refused):
+
+| Scenario | What it does |
+|---|---|
+| Skip another meal | Frees that meal's money so the favourite fits |
+| Swap to a cheaper favourite | Another dish from the same meal list |
+| Cook it | The open meal at home |
+| Cheaper dish at your places | The old automatic fallback, now only when picked |
+| Raise by ₹N | The exact weekly increase that makes every favourite fit |
+
+The only "too little money" warning uses **your own cheapest favourite with its fees**; with no
+favourites there is no floor and no warning (the old flat ₹60 a meal is gone). Money counts
+whole bills: on Today, a Swiggy pick counts at its estimated whole bill (dish + delivery +
+platform fee + packaging + GST, learned from your bills) and at the real Swiggy cart bill
+once its cart is filled; Today's *Decide for me* weighs Swiggy dishes the same way. Meals over
+Swiggy's ₹1,000 cart limit go as sequential split carts, each approved.
 
 ## Modes ("Decide for me" only)
 
@@ -58,7 +90,7 @@ Each term is 0..1 before its weight. These are the only numbers that rank dishes
 |---|---|---|
 | `W_RATING` | 0.35 | The dish's rating out of 5 (the restaurant's if the dish has none) |
 | `W_TIMES` | 0.30 | How often you ordered it: n/(n+2), so once ≈ 0.33, four times ≈ 0.67 |
-| `W_SLOT` | 0.20 | Right for this meal (a tiffin dish at breakfast, a full plate at lunch; no idli as dinner unless it's in your dinner list) |
+| `W_SLOT` | 0.20 | Right for this meal (a tiffin dish at breakfast, a full plate at lunch). Tiffin (dosa, idli, pongal) is fine at dinner; only snack-alone (vada, bonda, chai…) is never a lunch or dinner |
 | `W_RECENCY` | 0.15 | Ordered lately: 1 today, fading to 0 over 30 days |
 | `POOL_BONUS` | 0.50 | You put this dish in this meal's list yourself |
 | `PLACE_BONUS` | 0.20 | A dish at one of your places |
@@ -96,9 +128,10 @@ the rules allow. Its new pieces map onto the rules above:
   exact staged solve (fewest skips, then fewest extra cooks, then the week). A staged
   "fewest skips first" solve in every mode was tried and is behind `SKIP_STAGE`: it made the
   follow-up solve 10–50× slower to prove.
-- **Pool fallback**: a meal with a list of your own dishes now falls back to other safe
+- **Pool fallback**: a meal with a list of your own dishes can fall back to other safe
   dishes *at your places* (`POOL_FALLBACK_PEN` = 1.0, so a list dish always wins when it
-  fits) instead of skipping when the list is too dear or not safe for someone eating.
+  fits), but only when the list isn't safe for someone eating or a Decide-for-me mode
+  allows it. Too dear is not a reason to swap silently (see the build-out set).
 - **Whole places** (grill #5): with saved places, every safe dish there is a candidate (up
   to `MAX_FAVOURITE_CANDIDATES` = 40 a meal, round-robin across places), not the old short
   list of about 6; the live refresh reads every saved place (up to 12), not the first 4.
@@ -110,6 +143,13 @@ the rules allow. Its new pieces map onto the rules above:
   *Decide for me* the favourite score carries `DIET_BONUS` (no solver cost there).
 - **Not a whole meal** (usab #12): vada, bonda, samosa, chai, juice and similar are never
   planned alone as lunch or dinner (unless you chose them).
+- **Tiffin at dinner** (founder, 14 Oct 2026): dosa, idli and pongal are allowed at dinner.
+  The week MILP offers each dinner its best `DINNER_TIFFIN_CANDIDATES` = 2 tiffin dishes;
+  offering all of them made the 6-place week hit the 10 s limit unproven.
+- **Favourites never cheapened silently**: a pooled meal whose list is too dear for the money
+  left is not swapped to a cheaper dish; it is left open for the build-out set. The pool
+  fallback (below) runs only when no list dish is safe for someone eating, or when a
+  Decide-for-me mode the person chose allows cheaper dishes (`allow_cheaper`).
 - **Honest skips**: every skip in every mode says the real cause (money left vs cheapest
   option, daily limit, variety cap, nothing safe for a named household member); the plan
   summary counts skips *by cause* instead of "skipped to stay within budget".
@@ -145,8 +185,8 @@ start (founder answer #55), not for plan quality.
 2. **"New places" needs a live search.** In live mode the catalogue holds only your
    places, so *Favourites + new places* and *Surprise me* only add places already read
    (e.g. from a search). Reading new places per decision is a Swiggy call per tap.
-3. **Rule 4 vs your list.** A meal with its own list now falls back to other dishes at the
-   same places rather than skipping. If Vijay wants "my list or nothing", that is one flag.
+3. ~~Rule 4 vs your list.~~ Decided 14 Oct 2026: favourites first; a too-dear list leaves
+   the meal open with build-out scenarios instead of a silent cheaper swap or skip.
 
 ## One "Decide for me" engine (integration, Oct 2026)
 

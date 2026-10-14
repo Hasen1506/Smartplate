@@ -225,7 +225,9 @@ def test_out_of_area_place_gets_a_plain_409(town):
 
 def test_address_change_drops_places_that_dont_deliver_there(town):
     c, uid, plan = _open(town, "addr-omr")
-    for meal, rid, dish in (("lunch", "r-101", "South Indian Meals"), ("dinner", "r-101", "Masala Dosa"),
+    # (Masala Dosa is a lunch here: since Oct 2026 a dosa is a fine dinner and, cheaper, would
+    # take every dinner from Wok Street, which this test needs in the week.)
+    for meal, rid, dish in (("lunch", "r-101", "South Indian Meals"), ("lunch", "r-101", "Masala Dosa"),
                             ("dinner", "r-105", "Veg Hakka Noodles")):
         r = c.post(f"/api/user/{uid}/pools", json={"meal": meal, "restaurant_id": rid,
                                                    "restaurant_name": PLACES[rid][0], "item_id": _dish(rid, dish)})

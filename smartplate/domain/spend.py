@@ -3,8 +3,8 @@
 Three things read from it:
   • actual vs target for a week (critique 33: "weekly target", not "hard weekly cap"),
   • the Sunday recap: target, actual, ₹ kept, best/worst day (critique 24),
-  • a budget suggestion from the user's own last-4-weeks spend with guard rails
-    (critique 27 + Vijay's answer: never a dysfunctional target).
+  • what the user really spends and, only when they ask, 10/15/20 % "cut" options in ₹
+    (founder decision 14 Oct 2026: no automatic reduction targets).
 
 What counts as spent (the ledger, `spend_ledger`):
   • an order in Swiggy's own order history (get_food_orders), not cancelled, with a
@@ -25,11 +25,9 @@ import math
 import re
 import statistics
 
-from .. import clock, config, db
+from .. import clock, db
 
 WEEKS_FOR_SUGGESTION = 4
-SUGGEST_CUT = 0.15            # "aim for 0.85 × what you spent"
-MAX_CUT_PER_STEP = 0.25       # never ask for more than 25 % less than real spend in one step
 CANCELLED = re.compile(r"cancel|refund|fail|reject", re.IGNORECASE)
 _MONEY_TEXT = re.compile(r"\s*(₹|rs\.?|inr)?\s*([\d,]+(?:\.\d+)?)\s*", re.IGNORECASE)
 _ISO_DATE = re.compile(r"(\d{4}-\d{2}-\d{2})")
@@ -265,14 +263,23 @@ def week_recap(user: dict, week_start: str | None = None) -> dict:
 # Budget from real spend (critique 27)
 # --------------------------------------------------------------------------- #
 def cheapest_meal(user: dict) -> dict | None:
-    """The cheapest realistic delivered meal from the user's OWN places (live favourites /
-    pools), with delivery, fees and GST — not a side, not a drink. None without any."""
-    from . import fees, models
+    """The user's own cheapest FAVOURITE, delivered (delivery, fees and GST included) — a
+    dish in one of their meal lists or at one of their saved places; not a side, not a
+    drink. None without favourites: then there is no floor at all (founder decision,
+    14 Oct 2026: no made-up "₹60 a meal" floor)."""
+    from . import fees, models, taste
+    from .meal_pools import for_planner
     try:
         menu = models.menu_for_user(user)
     except Exception:
         return None
-    menu = [it for it in menu if "side" not in (it.get("tags") or []) and it.get("price")]
+    try:
+        pooled = set().union(*(p["ids"] for p in for_planner(user["id"]).values())) if user.get("id") else set()
+    except Exception:
+        pooled = set()
+    places = set(user.get("favourite_places") or ()) | (taste.favourites(user["id"]) if user.get("id") else set())
+    menu = [it for it in menu if (it["id"] in pooled or it["restaurant_id"] in places)
+            and "side" not in (it.get("tags") or []) and it.get("price")]
     if not menu:
         return None
     priced = [(round(it["price"] + it.get("delivery_fee", 0) + fees.charges(it, it["price"]), 2), it) for it in menu]
@@ -286,25 +293,52 @@ def meals_per_week(user: dict) -> int:
     return max(1, len(profile.meals_planned(user)) * 7)
 
 
-def suggest(user: dict, *, cut: float | None = None, target: float | None = None) -> dict:
-    """"You spent ₹X in the last 4 weeks; aim for ₹0.85X?" with guard rails.
+CUT_OPTIONS = (0.10, 0.15, 0.20)     # "cut my spending": the three offers, each shown in ₹
+DEFAULT_CUT = 0.15                   # highlighted, never applied by itself
 
-    Guard rails, applied in this order:
-      • real spend only (ledger); without it there is no suggestion, only what to do;
-      • a single step never cuts more than 25 % below real weekly spend;
-      • never below the floor: the cheapest realistic meal from the user's own places
-        × the number of orders they actually make a week (from the same history).
-    `cut` (0.2 = "20 % less") or `target` (₹) is the user's own ask; it is checked, not
-    obeyed blindly. Cheaper alternatives are never suggested here (only on request).
+
+def _cut_option(pct: float, weekly: float, orders_week: float, avg_order: float, cheap: dict | None,
+                floor: float | None) -> dict:
+    target = round(weekly * (1 - pct), 2)
+    target = math.ceil(target / 10) * 10 if target >= 100 else round(target, 2)
+    saving = round(weekly - target, 2)
+    changes = []
+    if cheap and avg_order > cheap["cost"] and saving > 0:
+        swaps = math.ceil(saving / (avg_order - cheap["cost"]))
+        changes.append(f"About {swaps} of your ~{orders_week:.0f} weekly orders at your cheapest favourite "
+                       f"({cheap['item']}, ₹{cheap['cost']:,.0f}) instead of your average ₹{avg_order:,.0f} order")
+    if avg_order > 0 and saving > 0:
+        n = math.ceil(saving / avg_order)
+        changes.append(f"Or cook {n} meal{'s' if n != 1 else ''} a week instead of ordering")
+    below = floor is not None and target < floor
+    if below:
+        changes = [f"Below what your favourites cost (₹{floor:,.0f} a week for your ~{orders_week:.0f} orders): "
+                   "only cooking more or ordering less gets there"]
+    return {"pct": round(pct * 100), "target": target, "saving_week": saving,
+            "saving_month": round(saving * 52 / 12), "default": abs(pct - DEFAULT_CUT) < 1e-9,
+            "below_floor": below, "label": f"{round(pct * 100)}% less: ₹{target:,.0f} a week (₹{saving:,.0f} less)",
+            "what_changes": changes}
+
+
+def suggest(user: dict, *, cut: float | None = None, target: float | None = None,
+            asked: bool = False) -> dict:
+    """What the user really spends (Swiggy bills only) and, ONLY when they ask to cut it,
+    10 / 15 / 20 % options, each in ₹ with what would change; 15 % is highlighted.
+
+    Founder decision (14 Oct 2026): no automatic reduction target. Without `asked` (or
+    their own `cut` / `target`) this returns the facts and no suggested number. A `cut`
+    (0.2 = "20 % less") or `target` (₹) of their own is checked against the floor — their
+    own cheapest favourite × the orders they actually make a week (none without
+    favourites) — and never applied here.
     """
     today = clock.today()
     start = today - dt.timedelta(days=7 * WEEKS_FOR_SUGGESTION)
     rows = entries(user["id"], start.isoformat(), today.isoformat())
     s = synced(user["id"])
     if not rows:
-        return {"available": False,
+        return {"available": False, "asked": bool(asked or cut is not None or target is not None),
                 "why": "No real Swiggy spend yet. Read your Swiggy order history (or place a first order) and "
-                       "Ziggy will suggest a target from what you actually spend."}
+                       "Ziggy can show what you actually spend, and options to cut it if you ask."}
     first = min(r["iso_date"] for r in rows)
     oldest = (s or {}).get("oldest_date") or first
     covered_days = max(7, (today - dt.date.fromisoformat(min(first, oldest))).days + 1)
@@ -315,45 +349,37 @@ def suggest(user: dict, *, cut: float | None = None, target: float | None = None
     avg_order = spent / len(rows)
     cheap = cheapest_meal(user)
     floor = round(cheap["cost"] * max(1, round(orders_week)), 2) if cheap else None
-    max_cut_target = round(weekly * (1 - MAX_CUT_PER_STEP), 2)
-
-    asked = None
+    out = {"available": True, "spent_4w": spent, "weeks": round(covered_days / 7, 1), "weekly_spend": weekly,
+           "orders_per_week": round(orders_week, 1), "avg_order": round(avg_order, 2),
+           "floor": floor, "cheapest_meal": cheap,
+           "headline": f"You spent ₹{spent:,.0f} in the last {_span(covered_days)} (₹{weekly:,.0f} a week).",
+           "complete": bool(s) and dt.date.fromisoformat(s["synced_ts"][:10]) >= today,
+           "basis": "Real Swiggy bills and order history only.",
+           "asked": bool(asked or cut is not None or target is not None), "options": [],
+           "suggested": None, "reasons": [], "clamped": False}
+    if not out["asked"]:
+        out["offer"] = "Want to spend less? Ask and Ziggy shows 10%, 15% and 20% options in rupees."
+        return out
+    out["options"] = [_cut_option(p, weekly, orders_week, avg_order, cheap, floor) for p in CUT_OPTIONS]
+    out["default_pct"] = round(DEFAULT_CUT * 100)
+    mine = None
     if target is not None:
-        asked = float(target)
+        mine = float(target)
     elif cut is not None:
-        asked = round(weekly * (1 - float(cut)), 2)
-    proposed = asked if asked is not None else round(weekly * (1 - SUGGEST_CUT), 2)
-    reasons, clamped = [], False
-    if proposed < max_cut_target:
-        reasons.append(f"More than a 25% cut in one step usually doesn't stick, so this aims for "
-                       f"₹{max_cut_target:,.0f} first; ask again once you've held it for a week.")
-        proposed, clamped = max_cut_target, True
-    if floor is not None and proposed < floor:
-        reasons.append(f"Your cheapest meal from your own places is about ₹{cheap['cost']:,.0f} "
-                       f"({cheap['item']}, incl. delivery, fees & GST); ×{max(1, round(orders_week))} orders a week "
-                       f"is ₹{floor:,.0f}, so the target can't go below that without cooking or ordering less.")
-        proposed, clamped = floor, True
-    proposed = math.ceil(proposed / 10) * 10 if proposed >= 100 else round(proposed, 2)   # up: never under a floor
-    saving = round(weekly - proposed, 2)
-    trade = []
-    if saving > 0 and cheap and avg_order > cheap["cost"]:
-        swaps = math.ceil(saving / (avg_order - cheap["cost"]))
-        trade.append(f"About {swaps} of your ~{orders_week:.0f} weekly orders at your cheapest favourite "
-                     f"(₹{cheap['cost']:,.0f}) instead of your average ₹{avg_order:,.0f} order.")
-    if saving > 0 and avg_order > 0:
-        trade.append(f"Or cook {math.ceil(saving / avg_order)} of those meals instead of ordering.")
-    if floor is not None and floor >= weekly:
-        trade = ["You already spend about as little as your own places allow. Cooking some meals is the "
-                 "only lever left."]
-    return {"available": True, "spent_4w": spent, "weeks": round(covered_days / 7, 1), "weekly_spend": weekly,
-            "orders_per_week": round(orders_week, 1), "avg_order": round(avg_order, 2),
-            "suggested": proposed, "saving_per_week": max(0.0, saving), "clamped": clamped,
-            "floor": floor, "cheapest_meal": cheap, "max_cut_target": max_cut_target, "reasons": reasons,
-            "trade_offs": trade,
-            "headline": (f"You spent ₹{spent:,.0f} in the last {_span(covered_days)} "
-                         f"(₹{weekly:,.0f} a week). Aim for ₹{proposed:,.0f} a week?"),
-            "complete": bool(s) and dt.date.fromisoformat(s["synced_ts"][:10]) >= today,
-            "basis": "Real Swiggy bills and order history only."}
+        mine = round(weekly * (1 - float(cut)), 2)
+    if mine is not None:
+        out["suggested"] = mine
+        out["saving_per_week"] = max(0.0, round(weekly - mine, 2))
+        if floor is not None and mine < floor:
+            out["reasons"].append(
+                f"Your cheapest favourite is about ₹{cheap['cost']:,.0f} ({cheap['item']}, incl. delivery, fees & "
+                f"GST); ×{max(1, round(orders_week))} orders a week is ₹{floor:,.0f}, so ₹{mine:,.0f} means "
+                "cooking more or ordering less.")
+            out["clamped"] = True
+    else:
+        d = next(o for o in out["options"] if o["default"])
+        out["suggested"], out["saving_per_week"] = d["target"], d["saving_week"]
+    return out
 
 
 def _span(days: int) -> str:
@@ -365,30 +391,25 @@ def _span(days: int) -> str:
 
 def low_budget_check(user: dict, weekly_budget: float | None = None) -> dict | None:
     """A weekly budget that can't buy the meals it's meant to cover gets an explicit warning
-    and a choice (usability finding 23: "₹300 covers about 3 delivered meals near you. Plan
-    3 meals, or cook the rest?"). Uses the cheapest realistic meal from the user's own
-    places; without any, the research default (cheapest plausible dish ₹60 + default fees)."""
-    from . import fees
+    and a choice (usability finding 23). The only floor is the user's own cheapest
+    favourite with its fees (founder decision, 14 Oct 2026); with no favourites there is no
+    floor and no warning (no made-up "typical cheapest meal")."""
     budget = float(weekly_budget if weekly_budget is not None else user["weekly_budget"])
     meals = meals_per_week(user)
     cheap = cheapest_meal(user)
-    if cheap:
-        per, basis = cheap["cost"], f"your cheapest meal ({cheap['item']}, ~₹{cheap['cost']:,.0f} delivered)"
-    else:
-        per = round(DEFAULT_CHEAPEST_DISH + fees.DELIVERY + fees.DEFAULT_FIXED + fees.GST_FOOD_RATE * DEFAULT_CHEAPEST_DISH, 2)
-        basis = f"a typical cheapest delivered meal (~₹{per:,.0f} incl. delivery, fees & GST, an estimate)"
+    if not cheap:
+        return None
+    per = cheap["cost"]
+    basis = f"your cheapest favourite ({cheap['item']}, ~₹{cheap['cost']:,.0f} delivered)"
     covers_n = int(budget // per) if per > 0 else 0
     if covers_n >= meals:
         return None
+    raise_to = math.ceil(per * meals / 50) * 50
     return {"level": "warn", "kind": "low_budget", "budget": budget, "meals": meals, "per_meal": round(budget / meals, 2),
             "cheapest": per, "covers": covers_n,
-            "title": f"₹{budget:,.0f} covers about {covers_n} delivered meal{'s' if covers_n != 1 else ''} a week",
+            "title": f"₹{budget:,.0f} covers about {covers_n} of your favourite meal{'s' if covers_n != 1 else ''} a week",
             "body": (f"That's ₹{budget / meals:,.0f} a meal for {meals} meals; {basis}. "
                      f"Plan {covers_n} delivered meal{'s' if covers_n != 1 else ''} and cook the rest, "
-                     f"or raise the target to about ₹{math.ceil(per * meals / 50) * 50:,.0f} to order every meal."),
+                     f"or raise the target to about ₹{raise_to:,.0f} to order every meal."),
             "actions": [{"act": "plan-delivered", "label": f"Plan {covers_n} delivered, cook the rest", "n": covers_n},
-                        {"act": "raise-budget", "label": f"Raise to ₹{math.ceil(per * meals / 50) * 50:,.0f}",
-                         "amount": math.ceil(per * meals / 50) * 50}]}
-
-
-DEFAULT_CHEAPEST_DISH = config.MEAL_FLOOR_RUPEES   # ₹; shared with the onboarding warning (config.MEAL_FLOOR_RUPEES)
+                        {"act": "raise-budget", "label": f"Raise to ₹{raise_to:,.0f}", "amount": raise_to}]}

@@ -146,10 +146,13 @@ def require_cart_window(status: dict, *, what: str = "This meal") -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Meal-slot suitability: a tiffin dish isn't dinner unless the person says so
+# Meal-slot suitability
 # --------------------------------------------------------------------------- #
-# South Indian tiffin dishes that are breakfast (and evening tiffin) food. Planned at
-# dinner only when the person favourited them for dinner (their dinner pool).
+# South Indian tiffin dishes (breakfast and evening tiffin food). Founder decision 14 Oct
+# 2026: dosa, idli, pongal & co. are a normal dinner ("why should we restrict?"), so they
+# are no longer kept out of dinner. The list stays for labels and the lunch preference;
+# the only dinner rule left is the snack-alone one (vada / bonda / chai by themselves are
+# not a lunch or dinner: optimizer.meal_suitable, usab #12).
 BREAKFAST_ONLY = ("idli", "idly", "dosa", "dosai", "dose", "vada", "vadai", "pongal", "upma", "uppuma",
                   "uthappam", "uttapam", "oothappam", "appam", "idiyappam", "puttu", "kesari", "poha",
                   "aval upma", "rava kichadi", "bonda", "mini tiffin", "pesarattu", "paniyaram")
@@ -163,6 +166,8 @@ _NOT_TIFFIN_RE = _re.compile(r"\b(" + "|".join(_re.escape(w) for w in NOT_TIFFIN
 
 
 def is_breakfast_only(name: str) -> bool:
+    """True for a South Indian tiffin dish (idli, dosa, pongal…). Despite the name it no
+    longer keeps a dish out of dinner (Oct 2026); kept for callers that label tiffin."""
     n = " ".join(str(name or "").lower().replace("-", " ").split())
     return bool(_TIFFIN_RE.search(n)) and not _NOT_TIFFIN_RE.search(n)
 
@@ -170,16 +175,9 @@ def is_breakfast_only(name: str) -> bool:
 def slot_suitability(dish: dict | str, slot: str, *, favourited_for_slot: bool = False) -> bool:
     """Can `dish` be planned as `slot` (breakfast | lunch | dinner) without asking?
 
-    Pure (no I/O). Breakfast-only tiffin dishes (idli, dosa, vada, pongal, upma…) are
-    not planned as dinner, unless the person favourited that dish for dinner
-    (`favourited_for_slot`, i.e. it's in their dinner pool). Lunch keeps the planner's
-    existing soft "tiffin at lunch" penalty; breakfast takes anything that passed the
-    other filters. Unknown slots are not suitable."""
-    if slot not in ("breakfast", "lunch", "dinner"):
-        return False
-    if favourited_for_slot:
-        return True
-    name = dish if isinstance(dish, str) else (dish.get("name") or dish.get("item_name") or "")
-    if slot == "dinner" and is_breakfast_only(name):
-        return False
-    return True
+    Pure (no I/O). Every known slot takes any dish that passed the other filters: tiffin
+    dishes are fine at dinner (founder decision, 14 Oct 2026). Lunch keeps the planner's
+    soft "tiffin at lunch" preference and lunch/dinner keep the snack-alone rule
+    (optimizer.meal_suitable). Unknown slots are not suitable. `favourited_for_slot` is
+    accepted for callers and always allowed."""
+    return slot in ("breakfast", "lunch", "dinner")

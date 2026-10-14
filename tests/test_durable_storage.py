@@ -206,6 +206,8 @@ def test_app_sql_uses_only_the_portable_dialect():
     db_pg.register_schema(swiggy_connect.SCHEMA)
     from smartplate import today
     db_pg.register_schema(today.SCHEMA)
+    from smartplate.domain import autofill
+    db_pg.register_schema(autofill.SCHEMA)
     found = []
     for path, line, sql in _app_sql():
         low = sql.lower()

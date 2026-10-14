@@ -41,6 +41,9 @@ MAX_FAVOURITE_CANDIDATES = 40
 # The penalty makes a pool dish win whenever one fits; skipping is ruled out first
 # (fewest skips is solved before anything else — docs/planner-objective.md).
 POOL_FALLBACK_PEN = 1.0
+# The first words of a meal whose own favourites didn't fit the money (domain/buildout.py
+# finds these meals by it and offers the person scenarios to choose from).
+BUILDOUT_PREFIX = "Your favourites for this meal don't fit"
 FALLBACK_PER_MEAL = 12
 # Diet mix (usab #11): Ravi (non-veg) got two non-veg meals in 14 because the planner only
 # offered each meal its cheapest few dishes, which were all veg. A non-veg eater's lunches
@@ -136,27 +139,12 @@ def _cook_effort(user: dict, meal: str) -> float:
 
 
 def _rating_filter(user: dict, items: list[dict]) -> list[dict]:
-    """Apply the rating floor as a candidate filter.
-
-    Default ("hard"): the user's ★ is a hard gate (current behaviour, and what the
-    "never below your floor" promise rests on). Optional ("soft"): filter only at
-    the low hard safety floor and let the user's aspirational ★ become a soft
-    penalty (see `_rating_pen`) so a high ★ bends under budget instead of exploding
-    it (docs §4)."""
+    """Apply the rating floor as a hard candidate filter (what the "never below your
+    floor" promise rests on). The old "soft" floor experiment is archived in
+    smartplate/archive/experiments.py."""
     user_floor = float(user.get("rating_floor", 4.0))
-    if config.RATING_FLOOR_MODE == "soft":
-        floor = min(user_floor, config.HARD_SAFETY_FLOOR)
-        return [it for it in items if it["restaurant_rating"] >= floor]
     return [it for it in items
             if it["restaurant_rating"] >= user_floor and it["item_rating"] >= user_floor - 0.3]
-
-
-def _rating_pen(user: dict, item: dict) -> float:
-    """Soft cost for a pick below the user's aspirational ★ (soft mode only)."""
-    if config.RATING_FLOOR_MODE != "soft":
-        return 0.0
-    short = max(0.0, float(user.get("rating_floor", 4.0)) - item.get("restaurant_rating", 0))
-    return round(0.8 * short, 4)
 
 
 # --------------------------------------------------------------------------- #
@@ -210,10 +198,6 @@ def build_context(user: dict, plan: dict) -> dict:
         # how far calories may drift before the nutrition term bites — the mode's
         # "what's allowed to give" knob (config.MODE_META).
         "nutri_tol": config.mode_meta(plan["mode"])["nutri_tol"],
-        # variety nudge strength: the user's variety level as a fraction, or 0 when
-        # the nudge is off (default) so the planner behaves exactly as before.
-        "variety_frac": (fatigue.VARIETY_LEVELS.get(fatigue.variety_pref(user), 0.0)
-                         if config.VARIETY_NUDGE == "on" else 0.0),
     }
 
 
@@ -279,9 +263,10 @@ def _delivery_candidate(user, plan, session, item, ctx):
     nutri = nutrition.penalty(user, meal, item, tol=ctx["nutri_tol"]) if known else 0.0
     hp = health.protein_penalty(user, item) if known else 0.0
     cpen = carbon.penalty(item)
-    # usual-first (§5.2): a familiar pick is the "usual"; a novel one pays a small soft
-    # premium when USUAL_FIRST is on, so the planner keeps the user's usuals unless a
-    # swap buys goal-fit. `is_usual` drives the kept/swapped diagnostic (always computed).
+    # usual-first (§5.2, the default since Oct 2026): a familiar pick is the "usual"; a
+    # novel one pays a small soft premium once the user has order history, so the planner
+    # keeps their usuals unless a swap buys goal-fit. `is_usual` drives the kept/swapped
+    # diagnostic (always computed).
     history = ctx["taste"]["history"] or None
     novel = fatigue.novelty(item, history)
     return {
@@ -291,13 +276,12 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3), "portions": n,
         "delivery_fee": item["delivery_fee"], "delivery_fee_estimated": item.get("delivery_fee_estimated"),
         "charges": extra, "bill_estimate": fees.breakdown(item, item["price"] * n),
-        "time_shift": time_shift, "flaky": item.get("flaky", 0), "rating_pen": _rating_pen(user, item),
+        "time_shift": time_shift, "flaky": item.get("flaky", 0),
         "is_usual": (not discovery) if ctx["taste"]["favourites"] else not fatigue.is_novel(item, history),
         "familiarity": round(1.0 - novel, 4), "discovery": discovery,
         "eta_min": item.get("eta_min", 35),
         "usual_pen": (DISCOVERY_PEN if discovery else 0.0)
-                     + (round(config.USUAL_FIRST_W * novel, 4) if config.USUAL_FIRST == "on" else 0.0),
-        "novelty_bonus": round(config.VARIETY_NUDGE_W * novel * ctx.get("variety_frac", 0.0), 4),
+                     + (round(config.USUAL_FIRST_W * novel, 4) if history else 0.0),
         "taste": taste_score, "sentiment": senti, "nutri": nutri, "health": hp, "carbon_pen": cpen,
         "learned_pen": learned_pen + (AVOID_PEN if item["id"] in ctx.get("avoid", ()) else 0.0),
         "carbon_kg": carbon.estimate(item), "weather_cond": cond,
@@ -378,6 +362,27 @@ def meal_fit_pen(items: list[dict], meal: str):
     return lambda it: 0.0
 
 
+# Tiffin at dinner (founder decision 14 Oct 2026: allowed by default). The planner offers
+# a dinner the best few tiffin dishes (by the same meal-fit and cost order as every other
+# candidate) next to its plates, not all of them: the same dosa as a breakfast and as a
+# dinner candidate on every day ties the week MILP in knots (a ₹3,500 week with six places
+# went from 0.6 s proven optimal to the 10 s limit, unproven, with the same plan; capped at
+# 2 it is back to 0.4 s, proven, same plan). The person's own dinner list, the Change sheet
+# and Decide for me are not bounded.
+DINNER_TIFFIN_CANDIDATES = 2
+
+
+def _bound_dinner_tiffin(cands: list[dict]) -> list[dict]:
+    out, n = [], 0
+    for c in cands:
+        if c.get("kind") == "delivery" and timing.is_breakfast_only(c.get("item_name") or ""):
+            n += 1
+            if n > DINNER_TIFFIN_CANDIDATES:
+                continue
+        out.append(c)
+    return out
+
+
 def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[dict]:
     """All options for one session, hard constraints already applied. Always
     returns at least a 'skip' so the MILP stays feasible."""
@@ -424,11 +429,17 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
         safe = [it for it in safe_all if it["id"] in pool["ids"]]
         safe.sort(key=lambda it: it["price"] + it["delivery_fee"])
         cands = [_delivery_candidate(user, plan, session, it, ctx) for it in safe]
-        cands += _pool_fallback(user, plan, session, ctx, pool, safe_all, unsafe_pool=not safe)
+        # Favourites first, never silently cheaper (founder decision 14 Oct 2026): other
+        # dishes at their places stand in only when no list dish is safe for someone
+        # eating (said so), or when the run was asked to (ctx["allow_cheaper"]: a
+        # Decide-for-me mode the person chose). A list that's too dear for the money left
+        # is not swapped: the meal is left for the person to build out (buildout.py).
+        if not safe or ctx.get("allow_cheaper"):
+            cands += _pool_fallback(user, plan, session, ctx, pool, safe_all, unsafe_pool=not safe)
     elif not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
         safe = [it for it in safe if meal_suitable(it, meal) and it.get("nutrition_known", 1) != 0
-                and timing.slot_suitability(it, meal)]          # no idli/vada as dinner unless pooled
+                and timing.slot_suitability(it, meal)]          # dosa at dinner is fine; snacks alone are not (meal_suitable)
         fit = meal_fit_pen(safe, meal)
         safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
         safe = [it for it in safe if it["id"] not in ctx["taste"]["disliked"]]   # "not again" is a lock
@@ -457,6 +468,8 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
             have = {c["item_id"] for c in cands}
             cands += [c for c in best([it for it in usual if not it.get("veg", 1)], slots)
                       if c["item_id"] not in have]
+        if meal == "dinner":
+            cands = _bound_dinner_tiffin(cands)
 
     # A meal the user said they order (rhythm "order") is never turned into a cook day:
     # the flexible "cook 1–2× a week" days only go to meals they didn't say they order.
@@ -473,11 +486,13 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     elif pool and not any(c["kind"] == "delivery" for c in cands):
         skip_reason = _empty_pool_reason(user, ctx, pool, meal)
     elif pool:
-        skip_reason = f"Your {meal} pool and your places didn't fit the money left — skipped."
+        skip_reason = f"{BUILDOUT_PREFIX} the money left — choose how to build out the week."
     if fasting:
         skip_reason = "Inside your fasting window — kept clear (cook/skip only)."
     skip = _skip(forced=False, reason=skip_reason)
     skip["fasting"] = bool(fasting)
+    skip["pooled"] = bool(pool) and not fasting and any(c.get("kind") == "delivery" and not c.get("pool_fallback")
+                                                        for c in cands)
     # An empty meal is the whole meal's nutrition missing: charge it the same banded
     # shortfall a dish with nothing in it would pay (it was a free 0 before).
     # (Tight Week; the other modes keep their flat skip penalty — docs/IDEAS.md.)
@@ -583,11 +598,9 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
         + w["carbon"] * cand["carbon_pen"] * carbon_pref
         + w["surge"] * surge_premium
         + effort
-        + cand.get("rating_pen", 0.0)
         + cand.get("learned_pen", 0.0)          # rating reasons: late / spicy / pricey (+), great (−)
         + cand.get("meal_pen", 0.0)             # a tiffin dish at lunch, a dal at breakfast
-        + cand.get("usual_pen", 0.0)             # ↑ objective for novel ⇒ usual picks preferred (when usual-first on)
-        - cand.get("novelty_bonus", 0.0)         # ↓ objective ⇒ novel picks preferred (when nudge on)
+        + cand.get("usual_pen", 0.0)             # ↑ objective for novel ⇒ usual picks preferred (usual-first)
         + cand["weather_bias"] + cand["festival_bias"],
         5,
     )
@@ -932,6 +945,11 @@ def _label_budget_skips(active, cand_map, x, room, dcap, fixed_by_day, rename=Tr
             else:
                 reason = ("Budget skip: the dishes that fit the money left are already planned "
                           "as often as your variety setting allows.")
+        if c.get("pooled") and options and min(options) > left:
+            # their favourites don't fit: say so and leave the choice to them (buildout.py)
+            reason = (f"{BUILDOUT_PREFIX} ₹{left:.0f} of this week's money left (the cheapest of them is "
+                      f"₹{min(options):.0f}). Ziggy didn't swap in something cheaper: choose how to build "
+                      "out the week.")
         label = {"item_name": "Budget skip"} if rename else {}
         cand_map[s["id"]] = [{**o, **label, "skip_reason": reason} if o is c else o
                              for o in cand_map[s["id"]]]

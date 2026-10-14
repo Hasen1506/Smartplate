@@ -73,8 +73,9 @@ CART_CAP = 1000.0     # ₹ payable, Builders Club Food orders (checked again on
 def split_for_cap(price: float, quantity: int, item: dict | None = None, *, cap: float = CART_CAP) -> dict:
     """Does `quantity` × a ₹`price` dish fit one capped Swiggy cart once delivery, fees and
     GST are on the bill? If not, how to order it: split into the fewest carts that each fit
-    (every cart pays its own delivery and platform fee, so splitting costs extra and says
-    how much), or hand off to the Swiggy app when even one portion can't fit.
+    (the default since 14 Oct 2026: sequential carts, each approved; every cart pays its own
+    delivery and platform fee, so splitting costs extra and says how much), or hand off to
+    the Swiggy app only when even one portion can't fit.
 
     Fees come from the dish's fee model (domain/fees: learned from the user's bills, else a
     labelled estimate); a row without one is checked on the item total plus the default
@@ -108,6 +109,6 @@ def split_for_cap(price: float, quantity: int, item: dict | None = None, *, cap:
     return {"fits": False, "mode": "split", "carts": carts, "cap": cap, "estimate_total": total,
             "extra_fees": extra,
             "message": (f"{quantity} × this dish is about ₹{one:,.0f} with fees, above Swiggy's ₹{cap:,.0f} limit for "
-                        f"orders placed from Ziggy. Order it as {n} carts ({' + '.join(str(q) for q in sizes)}), one "
-                        f"after the other: about ₹{extra:,.0f} more in delivery and platform fees. Or order it in "
-                        "one go in the Swiggy app.")}
+                        f"orders placed from Ziggy, so Ziggy splits it into {n} carts ({' + '.join(str(q) for q in sizes)}), "
+                        f"one after the other, each for your approval: about ₹{extra:,.0f} more in delivery and "
+                        "platform fees.")}

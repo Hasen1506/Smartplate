@@ -342,6 +342,15 @@ def create_app() -> Flask:
         response.headers["Cache-Control"] = "no-cache"
         return response
 
+    def _part(value) -> int:
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("part must be a cart number (1, 2, …)") from None
+        if isinstance(value, bool) or not 1 <= n <= 20:
+            raise ValueError("part must be a cart number (1, 2, …)")
+        return n
+
     # ---- meta / cost transparency ---- #
     @app.get("/api/meta")
     def meta():
@@ -367,7 +376,6 @@ def create_app() -> Flask:
             "weather_provider": config.WEATHER_PROVIDER,
             "catalog_city": everyday.CITY,
             "fixture_data": config.FIXTURE_DATA,
-            "meal_floor": config.MEAL_FLOOR_RUPEES,      # ₹ a meal; onboarding warning = server low-budget guard
             # Epicure ingredient embeddings: swaps, "more like this", cuisine tilt
             "epicure": {"available": epicure.get() is not None, "cuisines": flavour.CUISINES},
         })
@@ -902,6 +910,21 @@ def create_app() -> Flask:
         return jsonify(dish_library.search(user, request.args.get("q", "")[:60],
                                            meal if meal in models.MEALS else None))
 
+    # How likely a restaurant dish holds each of this person's allergens, from the recipe
+    # library (founder decision 14 Oct 2026). Information only: verdicts stay fail-closed.
+    @app.get("/api/user/<int:user_id>/allergen-likelihood")
+    def allergen_likelihood(user_id):
+        from .domain import allergens as allergens_
+        user = models.get_user(user_id)
+        if not user:
+            raise KeyError("Profile not found")
+        name = (request.args.get("name") or "").strip()[:80]
+        if not name:
+            raise ValueError("Add ?name= with the dish name")
+        item = {"name": name, "description": (request.args.get("description") or "")[:200], "source": "live"}
+        return jsonify({"allergen_likelihood": allergens_.allergen_likelihood(user, name),
+                        "safety": allergens_.safety_label(user, item)})
+
     @app.get("/api/user/<int:user_id>/dishes/<key>")
     def dish_detail(user_id, key):
         from .domain import dish_library
@@ -958,7 +981,7 @@ def create_app() -> Flask:
         body = request.get_json()
         return jsonify(swiggy_live.live_cart_preview(user_id, str(body.get("restaurant_id") or ""),
                           str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
-                          str(body.get("item_name") or ""), body.get("quantity", 1)))
+                          str(body.get("item_name") or ""), body.get("quantity", 1), body.get("part", 1)))
 
     @app.post("/api/user/<int:user_id>/swiggy/live-cart")
     def swiggy_live_fill_cart(user_id):
@@ -967,7 +990,7 @@ def create_app() -> Flask:
             return jsonify(swiggy_live.fill_live_cart(user_id, str(body.get("restaurant_id") or ""),
                           str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
                           str(body.get("item_name") or ""), body.get("expected_fingerprint"),
-                          body.get("quantity", 1)))
+                          body.get("quantity", 1), body.get("part", 1)))
         except swiggy_live.CartChanged as exc:
             return jsonify(error="cart_changed", message=str(exc)), 409
 
@@ -977,7 +1000,16 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy/checkout/preview")
     def swiggy_checkout_preview(user_id):
+        # ?payment=upi[&app=gpay]: a UPI order through Swiggy's Payment stage (live_order only);
+        # "Pay in Swiggy" when Swiggy doesn't offer it here
+        if request.args.get("payment") == "upi":
+            return jsonify(swiggy_live.live_checkout_preview(user_id, "upi", request.args.get("app") or None))
         return jsonify(swiggy_live.live_checkout_preview(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/orders/<order_id>/payment")
+    def swiggy_upi_payment(user_id, order_id):
+        from .integrations import swiggy_upi
+        return jsonify(swiggy_upi.payment_status(user_id, order_id))
 
     @app.post("/api/user/<int:user_id>/swiggy/checkout")
     def swiggy_checkout(user_id):
@@ -1042,14 +1074,54 @@ def create_app() -> Flask:
 
     @app.get("/api/session/<int:session_id>/swiggy-cart/preview")
     def swiggy_cart_preview(session_id):
-        return jsonify(swiggy_live.cart_preview(session_id))
+        # part=N: cart N of a split order over Swiggy's ₹1,000 limit (sequential, each approved)
+        return jsonify(swiggy_live.cart_preview(session_id, _part(request.args.get("part", 1))))
 
     @app.post("/api/session/<int:session_id>/swiggy-cart")
     def swiggy_fill_cart(session_id):
         try:
-            return jsonify(week_orders.check_single_cart(session_id, request.get_json().get("expected_fingerprint")))
+            body = request.get_json() or {}
+            return jsonify(week_orders.check_single_cart(session_id, body.get("expected_fingerprint"),
+                                                         _part(body.get("part", 1))))
         except swiggy_live.CartChanged as exc:
             return jsonify(error="cart_changed", message=str(exc)), 409
+
+    # Plan-ahead carts (R2): opt in per meal or per day; /cron/tick fills the cart when the
+    # meal's window opens and says "pay in Swiggy". Ziggy never pays (domain/autofill).
+    @app.get("/api/session/<int:session_id>/auto-cart")
+    def auto_cart_status(session_id):
+        from .domain import autofill
+        return jsonify(autofill.status(session_id))
+
+    @app.post("/api/session/<int:session_id>/auto-cart")
+    def auto_cart_set(session_id):
+        from .domain import autofill
+        body = request.get_json() or {}
+        if body.get("on") is False:
+            return jsonify(autofill.disarm(session_id))
+        try:
+            return jsonify(autofill.arm(session_id, body.get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
+
+    @app.get("/api/plan/<int:plan_id>/auto-cart")
+    def auto_cart_plan(plan_id):
+        from .domain import autofill
+        return jsonify({"meals": autofill.for_plan(plan_id)})
+
+    @app.post("/api/plan/<int:plan_id>/auto-cart/day")
+    def auto_cart_day(plan_id):
+        from .domain import autofill
+        body = request.get_json() or {}
+        day = body.get("day")
+        if not isinstance(day, int) or isinstance(day, bool) or not 0 <= day <= 6:
+            raise ValueError("Choose a day of the week (0–6).")
+        if body.get("on") is False:
+            return jsonify(autofill.disarm_day(plan_id, day))
+        fps = body.get("fingerprints")
+        if not isinstance(fps, dict):
+            raise ValueError("Review each meal's Swiggy item first (fingerprints by meal).")
+        return jsonify(autofill.arm_day(plan_id, day, fps))
 
     @app.post("/api/user/<int:user_id>/swiggy/disconnect")
     def swiggy_disconnect(user_id):
@@ -1155,6 +1227,22 @@ def create_app() -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         return jsonify(service.decide_week(plan_id, body.get("mode"), apply=body.get("apply") is True))
 
+    # Favourites that don't fit the week's money: scenarios the person picks from
+    # (domain/buildout.py; founder decision 14 Oct 2026: never a silent cheaper swap or skip).
+    @app.get("/api/plan/<int:plan_id>/buildout")
+    def buildout_view(plan_id):
+        from .domain import buildout
+        return jsonify(buildout.scenarios(plan_id))
+
+    @app.post("/api/plan/<int:plan_id>/buildout")
+    def buildout_apply(plan_id):
+        from .domain import buildout
+        body = request.get_json(force=True, silent=True) or {}
+        sid = body.get("id")
+        if not isinstance(sid, str) or not sid or len(sid) > 120:
+            raise ValueError("Pick one of the build-out choices (its id)")
+        return jsonify(buildout.apply(plan_id, sid))
+
     # ---- household (domain/household.py) ---- #
     @app.post("/api/user/<int:user_id>/household")
     def household_create(user_id):
@@ -1231,7 +1319,9 @@ def create_app() -> Flask:
         if cut is not None and cut >= 1:
             raise ValueError("cut is a fraction: 0.2 means 20% less")
         user = models.get_user(user_id)
-        return jsonify({**spend.suggest(user, cut=cut, target=target),
+        # Cut options only when asked (?ask=cut, or their own cut/target): no automatic target.
+        asked = (request.args.get("ask") or "").lower() in ("cut", "1", "true", "yes")
+        return jsonify({**spend.suggest(user, cut=cut, target=target, asked=asked),
                         "low_budget": spend.low_budget_check(user, target)})
 
     @app.get("/api/fees/defaults")

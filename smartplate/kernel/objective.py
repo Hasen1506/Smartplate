@@ -27,7 +27,7 @@ from __future__ import annotations
 # --- favourite score: the only weights there are --------------------------------------
 W_RATING = 0.35        # the dish's rating out of 5 (the restaurant's when the dish has none)
 W_TIMES = 0.30         # how often they ordered it: n / (n + 2), so 1×≈0.33, 4×≈0.67
-W_SLOT = 0.20          # right for this meal (a tiffin dish at breakfast, a plate at lunch)
+W_SLOT = 0.20          # right for this meal (a tiffin dish at breakfast, a plate at lunch; dinner takes any)
 W_RECENCY = 0.15       # ordered lately: 1 today, fading to 0 over RECENCY_DAYS
 POOL_BONUS = 0.50      # they put this dish in this meal's list themselves
 PLACE_BONUS = 0.20     # a dish at one of their places
@@ -64,7 +64,7 @@ def slot_term(item: dict, meal: str, pooled: bool = False) -> float:
         return 1.0 if "breakfast" in tags else 0.5
     if meal == "lunch":
         return 0.5 if "breakfast" in tags else (1.0 if "main" in tags else 0.75)
-    return 0.5 if "breakfast" in tags else 1.0
+    return 1.0                       # dinner takes anything, a dosa included (Oct 2026)
 
 
 def favourite_score(item: dict, meal: str, *, tier: str, history: dict | None = None,

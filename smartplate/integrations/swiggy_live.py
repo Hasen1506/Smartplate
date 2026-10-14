@@ -3,7 +3,9 @@
 Builds on swiggy_connect (sign-in + discovery). Every call goes through `call()`,
 which refuses any tool not on ALLOWED. SmartPlate can read live menus, prepare
 an exact item in the cart, and place an explicitly approved Cash on Delivery
-order only when LIVE_ORDERS is enabled. Other payments stay in Swiggy.
+order only when LIVE_ORDERS is enabled; with the same approval, a UPI order through
+Swiggy's Payment stage when Swiggy offers it to Ziggy (swiggy_upi). Otherwise payment
+stays in Swiggy ("Pay in Swiggy").
 
 Written from Swiggy's public docs (docs/vendor/swiggy/README.md). The exact argument
 and reply shapes are only known after a real sign-in, so this module:
@@ -70,10 +72,14 @@ from .swiggy_money import (  # noqa: F401  (split out, grill #57; re-exported)
 
 ALLOWED = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu",
                      "get_food_cart", "update_food_cart", "flush_food_cart", "get_payment_options",
-                     "place_food_order", "get_food_orders", "track_food_order"})
+                     "place_food_order", "get_food_orders", "track_food_order",
+                     "check_payment_status", "confirm_order"})     # UPI Payment stage (live_order only)
 # Tools that only read: safe to send again on a fresh MCP session after a session error.
 READ_ONLY = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu",
-                       "get_food_cart", "get_payment_options", "get_food_orders", "track_food_order"})
+                       "get_food_cart", "get_payment_options", "get_food_orders", "track_food_order",
+                       "check_payment_status"})
+# Tools that place or confirm a real order: only in mode live_order, never re-sent.
+ORDER_WRITES = frozenset({"place_food_order", "confirm_order"})
 # Tools that change the user's Swiggy cart: allowed from mode live_cart up (config.swiggy_mode).
 CART_WRITES = frozenset({"update_food_cart", "flush_food_cart"})
 MENU_TTL = dt.timedelta(hours=6)
@@ -167,7 +173,7 @@ def call(user_id: int, name: str, arguments: dict) -> object:
     if name in CART_WRITES and not config.swiggy_allows("live_cart"):
         raise SwiggyError("Filling your Swiggy cart from Ziggy is switched off on this server "
                           "(read-only mode). Add the dish in Swiggy.", code="swiggy_read_only")
-    if name == "place_food_order" and not config.LIVE_ORDERS:
+    if name in ORDER_WRITES and not config.LIVE_ORDERS:
         raise SwiggyError("Real order placement is disabled until Swiggy access and durable storage are approved.")
     try:
         conn = _conn(user_id)
@@ -184,7 +190,7 @@ def call(user_id: int, name: str, arguments: dict) -> object:
         # must never poison the calls after it (a stale session id would fail them all).
         forget_session(user_id)
         stale = status == 404 or (status == 400 and name in READ_ONLY)
-        if stale and reused and name != "place_food_order":
+        if stale and reused and name not in ORDER_WRITES:
             # MCP: 404 means the session ended and nothing was processed; some servers say
             # 400 for an unknown session. Re-open once with a fresh session (an order is
             # never re-sent automatically; a cart write only on 404, which is unprocessed).
@@ -417,6 +423,10 @@ def addresses(user_id: int, *, fresh: bool = False) -> list[dict]:
             raise SwiggyError("Swiggy's address pagination could not be completed. Choose an address in Swiggy.")
     out = [{"id": str(_get(r, "id")), "label": str(_get(r, "label") or "Address"),
             "text": str(_get(r, "text") or "")} for r in rows]
+    for a, r in zip(out, rows):            # the location UPI's confirm_order needs (swiggy_upi), when given
+        lat, lng = _num(r, "lat"), _num(r, "lng")
+        if lat is not None and lng is not None:
+            a["lat"], a["lng"] = lat, lng
     if not out:
         raise SwiggyError("Swiggy didn't return any saved addresses. Add one in the Swiggy app first.")
     with _cache_lock:
@@ -843,7 +853,43 @@ def _name(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", (value or "").lower())).strip()
 
 
-def cart_preview(session_id: int) -> dict:
+def split_view(cap: dict) -> dict:
+    """The split-cart path (founder decision 14 Oct 2026: over ₹1,000 is split by default,
+    not handed off): sequential carts, each reviewed and approved on its own, because Swiggy
+    holds one live cart and delivers each order at once. Cart N is asked for with part=N."""
+    parts = [{"part": i + 1, "quantity": c["quantity"], "estimate": c["estimate"]} for i, c in enumerate(cap["carts"])]
+    n = len(parts)
+    return {"part": 1, "of": n, "parts": parts, "quantity": parts[0]["quantity"],
+            "next_quantity": sum(p["quantity"] for p in parts[1:]) or None,
+            "extra_fees": cap.get("extra_fees", 0.0), "estimate_total": cap.get("estimate_total"),
+            "message": (f"Over Swiggy's ₹{cap['cap']:,.0f} limit for orders from Ziggy, so it goes as {n} carts "
+                        f"({' + '.join(str(p['quantity']) for p in parts)}), one after the other: about "
+                        f"₹{cap.get('extra_fees', 0):,.0f} more in delivery and platform fees. This is cart 1 of {n}: "
+                        "review it, pay it in Swiggy, then Ziggy prepares the next one.")}
+
+
+def _split_part(price: float, total_qty: int, fee_model: dict, part: int) -> tuple[int, dict | None]:
+    """(quantity of cart `part`, split view) for an order of `total_qty` portions; the whole
+    order and no split view when it fits one cart. Raises for a single portion over the cap."""
+    from ..domain import checkout
+    cap = checkout.split_for_cap(price, total_qty, {"fees": fee_model})
+    if cap["fits"]:
+        if part != 1:
+            raise ValueError("This order fits one cart: there is no next cart")
+        return total_qty, None
+    if cap["mode"] != "split":
+        raise SwiggyError(cap["message"], code="cart_over_cap", http_status=409)
+    view = split_view(cap)
+    if not 1 <= part <= view["of"]:
+        raise ValueError(f"Cart {part} doesn't exist: this order is {view['of']} carts")
+    here = view["parts"][part - 1]
+    view.update(part=part, quantity=here["quantity"],
+                next_quantity=sum(p["quantity"] for p in view["parts"][part:]) or None,
+                message=view["message"].replace("This is cart 1 of", f"This is cart {part} of"))
+    return here["quantity"], view
+
+
+def cart_preview(session_id: int, part: int = 1) -> dict:
     """Read a fresh, exact, simple live item before the user approves a cart change.
 
     Provider menus do not establish allergen or medical safety, and a vegetarian
@@ -894,22 +940,31 @@ def cart_preview(session_id: int) -> dict:
                                             sort_keys=True).encode()).hexdigest()
     remember_photos(user_id, place["id"], [{"name": cell["item"], "image": _image(item)}])
     price = rupees(item, menu_unit(records(data, "menu_item_id", "name")))
+    split = None
     if price:
-        # Builders Club caps a Food cart at ₹1,000 payable (household meals hit it): stop before the cart.
-        from ..domain import checkout, fees
-        cap = checkout.split_for_cap(price, quantity, {"fees": fees.pricing_for(place["id"], fees.model(user_id))})
-        if not cap["fits"]:
-            raise SwiggyError(cap["message"], code="cart_over_cap", http_status=409)
-    return {**details, "address": conn.get("address_label") or "Selected Swiggy address",
-            "menu_price": price,
-            "price_estimated": price_estimated(item), "image": _image(item), "fingerprint": fingerprint}
+        # Builders Club caps a Food cart at ₹1,000 payable (household meals hit it): split it
+        # into sequential carts by default; hand off only when one portion is over the cap.
+        from ..domain import fees
+        q, split = _split_part(price, quantity, fees.pricing_for(place["id"], fees.model(user_id)), int(part or 1))
+        if split:
+            details["quantity"] = q
+            fingerprint = hashlib.sha256(json.dumps({**details, "provider_price": _get(item, "price"), "part": part},
+                                                    sort_keys=True).encode()).hexdigest()
+    elif int(part or 1) != 1:
+        raise ValueError("This order fits one cart: there is no next cart")
+    out = {**details, "address": conn.get("address_label") or "Selected Swiggy address",
+           "menu_price": price,
+           "price_estimated": price_estimated(item), "image": _image(item), "fingerprint": fingerprint}
+    if split:
+        out["split"] = split
+    return out
 
 
-def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
+def fill_cart(session_id: int, expected_fingerprint: str | None = None, part: int = 1) -> dict:
     """Add exactly the item the user reviewed, then read the provider's current cart."""
     if not expected_fingerprint:
         raise CartChanged("Review the live Swiggy item before adding it to your cart.")
-    preview = cart_preview(session_id)  # fresh provider lookup: no six-hour browse cache
+    preview = cart_preview(session_id, part)  # fresh provider lookup: no six-hour browse cache
     if preview["fingerprint"] != expected_fingerprint:
         raise CartChanged("The live Swiggy item or your plan changed. Review it again before adding to cart.")
     user_id, cell = _planned(session_id)
@@ -921,7 +976,8 @@ def fill_cart(session_id: int, expected_fingerprint: str | None = None) -> dict:
             "planned": cell["item"], "planned_cost": planned, "menu_price": preview["menu_price"],
             "to_pay": to_pay, "over_plan": round(to_pay - planned, 2) if to_pay is not None else None,
             "bill": prepared.get("bill"), "checkout_url": CHECKOUT_URL,
-            "cancellation_note": prepared.get("cancellation_note")}
+            "cancellation_note": prepared.get("cancellation_note"),
+            **({"split": preview["split"]} if preview.get("split") else {})}
 
 
 SAFETY_NOTE = ("Ziggy cannot verify your ingredient or medical rules from Swiggy's menu, so it won't add "
@@ -947,7 +1003,7 @@ def _quantity(value) -> int:
 
 
 def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
-                      item_id: str, item_name: str, quantity=1) -> dict:
+                      item_id: str, item_name: str, quantity=1, part=1) -> dict:
     """Review an item chosen from a real menu, without a seeded plan or fuzzy match.
 
     Always answers with a review (dish, current price, address). For profiles whose
@@ -1029,11 +1085,23 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
         blocked = "Swiggy did not verify this dish as vegetarian. Check it in Swiggy."
     cap = None
     if not blocked and price:
-        # Builders Club caps a Food cart at ₹1,000 payable: say so before the cart, with a split or a hand-off.
+        # Builders Club caps a Food cart at ₹1,000 payable. Over it, the default is a split into
+        # sequential carts, each reviewed and approved (founder decision 14 Oct 2026); the
+        # hand-off is only for one portion that is over the cap by itself.
         from ..domain import checkout, fees
-        cap = checkout.split_for_cap(price, quantity, {"fees": fees.pricing_for(restaurant_id, fees.model(user_id))})
+        model = fees.pricing_for(restaurant_id, fees.model(user_id))
+        cap = checkout.split_for_cap(price, quantity, {"fees": model})
         review["cart_cap"] = cap
-        if not cap["fits"]:
+        if not cap["fits"] and cap["mode"] == "split":
+            try:
+                part = int(part or 1)
+            except (TypeError, ValueError):
+                raise ValueError("part must be a cart number") from None
+            q, split = _split_part(price, quantity, model, part)
+            details["quantity"] = q
+            details["part"] = part
+            review.update(quantity=q, menu_total=round(price * q, 2), split=split)
+        elif not cap["fits"]:
             blocked = cap["message"]
     if blocked:
         return {**review, "orderable": False, "reason": blocked, "fingerprint": None,
@@ -1261,15 +1329,23 @@ def current_live_cart(user_id: int) -> dict:
 
 
 def fill_live_cart(user_id: int, restaurant_id: str, restaurant_name: str,
-                   item_id: str, item_name: str, expected_fingerprint: str | None, quantity=1) -> dict:
+                   item_id: str, item_name: str, expected_fingerprint: str | None, quantity=1, part=1) -> dict:
     if not expected_fingerprint:
         raise CartChanged("Review the exact live Swiggy item before adding it to your cart.")
-    preview = live_cart_preview(user_id, restaurant_id, restaurant_name, item_id, item_name, quantity)
+    preview = live_cart_preview(user_id, restaurant_id, restaurant_name, item_id, item_name, quantity, part)
     if not preview["orderable"]:
         raise SwiggyError(preview["reason"])
     if preview["fingerprint"] != expected_fingerprint:
         raise CartChanged("The live item, restaurant or address changed. Review it again.")
-    return _fill_reviewed_cart(user_id, preview)
+    result = _fill_reviewed_cart(user_id, preview)
+    # Today's money now counts this pick at the real cart bill, not the fee estimate.
+    try:
+        from .. import today
+        for iid in dict.fromkeys([str(item_id), str(preview["item_id"])]):
+            today.record_cart_bill(user_id, restaurant_id, iid, preview.get("quantity", 1), result.get("to_pay"))
+    except Exception:                                       # never fail a filled cart over a note
+        pass
+    return result
 
 
 def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
@@ -1320,8 +1396,12 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
             "cancellation_note": cancellation_note(cart)}
 
 
-def _checkout_state(user_id: int) -> dict:
-    """Fresh cart, exact payable total and provider-offered COD before placement."""
+def _checkout_state(user_id: int, payment: str = "cod", upi_app: str | None = None) -> dict:
+    """Fresh cart, exact payable total and the provider-offered payment (COD, or UPI through
+    Swiggy's Payment stage) before placement."""
+    from . import swiggy_upi
+    if payment == "upi":
+        swiggy_upi.available(_conn(user_id))       # "Pay in Swiggy" unless the Payment stage is on
     if not config.LIVE_ORDERS:
         raise SwiggyError("Real order placement is disabled until Swiggy access and durable storage are approved.")
     from ..domain import models
@@ -1357,32 +1437,48 @@ def _checkout_state(user_id: int) -> dict:
     options = call(user_id, "get_payment_options", build_args(_tool(conn, "get_payment_options"),
                                                         {"address": address_id}))
     body = options.get("data", options) if isinstance(options, dict) else {}
-    cod = body.get("cod") if isinstance(body, dict) else None
-    if not isinstance(cod, dict) or cod.get("available") is not True or not cod.get("id"):
-        raise SwiggyError("Cash on Delivery is not offered for this cart. Use Swiggy checkout for another payment method.")
+    if payment == "upi":
+        pay = swiggy_upi.choose(body, upi_app)
+    else:
+        cod = body.get("cod") if isinstance(body, dict) else None
+        if not isinstance(cod, dict) or cod.get("available") is not True or not cod.get("id"):
+            raise SwiggyError("Cash on Delivery is not offered for this cart. Use Swiggy checkout for another payment method.")
+        pay = {"payment_method": str(cod["id"]), "payment_label": str(cod.get("displayName") or "Cash on Delivery")}
     address = next((a for a in addresses(user_id) if a["id"] == address_id), None)
     if not address or not address["text"]:
         raise SwiggyError("Swiggy did not confirm your delivery address. Choose it again.")
     details = {"address_id": address_id, "address": address["text"],
                "restaurant_id": intent["restaurant_id"], "restaurant": intent["restaurant_name"],
                "item_id": str(_get(item, "menu_item_id")), "item": str(_get(item, "name") or "Selected dish"),
-               "quantity": item.get("quantity"), "to_pay": total, "payment_method": str(cod["id"])}
+               "quantity": item.get("quantity"), "to_pay": total, "payment_method": pay["payment_method"]}
+    if payment == "upi":                    # the exact UPI route is part of what is approved
+        details.update(payment_kind="upi", upi_app=pay["upi_app"])
     fingerprint = hashlib.sha256(json.dumps(details, sort_keys=True).encode()).hexdigest()
-    return {**details, "payment_label": str(cod.get("displayName") or "Cash on Delivery"),
+    extra = {"upi_apps": pay["upi_apps"]} if payment == "upi" else {}
+    return {**details, **extra, "payment_label": pay["payment_label"],
             "bill": bill_breakdown(cart, _anchor(intent)), "fingerprint": fingerprint}
 
 
-def live_checkout_preview(user_id: int) -> dict:
+def live_checkout_preview(user_id: int, payment: str = "cod", upi_app: str | None = None) -> dict:
     """Issue a short-lived approval for this exact live cart.
 
-    An uncertain attempt blocks further placement even if address or price changes.
-    Only the latest approval for this profile can be submitted.
+    An uncertain attempt (or a UPI order still waiting for payment) blocks further placement
+    even if address or price changes. Only the latest approval for this profile can be
+    submitted. payment="upi" approves a UPI order through Swiggy's Payment stage; when that
+    isn't available the answer is "Pay in Swiggy" (swiggy_upi.pay_in_swiggy), not an error.
     """
-    preview = _checkout_state(user_id)
+    from . import swiggy_upi
+    if payment == "upi":
+        try:
+            preview = _checkout_state(user_id, "upi", upi_app)
+        except swiggy_upi.PayInSwiggy as exc:
+            return swiggy_upi.pay_in_swiggy(str(exc))
+    else:
+        preview = _checkout_state(user_id)
     reconcile_attempts(user_id)
     with db.cursor() as cur:
         unresolved = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? "
-                                 "AND state IN ('started','unknown') LIMIT 1", (user_id,)).fetchone()
+                                 "AND state IN ('started','unknown','pending_payment') LIMIT 1", (user_id,)).fetchone()
         if unresolved:
             raise SwiggyError("An earlier order attempt is unresolved. Check your Swiggy orders "
                               "before placing it again.")
@@ -1390,8 +1486,14 @@ def live_checkout_preview(user_id: int) -> dict:
                     ((clock.now() - CHECKOUT_QUOTE_TTL).isoformat(),))
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
         approval = secrets.token_urlsafe(32)
+        if payment == "upi":
+            approval = swiggy_upi.token(preview.get("upi_app"), approval)
         cur.execute("INSERT INTO swiggy_checkout_quotes(token, user_id, cart_fingerprint, created_ts) "
                     "VALUES (?,?,?,?)", (approval, user_id, preview["fingerprint"], clock.now().isoformat()))
+    if payment == "upi":
+        preview = {**preview, "mode": "upi", "pays": False,
+                   "how": "Approve to start a UPI payment to Swiggy in your own UPI app. Ziggy never sees "
+                          "your UPI details and never collects money."}
     return {**preview, "fingerprint": approval}
 
 
@@ -1405,7 +1507,9 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
                             "WHERE user_id=? AND token=?", (user_id, expected_fingerprint)).fetchone()
     if not quote or dt.datetime.fromisoformat(quote["created_ts"]) < clock.now() - CHECKOUT_QUOTE_TTL:
         raise CartChanged("This checkout approval expired or was replaced. Review the cart again.")
-    preview = _checkout_state(user_id)
+    from . import swiggy_upi
+    payment, upi_app = swiggy_upi.parse_token(expected_fingerprint)
+    preview = _checkout_state(user_id) if payment == "cod" else _checkout_state(user_id, payment, upi_app)
     if quote["cart_fingerprint"] != preview["fingerprint"]:
         raise CartChanged("The Swiggy cart, address, total or payment method changed. Review it again.")
     with db.cursor() as cur:
@@ -1420,7 +1524,7 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
         if existing:
             raise CartChanged("This order was already attempted. Check your Swiggy orders before trying again.")
         unresolved = cur.execute("SELECT 1 FROM swiggy_order_attempts WHERE user_id=? "
-                                 "AND state IN ('started','unknown') LIMIT 1", (user_id,)).fetchone()
+                                 "AND state IN ('started','unknown','pending_payment') LIMIT 1", (user_id,)).fetchone()
         if unresolved:
             raise CartChanged("An earlier order attempt is unresolved. Check Swiggy orders first.")
         cur.execute("INSERT INTO swiggy_order_attempts(user_id, fingerprint, cart_fingerprint, "
@@ -1430,10 +1534,22 @@ def place_live_order(user_id: int, expected_fingerprint: str | None) -> dict:
         cur.execute("DELETE FROM swiggy_checkout_quotes WHERE user_id=?", (user_id,))
     try:
         conn = _conn(user_id)             # inside the try: an expired token here is "not sent" (M-01)
-        result = call(user_id, "place_food_order", build_args(_tool(conn, "place_food_order"),
-                {"address": preview["address_id"], "payment_method": preview["payment_method"]}))
+        values = (swiggy_upi.order_args(preview) if payment == "upi" else
+                  {"address": preview["address_id"], "payment_method": preview["payment_method"]})
+        result = call(user_id, "place_food_order", build_args(_tool(conn, "place_food_order"), values))
         body = result.get("data", result) if isinstance(result, dict) else {}
         order_id = body.get("orderId") if isinstance(body, dict) else None
+        if (payment == "upi" and isinstance(body, dict) and isinstance(order_id, str) and order_id.strip()
+                and str(body.get("status", "")).upper() == "PENDING_PAYMENT"):
+            # The order waits for the person's own UPI app; it is confirmed only after Swiggy
+            # says the payment went through (swiggy_upi.payment_status).
+            with db.cursor() as cur:
+                cur.execute("UPDATE swiggy_order_attempts SET state='pending_payment', order_id=? "
+                            "WHERE user_id=? AND fingerprint=?", (order_id, user_id, expected_fingerprint))
+            return {"order_id": order_id, "status": "pending_payment", "item": preview["item"],
+                    "to_pay": preview["to_pay"], "address": preview["address"], "pay": swiggy_upi.pay_step(body),
+                    "message": f"Pay ₹{preview['to_pay']:,.2f} to Swiggy in your UPI app. Ziggy never sees your "
+                               "UPI details; the order is placed once Swiggy confirms the payment."}
         confirmed = (isinstance(body, dict) and body.get("normalizedStatus") == "success"
                      and isinstance(order_id, str) and bool(order_id.strip())
                      and str(body.get("status", "")).upper() not in

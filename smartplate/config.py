@@ -1,8 +1,8 @@
 """Runtime configuration.
 
-Every knob here has a safe default so the app runs with zero setup. The single
-most important flag is AGENT_BRAIN: it defaults to the *deterministic* brain so
-v1.1 incurs no per-decision LLM cost (see FEASIBILITY.md §2).
+Every knob here has a safe default so the app runs with zero setup. The brain is
+always the *deterministic* one, so v1.1 incurs no per-decision LLM cost (see
+FEASIBILITY.md §2). Planner tuning values are pinned constants, not env knobs.
 """
 import os
 
@@ -69,8 +69,10 @@ FIXTURE_DATA = os.environ.get("SMARTPLATE_FIXTURE_DATA") == "1" and not PRODUCTI
 # (fail-closed) until they remove them. Default "on" until the founder decides.
 MEDICAL_FILTERS = os.environ.get("SMARTPLATE_MEDICAL_FILTERS", "on").lower() != "off"
 
-# Brain selection — "deterministic" (free, default) or "llm" (optional, paid).
-AGENT_BRAIN = os.environ.get("SMARTPLATE_BRAIN", "deterministic")
+# Brain: always the deterministic one (solver + templates, no per-decision LLM cost). The
+# SMARTPLATE_BRAIN=llm experiment (off since June, no tests) is archived in
+# smartplate/archive/experiments.py (founder decision, 14 Oct 2026).
+AGENT_BRAIN = "deterministic"
 
 # Legacy switch for the old simulated order saga only (swiggy_mcp.py, test runs with fixture
 # data). It never governed the real Swiggy sign-in, menus or carts, so it is NOT what the app
@@ -108,15 +110,18 @@ def swiggy_allows(mode: str) -> bool:
     """True when the current mode includes `mode` (each mode includes the ones before it)."""
     return SWIGGY_MODES.index(swiggy_mode()) >= SWIGGY_MODES.index(mode)
 
+# Planner tuning, pinned as constants (founder decision 14 Oct 2026: nobody tunes these per
+# deploy, so the SMARTPLATE_SOLVER_* / _STABILITY / _PROTEIN_EVEN / _EDIT_WINDOW env knobs
+# are gone; tests still monkeypatch these module attributes).
 # Solver limits: relative optimality gap and a hard time cap per weekly solve.
-SOLVER_GAP = float(os.environ.get("SMARTPLATE_SOLVER_GAP", "0.001"))
-SOLVER_TIME_LIMIT_S = float(os.environ.get("SMARTPLATE_SOLVER_TIME_LIMIT", "10"))
+SOLVER_GAP = 0.001
+SOLVER_TIME_LIMIT_S = 10.0
 # Branch-and-bound node cap: a deterministic work limit, so a hard week returns the same
 # plan however busy the server is (the time limit above is only a backstop).
-SOLVER_MAX_NODES = int(os.environ.get("SMARTPLATE_SOLVER_MAX_NODES", "20000"))
+SOLVER_MAX_NODES = 20000
 
 # Plan stability: bonus for keeping a meal's current pick on a re-plan (0 disables).
-STABILITY_W = float(os.environ.get("SMARTPLATE_STABILITY", "0.3"))
+STABILITY_W = 0.3
 
 # Weather — "live" (Open-Meteo forecast, cached; falls back to the sample feed when
 # offline) or "simulated" (sample feed only; used by the test-suite for determinism).
@@ -201,10 +206,8 @@ BEHIND_PROXY = os.environ.get("SMARTPLATE_BEHIND_PROXY", "1" if os.environ.get("
 
 # Web Push (order-time reminders). Keys are generated on first use when unset.
 PUSH_CONTACT = os.environ.get("SMARTPLATE_PUSH_CONTACT", "mailto:smartplate@example.invalid")
-# ₹ for the cheapest realistic delivered meal (a plain tiffin item, before fees). One number for
-# the onboarding "too little to eat on" warning (static/app.js via /api/meta) and the server's
-# low-budget guard / budget-suggestion floor (domain/spend.py). An estimate, not a quote.
-MEAL_FLOOR_RUPEES = float(os.environ.get("SMARTPLATE_MEAL_FLOOR", "60"))
+# (No meal floor: the old SMARTPLATE_MEAL_FLOOR ₹60 estimate is gone, founder decision 14 Oct
+# 2026. The only floor is the user's own cheapest favourite with its fees: spend.cheapest_meal.)
 PUSH_TICK_S = float(os.environ.get("SMARTPLATE_PUSH_TICK", "60"))
 PUSH_ENABLED = os.environ.get("SMARTPLATE_PUSH", "on") == "on"
 VAPID_PRIVATE = os.environ.get("SMARTPLATE_VAPID_PRIVATE", "")   # base64url P-256 key; generated if unset
@@ -216,7 +219,7 @@ CRON_KEY = os.environ.get("SMARTPLATE_CRON_KEY", "").strip()
 ADMIN_KEY = os.environ.get("SMARTPLATE_ADMIN_KEY", "").strip()
 # Logs: "json" (one JSON object per line, default on Render) or "text".
 LOG_FORMAT = os.environ.get("SMARTPLATE_LOG_FORMAT", "json" if os.environ.get("RENDER") else "text").lower()
-# Error tracking: set SENTRY_DSN (and add sentry-sdk to requirements) to report errors; unset = off.
+# Error tracking: set SENTRY_DSN to report errors (sentry-sdk[flask] is in requirements.txt); unset = off.
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
 SENTRY_TRACES = float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0") or 0)
 # Requests slower than this many ms are logged at WARNING (all are logged at INFO).
@@ -224,7 +227,7 @@ SLOW_REQUEST_MS = int(os.environ.get("SMARTPLATE_SLOW_MS", "2000"))
 
 # Default order-execution policy. Swiggy's cautious posture (§7.1) means we
 # default to an editable window rather than silent auto-placement.
-ORDER_EDIT_WINDOW_MIN = int(os.environ.get("SMARTPLATE_EDIT_WINDOW", "30"))
+ORDER_EDIT_WINDOW_MIN = 30          # pinned (was SMARTPLATE_EDIT_WINDOW)
 
 # Optimiser objective weights per mode. Survival cranks cost; comfort cranks taste.
 MODE_WEIGHTS = {
@@ -261,34 +264,19 @@ def mode_meta(mode: str) -> dict:
     return MODE_META.get(mode, MODE_META["balanced"])
 
 
-# Rating-floor policy. The brand promise is "we never silently substitute below
-# your rating floor" — so the *execution/substitution* path is always hard.
-# For the *planner*, the floor can optionally be split into a low hard safety
-# floor + a soft preference above it, so a high aspirational ★ bends under budget
-# instead of exploding it / forcing constant toggling (docs §4 — the ★ footgun).
-#   "hard" (default) : the user's ★ is a hard candidate filter (current behaviour).
-#   "soft"           : filter only at HARD_SAFETY_FLOOR; the user's ★ becomes a weight.
-RATING_FLOOR_MODE = os.environ.get("SMARTPLATE_RATING_FLOOR", "hard")
-HARD_SAFETY_FLOOR = float(os.environ.get("SMARTPLATE_SAFETY_FLOOR", "3.5"))
-
-# Variety nudge. When "on", the planner softly biases toward novel (less-familiar)
-# delivery picks, scaled by the user's variety level (domain/fatigue). OFF by default
-# so it never silently shifts a plan until the user opts into more variety — the
-# honest version of the "composition constraint" in docs §4.
-VARIETY_NUDGE = os.environ.get("SMARTPLATE_VARIETY", "off")
-VARIETY_NUDGE_W = float(os.environ.get("SMARTPLATE_VARIETY_W", "0.6"))
+# Rating floor: always a hard gate (the brand promise "never below your floor"). The soft
+# SMARTPLATE_RATING_FLOOR / SMARTPLATE_SAFETY_FLOOR experiment and the SMARTPLATE_VARIETY
+# nudge (both off since June, untested) are archived in smartplate/archive/experiments.py.
 
 # Protein evenness: a day-level penalty for backloading protein into one meal (the
-# per-meal even target is daily_protein / meals-that-day). Set 0 to disable.
-PROTEIN_EVEN_W = float(os.environ.get("SMARTPLATE_PROTEIN_EVEN", "0.25"))
+# per-meal even target is daily_protein / meals-that-day). 0 disables. Pinned constant.
+PROTEIN_EVEN_W = 0.25
 
-# Usual-first (docs §5.2): a soft preference for the user's *familiar* picks so the
-# planner makes the fewest substitutions that still clear the locks/targets — a novel
-# pick pays a small premium and only wins when it buys real goal-fit. OFF by default
-# (the kept/swapped diagnostic is always computed regardless); the budget recommender
-# and the variety nudge already cover the explore side.
-USUAL_FIRST = os.environ.get("SMARTPLATE_USUAL_FIRST", "off")
-USUAL_FIRST_W = float(os.environ.get("SMARTPLATE_USUAL_FIRST_W", "0.5"))
+# Usual-first / favourites first (docs §5.2), the default since 14 Oct 2026 (was the
+# SMARTPLATE_USUAL_FIRST=on experiment): a dish the user has never ordered pays a small
+# premium against the ones they order, so the planner keeps their usuals unless a swap buys
+# real goal-fit. Applies only once there is order history (a new profile has no usuals).
+USUAL_FIRST_W = 0.5
 
 # Epicure ingredient embeddings (domain/epicure.py): downloaded at build/setup time by
 # scripts/fetch_epicure.py. "pinned" checks every file against the SHA-256 sums in the

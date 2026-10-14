@@ -54,7 +54,8 @@ RULES = [
     {"id": "cart_cap", "whose": "swiggy", "title": "₹1,000 per order for now",
      "plain": "While Ziggy is in Swiggy's developer programme, an order placed through Ziggy can't be over "
               "₹1,000.",
-     "fix": "Pay larger orders in Swiggy."},
+     "fix": "Ziggy splits a larger order into carts under ₹1,000, one after the other, each for your "
+            "approval. One dish over ₹1,000 by itself is ordered in the Swiggy app."},
     {"id": "payment", "whose": "swiggy", "title": "You pay in Swiggy",
      "plain": "Ziggy never handles your money and never pays without your explicit approval. Where Swiggy "
               "allows it, Ziggy can place a Cash on Delivery order you approved; everything else is paid "

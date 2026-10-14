@@ -21,6 +21,10 @@ ALIASES = {
     "quantity": ["quantity", "qty", "count"],
     "payment_method": ["paymentMethod", "payment_method"],
     "order_id": ["orderId", "order_id"],
+    "intent_app": ["intentApp", "intent_app"],          # UPI Payment stage (swiggy_upi)
+    "upi_qr": ["generateUPIQR", "generateUpiQr", "generate_upi_qr"],
+    "lat": ["lat", "latitude"],
+    "lng": ["lng", "lon", "longitude"],
     "page": ["page"],
     "page_size": ["pageSize"],
     "offset": ["offset"],
@@ -47,6 +51,8 @@ FIELDS = {
     "restaurant_id": ["restaurant_id", "restaurantId"],
     "availability": ["availabilityStatus", "availability_status"],
     "distance": ["distance", "distanceKm", "distance_km"],
+    "lat": ["lat", "latitude"],
+    "lng": ["lng", "lon", "longitude"],
 }
 
 

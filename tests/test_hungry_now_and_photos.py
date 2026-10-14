@@ -100,7 +100,7 @@ def test_dish_photos_come_from_swiggy_search_and_are_cached(world):
     view = c.get(f"/api/plan/{world['plan']}").get_json()
     cells = [m for d in view["grid"] for m in d["meals"].values() if m.get("item_id") == ids["Masala Dosa"]]
     assert all(m["image"] == PHOTO for m in cells)
-    # (a lunch: Masala Dosa is a tiffin dish, not offered for dinner — domain/timing.slot_suitability)
+    # (any non-dinner meal with the dosa planned; tiffin is fine at dinner too since Oct 2026)
     sid = next(m["session_id"] for d in view["grid"] for meal, m in d["meals"].items()
                if m["kind"] == "delivery" and meal != "dinner")
     opts = c.get(f"/api/session/{sid}/options").get_json()

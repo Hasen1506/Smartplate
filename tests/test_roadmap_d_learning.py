@@ -114,7 +114,9 @@ def test_d4_too_pricey_raises_the_cost_weight_and_cuts_spend(gt):
 
 
 def test_d5_great_pulls_that_dish_up_and_counts_as_a_like(gt):
-    uid, pid = _setup()
+    # A week that isn't money-bound (as in D4): at ₹3,200 the once-planned dish is now a
+    # ₹325 biryani (tiffin can be dinner since Oct 2026), and a second one doesn't fit.
+    uid, pid = _setup(weekly_budget=4500)
     counts = {}
     for d in _fresh(pid):
         counts[d["item_id"]] = counts.get(d["item_id"], 0) + 1

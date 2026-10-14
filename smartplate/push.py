@@ -283,6 +283,14 @@ def tick(at: dt.datetime | None = None, sender=None, *, force: bool = False) -> 
         upcoming: list = []
         pairs = due(at, _next=upcoming)               # per-profile locks inside, never the whole API
         stats = deliver(at, sender=sender, pairs=pairs) if pairs else {}
+        try:                                          # opt-in "auto-fill my cart" meals whose window opened
+            from .domain import autofill
+            auto = autofill.run_due(at, sender=sender)
+            if any(auto.values()):
+                stats = {**stats, "auto_cart": auto}
+            upcoming += autofill.next_opening(at)
+        except Exception:
+            log.exception("push: auto-fill carts failed")
         retry_soon = any(stats.get(k) for k in ("failed", "busy"))
         midnight = dt.datetime.combine(at.date() + dt.timedelta(days=1), dt.time())   # a new day/week's plan
         nxt = min([at + QUIET_MAX, midnight] + upcoming)

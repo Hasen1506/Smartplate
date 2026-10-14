@@ -179,17 +179,24 @@ def check_cart(session_id: int, expected_fingerprint: str | None) -> dict:
     return {**result, "next": next_step, "budget": budget_check(row["plan_id"], session_id)}
 
 
-def check_single_cart(session_id: int, expected_fingerprint: str | None) -> dict:
+def check_single_cart(session_id: int, expected_fingerprint: str | None, part: int = 1) -> dict:
     """One planned meal into the Swiggy cart (the meal's own "Order" button): the same
-    real bill is kept for the plan and compared with the week's budget."""
+    real bill is kept for the plan and compared with the week's budget. A meal over
+    Swiggy's ₹1,000 limit goes as sequential carts (part 1, 2, …), each approved; the
+    meal's real total is the sum of its carts' bills."""
     from ..integrations import swiggy_live
     session = models.get_session(session_id)
     if not session:
         raise ValueError("Meal not found")
     from .. import service
     service.require_cart_window(session_id)          # tomorrow's breakfast can't be paid for (and delivered) now
-    result = swiggy_live.fill_cart(session_id, expected_fingerprint)
+    result = swiggy_live.fill_cart(session_id, expected_fingerprint, part)
     if result.get("to_pay") is not None:
+        if part > 1:
+            prior = real_totals(session["plan_id"]).get(session_id)
+            if prior and prior.get("to_pay") is not None:
+                result = {**result, "to_pay": round(prior["to_pay"] + result["to_pay"], 2),
+                          "cart_to_pay": result["to_pay"]}
         record_cart(session["plan_id"], session_id, result)
     return {**result, "budget": budget_check(session["plan_id"], session_id)}
 

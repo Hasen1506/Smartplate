@@ -162,6 +162,30 @@ def _infer(name: str, limit: int = 12) -> dict | None:
     the closest recipes whose names contain every word of the dish name (not for a
     lone generic word like "rice"). None when nothing matches. Only ever used to ADD
     restrictions, never to call a dish safe."""
+    m = _match(name, limit)
+    if not m:
+        return None
+    dishes, strong = m
+    from . import food_lexicon
+    # "sweet" here means the dish IS a sweet (a dessert, or a sweet word in its name),
+    # not that its batter has a pinch of sugar: naan dough does, naan isn't a dessert.
+    fs = [{**facts(d), "sweet": (d.get("course") or "").lower() == "dessert"
+           or bool(food_lexicon.read(d.get("title") or "").sweet)} for d in dishes]
+    if strong:                                         # the dish itself: everything it may hold
+        allergens_ = set().union(*(f["allergens"] for f in fs))
+        nonveg, sweet_ = any(not f["veg"] for f in fs), any(f["sweet"] for f in fs)
+    else:                                              # its variants: what most of them (over half) hold
+        half = len(fs) / 2
+        allergens_ = {a for a in set().union(*(f["allergens"] for f in fs))
+                      if sum(a in f["allergens"] for f in fs) > half}
+        nonveg = sum(not f["veg"] for f in fs) > half
+        sweet_ = sum(f["sweet"] for f in fs) > half
+    return {"allergens": sorted(allergens_), "nonveg": nonveg, "sweet": sweet_, "strong": strong,
+            "matched": [d["title"] for d in dishes]}
+
+
+def _match(name: str, limit: int = 12) -> tuple[list[dict], bool] | None:
+    """(the library recipes a restaurant dish called `name` matches, strong?) or None."""
     if not name or not _index():
         return None
     words = _core(name)[:8]
@@ -185,23 +209,90 @@ def _infer(name: str, limit: int = 12) -> dict | None:
                 keys += idx[core]
     if not keys or (not strong and len(set(keys)) < 2):    # one look-alike variant is no evidence
         return None
+    return [_index()[k] for k in dict.fromkeys(keys)][:limit], strong
+
+
+# --------------------------------------------------------------------------- #
+# How likely a restaurant dish holds each allergen (founder decision, 14 Oct 2026)
+# --------------------------------------------------------------------------- #
+LIKELIHOOD_CAVEAT = ("From home recipes, not this restaurant's: restaurants cook differently, so a dish "
+                     "can hold something its usual recipe doesn't. Ziggy never calls a dish safe; ask the "
+                     "restaurant.")
+LIKELIHOOD_LIMIT = 24        # recipes read per dish name (more than infer's 12: a share needs a sample)
+
+
+def _match_wide(name: str, limit: int) -> tuple[list[dict], bool] | None:
+    """Recipes for a likelihood: the exact matches (`_match`) plus every recipe whose name
+    holds all the dish's words ("Masala Dosa" → "Sagu Masala Dosa", "Mysore Masala Dosa"…),
+    closest names first. Never a lone generic word ("rice"). None when nothing matches."""
+    if not name or not _index():
+        return None
+    words = _core(name)[:8]
+    if not words or (len(words) == 1 and words[0] in _GENERIC):
+        return _match(name, limit)
+    idx, by_word = _name_index()
+    m = _match(name, limit)
+    keys = [d["key"] for d in m[0]] if m else []
+    cores = set.intersection(*(by_word.get(w, set()) for w in words))
+    for core in sorted(cores, key=lambda c: (len(c), sorted(c))):
+        if len(keys) >= limit:
+            break
+        keys += idx[core]
+    if not keys:
+        return None
+    return [_index()[k] for k in dict.fromkeys(keys)][:limit], bool(m and m[1])
+
+
+def _likely_word(share: float) -> str:
+    if share >= 0.75:
+        return "usually contains"
+    if share >= 0.4:
+        return "often contains"
+    return "sometimes contains"
+
+
+def likelihood(name: str) -> dict | None:
+    """How often the library's recipes for a dish called `name` hold each allergen:
+    {"dish", "recipes", "strong", "matched", "allergens": [{"allergen", "label", "words",
+    "recipes", "of", "share", "text"}], "caveat"}, most likely first. "words" are the
+    ingredient words that put it there ("cashew"), so the line can say "usually contains
+    cashew — 7 of 9 recipes". None when the name matches no recipe (unknown: callers stay
+    fail-closed). Never evidence that a dish is free of anything."""
+    return _likelihood_cached(name or "", _CACHE["mtime"] if _load() else None)
+
+
+@lru_cache(maxsize=4096)
+def _likelihood_cached(name: str, _mtime) -> dict | None:
+    m = _match_wide(name, LIKELIHOOD_LIMIT)
+    if not m:
+        return None
+    dishes, strong = m
     from . import food_lexicon
-    dishes = [_index()[k] for k in dict.fromkeys(keys)][:limit]
-    # "sweet" here means the dish IS a sweet (a dessert, or a sweet word in its name),
-    # not that its batter has a pinch of sugar: naan dough does, naan isn't a dessert.
-    fs = [{**facts(d), "sweet": (d.get("course") or "").lower() == "dessert"
-           or bool(food_lexicon.read(d.get("title") or "").sweet)} for d in dishes]
-    if strong:                                         # the dish itself: everything it may hold
-        allergens_ = set().union(*(f["allergens"] for f in fs))
-        nonveg, sweet_ = any(not f["veg"] for f in fs), any(f["sweet"] for f in fs)
-    else:                                              # its variants: what most of them (over half) hold
-        half = len(fs) / 2
-        allergens_ = {a for a in set().union(*(f["allergens"] for f in fs))
-                      if sum(a in f["allergens"] for f in fs) > half}
-        nonveg = sum(not f["veg"] for f in fs) > half
-        sweet_ = sum(f["sweet"] for f in fs) > half
-    return {"allergens": sorted(allergens_), "nonveg": nonveg, "sweet": sweet_, "strong": strong,
-            "matched": [d["title"] for d in dishes]}
+    n = len(dishes)
+    counts: dict[str, int] = {}
+    words: dict[str, dict[str, int]] = {}
+    for d in dishes:
+        reading = food_lexicon.read_all(d.get("ingredients") or [], d.get("title") or "")
+        fams = set(d.get("allergens") or []) | reading.allergens
+        for fam in fams:
+            counts[fam] = counts.get(fam, 0) + 1
+            for h in reading.allergen_hits(fam):
+                w = (h.word or "").strip().lower()
+                if w:
+                    words.setdefault(fam, {})
+                    words[fam][w] = words[fam].get(w, 0) + 1
+    rows = []
+    for fam, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        top = sorted((words.get(fam) or {}).items(), key=lambda kv: (-kv[1], kv[0]))[:2]
+        label = fam.replace("_", " ")
+        said = " / ".join(w for w, _ in top) or label
+        share = round(c / n, 2)
+        rows.append({"allergen": fam, "label": label, "words": [w for w, _ in top], "recipes": c, "of": n,
+                     "share": share,
+                     "text": (f"{_likely_word(share).capitalize()} {said}{'' if said == label else f' ({label})'}"
+                              f" — {c} of {n} recipe{'s' if n != 1 else ''}")})
+    return {"dish": name, "recipes": n, "strong": strong, "matched": [d.get("title") for d in dishes][:12],
+            "allergens": rows, "caveat": LIKELIHOOD_CAVEAT}
 
 
 def _score(d: dict, q: str, words: list[str]) -> int | None:

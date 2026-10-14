@@ -146,7 +146,7 @@ typed and offer Retry, instead of re-rendering and losing it. That is the other 
   per-call line Swiggy's go-live checklist asks for (tool, ms, status). It is **not yet
   wired into the Swiggy transport**, because W7 owns those files and the swiggy_live
   split was kept purely mechanical. One `with timed(...)` around the MCP call does it.
-- **Sentry:** set `SENTRY_DSN` and add `sentry-sdk[flask]` to `requirements.txt`.
+- **Sentry:** set `SENTRY_DSN`; `sentry-sdk[flask]` ships in `requirements.txt` and `create_app()` initialises it (no request bodies, cookies or headers sent).
   Without a DSN it is a no-op. With a DSN but no package, it logs one warning and
   carries on. It sends no request bodies, cookies or headers (`send_default_pii=False`).
   The package was not added to requirements, because CI runs `pip-audit --strict` on
