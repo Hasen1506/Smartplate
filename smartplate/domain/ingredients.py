@@ -242,8 +242,10 @@ def diet_class(token: str) -> str:
     else:
         cls = "vegan"
     w = words(token)
-    if w & NONVEG_WORDS and cls in ("vegan", "veg"):
-        cls = "egg" if w & {"egg"} else "nonveg"
+    said = food_lexicon.read(" ".join(sorted(w))) if cls in ("vegan", "veg") else None
+    if (w & NONVEG_WORDS or (said and said.nonveg)) and cls in ("vegan", "veg"):
+        cls = "egg" if (w & {"egg"} or (said and said.egg and not any(h.kind == "nonveg" for h in said.nonveg))) \
+            else "nonveg"
     if cls == "vegan" and families(token) & {"dairy"}:
         cls = "veg"
     return cls

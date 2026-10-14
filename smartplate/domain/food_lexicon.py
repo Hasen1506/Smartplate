@@ -46,13 +46,15 @@ NONVEG: list[tuple[str, str]] = [
     (r"kari", "meat (Tamil)"),
     (r"nethili|nethli|vanjaram|vaval|sura|kanava|kanavai|mathi|chaala|ayala|kilanga|paarai|koduva|"
      r"karuvadu|karuvaadu|nalli", "fish or seafood (Tamil)"),
-    (r"chemmeen|chemmen|konju", "prawn (Malayalam)"), (r"erachi|irachi|erachi[a-z]*|kakka", "meat or shellfish (Malayalam)"),
+    (r"chemmeen|chemmen|konju", "prawn (Malayalam)"), (r"erachi|irachi|erachi[a-z]*", "meat (Malayalam)"),
+    (r"kakka|kallumakkai", "clams or mussels (Malayalam)"),
     # Hindi / Urdu
-    (r"gosht|ghosht|murgh|murg|machli|machhli|machchi|jhinga|jheenga|bakra|tangdi",
-     "meat, chicken or fish (Hindi/Urdu)"),
+    (r"gosht|ghosht|bakra|bakre", "meat (Hindi/Urdu)"), (r"murgh|murg|tangdi", "chicken (Hindi/Urdu)"),
+    (r"machli|machhli|machchi|macchi", "fish (Hindi)"), (r"jhinga|jheenga|jhinge", "prawn (Hindi)"),
     # Telugu / Kannada
     (r"kodi|koodi", "chicken (Telugu)"), (r"mamsam|mamsa|mamsaharam", "meat (Telugu)"),
-    (r"royyalu|royya|chepa|chepala|peethala", "prawn, fish or crab (Telugu)"),
+    (r"royyalu|royya|royyala", "prawn (Telugu)"), (r"chepa|chepala", "fish (Telugu)"),
+    (r"peethala|peetha", "crab (Telugu)"),
     (r"kori", "chicken (Kannada/Tulu)"), (r"mamsa", "meat (Kannada)"),
 ]
 EGG: list[tuple[str, str]] = [
@@ -96,7 +98,8 @@ ALLERGENS: dict[str, list[tuple[str, str]]] = {
     "shellfish": [(r"prawns?|shrimps?|crabs?|lobsters?|squids?|calamari|octopus|mussels?|clams?|oysters?|"
                    r"scallops?|seafood", "shellfish"),
                   (r"eral|era|iraal|yeral|nandu|njandu|chemmeen|chemmen|konju|jhinga|jheenga|royyalu|royya|"
-                   r"kanava|kanavai|kakka|kallumakkai|kekda", "prawn, crab or squid (Tamil/Malayalam/Hindi/Telugu)")],
+                   r"royyala|peethala|kanava|kanavai|kakka|kallumakkai|kekda",
+                   "prawn, crab or squid (Tamil/Malayalam/Hindi/Telugu)")],
     "soy": [(r"soy|soya|soyabean|soybeans?|tofu|tempeh|edamame|miso|manchurian|schezwan|szechuan|"
              r"hakka|chop ?suey|chowmein|chow mein", "soy (soya, tofu or soy sauce)")],
     "sesame": [(r"sesame|til|gingelly|tahini|ellu|nuvvulu|nuvvula|hummus|ellu ?urundai", "sesame (til/ellu)")],
@@ -352,7 +355,7 @@ def read_all(*texts) -> Reading:
 
 # Single words, for readers that work word by word (ingredients.py pantry tokens).
 def _single_words(rows) -> set[str]:
-    return {w for frag, _ in rows for w in _expand(frag) if re.fullmatch(r"[a-z]+", w)}
+    return {w.strip("*+") for frag, _ in rows for w in _expand(frag) if re.fullmatch(r"[*+]?[a-z]+[*+]?", w)}
 
 
 NONVEG_WORDS = _single_words(NONVEG) | _single_words(EGG)

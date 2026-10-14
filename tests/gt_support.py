@@ -103,29 +103,66 @@ def plan_snapshot(view: dict) -> dict:
 CENT = 0.011            # costs are stored to the paisa; allow one paisa of float noise per check
 
 
+# Independent word lists for the oracle (deliberately short and written separately from
+# smartplate/domain/food_lexicon.py, so a lexicon regression can't make the oracle agree with
+# itself). Each word is unambiguous; the app's lexicon must catch at least these.
+ORACLE_NONVEG = r"chicken|mutton|prawns?|fish|crab|egg|eggs|keema|kheema|kozhi|nattukozhi|eral|nandu|meen|aatu|gosht|" \
+                r"murgh|machli|jhinga|chemmeen|muttai|anda"
+ORACLE_ALLERGEN = {"peanut": r"peanuts?|groundnut|verkadalai|moongphali|satay",
+                   "tree_nut": r"cashews?|kaju|badam|almonds?|pista|pistachios?|akhrot|walnuts?",
+                   "gluten": r"naan|parotta|roti|chapati|maida|rava|sooji|wheat",
+                   "dairy": r"paneer|ghee|curd|thayir|mor|milk|rasmalai|khoa|khoya",
+                   "fish": r"fish|meen|machli", "shellfish": r"prawns?|eral|nandu|crab|jhinga|chemmeen"}
+ORACLE_SWEET = r"kesari|halwa|payasam|kheer|jamun|rasmalai|jalebi|laddu|ladoo|barfi|burfi|sakkarai|dessert|sweet"
+
+
+def _says(pattern: str, name: str) -> bool:
+    import re
+    name = re.sub(r"egg ?less|egg ?plant|muttai ?kose|sweet ?(corn|potato|lime)|sweet (and|&|n) sour|"
+                  r"(peanut|almond|cashew) butter|(coconut|almond|soy|soya|oat|cashew|rice|peanut) (milk|cream|curd)",
+                  " ", name.lower())
+    return bool(re.search(rf"(?<![a-z])({pattern})(?![a-z])", name))
+
+
 def item_violation(user: dict, item: dict) -> str | None:
     """Independent restatement of the hard rules (not a call into allergens.py), so a
     regression there can't make the oracle agree with itself.
 
     Vegetarian follows the Indian (FSSAI) convention the app's veg/non-veg marks use:
-    eggs are non-vegetarian."""
+    eggs are non-vegetarian. Fail-closed (W1, sp-grill #37–#39): unknown is not safe — an
+    unmarked dish is not veg, a dish with no sugar figure fails diabetes, and a live dish
+    whose ingredients nothing describes fails an allergy."""
     people = [user] + list(user.get("household_members") or [])
     item_allergens = set(item.get("allergens") or [])
+    name = str(item.get("name") or item.get("title") or "")
+    for fam, words in ORACLE_ALLERGEN.items():
+        if _says(words, name):
+            item_allergens.add(fam)
+    nutrition_unknown = item.get("nutrition_known", 1) == 0 or item.get("sugar_g", 0) is None
+    live_unknown = item.get("source") == "live" and item.get("safety_basis") in (None, "name", "none")
     for p in people:
         clash = set(p.get("allergens") or []) & item_allergens
         if clash:
             return f"allergen {sorted(clash)} for {p.get('name')}"
+        if p.get("allergens") and live_unknown:
+            return f"unknown ingredients for {p.get('name')}'s allergy"
         med = set(p.get("medical") or [])
-        if "diabetes" in med and item.get("sugar_g", 0) > 20:
-            return "sugar > 20 g for diabetes"
+        if "diabetes" in med:
+            if (item.get("sugar_g") or 0) > 20:
+                return "sugar > 20 g for diabetes"
+            if _says(ORACLE_SWEET, name) or "dessert" in (item.get("tags") or []):
+                return "a sweet for diabetes"
+            if nutrition_unknown and item.get("sweet") is not False:
+                return "unknown sugar for diabetes"
         if "hypertension" in med and "high_sodium" in (item.get("tags") or []):
             return "high sodium for hypertension"
         if "celiac" in med and "gluten" in item_allergens:
             return "gluten for celiac"
         diet = p.get("diet") or "nonveg"
         if diet in ("veg", "vegan") and (not item.get("veg", 1) or "egg" in item_allergens
-                                         or "nonveg" in (item.get("tags") or [])):
-            return f"non-veg for a {diet} profile"
+                                         or "nonveg" in (item.get("tags") or []) or _says(ORACLE_NONVEG, name)
+                                         or item.get("veg_known", 1) == 0):
+            return f"non-veg or unmarked for a {diet} profile"
         if diet == "vegan" and "dairy" in item_allergens:
             return "dairy for a vegan profile"
     return None

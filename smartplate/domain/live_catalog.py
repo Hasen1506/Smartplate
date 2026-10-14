@@ -140,7 +140,10 @@ def estimate(name: str, veg, description: str | None = None, provider: dict | No
     only add one."""
     low = name.lower()
     words = food_lexicon.read_all(name, description or "")
-    values = _DESSERT if words.sweet else next((v for p, v in TEMPLATES if re.search(p, low)), None)
+    # The template comes from the NAME only: a description can add restrictions (an
+    # allergen, meat, sugar) but never turn an unknown dish into an estimated one.
+    values = (_DESSERT if food_lexicon.read(name).sweet
+              else next((v for p, v in TEMPLATES if re.search(p, low)), None))
     if values is None:
         return None
     out = {k: v for k, v in values.items() if k not in ("allergens", "veg", "dessert")}
