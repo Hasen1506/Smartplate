@@ -36,12 +36,12 @@
     "status": "ordered"
    },
    "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 115.0,
+    "item": "Masala Dosa",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "",
-    "status": "active"
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "ordered"
    },
    "lunch": {
     "cost": 0.0,
@@ -114,19 +114,19 @@
     "status": "ordered"
    },
    "dinner": {
-    "cost": 100.0,
-    "item": "Curd Rice",
-    "kind": "delivery",
-    "pinned": true,
-    "restaurant": "Sangeetha Veg",
-    "status": "ordered"
-   },
-   "lunch": {
     "cost": 115.0,
     "item": "Masala Dosa",
     "kind": "delivery",
-    "pinned": false,
+    "pinned": true,
     "restaurant": "Hotel Saravana Bhavan",
+    "status": "ordered"
+   },
+   "lunch": {
+    "cost": 100.0,
+    "item": "Curd Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
     "status": "ordered"
    }
   },
@@ -174,12 +174,12 @@
     "status": "ordered"
    },
    "lunch": {
-    "cost": 115.0,
-    "item": "Masala Dosa",
-    "kind": "delivery",
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
-    "status": "ordered"
+    "restaurant": "",
+    "status": "active"
    }
   }
  },
@@ -213,11 +213,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 115.0,
-    "item": "Mini Tiffin",
-    "kind": "delivery",
+    "cost": 0.0,
+    "item": "Skip",
+    "kind": "skip",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "",
     "status": "active"
    }
   },
@@ -231,11 +231,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 0.0,
-    "item": "Skip",
-    "kind": "skip",
+    "cost": 115.0,
+    "item": "Masala Dosa",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    },
    "lunch": {
@@ -317,11 +317,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 115.0,
-    "item": "Masala Dosa",
+    "cost": 100.0,
+    "item": "Curd Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    }
   },
@@ -361,19 +361,19 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 100.0,
-    "item": "Curd Rice",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Sangeetha Veg",
-    "status": "active"
-   },
-   "lunch": {
     "cost": 115.0,
     "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 115.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
     "status": "active"
    }
   }

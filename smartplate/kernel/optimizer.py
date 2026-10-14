@@ -57,6 +57,16 @@ NONVEG_SHARE = 0.5
 TIEBREAK = 1e-4    # above CBC's integrality/optimality tolerances, far below any real preference
 
 
+# When the same number of meals has to be skipped either way (a variety cap, a short menu),
+# skip the later ones: today's meal is the one the person acts on now, and later days can
+# still gain dishes on a re-plan. Bigger than the hash tie-break, far below any preference.
+SKIP_LATER = 3 * TIEBREAK
+
+
+def _skip_later(session: dict, cand: dict) -> float:
+    return SKIP_LATER * (6 - int(session["day"])) / 6 if cand.get("kind") == "skip" else 0.0
+
+
 def _tiebreak(session: dict, cand: dict) -> float:
     """A small, fixed, content-derived nudge (< 1e-4) so two equally good weeks never
     tie. Without it the solver's choice between equal plans depends on the CBC build
@@ -747,7 +757,7 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
             keep = (config.STABILITY_W if previous.get(s["id"]) == _choice_key(c) and not c.get("pool_fallback")
                     else 0.0)
             obj_terms.append((_objective(c, w, ref_cost, user["carbon_pref"], skip_penalty) - keep
-                              + _tiebreak(s, c)) * v)
+                              + _tiebreak(s, c) + _skip_later(s, c)) * v)
             budget_terms.append(c["cost"] * v)
             day_terms.setdefault(s["day"], []).append(c["cost"] * v)
             if c["kind"] == "cook" and c.get("recipe_key") and not c.get("routine"):
