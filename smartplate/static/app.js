@@ -667,7 +667,7 @@ async function chooseAddress(addressId) {
   S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
   await refreshLiveCart(false);
   S.addrSheet = false; S.connectSheet = false;
-  toast(`Delivering to ${S.swiggy.address?.label || "this address"}`);
+  toast(S.swiggy.week?.dropped?.length ? S.swiggy.week.note : `Delivering to ${S.swiggy.address?.label || "this address"}`);
   S.view = await api(`/api/plan/${S.planId}`);          // its source now says what the new address needs
   S.liveSync = null; render();
   if (!(await resumePending())) await autoSyncLive();
@@ -2209,6 +2209,8 @@ const FAST_MIN = 30;
 function filterChip(key, label, extra = "") {
   return `<button class="chip" data-filter="${key}" aria-pressed="${!!S.filters[key]}" ${extra}>${label}</button>`;
 }
+// Swiggy's brand rules: "Powered by Swiggy" next to its results, the cart and the order (W7).
+const poweredBySwiggy = () => `<p class="fine" data-attribution="swiggy" style="text-align:right;opacity:.8">Powered by Swiggy</p>`;
 function liveResultsBlock() {
   const results = S.liveResults.restaurants || [];
   const starred = new Set((S.liveFavourites || []).map(x => x.id));
@@ -2222,7 +2224,7 @@ function liveResultsBlock() {
     ${anyEta || cuisines.length > 1 ? `<div class="chips scroll">${anyEta ? filterChip("fast", `Fast (≤${FAST_MIN} min)`) : ""}${cuisines.length > 1 ? cuisines.map(c => `<button class="chip" data-cuisine="${esc(c)}" aria-pressed="${S.cuisine === c}">${esc(c)}</button>`).join("") : ""}</div>` : ""}
     <div class="card tight">${shown.length ? shown.map(r => placeRow(r, { starred: starred.has(r.id), live: true })).join("")
       : results.length ? `<p class="fine" style="padding:14px 0">None of these match your filters. Turn them off to see all ${results.length}.</p>` : `<p class="fine" style="padding:14px 0">No live restaurants returned for this address and search.</p>`}</div>
-    ${S.liveResults.has_more ? `<button class="secondary" data-act="more-places" ${S.morePlaces ? 'disabled aria-busy="true"' : ""}>${S.morePlaces ? `${roller()}<span>Loading…</span>` : `Load more places${S.liveResults.total ? ` (${results.length} of about ${S.liveResults.total})` : ""}`}</button>` : ""}</section>`;
+    ${S.liveResults.has_more ? `<button class="secondary" data-act="more-places" ${S.morePlaces ? 'disabled aria-busy="true"' : ""}>${S.morePlaces ? `${roller()}<span>Loading…</span>` : `Load more places${S.liveResults.total ? ` (${results.length} of about ${S.liveResults.total})` : ""}`}</button>` : ""}${poweredBySwiggy()}</section>`;
 }
 // The next page of Swiggy's answer, added below (each place once).
 async function morePlaces() {
@@ -2308,6 +2310,7 @@ function liveOrderReviewDialog() {
       <p class="fine">Ziggy cannot verify all ingredients or cross-contact. Check the details before placing an order.</p>
       <button class="primary" data-act="confirm-live-cart" autofocus ${r.adding ? 'disabled aria-busy="true"' : ""}>${r.adding ? `${roller()}<span>Adding…</span>` : "Add to Swiggy cart"}</button>
       <button class="ghost" data-close-live-review="1" ${r.adding ? "disabled" : ""}>Cancel</button>`}
+    ${poweredBySwiggy()}
   </section></div>`;
 }
 function checkoutReviewDialog() {
@@ -2319,6 +2322,7 @@ function checkoutReviewDialog() {
     <p class="fine">Payment: ${esc(r.payment_label)}. This places a real order to the address shown and you may owe the full amount. Check ingredients with the restaurant if needed. An uncertain result will not be retried automatically.</p>
     <button class="primary" data-act="place-live-order" autofocus>Confirm and place order · ${rupee(r.to_pay)}</button>
     <button class="ghost" data-close-checkout-review="1">Cancel</button>
+    ${poweredBySwiggy()}
   </section></div>`;
 }
 
