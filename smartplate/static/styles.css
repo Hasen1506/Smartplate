@@ -548,3 +548,5 @@ ul.olist{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
 .lang-switch{display:flex;justify-content:center}
 /* Tamil: the brand fonts carry Latin only, so Tamil falls back to the phone's Tamil font. */
 :root[lang="ta"]{--display:"Bricolage Grotesque","Noto Sans Tamil","Latha",ui-rounded,system-ui,sans-serif;--body:"Figtree","Noto Sans Tamil","Latha",ui-sans-serif,system-ui,sans-serif}
+/* Phones: toasts sit at the top, so they don't cover the card you act on next (usability #41). */
+@media (max-width:720px){.toast{bottom:auto;top:calc(env(safe-area-inset-top) + 14px)}}

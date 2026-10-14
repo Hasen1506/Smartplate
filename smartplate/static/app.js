@@ -328,7 +328,13 @@ async function api(path, method = "GET", body, { timeoutMs } = {}) {
     err.data = data;
     throw err;
   }
-  return r.json();
+  // A host's "waking up" page (HTML) instead of Ziggy's JSON: the server is still starting.
+  try { return await r.json(); }
+  catch (_) {
+    const err = new Error("The server is still starting up.");
+    err.code = "server_waking"; err.status = r.status;
+    throw err;
+  }
 }
 // One message at a time, never stacked; an optional Undo runs through guard() like any tap.
 function toast(msg, undo) {
@@ -3341,18 +3347,32 @@ document.addEventListener("keydown", e => {
 function serverDown(e) {
   return ["database_unavailable", "server_timeout"].includes(e?.code) || (e?.status >= 500);
 }
+// A sleeping free server (cold start) looks like a timeout, a 502/503/504 or an HTML page.
+// That's "waking up", not "you're offline": say so and try again by itself.
+function serverWaking(e) {
+  if (e?.code === "server_waking" || e?.code === "server_timeout") return true;
+  return [502, 503, 504].includes(e?.status) && !e?.code;       // Ziggy's own 503s carry a code and a reason
+}
+const WAKE_RETRY_MS = 8000;
 function bootFailed(e) {
   const offline = (typeof navigator !== "undefined" && navigator.onLine === false) || /fetch|network/i.test(e?.message || "");
+  const waking = !offline && serverWaking(e);
   document.getElementById("app").innerHTML = offline
     ? `<main class="welcome">${mascot()}<h1 class="hero-h">You're offline.</h1>
-       <p class="sub">Plans and budgets are always live, so Ziggy needs a connection. It reloads by itself when you're back online.</p>
+       <p class="sub">This device doesn't have a saved copy of your plan yet, so Ziggy needs a connection this time. It reloads by itself when you're back online.</p>
        <button class="primary big" id="retry-boot">Try again</button></main>`
+    : waking
+    ? `<main class="welcome" role="status" aria-live="polite">${mascot("bob")}<h1 class="hero-h">Ziggy is waking up…</h1>
+       <p class="sub">The server sleeps when nobody's using it and takes about 30 seconds to start. This page tries again by itself.</p>
+       <div class="busybar on" style="position:static;width:100%"><i></i></div>
+       <button class="primary big" id="retry-boot">Try again now</button></main>`
     : serverDown(e)
     ? `<main class="welcome" role="alert">${mascot()}<h1 class="hero-h">Ziggy can't start right now.</h1>
        <p class="sub">${esc(e.message)}</p>
        <button class="primary big" id="retry-boot">Try again</button></main>`
     : `<div class="boot">Failed to start: ${esc(e.message)}</div>`;
   if (offline && typeof window !== "undefined") window.addEventListener("online", () => location.reload(), { once: true });
+  if (waking && typeof location !== "undefined") setTimeout(() => location.reload(), WAKE_RETRY_MS);
   document.getElementById("retry-boot")?.addEventListener("click", () => location.reload());
 }
 if (typeof window !== "undefined" && window.addEventListener) {
