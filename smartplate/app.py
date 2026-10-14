@@ -6,7 +6,7 @@ from flask import Flask, Response, g, jsonify, redirect, request, send_from_dire
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, accounts, config, errors, everyday, profile_data, push, ratelimit, service
+from . import access, accounts, config, errors, everyday, profile_data, push, ratelimit, service, websession
 from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, week_orders
 from .domain.checkout import CheckoutConflict
 from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
@@ -106,6 +106,16 @@ def create_app() -> Flask:
                 return jsonify(error='Cross-site requests are not allowed'), 403
             if not request.is_json or not isinstance(request.get_json(silent=True), dict):
                 return jsonify(error='Send a JSON object'), 400
+        # Cookie session (websession.py, #62): load it, and demand the CSRF token on every
+        # state-changing request that leans on it instead of on the header key.
+        g.web_session = None
+        if request.path.startswith('/api/') and request.cookies.get(websession.COOKIE):
+            g.web_session = websession.load(request.cookies.get(websession.COOKIE))
+        if (g.web_session and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
+                and not request.headers.get(access.HEADER)
+                and not websession.csrf_ok(g.web_session, request.headers.get(websession.CSRF_HEADER))):
+            return jsonify(error='This request is missing its security token. Reload Ziggy and try again.',
+                           code='csrf_failed'), 403
         args = request.view_args or {}
         for key, table in (('plan_id', 'plans'), ('user_id', 'users'), ('session_id', 'sessions')):
             if key in args:
@@ -119,7 +129,7 @@ def create_app() -> Flask:
             body = request.get_json(silent=True) if request.method == 'POST' else None
             owners = access.owners_of(args, body if isinstance(body, dict) else None,
                                       request.args.get('user_id', type=int))
-            if not all(access.allowed(uid, presented) for uid in owners):
+            if not all(access.allowed(uid, presented) or websession.grants(g.web_session, uid) for uid in owners):
                 return jsonify(error='This profile is private. Open it on the device that created it, '
                                      'or add it with its recovery code.'), 401
             # Serialize per profile, not per process (M-05): plan edits and checkout for
@@ -221,6 +231,17 @@ def create_app() -> Flask:
 
     @app.after_request
     def response_headers(response):
+        session = g.get('web_session')
+        if session and (session.get('rotate') or (g.get('session_cookie') and not session.get('token'))):
+            websession.rotate(session)              # a fresh token every day of use (#62)
+            g.session_cookie = True
+        if session and g.get('session_cookie'):
+            secure = request.is_secure or (config.PUBLIC_URL or '').startswith('https://')
+            age = int(websession.IDLE_TTL.total_seconds())
+            response.set_cookie(websession.COOKIE, websession.cookie_value(session['token']), max_age=age,
+                                httponly=True, secure=secure, samesite='Lax', path='/')
+            response.set_cookie(websession.CSRF_COOKIE, session['csrf'], max_age=age,
+                                httponly=False, secure=secure, samesite='Lax', path='/')
         if g.get('request_id'):
             response.headers['X-Request-ID'] = g.request_id
         response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -574,34 +595,90 @@ def create_app() -> Flask:
     @app.post("/api/profiles")
     def create_profile():
         ratelimit.check(f"profiles:{request.remote_addr}", 20, 3600)
-        return jsonify(everyday.create_profile(request.get_json())), 201
+        view = everyday.create_profile(request.get_json())
+        if _wants_session() and view.get("access_key"):
+            websession.bind(_session_for_binding(), view["user"]["id"])
+        return jsonify(view), 201
 
     # ---- sign-in (accounts.py): a name + password that opens a private profile anywhere ---- #
     def _presented():
         return request.headers.get(access.HEADER)
 
+    def _wants_session():
+        """The app asks for a cookie session; API scripts keep header keys (websession.py)."""
+        return request.headers.get(websession.OPT_IN_HEADER) == "cookie"
+
+    def _session_for_binding(renew=False):
+        """This browser's cookie session, started if needed; its cookie is (re)sent."""
+        session = g.get("web_session")
+        if not session:
+            session, _ = websession.start()
+            g.web_session = session
+        elif renew:
+            websession.renew(session)      # a privilege change: no planted token survives it
+        g.session_cookie = True
+        return session
+
+    def _this_device(user_id):
+        held = websession.binding(g.get("web_session"), user_id)
+        return held["device_id"] if held else None
+
     @app.post("/api/signin")
     def sign_in():
-        return jsonify(accounts.sign_in(request.get_json(), request.remote_addr or ""))
+        result = accounts.sign_in(request.get_json(), request.remote_addr or "")
+        if _wants_session():
+            websession.bind(_session_for_binding(renew=True), result["user_id"], result["device_id"])
+        return jsonify(result)
+
+    @app.get("/api/session")
+    def session_view():
+        """The private profiles this browser's cookie session may open, and its CSRF token."""
+        session = g.get("web_session")
+        return jsonify(profiles=websession.profiles(session), csrf=session["csrf"] if session else None)
+
+    @app.post("/api/session/claim")
+    def session_claim():
+        """Move a profile key (or recovery code) from the page into the HttpOnly session, once.
+        After this the app keeps no key in localStorage (#62)."""
+        ratelimit.check(f"claim:{request.remote_addr}", 30, 900)
+        body = request.get_json()
+        uid, key = body.get("user_id"), _presented() or body.get("key")
+        if isinstance(uid, bool) or not isinstance(uid, int) or not isinstance(key, str) or not key:
+            raise ValueError("Send the profile id and its key")
+        if not access.is_private(uid) or not access.allowed(uid, key):
+            return jsonify(error="That code doesn't match a profile here."), 401
+        session = _session_for_binding(renew=True)
+        websession.bind(session, uid, access.device_for(uid, key))
+        return jsonify(user_id=uid, name=models.get_user(uid)["name"], csrf=session["csrf"])
 
     @app.get("/api/user/<int:user_id>/account")
     def account(user_id):
-        return jsonify(accounts.summary(user_id, _presented()))
+        return jsonify(accounts.summary(user_id, _presented(), _this_device(user_id)))
 
     @app.post("/api/user/<int:user_id>/account")
     def set_account(user_id):
-        return jsonify(accounts.set_login(user_id, request.get_json(), _presented()))
+        return jsonify(accounts.set_login(user_id, request.get_json(), _presented(), _this_device(user_id)))
 
     @app.post("/api/user/<int:user_id>/account/rotate-key")
     def rotate_profile_key(user_id):
-        return jsonify(accounts.rotate_key(user_id, request.get_json().get("confirmation")))
+        result = accounts.rotate_key(user_id, request.get_json().get("confirmation"))
+        # Every other browser loses the profile; this one keeps it (and gets a fresh token).
+        session = g.get("web_session")
+        websession.revoke_user(user_id, keep_session=session["id"] if session else None)
+        if session:
+            websession.bind(_session_for_binding(renew=True), user_id)
+        return jsonify(result)
 
     @app.post("/api/user/<int:user_id>/devices/<int:device_id>/remove")
     def remove_device(user_id, device_id):
-        return jsonify(accounts.remove_device(user_id, device_id))
+        accounts.remove_device(user_id, device_id)
+        return jsonify(accounts.summary(user_id, _presented(), _this_device(user_id)))
 
     @app.post("/api/user/<int:user_id>/signout")
     def sign_out(user_id):
+        device = websession.unbind(g.get("web_session"), user_id)
+        if device is not None:
+            accounts.remove_device(user_id, device)
         return jsonify(accounts.sign_out(user_id, _presented()))
 
     @app.get("/api/user/<int:user_id>/data.json")
@@ -612,7 +689,9 @@ def create_app() -> Flask:
 
     @app.delete("/api/user/<int:user_id>")
     def delete_profile(user_id):
-        return jsonify(profile_data.delete(user_id, request.get_json().get("confirmation")))
+        result = profile_data.delete(user_id, request.get_json().get("confirmation"))
+        websession.revoke_user(user_id)            # no browser keeps a hold on a deleted profile
+        return jsonify(result)
 
     @app.patch("/api/user/<int:user_id>/setup")
     def update_setup(user_id):
