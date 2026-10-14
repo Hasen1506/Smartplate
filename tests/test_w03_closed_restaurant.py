@@ -36,7 +36,8 @@ def town(frozen, monkeypatch):
     client = create_app().test_client()
     uid = client.post("/api/profiles", json={
         "name": "Priya", "diet": "veg", "weekly_budget": 3500, "cook": "never",
-        "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "order"}}).get_json()["user"]["id"]
+        "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "order"},
+        "consent": {"account": True, "health": True, "learning": True}}).get_json()["user"]["id"]
     _connect(client, fake, uid=uid)
     assert client.post(f"/api/user/{uid}/swiggy/address", json={"address_id": "addr-home"}).status_code == 200
     yield client, uid

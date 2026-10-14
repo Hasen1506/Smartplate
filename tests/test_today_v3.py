@@ -12,7 +12,8 @@ from test_followups import _connect
 
 def _profile(client, diet="veg", **extra):
     body = {"name": "Priya", "diet": diet, "weekly_budget": 4200, "cook": "never",
-            "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "skip"}, "allergens": [], "medical": []}
+            "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "skip"}, "allergens": [], "medical": [],
+            "consent": {"account": True, "health": True, "learning": True}}
     body.update(extra)
     r = client.post("/api/profiles", json=body)
     assert r.status_code == 201, r.get_json()

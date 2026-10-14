@@ -358,6 +358,7 @@ def create_app() -> Flask:
             "weather_provider": config.WEATHER_PROVIDER,
             "catalog_city": everyday.CITY,
             "fixture_data": config.FIXTURE_DATA,
+            "meal_floor": config.MEAL_FLOOR_RUPEES,      # ₹ a meal; onboarding warning = server low-budget guard
             # Epicure ingredient embeddings: swaps, "more like this", cuisine tilt
             "epicure": {"available": epicure.get() is not None, "cuisines": flavour.CUISINES},
         })

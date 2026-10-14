@@ -33,7 +33,8 @@ def prod(monkeypatch):
 
 
 SETUP = {"name": "Priya", "diet": "veg", "weekly_budget": 1500, "cook": "sometimes",
-         "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"}}
+         "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"},
+         "consent": {"account": True, "health": True, "learning": True}}
 
 
 def _new_profile(client):

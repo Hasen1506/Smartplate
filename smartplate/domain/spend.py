@@ -25,7 +25,7 @@ import math
 import re
 import statistics
 
-from .. import clock, db
+from .. import clock, config, db
 
 WEEKS_FOR_SUGGESTION = 4
 SUGGEST_CUT = 0.15            # "aim for 0.85 × what you spent"
@@ -391,4 +391,4 @@ def low_budget_check(user: dict, weekly_budget: float | None = None) -> dict | N
                          "amount": math.ceil(per * meals / 50) * 50}]}
 
 
-DEFAULT_CHEAPEST_DISH = 60.0   # ₹; a plain tiffin item is the cheapest realistic delivered meal (estimate)
+DEFAULT_CHEAPEST_DISH = config.MEAL_FLOOR_RUPEES   # ₹; shared with the onboarding warning (config.MEAL_FLOOR_RUPEES)

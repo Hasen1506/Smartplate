@@ -198,7 +198,7 @@ def town(gt, monkeypatch):
         body, _ = PROFILES[kind]
         uid = client.post("/api/profiles", json={"name": kind.title(), "weekly_budget": 3500,
                                                  "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "order"},
-                                                 "cook": "never", "favourites": [], **body}).get_json()["user"]["id"]
+                                                 "cook": "never", "favourites": [], "consent": {"account": True, "health": True, "learning": True}, **body}).get_json()["user"]["id"]
         _connect(client, fake, uid=uid)
         assert client.post(f"/api/user/{uid}/swiggy/address", json={"address_id": "addr-home"}).status_code == 200
         return uid

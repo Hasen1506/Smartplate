@@ -3011,10 +3011,12 @@ function onboardingScreen() {
 }
 /* Budget step: the per-meal line and the "too little to eat on" warning, recomputed on every
    keystroke (not only on the ± buttons and chips). */
-const MEAL_FLOOR = 60;          // ₹ a meal: below this, delivered meals near you rarely fit
+const MEAL_FLOOR_DEFAULT = 60;  // ₹ a meal: below this, delivered meals near you rarely fit
+const mealFloor = () => Number(S.meta?.meal_floor) || MEAL_FLOOR_DEFAULT;   // server: config.MEAL_FLOOR_RUPEES
 const obMeals = (d) => MEALS.filter(m => d.rhythm[m] !== "skip").length * 7 || 1;
 const obPerMeal = (weekly, meals) => weekly ? t("about {x} a meal for {n} meals", { x: rupee0(weekly / meals), n: meals }) : t("Enter an amount");
 function obFloorWarn(weekly, meals) {
+  const MEAL_FLOOR = mealFloor();
   if (!weekly || weekly / meals >= MEAL_FLOOR) return "";
   const need = Math.ceil((MEAL_FLOOR * meals) / 250) * 250, fit = Math.max(0, Math.floor(weekly / MEAL_FLOOR));
   return `<div class="note warn" role="alert"><span style="flex:1"><b>${rupee0(weekly)} is ${rupee0(weekly / meals)} a meal.</b>

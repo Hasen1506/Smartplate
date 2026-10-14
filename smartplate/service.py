@@ -791,6 +791,14 @@ def week_recap(plan_id: int) -> dict:
     user = models.get_user(plan["user_id"])
     at = optimizer.now()
     decisions = models.decisions_for_plan(plan_id)
+    # Same money truth as the plan view: a meal whose real Swiggy cart was checked counts at
+    # the bill's total, not the planner's fee estimate (W4 fees vs the real to_pay).
+    from .domain import week_orders
+    real = week_orders.real_totals(plan_id)
+    for d in decisions:
+        r = real.get(d["session_id"])
+        if r and d["chosen_kind"] == "delivery" and r.get("to_pay") is not None:
+            d["cost"] = r["to_pay"]
     had, ahead, unknown, skipped = [], [], [], 0
     for d in decisions:
         if d["session_status"] in ("ordered", "confirmed") and d["chosen_kind"] in ("delivery", "cook"):

@@ -132,7 +132,8 @@ class Persona:
     def profile_body(self) -> dict:
         return {"name": self.name, "diet": self.diet, "weekly_budget": self.weekly_budget,
                 "rhythm": dict(self.rhythm), "cook": self.cook, "allergens": list(self.allergens),
-                "medical": list(self.medical), "favourites": []}
+                "medical": list(self.medical), "favourites": [],
+                "consent": {"account": True, "health": True, "learning": True}}   # W8: sign-up needs the notice agreed
 
     def people(self) -> list[dict]:
         me = {"name": self.name, "diet": self.diet, "allergens": list(self.allergens),
