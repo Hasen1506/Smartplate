@@ -6,10 +6,10 @@ from flask import Flask, Response, g, jsonify, redirect, request, send_from_dire
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
-from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, week_orders
+from . import access, accounts, config, everyday, profile_data, providers, push, ratelimit, service
+from .domain import address_change, epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, typed_in, week_orders
 from .domain.checkout import CheckoutConflict
-from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
+from .integrations import calendar_sync, swiggy_connect, swiggy_history, swiggy_live, swiggy_mcp, swiggy_rules
 from .kernel import agent_brain
 from .runtime import initialize, user_lock
 
@@ -66,9 +66,8 @@ def _shell_html(assets: dict) -> str:
 def create_app() -> Flask:
     if config.LIVE_ORDERS and os.environ.get("RENDER"):
         durable = bool(config.DATABASE_URL) or config.DB_PATH.startswith("/var/data/")
-        if (config.SWIGGY_PROVIDER != "live" or not durable
-                or not config.SECRET or not config.PUBLIC_URL.startswith("https://")):
-            raise RuntimeError("Live orders on Render require the live provider, a durable database "
+        if (not durable or not config.SECRET or not config.PUBLIC_URL.startswith("https://")):
+            raise RuntimeError("Live orders on Render require a durable database "
                                "(DATABASE_URL or /var/data), "
                                "stable SMARTPLATE_SECRET and HTTPS SMARTPLATE_PUBLIC_URL")
     initialize()
@@ -179,8 +178,10 @@ def create_app() -> Flask:
         response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after, rule=rule)
         if error.retry_after is not None:
             response.headers['Retry-After'] = str(error.retry_after)
-        if error.code == 'swiggy_cart_other_address':
-            return response, 409        # the user's cart is for another of their addresses: their choice, not an outage
+        if error.code in ('swiggy_cart_other_address', 'swiggy_out_of_area'):
+            return response, 409        # about the user's chosen address (cart elsewhere / place too far): not an outage
+        if error.code in ('swiggy_demo_mode', 'swiggy_read_only'):
+            return response, 403        # this server's Swiggy mode doesn't allow it
         return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
     from . import db as _db
@@ -286,8 +287,15 @@ def create_app() -> Flask:
             "version": "1.1.0",
             "brain": brain.name,
             "brain_cost_per_decision": brain.cost_per_decision,
-            "swiggy_provider": config.SWIGGY_PROVIDER,
-            "swiggy_redirect_approved": config.SWIGGY_REDIRECT_APPROVED,
+            # One truthful Swiggy mode (grill #34): demo | live_read | live_cart | live_order.
+            "swiggy_mode": config.swiggy_mode(),
+            "swiggy_can": {m: config.swiggy_allows(m) for m in config.SWIGGY_MODES[1:]},
+            # "simulated" only where the old simulated order saga can actually run (test runs
+            # with fixture data); everywhere else Ziggy talks to the real Swiggy.
+            "swiggy_provider": ("simulated" if config.FIXTURE_DATA and config.SWIGGY_PROVIDER == "simulated"
+                                else "demo" if config.swiggy_mode() == "demo" else "live"),
+            "swiggy_redirect_approved": config.swiggy_redirect_approved(),
+            "providers": providers.overview(),
             "storage": config.storage_status(),
             "order_edit_window_min": config.ORDER_EDIT_WINDOW_MIN,
             "modes": config.MODE_LABELS,
@@ -679,8 +687,11 @@ def create_app() -> Flask:
 
     @app.post("/api/user/<int:user_id>/swiggy/address")
     def swiggy_choose_address(user_id):
-        return jsonify({**swiggy_live.choose_address(user_id, request.get_json().get("address_id")),
-                        "order_enabled": config.LIVE_ORDERS})
+        before = address_change.snapshot(user_id)
+        chosen = swiggy_live.choose_address(user_id, request.get_json().get("address_id"))
+        # A new address can put planned restaurants out of reach: re-check the week (W7).
+        return jsonify({**chosen, "order_enabled": config.LIVE_ORDERS,
+                        "week": address_change.revalidate(user_id, before)})
 
     @app.get("/api/user/<int:user_id>/swiggy/menu")
     def swiggy_menu(user_id):
@@ -835,6 +846,46 @@ def create_app() -> Flask:
     @app.get("/api/user/<int:user_id>/swiggy/order-history")
     def swiggy_order_history(user_id):
         return jsonify(swiggy_live.live_order_history(user_id))
+
+    # Suggested favourites from the user's own Swiggy order history: read only on an
+    # explicit tap with consent, minimal fields kept, deletable (grill #7, #17; W7).
+    @app.get("/api/user/<int:user_id>/favourites/suggested")
+    def suggested_favourites(user_id):
+        return jsonify(swiggy_history.view(user_id))
+
+    @app.post("/api/user/<int:user_id>/favourites/suggested")
+    def import_suggested_favourites(user_id):
+        ratelimit.check(f"history-import:{user_id}", 5, 3600)
+        return jsonify(swiggy_history.import_history(user_id, request.get_json().get("consent")))
+
+    @app.delete("/api/user/<int:user_id>/favourites/suggested")
+    def delete_suggested_favourites(user_id):
+        return jsonify(swiggy_history.delete(user_id))
+
+    # Without Swiggy: a typed delivery address and typed favourites (grill #25; W7).
+    @app.get("/api/user/<int:user_id>/typed-favourites")
+    def typed_favourites(user_id):
+        return jsonify(typed_in.favourites(user_id))
+
+    @app.post("/api/user/<int:user_id>/typed-favourites")
+    def add_typed_favourite(user_id):
+        return jsonify(typed_in.add_favourite(user_id, request.get_json()))
+
+    @app.delete("/api/user/<int:user_id>/typed-favourites/<int:fav_id>")
+    def remove_typed_favourite(user_id, fav_id):
+        return jsonify(typed_in.remove_favourite(user_id, fav_id))
+
+    @app.get("/api/user/<int:user_id>/manual-address")
+    def manual_address(user_id):
+        return jsonify({"address": typed_in.address(user_id)})
+
+    @app.put("/api/user/<int:user_id>/manual-address")
+    def set_manual_address(user_id):
+        return jsonify(typed_in.set_address(user_id, request.get_json()))
+
+    @app.delete("/api/user/<int:user_id>/manual-address")
+    def delete_manual_address(user_id):
+        return jsonify(typed_in.delete_address(user_id))
 
     @app.get("/api/session/<int:session_id>/swiggy-cart/preview")
     def swiggy_cart_preview(session_id):

@@ -66,11 +66,41 @@ FIXTURE_DATA = os.environ.get("SMARTPLATE_FIXTURE_DATA") == "1" and not PRODUCTI
 # Brain selection — "deterministic" (free, default) or "llm" (optional, paid).
 AGENT_BRAIN = os.environ.get("SMARTPLATE_BRAIN", "deterministic")
 
-# Swiggy MCP provider — "simulated" (default) or "live" (requires real access).
+# Legacy switch for the old simulated order saga only (swiggy_mcp.py, test runs with fixture
+# data). It never governed the real Swiggy sign-in, menus or carts, so it is NOT what the app
+# reports: /api/meta reports swiggy_mode() below (grill #34).
 SWIGGY_PROVIDER = os.environ.get("SMARTPLATE_SWIGGY", "simulated")
+
+# One Swiggy mode, reported truthfully by /api/meta (grill #34, Oct 2026):
+#   demo       : this server never talks to Swiggy (no sign-in, no tool calls).
+#   live_read  : sign-in, addresses, live menus, search and order history; no cart writes.
+#   live_cart  : live_read + filling the user's own Swiggy cart after they review it
+#                (checkout and payment happen in Swiggy). The default.
+#   live_order : live_cart + placing an order the user explicitly approved in Ziggy.
+# SMARTPLATE_SWIGGY_MODE picks one; unset, it is live_cart, or live_order when the older
+# SMARTPLATE_LIVE_ORDERS=on is set.
+SWIGGY_MODES = ("demo", "live_read", "live_cart", "live_order")
+SWIGGY_MODE = os.environ.get("SMARTPLATE_SWIGGY_MODE", "").strip().lower()
+if SWIGGY_MODE and SWIGGY_MODE not in SWIGGY_MODES:
+    raise ValueError(f"SMARTPLATE_SWIGGY_MODE must be one of {', '.join(SWIGGY_MODES)}")
 # Real Food orders are non-idempotent. Enable only after provider approval,
 # staging validation and durable storage; the public Render Free demo stays off.
-LIVE_ORDERS = os.environ.get("SMARTPLATE_LIVE_ORDERS", "off") == "on"
+LIVE_ORDERS = (SWIGGY_MODE == "live_order") if SWIGGY_MODE else \
+    os.environ.get("SMARTPLATE_LIVE_ORDERS", "off") == "on"
+
+
+def swiggy_mode() -> str:
+    """The Swiggy mode this server runs in (read at call time, so tests can switch it)."""
+    if LIVE_ORDERS:
+        return "live_order"
+    if SWIGGY_MODE in ("demo", "live_read", "live_cart"):
+        return SWIGGY_MODE
+    return "live_cart"
+
+
+def swiggy_allows(mode: str) -> bool:
+    """True when the current mode includes `mode` (each mode includes the ones before it)."""
+    return SWIGGY_MODES.index(swiggy_mode()) >= SWIGGY_MODES.index(mode)
 
 # Solver limits: relative optimality gap and a hard time cap per weekly solve.
 SOLVER_GAP = float(os.environ.get("SMARTPLATE_SOLVER_GAP", "0.001"))
@@ -87,9 +117,14 @@ STABILITY_W = float(os.environ.get("SMARTPLATE_STABILITY", "0.3"))
 WEATHER_PROVIDER = os.environ.get("SMARTPLATE_WEATHER", "live")
 WEATHER_TIMEOUT_S = float(os.environ.get("SMARTPLATE_WEATHER_TIMEOUT", "3"))
 
-# Swiggy only lets sign-in redirect to exact callback URLs it has allow-listed. Set to
-# "1" once Swiggy has approved THIS deployment's callback (More -> Swiggy connection
-# shows it). Until then the UI says plainly that connecting Swiggy is not yet possible.
+# Swiggy only lets sign-in redirect to exact callback URLs it has allow-listed. The ones
+# Swiggy has whitelisted for this app are listed here (founder, Oct 2026: the Render origin
+# is whitelisted and sign-in works); swiggy_redirect_approved() is true when this
+# deployment's callback is one of them. SMARTPLATE_SWIGGY_REDIRECT_APPROVED=1 marks any
+# other deployment approved (a new domain Swiggy confirmed in writing).
+APPROVED_SWIGGY_REDIRECTS = tuple(u.strip().rstrip("/") for u in os.environ.get(
+    "SMARTPLATE_SWIGGY_APPROVED_REDIRECTS",
+    "https://smartplate-xgxd.onrender.com/swiggy/callback").split(",") if u.strip())
 SWIGGY_REDIRECT_APPROVED = os.environ.get("SMARTPLATE_SWIGGY_REDIRECT_APPROVED", "0") == "1"
 
 # Swiggy sign-in + read-only discovery (docs/vendor/swiggy/README.md).
@@ -109,6 +144,18 @@ SWIGGY_MAX_CLIENTS = int(os.environ.get("SMARTPLATE_SWIGGY_MAX_CLIENTS", "3"))
 SWIGGY_CALLBACK_PATH = os.environ.get("SMARTPLATE_SWIGGY_CALLBACK_PATH", "/swiggy/callback")
 if SWIGGY_CALLBACK_PATH not in ("/swiggy/callback", "/auth/swiggy/callback"):
     raise ValueError("SMARTPLATE_SWIGGY_CALLBACK_PATH must be a supported callback route")
+
+
+def swiggy_callback_url() -> str | None:
+    """This deployment's Swiggy callback when its public URL is configured, else None."""
+    return f"{PUBLIC_URL}{SWIGGY_CALLBACK_PATH}" if PUBLIC_URL else None
+
+
+def swiggy_redirect_approved() -> bool:
+    """Whether Swiggy accepts this deployment's sign-in redirect (derived, not hand-set)."""
+    if swiggy_mode() == "demo":
+        return False
+    return SWIGGY_REDIRECT_APPROVED or swiggy_callback_url() in APPROVED_SWIGGY_REDIRECTS
 
 # Server secret for encrypting stored tokens. render.yaml generates one; without it a
 # random key is created once and kept in the database (fine for a trial, not for

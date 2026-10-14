@@ -403,7 +403,7 @@ def source_for(user_id: int, connected: bool | None = None) -> dict:
     note = {"sync": ("Your live menus were read for another delivery address. Reading real dishes for the "
                      "address you chose." if row else "Reading real dishes from Swiggy for your address."),
             "address": "Pick a delivery address to see real dishes.",
-            "connect": ("Connect Swiggy and pick an address to see real dishes." if config.SWIGGY_REDIRECT_APPROVED
+            "connect": ("Connect Swiggy and pick an address to see real dishes." if config.swiggy_redirect_approved()
                         else "Connecting Swiggy from Ziggy is waiting for Swiggy's approval. "
                              "Until then, plans show home-cooked meals only.")}[needs]
     out = {"kind": kind, "connected": connected, "needs": needs, "stale_address": bool(row),

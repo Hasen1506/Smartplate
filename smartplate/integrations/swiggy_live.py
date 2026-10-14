@@ -37,6 +37,8 @@ ALLOWED = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu
 # Tools that only read: safe to send again on a fresh MCP session after a session error.
 READ_ONLY = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu",
                        "get_food_cart", "get_payment_options", "get_food_orders", "track_food_order"})
+# Tools that change the user's Swiggy cart: allowed from mode live_cart up (config.swiggy_mode).
+CART_WRITES = frozenset({"update_food_cart", "flush_food_cart"})
 MENU_TTL = dt.timedelta(hours=6)
 CHECKOUT_QUOTE_TTL = dt.timedelta(minutes=5)
 MATCH_RESTAURANT = 0.6
@@ -170,6 +172,12 @@ def call(user_id: int, name: str, arguments: dict) -> object:
     """One tools/call. Order placement also requires the explicit deployment gate."""
     if name not in ALLOWED:
         raise SwiggyError(f"Ziggy does not support {name}.")
+    if not config.swiggy_allows("live_read"):
+        raise SwiggyError("This Ziggy server runs in demo mode and doesn't connect to Swiggy.",
+                          code="swiggy_demo_mode")
+    if name in CART_WRITES and not config.swiggy_allows("live_cart"):
+        raise SwiggyError("Filling your Swiggy cart from Ziggy is switched off on this server "
+                          "(read-only mode). Add the dish in Swiggy.", code="swiggy_read_only")
     if name == "place_food_order" and not config.LIVE_ORDERS:
         raise SwiggyError("Real order placement is disabled until Swiggy access and durable storage are approved.")
     try:
@@ -215,13 +223,11 @@ def call(user_id: int, name: str, arguments: dict) -> object:
             cur.execute("UPDATE swiggy_connections SET samples=? WHERE user_id=?", (db.jd(samples), user_id))
     except Exception:
         logging.getLogger(__name__).warning("Could not record Swiggy response shape for %s", name)
-    if result.get("isError"):
-        text = data.get("text") if isinstance(data, dict) else None
-        raise SwiggyError(f"Swiggy said: {(text or json.dumps(data))[:240]}")
-    if isinstance(data, dict) and data.get("success") is False:
-        error = data.get("error") or {}
-        message = error.get("message") if isinstance(error, dict) else str(error)
-        raise SwiggyError(f"Swiggy said: {(message or 'The request failed')[:240]}")
+    if result.get("isError") or (isinstance(data, dict) and data.get("success") is False):
+        # Plain words only: never the provider's raw JSON (W10 scenario finding, Oct 2026).
+        message = swiggy_rules.plain_message(data if isinstance(data, dict) else str(data))
+        out_of_area = message == swiggy_rules.PLAIN[0][1]
+        raise SwiggyError(f"Swiggy said: {message}", code="swiggy_out_of_area" if out_of_area else "swiggy_error")
     return data
 
 
