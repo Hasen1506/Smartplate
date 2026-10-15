@@ -3,8 +3,8 @@
   "budget": 3000.0,
   "daily_cap": null,
   "prorated": false,
-  "remaining": 52.21,
-  "spend": 2947.79,
+  "remaining": 60.0,
+  "spend": 2940.0,
   "weekly_budget": 3000.0
  },
  "counts": {
@@ -16,84 +16,6 @@
  },
  "grid": {
   "Fri 2026-11-06": {
-   "breakfast": {
-    "cost": 145.0,
-    "item": "Pesarattu + Chutney",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Murugan Idli Shop",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 115.72,
-    "item": "Vegan Sambar Rice",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Sangeetha Veg",
-    "status": "active"
-   }
-  },
-  "Mon 2026-11-02": {
-   "breakfast": {
-    "cost": 115.0,
-    "item": "Mini Tiffin",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
-    "pinned": false,
-    "restaurant": "Home kitchen",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 220.92,
-    "item": "Chana Masala Bowl",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "The Bowl Company",
-    "status": "active"
-   }
-  },
-  "Sat 2026-11-07": {
-   "breakfast": {
-    "cost": 243.1,
-    "item": "Rajma Chawal Bowl",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "The Bowl Company",
-    "status": "active"
-   },
-   "dinner": {
-    "cost": 181.5,
-    "item": "Veg Meals",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
-    "status": "active"
-   },
-   "lunch": {
-    "cost": 225.62,
-    "item": "Egg Curry Meals",
-    "kind": "delivery",
-    "pinned": false,
-    "restaurant": "Junior Kuppanna",
-    "status": "active"
-   }
-  },
-  "Sun 2026-11-08": {
    "breakfast": {
     "cost": 115.0,
     "item": "Idli Sambar (4 pc)",
@@ -111,11 +33,89 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 157.8,
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   }
+  },
+  "Mon 2026-11-02": {
+   "breakfast": {
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Murugan Idli Shop",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
+    "pinned": false,
+    "restaurant": "Home kitchen",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 115.0,
+    "item": "Mini Tiffin",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Adyar Ananda Bhavan",
+    "status": "active"
+   }
+  },
+  "Sat 2026-11-07": {
+   "breakfast": {
+    "cost": 150.0,
     "item": "Veg Meals",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 255.0,
+    "item": "Chicken Chettinad + Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Junior Kuppanna",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 195.0,
+    "item": "Egg Curry Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Junior Kuppanna",
+    "status": "active"
+   }
+  },
+  "Sun 2026-11-08": {
+   "breakfast": {
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Sangeetha Veg",
+    "status": "active"
+   },
+   "dinner": {
+    "cost": 150.0,
+    "item": "Veg Meals",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Hotel Saravana Bhavan",
+    "status": "active"
+   },
+   "lunch": {
+    "cost": 325.0,
+    "item": "Chicken Biryani",
+    "kind": "delivery",
+    "pinned": false,
+    "restaurant": "Dindigul Thalappakatti",
     "status": "active"
    }
   },
@@ -137,17 +137,17 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 220.92,
-    "item": "Chana Masala Bowl",
-    "kind": "delivery",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "The Bowl Company",
+    "restaurant": "Home kitchen",
     "status": "active"
    }
   },
   "Tue 2026-11-03": {
    "breakfast": {
-    "cost": 243.1,
+    "cost": 220.0,
     "item": "Rajma Chawal Bowl",
     "kind": "delivery",
     "pinned": false,
@@ -155,16 +155,16 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 45.0,
-    "item": "Cook: Dal + rice",
-    "kind": "cook",
+    "cost": 195.0,
+    "item": "Egg Curry Meals",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Junior Kuppanna",
     "status": "active"
    },
    "lunch": {
-    "cost": 232.44,
-    "item": "Egg Curry Meals",
+    "cost": 255.0,
+    "item": "Chicken Chettinad + Rice",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Junior Kuppanna",
@@ -173,15 +173,15 @@
   },
   "Wed 2026-11-04": {
    "breakfast": {
-    "cost": 117.07,
-    "item": "Idli Sambar (4 pc)",
+    "cost": 145.0,
+    "item": "Pesarattu + Chutney",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "dinner": {
-    "cost": 121.55,
+    "cost": 110.0,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
@@ -189,7 +189,7 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 123.05,
+    "cost": 115.0,
     "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
@@ -199,19 +199,19 @@
   }
  },
  "heads_up": [
-  "budget: ₹52 left this week",
+  "budget: ₹60 left this week",
   "holiday: Sun 08 Nov: Diwali",
-  "nutrition: Protein runs low: about 55 g a day of 80 g",
+  "nutrition: Protein runs low: about 63 g a day of 80 g",
   "weather: Sat 07 Nov: rain likely (80%)",
   "weather: Tomorrow: rain likely (80%)",
   "weather: Wed 04 Nov: 38°C"
  ],
  "mode": "balanced",
  "recommendation": {
-  "floor": 2870.0,
+  "floor": 2520.0,
   "suggested_rating_floor": 4.4,
-  "usual": 6069.0,
-  "variety": 6194.0
+  "usual": 5355.0,
+  "variety": 5455.0
  },
  "week_start": "2026-11-02"
 }

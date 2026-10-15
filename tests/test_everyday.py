@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from smartplate import config, db, everyday
+from smartplate import config, db, everyday, service
 from smartplate.app import create_app
 from smartplate.domain import festivals, models, profile, taste, timing, weather
 from smartplate.kernel import optimizer
@@ -77,7 +77,7 @@ def test_variety_pref_no_longer_breaks_meal_targets(seeded):
 # Onboarding → a real plan
 # --------------------------------------------------------------------------- #
 def test_onboarding_creates_prorated_plan_for_rest_of_week(client, friday):
-    r = client.post("/api/profiles", json=dict(ASHA))
+    r = client.post("/api/profiles", json={**dict(ASHA), "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201
     v = r.get_json()
     assert v["plan"]["week_start"] == "2026-09-21"            # this week's Monday
@@ -95,8 +95,8 @@ def test_onboarding_creates_prorated_plan_for_rest_of_week(client, friday):
 
 def test_onboarding_rejects_bad_payload_without_creating_user(client):
     before = len(models.list_users())
-    assert client.post("/api/profiles", json={**ASHA, "diet": "keto"}).status_code == 400
-    assert client.post("/api/profiles", json={"name": "No budget"}).status_code == 400
+    assert client.post("/api/profiles", json={**{**ASHA, "diet": "keto"}, "consent": {"account": True, "health": True, "learning": True}}).status_code == 400
+    assert client.post("/api/profiles", json={**{"name": "No budget"}, "consent": {"account": True, "health": True, "learning": True}}).status_code == 400
     assert len(models.list_users()) == before
 
 
@@ -273,8 +273,8 @@ def test_saved_lists_liked_dishes_and_meals_had_newest_first(client):
 def test_saved_is_private_to_its_profile(seeded):
     app = create_app()
     c = app.test_client()
-    created = c.post("/api/profiles", json={"name": "Private", "diet": "veg", "weekly_budget": 2000,
-                                            "meals": ["dinner"]}).get_json()
+    created = c.post("/api/profiles", json={**{"name": "Private", "diet": "veg", "weekly_budget": 2000,
+                                            "meals": ["dinner"]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid = created["user"]["id"]
     assert c.get(f"/api/user/{uid}/saved").status_code == 401
     ok = c.get(f"/api/user/{uid}/saved", headers={"X-SmartPlate-Key": created["access_key"]})
@@ -375,7 +375,10 @@ def test_holiday_calendar_is_real_and_fasts_are_opt_in(client, friday):
     assert diwali[0] == "2026-11-08"
 
 
-def test_holiday_raises_dinner_surge(seeded):
+def test_holiday_raises_dinner_surge(seeded, monkeypatch):
+    # The archived demo surge model (domain/surge, off by default since W4) still behaves when switched on.
+    from smartplate.domain import surge
+    monkeypatch.setattr(surge, "ENABLED", True)
     ws = dt.date.fromisoformat(seeded["week_start"])
     with db.cursor() as cur:
         cur.execute("INSERT INTO festivals(name, iso_date, effect) VALUES ('Test holiday', ?, 'holiday')",
@@ -387,6 +390,29 @@ def test_holiday_raises_dinner_surge(seeded):
     holiday = optimizer._delivery_candidate(user, plan, {"day": 6, "meal": "dinner"}, item, ctx)
     assert holiday["base_cost"] == normal["base_cost"]
     assert (holiday["time_shift"] or {}).get("peak_mult", 0) >= 1.25 * optimizer.HOLIDAY_DINNER_SURGE - 1e-6
+
+
+def test_surge_model_is_off_by_default_no_holiday_bump_no_shift(seeded):
+    """Critiques 6 and 52: surge is a seeded demo signal, so by default nothing is multiplied,
+    no holiday "surge bump", no time-shift saving, and no surge copy."""
+    from smartplate.domain import surge
+    assert surge.ENABLED is False
+    ws = dt.date.fromisoformat(seeded["week_start"])
+    with db.cursor() as cur:
+        cur.execute("INSERT INTO festivals(name, iso_date, effect) VALUES ('Test holiday', ?, 'holiday')",
+                    ((ws + dt.timedelta(days=6)).isoformat(),))
+    user, plan = models.get_user(1), models.get_plan(seeded["plan_id"])
+    ctx = optimizer.build_context(user, plan)
+    item = next(it for it in ctx["menu"] if it["name"] == "Veg Meals")
+    for day, cond in ((6, "clear"), (1, "rain")):
+        cand = optimizer._delivery_candidate(user, plan, {"day": day, "meal": "dinner"}, item, ctx)
+        assert cand["surge_mult"] == 1.0 and cand["time_shift"] is None
+        assert cand["cost"] == cand["base_cost"]
+    view = service.plan_view(seeded["plan_id"])
+    assert view["surge_saved"] == 0
+    words = " ".join(r for day in view["grid"] for m in day["meals"].values() for r in m.get("reasons", []))
+    words += " ".join(h["title"] + h["body"] for h in view["heads_up"]) + " ".join(view["summary_reasons"])
+    assert "surge" not in words.lower() and "saves ₹" not in words
 
 
 def test_heads_up_flags_rain_and_budget_skips(client):

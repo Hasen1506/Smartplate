@@ -45,10 +45,10 @@ def town_world(frozen, monkeypatch):
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     app = create_app()
     client = app.test_client()
-    uid = client.post("/api/profiles", json={
-        "name": "Priya", "diet": "veg", "weekly_budget": 3500, "cook": "never",
+    uid = client.post("/api/profiles", json={**{
+        "name": "Priya", "diet": "veg", "weekly_budget": 5000, "cook": "never",   # W4 fees priced in: 3,500 is money-bound once a lunch thali is pooled
         "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "order"},
-        "login": "priya@example.com", "password": "priya-long-password"}).get_json()["user"]["id"]
+        "login": "priya@example.com", "password": "priya-long-password"}, "consent": {"account": True, "health": True, "learning": True}}).get_json()["user"]["id"]
     _connect(client, fake, uid=uid)
     assert client.post(f"/api/user/{uid}/swiggy/address", json={"address_id": "addr-home"}).status_code == 200
     key = client.environ_base["HTTP_X_SMARTPLATE_KEY"]
@@ -86,7 +86,8 @@ def test_meal_pools_drive_the_plan_and_any_nearby_dish_can_be_picked(town_world,
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         bag = {str(w["uid"]): {"key": w["key"], "name": "Priya"}}
-        page.add_init_script(f"""localStorage.setItem('smartplate.keys', {json.dumps(json.dumps(bag))});
+        page.add_init_script(f"""localStorage.setItem('ziggy.ui', 'classic');  /* classic Today, kept behind the v3 flag (docs/IA.md) */
+localStorage.setItem('smartplate.keys', {json.dumps(json.dumps(bag))});
             localStorage.setItem('smartplate.user', {json.dumps(str(w['uid']))});""")
         try:
             page.goto(w["url"])
@@ -121,7 +122,7 @@ def test_meal_pools_drive_the_plan_and_any_nearby_dish_can_be_picked(town_world,
             page.get_by_role("navigation", name="Main").get_by_role("button", name="Today").click()
             hero = page.locator('section[aria-label="Next meal"]')
             expect(hero).to_contain_text("Ven Pongal")
-            expect(hero).to_contain_text("From your breakfast pool")
+            expect(hero).to_contain_text("From your usual breakfasts")       # W3: plain words instead of "pool"
             expect(page.get_by_role("heading", name="Tell Ziggy what you eat")).to_have_count(0)
 
             # Change dinner → any place Swiggy lists → filter → full menu → Have for dinner

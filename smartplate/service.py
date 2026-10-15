@@ -39,10 +39,22 @@ def create_plan(user_id: int, mode: str | None = None, week_start: str | None = 
     return plan_id
 
 
+def _meal_ahead(date: dt.date, meals, at: dt.datetime) -> bool:
+    """Is any of these meals on `date` still ahead (its time + grace not yet passed)?"""
+    return any(dt.datetime.fromisoformat(scheduler.trigger_ts(date.isoformat(), 0, m)) + scheduler.PAST_GRACE >= at
+               for m in meals)
+
+
 def _plan_week_start(user_id: int) -> str:
-    today = optimizer.now().date()
+    """This week's Monday while the week still has a meal ahead, so Sunday lunch and
+    dinner are planned too (they used to fall into a gap: Sunday planned next week).
+    Only once Sunday's last meal is past does a new plan start next Monday."""
+    at = optimizer.now()
+    today = at.date()
     monday = today - dt.timedelta(days=today.weekday())
-    start = monday if today.weekday() <= 5 else monday + dt.timedelta(days=7)   # Sunday → next week
+    user = models.get_user(user_id)
+    meals = profile.meals_planned(user) if user else models.MEALS
+    start = monday if (today.weekday() < 6 or _meal_ahead(today, meals, at)) else monday + dt.timedelta(days=7)
     with db.cursor() as cur:
         taken = {r["week_start"] for r in cur.execute("SELECT week_start FROM plans WHERE user_id=?", (user_id,))}
     while start.isoformat() in taken:                    # "plan another week" → the following one
@@ -63,13 +75,30 @@ def reoptimize(plan_id: int, mode: str | None = None) -> dict:
 
 
 def current_plan(user_id):
-    """The plan to show now: the latest one, rolled forward once its week is over."""
+    """The plan to show now: the latest one, rolled forward once its week is over (or,
+    late on its last Sunday, once nothing is left in it).
+
+    When a later week was planned ahead while today still has meals to come, the view
+    also names the plan covering today (`today_plan_id`), so Today can still answer
+    for today's remaining meals."""
+    at = optimizer.now()
+    today = at.date()
     with db.cursor() as cur:
-        row = cur.execute('SELECT id, week_start FROM plans WHERE user_id=? ORDER BY week_start DESC, id DESC LIMIT 1',
-                          (user_id,)).fetchone()
-    if row and dt.date.fromisoformat(row['week_start']) + dt.timedelta(days=7) <= optimizer.now().date():
-        row = None
-    return plan_view(row['id'] if row else create_plan(user_id))
+        rows = cur.execute('SELECT id, week_start FROM plans WHERE user_id=? ORDER BY week_start DESC, id DESC',
+                           (user_id,)).fetchall()
+    user = models.get_user(user_id)
+    meals = profile.meals_planned(user) if user else models.MEALS
+    row = rows[0] if rows else None
+    if row:
+        end = dt.date.fromisoformat(row['week_start']) + dt.timedelta(days=7)
+        if end <= today or (end == today + dt.timedelta(days=1) and not _meal_ahead(today, meals, at)):
+            row = None
+    view = plan_view(row['id'] if row else create_plan(user_id))
+    covering = next((r for r in rows if dt.date.fromisoformat(r['week_start']) <= today
+                     < dt.date.fromisoformat(r['week_start']) + dt.timedelta(days=7)), None)
+    if covering and covering['id'] != view['plan']['id'] and _meal_ahead(today, meals, at):
+        view['today_plan_id'] = covering['id']
+    return view
 
 
 def update_preferences(user_id, body):
@@ -192,6 +221,12 @@ def plan_view(plan_id: int) -> dict:
     env["weekly_budget"] = user["weekly_budget"]
     env["prorated"] = cap < user["weekly_budget"]
     env["daily_cap"] = profile.daily_cap(user)
+    # A weekly TARGET for planning, not a hard cap on what's spent (critique 33): beside it, what
+    # real Swiggy bills say was actually spent this week (never estimates).
+    from .domain import spend
+    env["kind"] = "target"
+    _ws = dt.date.fromisoformat(plan["week_start"])
+    env["actual"] = spend.actual(user["id"], _ws.isoformat(), (_ws + dt.timedelta(days=6)).isoformat())
 
     nut = nutrition.summary([d["nutrition"] for d in spend_rows if d.get("nutrition")])
     targets = nutrition.targets_for(user)
@@ -208,7 +243,7 @@ def plan_view(plan_id: int) -> dict:
     fests = festivals.for_week(plan["week_start"])
     wx = weather.week(user["city"], plan["week_start"])
     sig = taste.signals(user["id"])
-    grid = _grid(decisions, plan=plan, user=user, wx=wx, sig=sig)
+    grid = _grid(decisions, plan=plan, user=user, wx=wx, sig=sig, at=at)
 
     view = {
         "plan": {**plan, "mode_label": config.MODE_LABELS.get(plan["mode"], plan["mode"])},
@@ -227,9 +262,11 @@ def plan_view(plan_id: int) -> dict:
         "carbon": {"total_kg": carbon_total, "band": carbon.band(carbon_total / max(1, len(spend_rows)))},
         "surge_saved": round(surge_saved, 2),
         "counts": counts,
+        "plan_summary": plan_summary(decisions),
         "summary_reasons": explainability.plan_summary_reasons({
             "spend": env["spend"], "budget": env["budget"],
-            "skipped": counts["skip"], "cooked": counts["cook"], "surge_saved": surge_saved}),
+            "skipped": counts["skip"], "cooked": counts["cook"], "surge_saved": surge_saved,
+            "skip_reasons": [(d.get("reasons") or [""])[0] for d in decisions if d["chosen_kind"] in ("skip", "skipped")]}),
         "coach": coach,
         "grid": grid,
         "week_context": _week_context(user, plan, fests, wx),
@@ -255,6 +292,13 @@ def plan_view(plan_id: int) -> dict:
     for c in cells:
         if photos.get(c["item_id"]):
             c["image"] = photos[c["item_id"]]
+    from .domain import buildout
+    view["buildout"] = buildout.summary(plan_id, decisions)
+    # The only "too little money" floor: this person's own cheapest favourite with its fees
+    # (founder, 14 Oct 2026); none without favourites. The onboarding budget step reads it.
+    cheap = spend.cheapest_meal(user)
+    view["meal_floor"] = ({"amount": cheap["cost"], "item": cheap["item"], "estimated": cheap["estimated"],
+                           "basis": f"{cheap['item']}, with delivery, fees & GST"} if cheap else None)
     from . import everyday
     view["next_up"] = everyday.next_up(view, at)
     view["heads_up"] = everyday.heads_up(view, user, plan, decisions, at)
@@ -311,6 +355,49 @@ def nutrition_ledger(user_id: int) -> dict:
                                sugar_cap=targets.get("sugar_g"))
 
 
+_JARGON = (" — session skipped.", " — session skipped", " — skipped.", " — skipped")
+
+
+def _plain_reason(r: str) -> str:
+    r = (r or "").strip()
+    for j in _JARGON:
+        if r.endswith(j):
+            r = r[: -len(j)]
+    return r.rstrip(".")
+
+
+def plan_summary(decisions: list[dict]) -> dict:
+    """An honest one-liner for "Plan my week": how many of the meals still ahead were
+    planned, how many were skipped and the main reason — never "Your week is planned"
+    over a week of skips."""
+    ahead = [d for d in decisions if not d.get("past") and d["chosen_kind"] != "past"]
+    planned = [d for d in ahead if d["chosen_kind"] in ("delivery", "cook")
+               or d.get("session_status") in ("ordered", "confirmed")]
+    skipped = [d for d in ahead if d not in planned]
+    why: dict[str, int] = {}
+    for d in skipped:
+        if d.get("session_status") in ("skipped", "snoozed") or d["chosen_kind"] in ("skipped", "snoozed"):
+            r = "you skipped them"
+        else:
+            r = _plain_reason(next(iter(d.get("reasons") or []), "")) or "nothing fit your rules and budget"
+        why[r] = why.get(r, 0) + 1
+    reasons = [{"reason": r, "count": n} for r, n in sorted(why.items(), key=lambda kv: (-kv[1], kv[0]))]
+    total, n_planned, n_skipped = len(ahead), len(planned), len(skipped)
+    word = lambda n: "meal" if n == 1 else "meals"                                   # noqa: E731
+    if total == 0:
+        message, level = "No meals left to plan this week.", "warn"
+    elif n_skipped == 0:
+        message, level = f"Your week is planned: all {total} {word(total)}.", "good"
+    else:
+        main = reasons[0]["reason"]
+        lead = main[:1].lower() + main[1:]
+        because = f" ({reasons[0]['count']}: {lead})" if len(reasons) > 1 else f": {lead}"
+        message = (f"{n_planned} of {total} {word(total)} planned; {n_skipped} skipped" + because + ".")
+        level = "warn" if n_skipped * 2 >= total else "info"
+    return {"planned": n_planned, "skipped": n_skipped, "total": total, "reasons": reasons,
+            "message": message, "level": level}
+
+
 def _counts(decisions):
     c = {"delivery": 0, "cook": 0, "skip": 0, "snoozed": 0, "ordered": 0}
     for d in decisions:
@@ -321,7 +408,50 @@ def _counts(decisions):
     return c
 
 
-def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
+def _meal_min(d: dict) -> int:
+    """Minute of the day a planned meal arrives: its off-peak slot, else the usual time."""
+    ts = d.get("time_shift") or {}
+    return int(ts.get("offpeak_min") or models.MEAL_WINDOWS[d["meal"]][1])
+
+
+def order_info(d: dict, plan: dict, *, eta_min, condition: str, at: dt.datetime) -> dict:
+    """A delivery meal's order-by plan plus *when*, on the meal's own date: the absolute
+    order-by instant (countdown target), its label, and the Swiggy cart window."""
+    order = timing.order_plan(d["meal"], eta_min=eta_min, time_shift=d.get("time_shift"), condition=condition)
+    order.update(timing.order_status(dt.date.fromisoformat(models.session_date(plan, d["day"])), order, at,
+                                     meal_min=_meal_min(d)))
+    return order
+
+
+def session_order_status(session_id: int, at: dt.datetime | None = None) -> dict | None:
+    """order_info for one planned delivery meal (None when it isn't a delivery)."""
+    session = models.get_session(session_id)
+    if not session:
+        raise ValueError("Meal not found")
+    plan = models.get_plan(session["plan_id"])
+    d = next((x for x in models.decisions_for_plan(plan["id"]) if x["session_id"] == session_id), None)
+    if not d or d["chosen_kind"] != "delivery":
+        return None
+    user = models.get_user(plan["user_id"])
+    with db.cursor() as cur:
+        row = cur.execute("SELECT eta_min FROM restaurants WHERE id=?", (d.get("restaurant_id"),)).fetchone()
+    cond = weather.week(user["city"], plan["week_start"]).get(d["day"], {}).get("condition", "clear")
+    return order_info(d, plan, eta_min=row["eta_min"] if row else None, condition=cond, at=at or optimizer.now())
+
+
+def require_cart_window(session_id: int, at: dt.datetime | None = None) -> None:
+    """Refuse to fill a Swiggy cart for a meal outside its order window (see timing)."""
+    st = session_order_status(session_id, at)
+    if st is None:
+        return
+    session = models.get_session(session_id)
+    plan = models.get_plan(session["plan_id"])
+    day = dt.date.fromisoformat(models.session_date(plan, session["day"]))
+    what = f"{timing.day_label(day, (at or optimizer.now()).date())}'s {session['meal']}"
+    timing.require_cart_window(st, what=what)
+
+
+def _grid(decisions, *, plan=None, user=None, wx=None, sig=None, at=None):
     """Shape decisions into a day→meals grid for the UI."""
     grid = {i: {"day": models.DAYS[i], "meals": {}} for i in range(7)}
     if plan:
@@ -352,11 +482,13 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None):
                      "pooled": d.get("item_id") in (pools.get(d["meal"]) or {}).get("ids", ())}
             if d["chosen_kind"] == "delivery":
                 cond = (wx or {}).get(d["day"], {}).get("condition", "clear")
-                extra["order"] = timing.order_plan(d["meal"], eta_min=etas.get(d.get("restaurant_id")),
-                                                   time_shift=d.get("time_shift"), condition=cond)
+                extra["order"] = order_info(d, plan, eta_min=etas.get(d.get("restaurant_id")), condition=cond,
+                                            at=at or optimizer.now())
                 extra["handoff_url"] = timing.swiggy_handoff(d.get("restaurant_name") or "", d.get("item_name") or "")
                 if d.get("delivery_fee") is not None:   # live dish: estimated until a real bill shows the fee
                     extra["delivery_fee"] = {"amount": d["delivery_fee"], "estimated": bool(d.get("fee_estimated"))}
+                if d.get("charges") is not None:        # platform fee + packaging + GST priced into cost
+                    extra["charges"] = {"amount": d["charges"], "estimated": bool(d.get("charges_estimated"))}
                 if d.get("real_bill"):
                     extra["real_bill"] = True
                     extra["planned_cost"] = round(d["planned_cost"], 2)
@@ -575,7 +707,7 @@ def grocery_basket(plan_id: int) -> dict:
     return plan_view(plan_id)["coach"]["basket"]
 
 
-ANONYMOUS_AUTHOR = "A SmartPlate user"
+ANONYMOUS_AUTHOR = "A Ziggy user"
 
 
 def list_community(city=None):
@@ -667,6 +799,14 @@ def week_recap(plan_id: int) -> dict:
     user = models.get_user(plan["user_id"])
     at = optimizer.now()
     decisions = models.decisions_for_plan(plan_id)
+    # Same money truth as the plan view: a meal whose real Swiggy cart was checked counts at
+    # the bill's total, not the planner's fee estimate (W4 fees vs the real to_pay).
+    from .domain import week_orders
+    real = week_orders.real_totals(plan_id)
+    for d in decisions:
+        r = real.get(d["session_id"])
+        if r and d["chosen_kind"] == "delivery" and r.get("to_pay") is not None:
+            d["cost"] = r["to_pay"]
     had, ahead, unknown, skipped = [], [], [], 0
     for d in decisions:
         if d["session_status"] in ("ordered", "confirmed") and d["chosen_kind"] in ("delivery", "cook"):
@@ -726,4 +866,142 @@ def week_recap(plan_id: int) -> dict:
         hh = household.get(user["household_id"])
         out["household"] = {"name": hh["name"], "split_method": hh["split"],
                             "split": household.split_cost(hh, members, spent, had, user)}
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# "Decide for me" (W6): proposals by the explicit objective, only when asked
+# --------------------------------------------------------------------------- #
+def _decide_slots(user: dict, plan: dict, sessions: list[dict], people: list[dict]) -> list[dict]:
+    """One slot per open meal, with who is eating it (household ticks, else everyone)."""
+    members = models.get_household_members(user["household_id"]) if user.get("household_id") else []
+    by_id = {m["id"]: m for m in members}
+    me_and_others = {p.get("id"): p for p in people}
+    slots = []
+    for s in sessions:
+        if members:
+            ids = household.eaters(s, members, user)
+            eaters = [me_and_others.get(i) or {k: by_id[i].get(k) for k in ("id", "name", "diet", "allergens",
+                                                                             "medical")} for i in ids if i in by_id]
+        else:
+            eaters = people[:1]
+        slots.append({"session_id": s["id"], "day": s["day"], "meal": s["meal"], "eaters": eaters or people[:1]})
+    return slots
+
+
+def _open_sessions(plan_id: int, *, day: int | None = None) -> list[dict]:
+    at = optimizer.now()
+    return [s for s in models.sessions_for_plan(plan_id)
+            if s["status"] == "active" and not s.get("pinned") and not scheduler.is_past(s, at)
+            and (day is None or s["day"] == day)]
+
+
+def _decide(user: dict, plan: dict, sessions: list[dict], *, mode: str, money: float, money_word: str,
+            rules_extra: dict | None = None) -> dict:
+    from .kernel import decide
+    mode = decide.check_mode(mode)
+    g = decide.gather(user)
+    people = [g["me"], *g["others"]]
+    rules = {**decide.rules_for(user), **(rules_extra or {})}
+    slots = _decide_slots(user, plan, sessions, people)
+    out = decide.plan(slots, g["menu"], mode=mode, people=people, places=g["places"], pools=g["pools"],
+                      money=money, rules=rules, history=g["history"], liked=g["liked"], disliked=g["disliked"],
+                      cook_for=lambda meal: reverse_mode.cook_candidate(user, meal),
+                      seed=f"{user['id']}|{plan['week_start']}", money_word=money_word)
+    for p in out["picks"]:
+        p["day_name"] = models.DAYS[p["day"]]
+    out["plan_id"] = plan["id"]
+    return out
+
+
+def _fixed_money(plan_id: int) -> tuple[float, dict]:
+    """Money already fixed this week: orders placed or confirmed, plus the person's own
+    picks (pins). (total, {day: amount})."""
+    committed = optimizer.committed_spend(plan_id)
+    sessions = {s["id"]: s for s in models.sessions_for_plan(plan_id)}
+    total, by_day = committed["total"], dict(committed["by_day"])
+    for d in models.decisions_for_plan(plan_id):
+        s = sessions.get(d["session_id"])
+        if s and s["status"] == "active" and s.get("pinned") and d.get("chosen_kind") in ("delivery", "cook"):
+            total += d["cost"]
+            by_day[s["day"]] = by_day.get(s["day"], 0.0) + d["cost"]
+    return round(total, 2), by_day
+
+
+def decide_today(user_id: int, mode: str | None = None, money: float | None = None) -> dict:
+    """Plan the rest of TODAY's meals inside today's money (Vijay's sketch: "Today's budget").
+    Today's money is the person's daily limit when they set one, else the week's money left
+    shared evenly over the days left (today included); `money` overrides it (the budget
+    card's "modify"). Proposals only: nothing is planned over, pinned or ordered."""
+    user = models.get_user(user_id)
+    if not user:
+        raise ValueError("Profile not found")
+    view = current_plan(user_id)
+    plan = models.get_plan(view["plan"]["id"])
+    today = optimizer.now().date()
+    day = (today - dt.date.fromisoformat(plan["week_start"])).days
+    if not 0 <= day <= 6:
+        return {"mode": mode or "favourites_only", "picks": [], "money": 0.0, "spent": 0.0, "left": 0.0,
+                "plan_id": plan["id"], "meals": 0, "filled": 0, "method": "none",
+                "note": "This week's plan starts on " + plan["week_start"] + "; nothing to decide for today."}
+    cap = optimizer.week_cap(user, plan)
+    fixed, by_day = _fixed_money(plan["id"])
+    week_left = max(0.0, cap - fixed)
+    spent_today = by_day.get(day, 0.0)
+    if money is not None:
+        try:
+            money = float(money)
+        except (TypeError, ValueError):
+            raise ValueError("money must be a number") from None
+        if not math.isfinite(money) or money < 0 or money > 100000:
+            raise ValueError("money must be between 0 and 100000")
+        today_money = money
+    else:
+        days_left = 7 - day
+        today_money = max(0.0, min(week_left, (week_left + spent_today) / days_left - spent_today))
+        dcap = profile.daily_cap(user)
+        if dcap:
+            today_money = min(week_left, max(0.0, dcap - spent_today))
+    sessions = _open_sessions(plan["id"], day=day)
+    out = _decide(user, plan, sessions, mode=mode, money=round(today_money, 2), money_word="today's",
+                  rules_extra={"daily_cap": None})
+    out["horizon"] = "today"
+    out["week_left"] = round(week_left, 2)
+    return out
+
+
+def decide_week(plan_id: int, mode: str | None = None, *, apply: bool = False) -> dict:
+    """Plan the week's open meals by the explicit objective. With `apply`, each single-dish
+    pick becomes the meal's pick (a pin the re-plan keeps), each honest skip is recorded
+    with its reason, and the week is re-balanced; a split household meal (one dish per
+    group) stays open, because a decision holds one dish (needs per-person cart lines)."""
+    plan = models.get_plan(plan_id)
+    if not plan:
+        raise ValueError("Plan not found")
+    user = models.get_user(plan["user_id"])
+    sessions = _open_sessions(plan_id)
+    cap = optimizer.week_cap(user, plan)
+    fixed, day_money = _fixed_money(plan_id)
+    money = max(0.0, cap - fixed)
+    out = _decide(user, plan, sessions, mode=mode, money=round(money, 2), money_word="this week's",
+                  rules_extra={"day_money": day_money})
+    out["horizon"] = "week"
+    if apply:
+        kept_open = []
+        with db.cursor() as cur:
+            for p in out["picks"]:
+                if p["kind"] == "delivery" and len(p.get("lines") or []) == 1:
+                    cur.execute("UPDATE sessions SET pinned=?, status='active', note='' WHERE id=?",
+                                (db.jd({"kind": "delivery", "item_id": p["item_id"]}), p["session_id"]))
+                elif p["kind"] == "cook" and p.get("recipe_key"):
+                    cur.execute("UPDATE sessions SET pinned=?, status='active', note='' WHERE id=?",
+                                (db.jd({"kind": "cook", "recipe_key": p["recipe_key"]}), p["session_id"]))
+                elif p["kind"] == "skip":
+                    cur.execute("UPDATE sessions SET status='skipped', pinned=NULL, note=? WHERE id=?",
+                                (p["reason"], p["session_id"]))
+                else:
+                    kept_open.append(p["session_id"])
+        optimizer.optimize(plan_id)
+        out["kept_open"] = kept_open
+        out["view"] = plan_view(plan_id)
     return out

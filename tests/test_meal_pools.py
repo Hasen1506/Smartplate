@@ -15,9 +15,9 @@ def town(gt, monkeypatch):
     fake = TownFake()
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     client = create_app().test_client()
-    uid = client.post("/api/profiles", json={"name": "Priya", "diet": "veg", "weekly_budget": 3500,
+    uid = client.post("/api/profiles", json={**{"name": "Priya", "diet": "veg", "weekly_budget": 4500,   # 21 delivered meals incl. W4 fees
         "rhythm": {"breakfast": "order", "lunch": "order", "dinner": "order"}, "cook": "never",
-        "allergens": [], "medical": [], "favourites": []}).get_json()["user"]["id"]
+        "allergens": [], "medical": [], "favourites": []}, "consent": {"account": True, "health": True, "learning": True}}).get_json()["user"]["id"]
     _connect(client, fake, uid=uid)
     assert client.post(f"/api/user/{uid}/swiggy/address", json={"address_id": "addr-home"}).status_code == 200
     plan = client.get(f"/api/user/{uid}/plan").get_json()["plan"]["id"]
@@ -55,7 +55,12 @@ def test_a_dish_with_no_nutrition_template_is_planned_without_made_up_numbers(to
     assert _add(c, uid, "lunch", "r-103", "r-103-i0").status_code == 200        # Quinoa Veg Bowl: matches "bowl"
     assert _add(c, uid, "lunch", "r-102", "r-102-i5").status_code == 200        # Gobi Manchurian: no template
     lunches = [x for x in _cells(c, plan, "lunch") if x["kind"] == "delivery"]
-    assert {x["item"] for x in lunches} <= {"Quinoa Veg Bowl", "Gobi Manchurian"}
+    pooled = {"Quinoa Veg Bowl", "Gobi Manchurian"}
+    # W6 (rule 4, docs/planner-objective.md): a lunch the pool can't cover within the money
+    # takes a dish from one of the person's places instead of being skipped, and says so
+    for x in lunches:
+        if x["item"] not in pooled:
+            assert any("isn't skipped" in r for r in x["reasons"]), x
     gobi = [x for x in lunches if x["item"] == "Gobi Manchurian"]
     assert gobi and all(x["nutrition"] == {} and x["nutrition_unknown"] for x in gobi)
     view = c.get(f"/api/plan/{plan}").get_json()

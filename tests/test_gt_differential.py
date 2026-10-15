@@ -2,7 +2,7 @@
 
   pre19   — main before PR #19 (4bd8408, smartplate/ tree cd15aa2e)
   main    — main with PR #19 (33c6916, smartplate/ tree db0833e7)
-  current — this working tree
+  current — main @ 19fd3ef (frozen; later planner changes: tests/test_w06_differential.py)
 
 Each version is extracted from git into its own importable package with its own
 database and its own frozen clock, then fed the same random profiles. Every plan
@@ -33,7 +33,11 @@ pytestmark = pytest.mark.sqlite_only      # about the SQLite file / sqlite-only 
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 BASELINES = {"pre19": "cd15aa2e4d395870abe3b1099869d1c7baf03cc0",     # git rev-parse 4bd8408:smartplate
-             "main": "db0833e7fc9ca90bdfd782f7ae42c0492a82f637"}      # git rev-parse 33c6916:smartplate
+             "main": "db0833e7fc9ca90bdfd782f7ae42c0492a82f637",      # git rev-parse 33c6916:smartplate
+             # "current" of this file is frozen at main @ 19fd3ef (the tree these GT-1/2/3
+             # reasons were measured on). The W6 planner changes since then are compared
+             # against it in tests/test_w06_differential.py (docs/testing/differential-w06.md).
+             "base": "7c4829bb0ecb0029321539d5dfa35bee2ff26d20"}      # git rev-parse 19fd3ef:smartplate
 EGG_LABELLED_VEG = {"Egg Puff + Chai"}       # seeded as veg=1 before this PR
 MAX_ITEM_REPEAT, MAX_DELIVERY_CANDIDATES = 2, 6
 INSTANTS = [MONDAY_8AM, dt.datetime(2026, 11, 4, 12, 0), NAVRATRI_MONDAY]
@@ -58,6 +62,9 @@ class Version:
     def activate(self, monkeypatch):
         cfg, clock = self.mod["config"], self.mod["clock"]
         monkeypatch.setattr(cfg, "DB_PATH", self.db_path)
+        # a baseline is always compared on its own SQLite file, also on the Postgres run
+        # (conftest's sqlite_only switch only reaches the current tree's config)
+        monkeypatch.setattr(cfg, "DATABASE_URL", "", raising=False)
         monkeypatch.setattr(cfg, "WEATHER_PROVIDER", "simulated")
         monkeypatch.setattr(cfg, "SWIGGY_PROVIDER", "simulated")
         monkeypatch.setattr(clock, "now", lambda: self.at)
@@ -67,6 +74,12 @@ class Version:
         # one) may stop a solve, never the wall clock of a busy CI runner
         monkeypatch.setattr(cfg, "SOLVER_TIME_LIMIT_S", 300.0, raising=False)
         monkeypatch.setattr(cfg, "SOLVER_MAX_NODES", 3000, raising=False)
+        surge = importlib.import_module(f"{self.pkg}.domain.surge")
+        if hasattr(surge, "ENABLED"):
+            # W4 (critiques 6/52) archived the demo surge model behind a flag, off by default: an
+            # intentional, documented change (docs/testing/ground-truth.md). The baselines always
+            # price it in, so compare like with like: the current tree runs with it switched on here.
+            monkeypatch.setattr(surge, "ENABLED", True)
         opt = importlib.import_module(f"{self.pkg}.kernel.optimizer")
         if not hasattr(opt, "_tiebreak"):
             # Baselines predate the planner's tie-break. Give them the same one, so two
@@ -119,7 +132,7 @@ def versions():
     saved = os.environ.get("SMARTPLATE_DB")
     out = {"pre19": Version("pre19", "smartplate_pre19", _extract(BASELINES["pre19"], "smartplate_pre19")),
            "main": Version("main", "smartplate_main", _extract(BASELINES["main"], "smartplate_main")),
-           "current": Version("current", "smartplate", None)}
+           "current": Version("current", "smartplate_base", _extract(BASELINES["base"], "smartplate_base"))}
     if saved is not None:
         os.environ["SMARTPLATE_DB"] = saved
     yield out

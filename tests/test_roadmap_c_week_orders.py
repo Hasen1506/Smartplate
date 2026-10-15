@@ -145,7 +145,7 @@ def test_c4_placement_needs_the_explicit_approval_of_that_exact_total(client, sw
 
 
 def test_c5_another_users_queue_is_private(client, swiggy):
-    v = client.post("/api/profiles", json={"name": "P", "diet": "veg", "weekly_budget": 2000,
-                                           "meals": ["dinner"], "favourites": [6]}).get_json()
+    v = client.post("/api/profiles", json={**{"name": "P", "diet": "veg", "weekly_budget": 2000,
+                                           "meals": ["dinner"], "favourites": [6]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     pid = v["plan"]["id"]
     assert client.get(f"/api/plan/{pid}/order-queue").status_code == 401

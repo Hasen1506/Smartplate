@@ -123,8 +123,13 @@ def test_a_live_dish_says_estimated_until_a_real_bill_teaches_the_fee(client, sw
     assert others, "the rest of the week still has live deliveries"
     for c in others:
         assert c["delivery_fee"]["amount"] == 41 and c["delivery_fee"]["estimated"] is False
-        # the next plan prices the dish at Swiggy's price plus the fee Swiggy billed
-        assert c["cost"] == RECORDED_MENU[c["item"]] / 100 + 41, c
+        # the next plan prices the dish at Swiggy's price plus the delivery fee Swiggy billed, plus the
+        # bill's other charges (platform fee + packaging + GST & other = ₹37.50 on the first dish): the
+        # per-order part is learned as is and GST on food scales at 5% (W4, critique 50)
+        price = RECORDED_MENU[c["item"]] / 100
+        fixed = round(10 + 15 + 12.5 - 0.05 * dish_price, 2)
+        assert c["charges"] == {"amount": round(fixed + 0.05 * price, 2), "estimated": False}, c
+        assert c["cost"] == round(price + 41 + fixed + 0.05 * price, 2), c
         assert any("from your last Swiggy bill" in r for r in c["reasons"]), c["reasons"]
 
 
@@ -153,8 +158,9 @@ def test_the_checked_total_replaces_the_estimate_in_the_week(client, swiggy):
     assert cart["budget"]["over"] is False and cart["budget"]["week_total"] == after["budget"]["spend"]
 
 
-# A ₹1,130 week leaves ₹20 unplanned; the real bill adds ₹43.50 to the planned dish.
-TIGHT = 1130
+# A ₹1,050 week leaves about ₹11 unplanned; the real bill adds ₹27 to the planned dish (W4 fee
+# estimate already in the plan). Was ₹1,130 before W2's slot rules changed which dishes fit.
+TIGHT = 1050
 
 
 def _over_budget_cart(client, swiggy):

@@ -297,7 +297,7 @@ def client(seeded):
 def _profile(client, **over):
     body = {"name": "Kavya", "diet": "veg", "allergens": [], "weekly_budget": 2500,
             "meals": ["lunch", "dinner"], "cook": "sometimes", **over}
-    r = client.post("/api/profiles", json=body)
+    r = client.post("/api/profiles", json={**body, "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201, r.get_json()
     v = r.get_json()
     return v, {"X-SmartPlate-Key": v["access_key"]}
@@ -519,8 +519,8 @@ def test_checkout_with_a_non_string_approval_asks_for_review_not_500(gt, swiggy_
     from gt_support import connect_swiggy
     app = create_app()
     c = app.test_client()
-    created = c.post("/api/profiles", json={"name": "Live", "diet": "veg", "weekly_budget": 2000,
-                                            "meals": ["dinner"]}).get_json()
+    created = c.post("/api/profiles", json={**{"name": "Live", "diet": "veg", "weekly_budget": 2000,
+                                            "meals": ["dinner"]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid, key = created["user"]["id"], created["access_key"]
     connect_swiggy(c, swiggy_replay, uid, key)
     r = c.post(f"/api/user/{uid}/swiggy/checkout", json={"expected_fingerprint": bad},

@@ -75,7 +75,7 @@ def test_subscribe_validates_and_reports_this_device(client):
     assert client.get("/api/user/1/push").get_json()["devices"] == 0
 
 
-def test_due_reminders_are_sent_once_and_late_ones_dropped(client):
+def test_due_reminders_are_sent_once_never_again_even_late(client):
     client.post("/api/user/1/push/subscribe", json={"subscription": _browser_subscription()})
     first = client.get("/api/user/1/reminders").get_json()[0]
     when = dt.datetime.fromisoformat(first["at"])
@@ -87,7 +87,7 @@ def test_due_reminders_are_sent_once_and_late_ones_dropped(client):
     assert push.send_due(when + dt.timedelta(minutes=2), sender=svc) == 0              # never twice
     svc2 = FakeService()
     push.send_due(when + push.LATE_OK + dt.timedelta(minutes=5), sender=svc2)
-    assert first["session_id"] not in [int(p["tag"].split("-")[1]) for _, p in svc2.calls]   # too late: dropped
+    assert first["session_id"] not in [int(p["tag"].split("-")[1]) for _, p in svc2.calls]   # sent once already
 
 
 def test_gone_subscriptions_are_forgotten(client):
@@ -108,8 +108,8 @@ def test_test_message_and_private_profiles_need_their_key(client, monkeypatch):
     client.post("/api/user/1/push/subscribe", json={"subscription": _browser_subscription()})
     svc = FakeService()
     assert push.test_message(1, sender=svc) == {"sent": 1, "devices": 1}
-    v = client.post("/api/profiles", json={"name": "P", "diet": "veg", "weekly_budget": 2000,
-                                           "meals": ["dinner"], "favourites": [6]}).get_json()
+    v = client.post("/api/profiles", json={**{"name": "P", "diet": "veg", "weekly_budget": 2000,
+                                           "meals": ["dinner"], "favourites": [6]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid = v["user"]["id"]
     assert client.post(f"/api/user/{uid}/push/subscribe", json={"subscription": _browser_subscription("https://updates.push.services.mozilla.com/wpush/v2/abc")}).status_code == 401
     assert client.post(f"/api/user/{uid}/push/subscribe", json={"subscription": _browser_subscription("https://updates.push.services.mozilla.com/wpush/v2/abc")},

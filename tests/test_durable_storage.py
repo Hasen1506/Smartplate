@@ -34,8 +34,8 @@ def client(seeded):
 
 
 def _private_profile(client, name="Kept across restarts"):
-    made = client.post("/api/profiles", json={"name": name, "diet": "veg", "weekly_budget": 1800,
-                                              "meals": ["lunch", "dinner"], "favourites": [6]}).get_json()
+    made = client.post("/api/profiles", json={**{"name": name, "diet": "veg", "weekly_budget": 1800,
+                                              "meals": ["lunch", "dinner"], "favourites": [6]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid, headers = made["user"]["id"], {"X-SmartPlate-Key": made["access_key"]}
     assert client.post(f"/api/user/{uid}/account", headers=headers,
                        json={"login": f"restart-{uid}", "password": "a-long-password"}).status_code == 200
@@ -204,6 +204,10 @@ def test_app_sql_uses_only_the_portable_dialect():
     from smartplate.integrations import swiggy_connect
     db_pg.register_schema(db.SCHEMA)
     db_pg.register_schema(swiggy_connect.SCHEMA)
+    from smartplate import today
+    db_pg.register_schema(today.SCHEMA)
+    from smartplate.domain import autofill
+    db_pg.register_schema(autofill.SCHEMA)
     found = []
     for path, line, sql in _app_sql():
         low = sql.lower()
@@ -265,8 +269,8 @@ def test_sqlite_to_postgres_copies_every_record(tmp_path, monkeypatch):
         assert pg_client.post("/api/signin", json={"login": f"restart-{uid}",
                                                    "password": "a-long-password"}).status_code == 200
         # new rows continue after the copied ids
-        made = pg_client.post("/api/profiles", json={"name": "After the move", "diet": "veg",
-                                                     "weekly_budget": 1500, "meals": ["dinner"]}).get_json()
+        made = pg_client.post("/api/profiles", json={**{"name": "After the move", "diet": "veg",
+                                                     "weekly_budget": 1500, "meals": ["dinner"]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
         assert made["user"]["id"] > uid
 
         with pytest.raises(SystemExit, match="already holds SmartPlate data"):
@@ -281,3 +285,11 @@ def test_sqlite_to_postgres_copies_every_record(tmp_path, monkeypatch):
 def closing_sqlite(path):
     from contextlib import closing
     return closing(sqlite3.connect(path))
+
+
+def test_a_column_named_text_is_not_rewritten_as_a_type():
+    """manual_addresses has a column called `text`: only its type gets Postgres' collation."""
+    out = db_pg.translate_ddl("CREATE TABLE IF NOT EXISTS t (\n id INTEGER PRIMARY KEY,\n text TEXT NOT NULL,\n"
+                              " n REAL, UNIQUE(id, text))")
+    assert '\n    text TEXT COLLATE "C" NOT NULL' in out and "UNIQUE(id, text)" in out
+    assert "n DOUBLE PRECISION" in out and out.count("COLLATE") == 1

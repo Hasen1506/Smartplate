@@ -26,14 +26,17 @@ def snapshot() -> dict | None:
     return _CACHE["data"]
 
 
+def _verdict(user: dict, r: dict) -> dict:
+    """The shared safety checker (allergens.check) on the recipe's ingredient words, so
+    the recipe library, the dish library and delivery dishes never disagree."""
+    from . import allergens, dish_library
+    return allergens.check(user, dish_library.facts(r))
+
+
 def _blocked(user: dict, r: dict) -> str | None:
-    if user.get("diet") == "vegan" and not r.get("vegan"):
-        return "diet"
-    if user.get("diet") == "veg" and not r.get("veg"):
-        return "diet"
-    if set(user.get("allergens") or []) & set(r.get("allergens") or []):
-        return "allergen"
-    return None
+    from . import allergens
+    v = _verdict(user, r)
+    return allergens.reason_text(v) if v["status"] in ("unsafe", "unknown") else None
 
 
 def for_user(user: dict, query: str = "") -> dict:
@@ -41,14 +44,17 @@ def for_user(user: dict, query: str = "") -> dict:
     if not snap:
         return {"available": False, "recipes": [], "hidden": 0}
     q = (query or "").strip().lower()
-    shown, hidden = [], 0
+    shown, hidden, why = [], 0, []
     for r in snap.get("recipes", []):
         if q and q not in r["title"].lower() and not any(q in i.lower() for i in r["ingredients"]):
             continue
-        if _blocked(user, r):
+        reason = _blocked(user, r)
+        if reason:
             hidden += 1
+            if len(why) < 30:
+                why.append({"title": r["title"], "reason": reason})
             continue
         shown.append(r)
     return {"available": True, "source": snap.get("source"), "license": snap.get("license"),
             "imported": snap.get("imported"), "note": snap.get("note"), "total": len(shown),
-            "recipes": shown[:LIMIT], "hidden": hidden}
+            "recipes": shown[:LIMIT], "hidden": hidden, "hidden_dishes": why}

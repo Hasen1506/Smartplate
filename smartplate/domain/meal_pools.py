@@ -149,6 +149,9 @@ def add(user_id: int, meal: str, restaurant_id: str, restaurant_name: str, item_
         raise ValueError(f"Your {meal} pool is full ({MAX_PER_MEAL} dishes). Remove one first.")
     menu = swiggy_live.live_menu(user_id, restaurant_id, restaurant_name)
     item = next((i for i in menu["items"] if i["id"] == item_id), None)
+    left_out = next((i for i in menu.get("hidden_items") or [] if i["id"] == item_id), None)
+    if left_out:                                   # the shared safety checker said no: say why
+        raise ValueError(f"Not safe for you: {left_out['reason']}.")
     if not item:
         raise SwiggyError(f"That dish isn't on {menu['restaurant']['name']}'s Swiggy menu for your address now.")
     if item.get("has_options"):

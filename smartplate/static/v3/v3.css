@@ -1,0 +1,105 @@
+/* Ziggy v3 Today / Cook (docs/IA.md). Uses the redesign's tokens only; no new colours. */
+.nav{grid-template-columns:repeat(4,minmax(0,1fr))}
+.v3-ob .ob-bars{grid-template-columns:repeat(2,minmax(0,1fr))}
+.opt[aria-checked="true"]{border-color:var(--ink);box-shadow:0 0 0 1.5px var(--ink) inset}
+
+.v3-today,.v3-cook{display:flex;flex-direction:column;gap:14px;min-width:0}
+.v3-head .h1{font-size:26px}
+.v3-mode{max-width:280px}
+.v3-top{display:grid;grid-template-columns:minmax(0,1fr) 116px;gap:12px}
+.v3-top .card{padding:14px 16px;gap:8px}
+.v3-budget-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.v3-big{font-size:34px}
+.v3-budget .chips{gap:6px}
+.chip.small{min-height:36px;padding:0 12px;font-size:13.5px}
+.stepper.sm{gap:6px}
+.stepper.sm button{width:40px;height:40px;min-height:40px}
+.v3-wx{align-items:flex-start}
+.v3-wx-row{display:flex;align-items:center;gap:6px}
+.v3-wx-row b{font-size:28px}
+.v3-wx-ico{font-size:24px;line-height:1}
+.v3-rules{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.v3-rules .tag{font-size:12.5px;padding:4px 9px}
+.v3-rules .link{min-height:36px;font-size:13.5px;margin-left:4px}
+
+.v3-meals{gap:0;padding:6px 16px 12px}
+.v3-meal{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);grid-template-areas:"n m" "p p" "w w" "u u";column-gap:10px;row-gap:6px;padding:12px 0;border-bottom:1px solid var(--line)}
+.v3-meal-name{grid-area:n;font-weight:800;font-size:15px;align-self:center}
+.v3-meal-meta{justify-content:flex-end}
+.v3-qty.stepper.sm button{width:36px;height:36px;min-height:36px}
+.v3-meal-pick{grid-area:p;display:flex;align-items:center;gap:8px;min-width:0}
+.v3-meal-pick .v3-select{flex:1;min-width:0;min-height:44px;text-overflow:ellipsis}
+.v3-meal-meta{grid-area:m;display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.v3-meal-meta .link{min-height:32px;display:inline-flex;align-items:center;gap:4px;font-size:13.5px}
+.v3-meal-meta .link svg{width:16px;height:16px}
+.v3-meal-meta i{font-style:normal}
+.v3-why{grid-area:w;color:var(--amber)}
+.v3-qty{flex:none}
+.v3-qty b{min-width:28px;text-align:center;font-variant-numeric:tabular-nums}
+.v3-decide{padding-top:12px;gap:8px 12px}
+.v3-decide .fine{flex:1;min-width:180px}
+
+.v3-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.v3-actions button{min-height:52px;font-size:15px;padding:0 8px;gap:6px;white-space:nowrap}
+.v3-actions .primary{font-size:16px}
+.v3-actions button span{overflow:hidden;text-overflow:ellipsis}
+@media (max-width:420px){.v3-actions button svg{display:none}.v3-actions button{font-size:14.5px;padding:0 6px}}
+.v3-cart{display:flex;flex-direction:column;gap:12px}.v3-cart:empty{display:none}
+.v3-compare{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;padding:10px 14px;border-radius:16px;background:var(--raised)}
+.v3-compare .fine{flex-basis:100%}
+
+.v3-pools-h{margin-top:6px}
+/* Phone: each meal's usual meals open under its line ("Usual ▾"), not as a separate block. */
+.v3-usual{grid-area:u;display:flex;flex-direction:column;gap:8px;padding:4px 12px 12px;border-radius:14px;background:var(--raised);min-width:0}
+.v3-usual .v3-pool-list{min-width:0}
+.v3-usual-btn{white-space:nowrap}
+.v3-other-usual{display:flex;flex-direction:column;gap:6px;padding-top:10px;margin-top:10px;border-top:1px solid var(--line)}
+.v3-other-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px}
+.v3-other-row .link{min-height:40px;display:inline-flex;align-items:center;gap:4px;font-size:13.5px}
+.v3-left-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:14.5px}
+.v3-left-tag{font-size:11.5px;padding:2px 7px;vertical-align:1px}
+.v3-pools{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+.v3-pool{gap:10px;padding:16px}
+.v3-pool-list{list-style:none;display:flex;flex-direction:column}
+.v3-pool-item{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
+.v3-pool-item:last-child{border-bottom:0}
+.v3-pool-item .t{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.v3-pool-item .t b{font-size:15px;overflow-wrap:anywhere}
+.v3-pool-item.off .t b,.v3-pool-item.off .t .fine{opacity:.6}
+.v3-reason{font-size:12.5px;font-weight:600;color:var(--amber)}
+.v3-pool-btns{display:flex;align-items:center;gap:2px;flex:none}
+.v3-pool-btns .icon-btn{width:40px;min-width:40px;min-height:40px}
+.v3-setup ol{margin-left:20px;display:grid;gap:6px}
+.v3-setup li.done{color:var(--leaf-ink)}
+.v3-setup .link{min-height:32px}
+.v3-sheet .seg{max-width:360px}
+.v3-swap-row{min-height:60px}
+.v3-off-list{margin:8px 0 0 18px;display:grid;gap:4px}
+.v3-fs{border:0;display:flex;flex-direction:column;gap:6px}
+.v3-fs .chip input{accent-color:var(--ink)}
+.v3-menu{max-height:52vh;overflow-y:auto}
+.v3-week-top{align-items:center;gap:6px 12px;padding:2px 2px}
+.v3-week-top .fine{flex:1;min-width:200px}
+.v3-nut{gap:8px}
+
+/* Phone: one column in the sketch's order. Computer: meals left, budget/weather/rules right,
+   pools side by side from 1024 px. Today is wider than other screens and has no week aside. */
+.v3-cols,.v3-left,.v3-side{display:contents}
+.v3-head{order:1}.v3-mode{order:2}.v3-setup{order:3}.v3-side > *{order:4}.v3-meals{order:5}.v3-actions{order:6}
+@media (max-width:420px){.v3-actions button svg{display:none}.v3-actions button{font-size:14.5px;padding:0 6px}}
+.v3-compare{order:7}.v3-cart{order:7}.v3-save{order:8}.v3-pools-h{order:9}.v3-pools{order:10}
+.v3-side > .v3-rules{order:4}
+.body:has(.v3-today) .aside{display:none}
+@media (min-width:900px){
+  .main:has(.v3-today){max-width:1120px}
+}
+@media (min-width:1024px){
+  .v3-cols{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:16px;align-items:start;order:1}
+  .v3-left,.v3-side{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .v3-side{position:sticky;top:76px}
+  .v3-top{grid-template-columns:minmax(0,1fr)}
+  .v3-pools{grid-template-columns:repeat(3,minmax(0,1fr));align-items:start}
+}
+@media (min-width:1180px){
+  .body:has(.v3-today){grid-template-columns:minmax(0,1120px);padding:0 32px}
+}

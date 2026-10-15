@@ -8,6 +8,7 @@ The schema deliberately carries the columns every gap feature needs (allergens,
 nutrition, carbon, surge history, leftovers, calendar, community, receipts) so
 the optimiser can read them all as constraints/signals from one place.
 """
+import contextvars
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -100,6 +101,37 @@ CREATE TABLE IF NOT EXISTS swiggy_delivery_fees (  -- the delivery fee Swiggy ac
     delivery_fee REAL NOT NULL,                    -- rupees, the bill's Delivery line
     seen_ts TEXT NOT NULL,
     PRIMARY KEY (user_id, address_id, provider_id)
+);
+
+CREATE TABLE IF NOT EXISTS swiggy_bill_fees (      -- fee lines of real Swiggy cart bills (domain/fees)
+    user_id INTEGER NOT NULL,
+    address_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,                     -- Swiggy restaurant id
+    restaurant_name TEXT NOT NULL DEFAULT '',
+    item_total REAL NOT NULL,                      -- rupees
+    delivery REAL,                                 -- rupees; NULL when the bill had no delivery line
+    other REAL NOT NULL,                           -- platform + packaging + GST & other charges (no discounts)
+    to_pay REAL NOT NULL,
+    lines TEXT NOT NULL DEFAULT '[]',
+    seen_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, address_id, provider_id, seen_ts)
+);
+
+CREATE TABLE IF NOT EXISTS spend_ledger (          -- money actually spent: real Swiggy bills only (domain/spend)
+    user_id INTEGER NOT NULL,
+    ref TEXT NOT NULL,                             -- swiggy:<order id> | queue:<session id>
+    iso_date TEXT NOT NULL,
+    amount REAL NOT NULL,                          -- rupees, as billed
+    restaurant TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL,                          -- swiggy_order | ziggy_placed | ziggy_handoff
+    confirmed INTEGER NOT NULL DEFAULT 1,          -- 0: real bill, placement not confirmed (never counted)
+    PRIMARY KEY (user_id, ref)
+);
+
+CREATE TABLE IF NOT EXISTS spend_sync (            -- when Swiggy's order history was last read (domain/spend)
+    user_id INTEGER PRIMARY KEY,
+    synced_ts TEXT NOT NULL,
+    oldest_date TEXT
 );
 
 CREATE TABLE IF NOT EXISTS live_catalog_state (   -- the user's live Swiggy catalogue (domain/live_catalog)
@@ -328,12 +360,41 @@ CREATE TABLE IF NOT EXISTS push_sent (           -- one reminder per meal per su
     session_id INTEGER NOT NULL,
     at TEXT NOT NULL,                              -- the reminder time it was sent for
     sent_ts TEXT NOT NULL,
+    outcome TEXT NOT NULL DEFAULT 'sent',          -- sending | sent | late | missed | rejected
     PRIMARY KEY (subscription_id, session_id, at)
 );
+
+CREATE TABLE IF NOT EXISTS events (              -- product analytics, the source of truth (smartplate/analytics.py)
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER,                               -- NULL: not tied to a profile
+    name TEXT NOT NULL,                            -- app_open | plan_viewed | cart_filled | ordered_confirmed | budget_overrun
+    ts TEXT NOT NULL,                              -- local time, ISO seconds
+    props TEXT NOT NULL DEFAULT '{}'               -- ids and amounts only, never free text
+);
+
+CREATE INDEX IF NOT EXISTS events_name_user_ts ON events(name, user_id, ts);
 
 CREATE TABLE IF NOT EXISTS app_secrets (         -- generated keys when no env secret is set
     name TEXT PRIMARY KEY,
     value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS typed_favourites (     -- places/dishes the user typed in, no platform needed (domain/typed_in.py)
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    meal TEXT NOT NULL,
+    restaurant_name TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    price REAL,
+    platform TEXT NOT NULL DEFAULT 'swiggy',
+    added_ts TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS manual_addresses (     -- a delivery area typed in without connecting Swiggy (domain/typed_in.py)
+    user_id INTEGER PRIMARY KEY,
+    label TEXT NOT NULL,
+    text TEXT NOT NULL,
+    updated_ts TEXT NOT NULL
 );
 """
 
@@ -348,6 +409,8 @@ MIGRATIONS = [
     ("menu_items", "provider_item_id", "TEXT"),                         # Swiggy menu item id (live rows)
     ("menu_items", "nutrition_estimated", "INTEGER NOT NULL DEFAULT 0"),
     ("menu_items", "nutrition_known", "INTEGER NOT NULL DEFAULT 1"),   # 0: a pooled dish with no estimate
+    ("menu_items", "veg_known", "INTEGER NOT NULL DEFAULT 1"),         # 0: no veg mark (stored veg=0, fail-closed)
+    ("menu_items", "safety_basis", "TEXT"),                            # allergens.KNOWN_BASES; NULL: legacy row
     ("community_templates", "author_user_id", "INTEGER"),
     ("users", "observances", "TEXT NOT NULL DEFAULT '[]'"),
     ("users", "prefs", "TEXT NOT NULL DEFAULT '{}'"),
@@ -360,6 +423,9 @@ MIGRATIONS = [
     ("order_queue", "planned_cost", "REAL"),             # the plan's estimate when the real cart was checked
     ("decisions", "delivery_fee", "REAL"),               # live dish: the delivery fee priced into cost
     ("decisions", "fee_estimated", "INTEGER"),           # 1 = flat estimate, 0 = from a real Swiggy bill
+    ("decisions", "charges", "REAL"),                    # live dish: platform fee + packaging + GST priced into cost
+    ("decisions", "charges_estimated", "INTEGER"),       # 1 = research default / other bills, 0 = this restaurant's bill
+    ("push_sent", "outcome", "TEXT NOT NULL DEFAULT 'sent'"),  # sending | sent | late | missed | rejected
 ]
 
 
@@ -375,17 +441,48 @@ def connect():
     return conn
 
 
+# Committed writes in this request/thread. A request that committed nothing can be run
+# again safely after a stale-connection failure (smartplate/resilience.py).
+_writes = contextvars.ContextVar("smartplate_db_writes", default=0)
+
+
+def reset_writes() -> None:
+    _writes.set(0)
+
+
+def writes_committed() -> int:
+    return _writes.get()
+
+
+def _changes(conn) -> int:
+    """A counter that grows with every row written on this connection."""
+    if isinstance(conn, sqlite3.Connection):
+        return conn.total_changes
+    return getattr(conn, "writes", 0)
+
+
 @contextmanager
 def cursor():
     conn = connect()
     try:
+        before = _changes(conn)
         yield conn.cursor()
         conn.commit()
+        if _changes(conn) != before:
+            _writes.set(_writes.get() + 1)
     except BaseException:
         conn.rollback()
         raise
     finally:
         conn.close()
+
+
+def on_stale_connection() -> None:
+    """A database call failed as if the connection had gone stale (Neon closes idle
+    connections and suspends its compute after 5 minutes): start over with a new pool."""
+    if config.DATABASE_URL:
+        from . import db_pg
+        db_pg.replace_pool(db_pg.pool())
 
 
 try:                                   # the error a constraint failure raises, on either database
@@ -412,6 +509,36 @@ def init_db() -> None:
             have = {r["name"] for r in cur.execute(f"PRAGMA table_info({table})")}
             if column not in have:
                 cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
+def schema_fingerprint(*extra) -> str:
+    """A hash of everything init_db would create or alter (plus `extra` schema text)."""
+    import hashlib
+    h = hashlib.sha256(SCHEMA.encode())
+    h.update(repr(MIGRATIONS).encode())
+    for part in extra:
+        h.update(repr(part).encode())
+    return h.hexdigest()[:24]
+
+
+SCHEMA_MARK = "schema_fingerprint"
+
+
+def schema_is_current(fingerprint: str) -> bool:
+    """True when this database was last migrated to exactly this schema. Boot then skips
+    ~70 statements (each a network round trip to a hosted Postgres; cold start, grill #66).
+    Any doubt (no table yet, no mark, an error) means "no": the full migration runs."""
+    try:
+        with cursor() as cur:
+            row = cur.execute("SELECT value FROM app_secrets WHERE name=?", (SCHEMA_MARK,)).fetchone()
+        return bool(row) and row["value"] == fingerprint
+    except Exception:
+        return False
+
+
+def mark_schema(fingerprint: str) -> None:
+    with cursor() as cur:
+        cur.execute("INSERT OR REPLACE INTO app_secrets(name, value) VALUES (?,?)", (SCHEMA_MARK, fingerprint))
 
 
 # --- small json helpers so callers don't sprinkle json.loads everywhere ---

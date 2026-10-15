@@ -3,8 +3,8 @@
   "budget": 1400.0,
   "daily_cap": 250.0,
   "prorated": false,
-  "remaining": 0.28,
-  "spend": 1399.72,
+  "remaining": 5.0,
+  "spend": 1395.0,
   "weekly_budget": 1400.0
  },
  "counts": {
@@ -17,11 +17,11 @@
  "grid": {
   "Fri 2026-11-06": {
    "breakfast": {
-    "cost": 35.0,
-    "item": "Cook: Masala oats + veg",
-    "kind": "cook",
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "dinner": {
@@ -33,21 +33,21 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 115.72,
-    "item": "Vegan Sambar Rice",
-    "kind": "delivery",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Home kitchen",
     "status": "active"
    }
   },
   "Mon 2026-11-02": {
    "breakfast": {
-    "cost": 105.0,
-    "item": "Egg Puff + Chai",
+    "cost": 100.0,
+    "item": "Curd Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Chai Kings",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "dinner": {
@@ -69,11 +69,11 @@
   },
   "Sat 2026-11-07": {
    "breakfast": {
-    "cost": 35.0,
-    "item": "Cook: Masala oats + veg",
-    "kind": "cook",
+    "cost": 100.0,
+    "item": "Curd Rice",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "dinner": {
@@ -95,11 +95,11 @@
   },
   "Sun 2026-11-08": {
    "breakfast": {
-    "cost": 35.0,
-    "item": "Cook: Masala oats + veg",
-    "kind": "cook",
+    "cost": 90.0,
+    "item": "Masala Chai + Bun Butter",
+    "kind": "delivery",
     "pinned": false,
-    "restaurant": "Home kitchen",
+    "restaurant": "Chai Kings",
     "status": "active"
    },
    "dinner": {
@@ -111,11 +111,11 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 115.72,
-    "item": "Vegan Sambar Rice",
-    "kind": "delivery",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Home kitchen",
     "status": "active"
    }
   },
@@ -137,21 +137,21 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 94.68,
-    "item": "Masala Chai + Bun Butter",
-    "kind": "delivery",
+    "cost": 45.0,
+    "item": "Cook: Dal + rice",
+    "kind": "cook",
     "pinned": false,
-    "restaurant": "Chai Kings",
+    "restaurant": "Home kitchen",
     "status": "active"
    }
   },
   "Tue 2026-11-03": {
    "breakfast": {
-    "cost": 110.5,
-    "item": "Curd Rice",
+    "cost": 105.0,
+    "item": "Egg Puff + Chai",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Chai Kings",
     "status": "active"
    },
    "dinner": {
@@ -173,11 +173,11 @@
   },
   "Wed 2026-11-04": {
    "breakfast": {
-    "cost": 101.8,
-    "item": "Curd Rice",
+    "cost": 90.0,
+    "item": "Masala Chai + Bun Butter",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Chai Kings",
     "status": "active"
    },
    "dinner": {
@@ -189,28 +189,28 @@
     "status": "active"
    },
    "lunch": {
-    "cost": 96.3,
-    "item": "Masala Chai + Bun Butter",
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Chai Kings",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    }
   }
  },
  "heads_up": [
-  "budget: ₹0 left this week",
+  "budget: ₹5 left this week",
   "holiday: Sun 08 Nov: Diwali",
-  "saving: Ordering a little earlier saves ₹65 this week",
+  "weather: Sat 07 Nov: rain likely (80%)",
   "weather: Tomorrow: rain likely (80%)",
   "weather: Wed 04 Nov: 38°C"
  ],
  "mode": "survival",
  "recommendation": {
-  "floor": 2443.0,
+  "floor": 2135.0,
   "suggested_rating_floor": 4.4,
-  "usual": 6069.0,
-  "variety": 6368.0
+  "usual": 5355.0,
+  "variety": 5615.0
  },
  "week_start": "2026-11-02"
 }

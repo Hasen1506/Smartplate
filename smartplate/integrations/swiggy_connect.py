@@ -122,6 +122,20 @@ CREATE TABLE IF NOT EXISTS swiggy_cart_intents (
     restaurant_name TEXT NOT NULL,
     item_id TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS swiggy_history_suggestions (  -- favourites suggested from order history (swiggy_history.py)
+    user_id INTEGER NOT NULL,
+    restaurant_id TEXT NOT NULL,
+    restaurant_name TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    menu_item_id TEXT,
+    slot TEXT NOT NULL,
+    times INTEGER NOT NULL,
+    last_date TEXT NOT NULL,
+    rating REAL,
+    score REAL NOT NULL,
+    imported_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, restaurant_id, item_name)
+);
 """
 COLUMNS = [                                      # added after gate 1 shipped
     ("swiggy_connections", "address_id", "TEXT"),
@@ -303,6 +317,9 @@ def start(user_id: int, redirect_uri: str, browser_nonce: str | None = None) -> 
 
     `browser_nonce` is also set as an HttpOnly cookie on the browser that asked;
     the callback is accepted only from a browser presenting it (H-01)."""
+    if config.swiggy_mode() == "demo":
+        raise SwiggyError("This Ziggy server runs in demo mode and doesn't connect to Swiggy.",
+                          code="swiggy_demo_mode")
     if not private_owner(user_id):
         raise SwiggyError("Create or sign in to your own private Ziggy profile before connecting Swiggy. "
                           "Sample profiles are shared by every visitor.")

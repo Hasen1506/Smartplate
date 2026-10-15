@@ -12,10 +12,11 @@ Every write re-optimises the rest of the week, so one tap never leaves the budge
 the hard rules inconsistent.
 """
 import datetime as dt
+import math
 
 from . import access, clock, db, service
 from .domain import (allergens, epicure, festivals, flavour, intake, learning, models, profile,
-                     reverse_mode, taste)
+                     reverse_mode, taste, timing)
 from .kernel import optimizer, recommender, scheduler
 
 CITY = "Chennai"                 # profiles' default city; restaurant dishes come only from live Swiggy menus
@@ -259,6 +260,12 @@ def suggest_budget(body: dict) -> dict:
         rec["suggested"] = round50(rec["usual"]["total"])
         rec["tight"] = round50(rec["floor"]["total"])
         rec["roomy"] = round50(rec["variety"]["total"] * 1.1)
+    # A typed budget too small for the meals it covers gets a warning and a choice (usability 23).
+    if "weekly_budget" in data:
+        from .domain import spend
+        # floor = their own cheapest favourite (places picked in onboarding); none picked → no warning
+        rec["low_budget"] = spend.low_budget_check({**user, "prefs": {"meals": data.get("meals")},
+                                                    "favourite_places": sorted(favs)}, data["weekly_budget"])
     return rec
 
 
@@ -302,13 +309,30 @@ def _session_bundle(session_id: int):
 
 
 def _limits(plan, user, session) -> dict:
-    """Money left for this one meal if everything else in the week stays as planned."""
+    """Money for this one meal if everything else in the week stays as planned.
+
+    Counted exactly as Today's "₹X left this week" is (service.plan_view: checked carts
+    at their real bill, unconfirmed past meals not counted), so the two never disagree:
+      week_left  = Today's number (the week's money not yet planned or spent)
+      this_meal  = what this meal is planned at now (0 for a skip)
+      left_week  = week_left + this_meal, the most a swap of this meal can use. It never
+                   exceeds the week's money left once this meal's own share is freed.
+    """
     decisions = models.decisions_for_plan(plan["id"])
     at = optimizer.now()
-    others = [d for d in decisions if d["session_id"] != session["id"] and d["chosen_kind"] in ("delivery", "cook")
-              and not (d["session_status"] == "active" and scheduler.is_past(d, at))]
-    left_week = optimizer.week_cap(user, plan) - sum(d["cost"] for d in others)
-    out = {"left_week": round(left_week, 2), "left_day": None}
+    from .domain import week_orders
+    real = week_orders.real_totals(plan["id"])
+    for d in decisions:
+        r = real.get(d["session_id"])
+        if r and d["chosen_kind"] == "delivery":
+            d["cost"] = r["to_pay"]
+    spend = [d for d in decisions if d["chosen_kind"] in ("delivery", "cook")
+             and not (d["session_status"] == "active" and scheduler.is_past(d, at))]
+    mine = sum(d["cost"] for d in spend if d["session_id"] == session["id"])
+    others = [d for d in spend if d["session_id"] != session["id"]]
+    week_left = optimizer.week_cap(user, plan) - sum(d["cost"] for d in spend)
+    out = {"left_week": round(week_left + mine, 2), "week_left": round(week_left, 2),
+           "this_meal": round(mine, 2), "left_day": None}
     cap = profile.daily_cap(user)
     if cap:
         out["left_day"] = round(cap - sum(d["cost"] for d in others if d["day"] == session["day"]), 2)
@@ -328,7 +352,8 @@ def options(session_id: int) -> dict:
     safe_all = allergens.safe_items(user, menu)
     pooled_ids = ((ctx.get("pools") or {}).get(session["meal"]) or {}).get("ids", set())
     # Dishes with no nutrition estimate are offered only where the person pooled them.
-    safe = [it for it in safe_all if optimizer.meal_suitable(it, session["meal"]) and it.get("nutrition_known", 1) != 0]
+    safe = [it for it in safe_all if optimizer.meal_suitable(it, session["meal"]) and it.get("nutrition_known", 1) != 0
+            and timing.slot_suitability(it, session["meal"], favourited_for_slot=it["id"] in pooled_ids)]
     floor = float(user["rating_floor"])
     rated_ok = [it for it in safe if it["restaurant_rating"] >= floor]
     disliked = ctx["taste"]["disliked"]
@@ -357,6 +382,7 @@ def options(session_id: int) -> dict:
                 "kcal": n.get("kcal"), "protein_g": n.get("protein_g"), "tags": it.get("tags", []),
                 "fits": c["cost"] <= ceiling, "why": " · ".join(why), "score": score,
                 "nutrition_estimated": bool(it.get("nutrition_estimated")),
+                "safety": allergens.safety_label(user, it),
                 "current": bool(current and current.get("item_id") == it["id"]),
                 "instructions": allergens.order_instructions(user, {**n, "tags": it.get("tags", [])})}
 
@@ -400,6 +426,8 @@ def options(session_id: int) -> dict:
         "portions": n,
         "cook": [{"recipe_key": r["key"], "name": r["name"], "price": round(r["cost"] * n, 2), "kcal": r["kcal"],
                   "protein_g": r["protein_g"]} for r in cooks],
+        # why each dish was left out, in plain words ("Kozhi means chicken (not veg)")
+        "hidden_dishes": allergens.hidden_report(user, menu)["dishes"],
         "hidden": {"not_safe": len(menu) - len(safe_all), "cook_not_safe": len(cook_all) - len(cooks), "not_a_meal": len(safe_all) - len(safe),
                    "below_rating": len(safe) - len(rated_ok),
                    "not_again": len(rated_ok) - len(pool)},
@@ -434,6 +462,10 @@ def choose_live(session_id: int, body: dict) -> dict:
         raise ValueError("Pick a dish from a restaurant's Swiggy menu")
     menu = swiggy_live.live_menu(user["id"], rid, str(body.get("restaurant_name") or ""))
     item = next((i for i in menu["items"] if i["id"] == iid), None)
+    left_out = next((i for i in menu.get("hidden_items") or [] if i["id"] == iid), None)
+    if left_out:
+        # The same checker the menu used (allergens.check): say exactly why (usability #5, #6).
+        raise ValueError(f"Not safe for you: {left_out['reason']}. Your hard rules can't be overridden by a pick.")
     if not item:
         raise SwiggyError(f"That dish isn't on {menu['restaurant']['name']}'s Swiggy menu for your address now.")
     if item.get("in_stock") is False:
@@ -510,13 +542,15 @@ def eat_now(plan_id: int, body: dict) -> dict:
             cur.execute("UPDATE sessions SET status='active', note='' WHERE id=?", (sid,))
     optimizer.optimize(plan_id)
     decision = next((d for d in models.decisions_for_plan(plan_id) if d["session_id"] == sid), None)
-    if not decision or decision["chosen_kind"] not in ("delivery", "cook"):
-        # The week would still skip it (variety, budget): the person said they're hungry, so
-        # keep the best safe dish that fits what's left, else the first safe recipe.
+    if not decision or decision["chosen_kind"] != "delivery":
+        # The week would still skip it (variety, budget) or make it a cook day: the person
+        # said they're hungry *now* (an order), so keep the best safe dish that fits what's
+        # left, else keep their cook day, else the first safe recipe.
         o = options(sid)
         dishes = sorted([x for g in o["usual"] for x in g["dishes"]] + o["new"], key=lambda x: x["score"])
         dish = next((x for x in dishes if x["fits"]), None)
         pin = ({"kind": "delivery", "item_id": dish["item_id"]} if dish
+               else None if decision and decision["chosen_kind"] == "cook"
                else {"kind": "cook", "recipe_key": o["cook"][0]["recipe_key"]} if o["cook"] else None)
         if pin:
             with db.cursor() as cur:
@@ -837,10 +871,42 @@ def heads_up(view: dict, user: dict, plan: dict, decisions: list[dict], at: dt.d
     if skipped_budget:
         more = ""
         if rec.get("feasible") and rec["usual"]["total"] > view["budget"]["budget"]:
-            more = f" Your usual week costs about ₹{rec['usual']['total']:.0f}."
+            # "your usual" only once there is order history to be usual (usab #18): a profile
+            # made a minute ago hears what these meals cost at the places near it instead.
+            if (view.get("learning") or {}).get("orders", 0) > 0:
+                more = f" Your usual week costs about ₹{rec['usual']['total']:.0f}."
+            else:
+                more = (f" Planning every one of these meals from places near you costs about "
+                        f"₹{rec['usual']['total']:.0f} a week.")
         out.append({"level": "warn", "icon": "₹", "kind": "budget",
-                    "title": f"{len(skipped_budget)} meal{'s' if len(skipped_budget) != 1 else ''} didn't fit the budget",
-                    "body": "Raise the weekly budget, cook one of them, or switch to Tight week." + more})
+                    "title": f"{len(skipped_budget)} meal{'s' if len(skipped_budget) != 1 else ''} didn't fit the weekly target",
+                    "body": "Raise the weekly target, cook one of them, or switch to Tight week." + more})
+    bo = view.get("buildout") or {}
+    if bo.get("needed"):            # favourites that don't fit: a choice, never a silent swap
+        names = ", ".join(m["label"] for m in bo["meals"][:3]) + ("…" if bo["count"] > 3 else "")
+        out.append({"level": "warn", "icon": "₹", "kind": "buildout",
+                    "title": f"Your favourites don't all fit this week ({names})",
+                    "body": "Ziggy didn't swap them for something cheaper or skip them. Pick how to build out the "
+                            "week: skip or cook a meal, swap to a cheaper favourite, or raise the target.",
+                    "actions": [{"act": "buildout", "label": "See choices"}]})
+    b0 = view["budget"]
+    if b0.get("over") and b0.get("budget"):
+        # usab #17: a pin (their own pick) that takes the week over the target is said, not hidden
+        pins = [d for d in decisions if d.get("pinned") and d["chosen_kind"] in ("delivery", "cook")
+                and not d.get("past")]
+        out.append({"level": "warn", "icon": "₹", "kind": "budget",
+                    "title": f"₹{b0['spend'] - b0['budget']:,.0f} over this week's target",
+                    "body": (f"Planned meals come to ₹{b0['spend']:,.0f} of your ₹{b0['budget']:,.0f} target"
+                             + (f", with {len(pins)} meal{'s' if len(pins) != 1 else ''} you picked yourself. "
+                                "Ziggy didn't drop your picks: change one, or raise the target."
+                                if pins else ". Change a meal, or raise the target.")),
+                    "actions": [{"act": "raise-budget", "label": "Raise the target",
+                                 "amount": int(math.ceil((b0["spend"] - b0["budget"]) / 50.0) * 50)}]})
+    from .domain import spend
+    low = spend.low_budget_check(user)
+    if low:                       # an impossible target becomes a choice, not 20 silent skips
+        out.append({"level": "warn", "icon": "₹", "kind": "low_budget", "title": low["title"], "body": low["body"],
+                    "actions": low["actions"]})
 
     b = view["budget"]
     if not skipped_budget and b["budget"] and b["remaining"] < 0.08 * b["budget"] and b["remaining"] >= 0:

@@ -67,7 +67,8 @@ def test_browser_golden_first_week(server):
         page.route("https://fonts.gstatic.com/**", lambda r: r.fulfill(status=204, body=""))
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.add_init_script("globalThis.policyViolations = [];"
+        page.add_init_script("localStorage.setItem('ziggy.ui', 'classic');"   # classic Today behind the v3 flag (docs/IA.md)
+                               "globalThis.policyViolations = [];"
                              "document.addEventListener('securitypolicyviolation', e => policyViolations.push(e.violatedDirective));")
         transcript = {}
         try:
@@ -87,12 +88,13 @@ def test_browser_golden_first_week(server):
             expect(page.get_by_text("So you can open Ziggy on any device", exact=False)).to_be_visible()
             page.locator("#ob-login").fill("asha@example.com")       # the wizard saves a sign-in
             page.locator("#ob-pw").fill("asha-long-password")
+            page.locator("#ob-c-account").check()                    # W8: the notice must be agreed to
             page.get_by_role("button", name="Plan my week").click()
             expect(page.get_by_role("navigation", name="Main")).to_be_visible()
             if page.evaluate("S.connectSheet"):                       # quick connection comes next; later
                 page.get_by_role("dialog", name="Connect Swiggy").get_by_role("button", name="Not now").click()
             uid = page.evaluate("S.userId")
-            key = page.evaluate(f"JSON.parse(localStorage.getItem('smartplate.keys'))['{uid}'].key")
+            key = page.evaluate("S.freshCode").split(".", 1)[1]     # W8: shown once, never kept in localStorage
             h = {"X-SmartPlate-Key": key}
             pid = page.evaluate("S.planId")
 
@@ -103,8 +105,9 @@ def test_browser_golden_first_week(server):
             api_view = client.get(f"/api/plan/{pid}", headers=h).get_json()
             expect(page.locator("nav.days [data-day]")).to_have_count(7)
             labels = page.locator(".mrow").evaluate_all("els => els.map(e => e.getAttribute('aria-label'))")
-            assert labels == [f"{m.capitalize()}: {api_view['grid'][0]['meals'][m]['item']}"
-                              for m in ("breakfast", "lunch", "dinner")], labels
+            cells = [api_view['grid'][0]['meals'][m] for m in ("breakfast", "lunch", "dinner")]
+            assert labels == [f"{m.capitalize()}: {c['item'] if c['kind'] in ('delivery', 'cook') else 'Skipped'}"
+                              for m, c in zip(("breakfast", "lunch", "dinner"), cells)], labels
             transcript["week"] = grid_snapshot(api_view)
 
             # 3. pick a dish in the Change sheet: it is kept ------------------------------------
@@ -112,14 +115,17 @@ def test_browser_golden_first_week(server):
             tue_lunch.click()
             sheet = page.get_by_role("dialog")
             expect(sheet).to_contain_text("not safe for your allergies or diet")
-            if sheet.locator('[data-pick="14"]').count() == 0:                       # not a top fit: browse its place
-                place = page.evaluate("""() => { const d = S.sheet.data;
-                    return [...d.usual.flatMap(g => g.dishes.map(x => ({...x, restaurant: g.restaurant}))), ...d.new]
-                      .find(x => x.item_id === 14).restaurant; }""")
+            # Pick an offered dish: Veg Meals (item 14) when the sheet offers it, else the first dish it
+            # offers (W2's slot rules changed what fits Tuesday lunch, so 14 may not be listed).
+            offered = page.evaluate("""() => { const d = S.sheet.data;
+                return [...d.usual.flatMap(g => g.dishes.map(x => ({...x, restaurant: g.restaurant}))), ...d.new]
+                  .map(x => ({ id: x.item_id, name: x.name || x.item, restaurant: x.restaurant })); }""")
+            choice = next((x for x in offered if x["id"] == 14), None) or offered[0]
+            if sheet.locator(f'[data-pick="{choice["id"]}"]').count() == 0:          # not a top fit: browse its place
                 sheet.get_by_role("button", name="Other places").click()
-                sheet.locator(f'[data-sheet-place="{place}"]').click()
-            sheet.locator('[data-pick="14"]').first.click()                         # Veg Meals
-            expect(page.get_by_text("Veg Meals it is.", exact=False)).to_be_visible()
+                sheet.locator(f'[data-sheet-place="{choice["restaurant"]}"]').click()
+            sheet.locator(f'[data-pick="{choice["id"]}"]').first.click()
+            expect(page.get_by_text(f'{choice["name"]} it is.', exact=False)).to_be_visible()
             expect(page.locator(f'.mrow[data-meal="{tue_sid}"] .tag[title="Kept: re-plans leave it"]')).to_be_attached()
 
             # 4. swap Wednesday dinner with Thursday dinner ---------------------------------------

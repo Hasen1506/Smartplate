@@ -3,8 +3,8 @@
   "budget": 2000.0,
   "daily_cap": null,
   "prorated": false,
-  "remaining": 950.39,
-  "spend": 1049.61,
+  "remaining": 1040.0,
+  "spend": 960.0,
   "weekly_budget": 2000.0
  },
  "counts": {
@@ -25,11 +25,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 157.62,
-    "item": "Pesarattu + Chutney",
+    "cost": 210.0,
+    "item": "Chana Masala Bowl",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "The Bowl Company",
     "status": "active"
    },
    "lunch": {
@@ -51,8 +51,8 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 157.62,
-    "item": "Pesarattu + Chutney",
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
     "restaurant": "Murugan Idli Shop",
@@ -77,7 +77,7 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 181.5,
+    "cost": 150.0,
     "item": "Veg Meals",
     "kind": "delivery",
     "pinned": false,
@@ -103,11 +103,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 125.0,
-    "item": "Mini Tiffin",
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Adyar Ananda Bhavan",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    },
    "lunch": {
@@ -129,7 +129,7 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 119.57,
+    "cost": 110.0,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
@@ -155,7 +155,7 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 186.75,
+    "cost": 150.0,
     "item": "Veg Meals",
     "kind": "delivery",
     "pinned": false,
@@ -181,11 +181,11 @@
     "status": "active"
    },
    "dinner": {
-    "cost": 121.55,
-    "item": "Vegan Sambar Rice",
+    "cost": 115.0,
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    },
    "lunch": {
@@ -208,10 +208,10 @@
  ],
  "mode": "balanced",
  "recommendation": {
-  "floor": 2443.0,
+  "floor": 2135.0,
   "suggested_rating_floor": 4.2,
-  "usual": 3570.0,
-  "variety": 4168.0
+  "usual": 3150.0,
+  "variety": 3670.0
  },
  "week_start": "2026-10-12"
 }

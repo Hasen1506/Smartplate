@@ -18,6 +18,8 @@ Invariants:
      a live cart total is read exactly or not at all
   8. nothing is ordered without an explicit approval bound to the exact total
   9. fuzzed API input never produces a 500
+ 11. "Decide for me" proposals are safe, inside their money and allowed by their mode
+     (and change nothing until applied)
 """
 import datetime as dt
 import json
@@ -359,8 +361,8 @@ def test_live_swiggy_never_carts_or_orders_without_approval(gt, monkeypatch, swi
     fake.strict = False               # random requests: unrecorded ones get Swiggy's refusal
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={"name": "Live", "diet": "veg", "weekly_budget": 2000,
-                                                 "meals": ["dinner"]}).get_json()
+    created = client.post("/api/profiles", json={**{"name": "Live", "diet": "veg", "weekly_budget": 2000,
+                                                 "meals": ["dinner"]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid, key = created["user"]["id"], created["access_key"]
     h = {"X-SmartPlate-Key": key}
     connect_swiggy(client, fake, uid, key)
@@ -457,3 +459,36 @@ def test_fuzzed_api_inputs_never_500(gt, monkeypatch, data):
     assert r.status_code != 500, (method, path, kwargs, r.get_data(as_text=True)[:300])
     if r.status_code >= 500:                # only deliberate upstream statuses: Swiggy (502/429) or live checkout off (503)
         assert r.status_code in (502, 503), r.status_code
+
+
+# --------------------------------------------------------------------------- #
+# 11: "Decide for me" (W6) obeys the same hard rules and its own order of priority
+# --------------------------------------------------------------------------- #
+@_budget(15)
+@given(body=profiles(), at=st.sampled_from(INSTANTS),
+       mode=st.sampled_from(["favourites_only", "favourites_plus_cook", "favourites_plus_new", "surprise_me"]),
+       horizon=st.sampled_from(["today", "week"]))
+def test_decide_for_me_is_safe_inside_its_money_and_mode(gt, body, at, mode, horizon):
+    from smartplate.domain import taste
+    uid, pid = _create(gt, body, at)
+    before = check_plan(pid)
+    out = (service.decide_today(uid, mode) if horizon == "today" else service.decide_week(pid, mode))
+    user = models.get_user(uid)
+    menu = {it["id"]: it for it in models.menu_for_city(user["city"])}
+    favs = taste.favourites(uid)
+    assert out["spent"] <= out["money"] + 0.011
+    assert out["spent"] == pytest.approx(sum(p["cost"] for p in out["picks"]), abs=0.02)
+    for p in out["picks"]:
+        assert p["why"], p
+        if p["kind"] != "delivery":
+            continue
+        for line in p["lines"]:
+            item = menu[line["item_id"]]
+            assert item_violation(user, item) is None, (item["name"], user["diet"], user["allergens"])
+            assert item["restaurant_rating"] >= user["rating_floor"]
+            if mode in ("favourites_only", "favourites_plus_cook"):
+                assert item["restaurant_id"] in favs, (item["name"], favs)
+        if horizon == "today":
+            assert p["day"] == (at.date() - dt.date.fromisoformat(models.get_plan(out["plan_id"])["week_start"])).days
+    # a proposal changes nothing in the plan
+    assert check_plan(pid) == before

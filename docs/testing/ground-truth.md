@@ -8,7 +8,9 @@ Four layers, all deterministic (frozen clock, seeded data, no network) and all r
 | Golden E2E (browser) | `tests/browser_journey.py` | The same first week clicked through real Chromium, compared with `fixtures/golden/browser_journey_asha.json` |
 | Golden planner | `tests/test_gt_golden_planner.py` | Exact plans for 7 fixed profiles (breakfast-only, three meals, fast days, daily cap, prorated, medical, usual places) plus the snack log and nutrition ledger |
 | Property-based | `tests/test_gt_properties.py` | Invariants that must never break (below), over random profiles, instants, re-plans and request sequences |
-| Differential | `tests/test_gt_differential.py` | pre-#19 vs #19 vs this branch on random profiles; every difference is intentional ([differential-pr19.md](differential-pr19.md)) |
+| Differential | `tests/test_gt_differential.py` | pre-#19 vs #19 vs main @ 19fd3ef on random profiles; every difference is intentional ([differential-pr19.md](differential-pr19.md)) |
+| Differential (W6 planner) | `tests/test_w06_differential.py` | main @ 19fd3ef vs this branch; every difference is one of W6-1…W6-4 ([differential-w06.md](differential-w06.md)) |
+| Planner objective | `tests/test_w06_planner.py`, `tests/scenarios/test_w06_planner_scenarios.py` | The rule order of [planner-objective.md](../planner-objective.md), Decide-for-me modes, today-only, household splits, exact vs MILP vs greedy, timing |
 | Regressions | `tests/test_gt_regressions.py` | One test per bug this suite found (GT-1…GT-5) |
 
 ## Invariants (Hypothesis)
@@ -26,13 +28,20 @@ app code, then every plan, re-plan and checkout is checked against it:
    safe dishes to spare has no empty meals.
 6. Pinned meals survive re-plans, mode switches, favourites, budget changes, ratings, swaps,
    the clock moving on and new meals; a pin that becomes unsafe is dropped, never kept.
-7. Prices add up: item + delivery fee × surge = cost; Σ items = checkout total = receipts;
-   a live Swiggy total is item + fees exactly or refused, never guessed.
+7. Prices add up: item + delivery fee + per-order charges (platform fee + packaging + 5% GST on
+   food, `domain/fees`) = cost, × surge only when the archived surge model is switched on (it is
+   off by default, so any multiplier ≠ 1 is a failure); a live dish's charges always include at
+   least the 5% GST; Σ items = checkout total = receipts; a live Swiggy total is item + fees
+   exactly or refused, never guessed; a menu re-read whose prices move ≥ 3× is refused (unit
+   flip, `fees.reprice_guard`).
 8. Nothing is ordered without an explicit approval of the exact fingerprint and total, and no
    live cart change or order happens without the reviewed fingerprint / fresh approval token.
 9. Fuzzed requests to every API route never return 500 (5xx only for Swiggy upstream errors
    (502) or live checkout being off (503)).
 10. Variety: a dish at most twice a week and once a day unless the user pinned it there.
+11. "Decide for me" proposals (today and week, every mode) are safe for everyone eating, never
+    exceed their money, only use what the mode allows (favourite places unless new places
+    were allowed, the min rating always), explain every pick, and change nothing until applied.
 
 ## Determinism
 
@@ -83,3 +92,13 @@ HYPOTHESIS_PROFILE=deep pytest tests/test_gt_properties.py                      
 ```
 
 Re-blessing a golden or the recording is a code change: review the JSON diff and say why it moved.
+
+### Intentional golden changes
+
+- **W4, Oct 2026 — surge model archived (critiques 6/52).** Every planner golden and
+  `journey_asha.json` moved: sample-catalogue costs lost their demo surge multiplier (e.g.
+  ₹121.55 → ₹110), so the solver picks some different dishes, fills a previously skipped meal,
+  and the "Ordering a little earlier saves ₹X" heads-up is gone. The differential test runs the
+  current tree with `surge.ENABLED = True` so the baselines are still compared like with like.
+  The simulated execution in the journey's approval step fails one more flaky order (one more
+  delivery in the week). Live-dish prices now include fees (`test_w04_money.py`).

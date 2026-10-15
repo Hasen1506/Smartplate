@@ -1,4 +1,6 @@
 """Flask JSON API and vanilla JavaScript UI; no frontend build step."""
+import datetime as dt
+import math
 import os
 import secrets
 
@@ -6,10 +8,12 @@ from flask import Flask, Response, g, jsonify, redirect, request, send_from_dire
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import access, accounts, config, everyday, profile_data, push, ratelimit, service
-from .domain import epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, week_orders
+from . import (access, accounts, config, errors, everyday, observability, ops, privacy, profile_data, providers, push,
+               ratelimit, service, websession)
+from .domain import (address_change, epicure, flavour, learning, live_catalog, meal_pools, models, sentiment, timing,
+                     typed_in, week_orders)
 from .domain.checkout import CheckoutConflict
-from .integrations import calendar_sync, swiggy_connect, swiggy_live, swiggy_mcp, swiggy_rules
+from .integrations import calendar_sync, swiggy_connect, swiggy_history, swiggy_live, swiggy_mcp, swiggy_rules
 from .kernel import agent_brain
 from .runtime import initialize, user_lock
 
@@ -40,7 +44,8 @@ def _missing(key: str, value) -> tuple:
                    missing=key, id=value), 404
 
 
-ASSETS = {"app.js": "text/javascript", "styles.css": "text/css"}
+ASSETS = {"app.js": "text/javascript", "styles.css": "text/css",
+          "v3/v3.js": "text/javascript", "v3/v3.css": "text/css"}    # v3 Today (docs/IA.md)
 
 
 def _fingerprinted_assets() -> dict:
@@ -66,14 +71,19 @@ def _shell_html(assets: dict) -> str:
 def create_app() -> Flask:
     if config.LIVE_ORDERS and os.environ.get("RENDER"):
         durable = bool(config.DATABASE_URL) or config.DB_PATH.startswith("/var/data/")
-        if (config.SWIGGY_PROVIDER != "live" or not durable
-                or not config.SECRET or not config.PUBLIC_URL.startswith("https://")):
-            raise RuntimeError("Live orders on Render require the live provider, a durable database "
+        if (not durable or not config.SECRET or not config.PUBLIC_URL.startswith("https://")):
+            raise RuntimeError("Live orders on Render require a durable database "
                                "(DATABASE_URL or /var/data), "
                                "stable SMARTPLATE_SECRET and HTTPS SMARTPLATE_PUBLIC_URL")
+    if config.PRODUCTION and config.secret_problem():
+        # Never encrypt Swiggy tokens with a key kept beside them, or with a public one (#64).
+        raise RuntimeError(f"Refusing to start in production: {config.secret_problem()}. Set a random value "
+                           "of at least 32 characters in the Render dashboard (Environment → SMARTPLATE_SECRET); "
+                           "see docs/production-deployment.md, 'The encryption key'.")
     initialize()
     app = Flask(__name__, static_folder=None)
     app.config['MAX_CONTENT_LENGTH'] = 256 * 1024
+    observability.init_app(app)              # request ids, JSON logs, latency, optional Sentry (W9)
     if config.BEHIND_PROXY:                  # one trusted hop sets X-Forwarded-For/Proto/Host
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
@@ -83,8 +93,16 @@ def create_app() -> Flask:
         @app.before_request
         def database_keepalive():
             # Started by the process that serves requests, never by a gunicorn --preload
-            # master (db_pg._after_fork_in_child). A no-op once it runs.
-            db_pg.ensure_keepalive()
+            # master (db_pg._after_fork_in_child). A no-op once it runs. Only people's
+            # requests count as activity: a scheduler's /cron/tick or a health check must
+            # not keep a free Neon database awake all day.
+            db_pg.ensure_keepalive(activity=not request.path.startswith(ops.NOT_ACTIVITY))
+
+    @app.before_request
+    def assign_request_id():
+        # One id per request, echoed in the X-Request-ID header and in error replies, so a
+        # person can quote it and the log line can be found without exposing internals (#65).
+        g.request_id = g.get("request_id") or errors.request_id(request.headers.get("X-Request-ID"))  # W9 may have set it
 
     @app.before_request
     def validate_request():
@@ -95,6 +113,16 @@ def create_app() -> Flask:
                 return jsonify(error='Cross-site requests are not allowed'), 403
             if not request.is_json or not isinstance(request.get_json(silent=True), dict):
                 return jsonify(error='Send a JSON object'), 400
+        # Cookie session (websession.py, #62): load it, and demand the CSRF token on every
+        # state-changing request that leans on it instead of on the header key.
+        g.web_session = None
+        if request.path.startswith('/api/') and request.cookies.get(websession.COOKIE):
+            g.web_session = websession.load(request.cookies.get(websession.COOKIE))
+        if (g.web_session and request.method in ('POST', 'PUT', 'PATCH', 'DELETE')
+                and not request.headers.get(access.HEADER)
+                and not websession.csrf_ok(g.web_session, request.headers.get(websession.CSRF_HEADER))):
+            return jsonify(error='This request is missing its security token. Reload Ziggy and try again.',
+                           code='csrf_failed'), 403
         args = request.view_args or {}
         for key, table in (('plan_id', 'plans'), ('user_id', 'users'), ('session_id', 'sessions')):
             if key in args:
@@ -108,7 +136,7 @@ def create_app() -> Flask:
             body = request.get_json(silent=True) if request.method == 'POST' else None
             owners = access.owners_of(args, body if isinstance(body, dict) else None,
                                       request.args.get('user_id', type=int))
-            if not all(access.allowed(uid, presented) for uid in owners):
+            if not all(access.allowed(uid, presented) or websession.grants(g.web_session, uid) for uid in owners):
                 return jsonify(error='This profile is private. Open it on the device that created it, '
                                      'or add it with its recovery code.'), 401
             # Serialize per profile, not per process (M-05): plan edits and checkout for
@@ -130,22 +158,34 @@ def create_app() -> Flask:
         for lock in reversed(g.pop('user_locks', [])):
             lock.release()
 
+    @app.errorhandler(timing.CartWindowClosed)
+    def cart_window_closed(error):
+        # Too early (or too late) to fill this meal's Swiggy cart: say when, so the UI can offer a reminder.
+        return jsonify(error=str(error), code=error.code, opens_at=error.opens_at, closed=error.closed), 409
+
     @app.errorhandler(ValueError)
     def invalid_input(error):
-        # ValueError is the app's "your input can't be used" signal; its text is written for people.
-        return jsonify(error=str(error)), 400
+        # Ziggy's own `raise ValueError("…")` text is written for people and is shown. A
+        # ValueError from anywhere else (a parser, a driver, int("x")) may carry internals:
+        # the person gets a generic sentence plus the request id; the detail is logged (#65).
+        message = errors.public_message(error)
+        rid = g.get("request_id")
+        if message is not None:
+            return jsonify(error=message), 400
+        app.logger.info("Rejected input on %s [%s]: %s: %s", request.path, rid, type(error).__name__, error)
+        return jsonify(error=errors.GENERIC, code="invalid_input", request_id=rid), 400
 
     @app.errorhandler(KeyError)
     def missing_field(error):
         # Usually a missing request field; never echo internal key names or data (L-07).
-        app.logger.info("KeyError on %s: %r", request.path, error)
-        return jsonify(error="A required field is missing or unknown."), 400
+        app.logger.info("KeyError on %s [%s]: %r", request.path, g.get("request_id"), error)
+        return jsonify(error="A required field is missing or unknown.", request_id=g.get("request_id")), 400
 
     @app.errorhandler(TypeError)
     def server_bug(error):
         # A TypeError is a server bug, not a user mistake: log it and answer 500 (L-07).
-        app.logger.exception("Unhandled TypeError on %s", request.path)
-        return jsonify(error="Something went wrong on our side. Try again."), 500
+        app.logger.exception("Unhandled TypeError on %s [%s]", request.path, g.get("request_id"))
+        return jsonify(error="Something went wrong on our side. Try again.", request_id=g.get("request_id")), 500
 
     def swiggy_owner():
         """The profile a Swiggy route acts for, so its problem log can be kept."""
@@ -163,6 +203,13 @@ def create_app() -> Flask:
         response.headers['Retry-After'] = str(error.wait_s)
         return response, 429
 
+    @app.errorhandler(privacy.ConsentRequired)
+    def consent_required(error):
+        # Not refused, just not asked yet: the app shows this notice and asks once (DPDP s.5-6).
+        return jsonify(error=str(error), code="consent_required", purpose=error.purpose,
+                       notice=privacy.PURPOSES[error.purpose], notice_version=privacy.NOTICE_VERSION,
+                       policy_url="/privacy"), 409
+
     @app.errorhandler(swiggy_connect.SwiggyError)
     def swiggy_error(error):
         # Every Swiggy problem names the rule behind it (plain words + what to do) and is
@@ -179,8 +226,12 @@ def create_app() -> Flask:
         response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after, rule=rule)
         if error.retry_after is not None:
             response.headers['Retry-After'] = str(error.retry_after)
-        if error.code == 'swiggy_cart_other_address':
-            return response, 409        # the user's cart is for another of their addresses: their choice, not an outage
+        if error.code in ('swiggy_cart_other_address', 'price_unit_changed', 'cart_over_cap', 'swiggy_out_of_area'):
+            return response, 409        # the user's address/cart/catalogue choice (W4, W7): not an outage
+        if error.code == 'restaurant_closed':
+            return response, 409        # the place is shut right now: information for the user, not an outage
+        if error.code in ('swiggy_demo_mode', 'swiggy_read_only'):
+            return response, 403        # this server's Swiggy mode doesn't allow it
         return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
     from . import db as _db
@@ -203,6 +254,19 @@ def create_app() -> Flask:
 
     @app.after_request
     def response_headers(response):
+        session = g.get('web_session')
+        if session and (session.get('rotate') or (g.get('session_cookie') and not session.get('token'))):
+            websession.rotate(session)              # a fresh token every day of use (#62)
+            g.session_cookie = True
+        if session and g.get('session_cookie'):
+            secure = request.is_secure or (config.PUBLIC_URL or '').startswith('https://')
+            age = int(websession.IDLE_TTL.total_seconds())
+            response.set_cookie(websession.COOKIE, websession.cookie_value(session['token']), max_age=age,
+                                httponly=True, secure=secure, samesite='Lax', path='/')
+            response.set_cookie(websession.CSRF_COOKIE, session['csrf'], max_age=age,
+                                httponly=False, secure=secure, samesite='Lax', path='/')
+        if g.get('request_id'):
+            response.headers['X-Request-ID'] = g.request_id
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['X-Frame-Options'] = 'DENY'
@@ -278,6 +342,15 @@ def create_app() -> Flask:
         response.headers["Cache-Control"] = "no-cache"
         return response
 
+    def _part(value) -> int:
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("part must be a cart number (1, 2, …)") from None
+        if isinstance(value, bool) or not 1 <= n <= 20:
+            raise ValueError("part must be a cart number (1, 2, …)")
+        return n
+
     # ---- meta / cost transparency ---- #
     @app.get("/api/meta")
     def meta():
@@ -286,8 +359,15 @@ def create_app() -> Flask:
             "version": "1.1.0",
             "brain": brain.name,
             "brain_cost_per_decision": brain.cost_per_decision,
-            "swiggy_provider": config.SWIGGY_PROVIDER,
-            "swiggy_redirect_approved": config.SWIGGY_REDIRECT_APPROVED,
+            # One truthful Swiggy mode (grill #34): demo | live_read | live_cart | live_order.
+            "swiggy_mode": config.swiggy_mode(),
+            "swiggy_can": {m: config.swiggy_allows(m) for m in config.SWIGGY_MODES[1:]},
+            # "simulated" only where the old simulated order saga can actually run (test runs
+            # with fixture data); everywhere else Ziggy talks to the real Swiggy.
+            "swiggy_provider": ("simulated" if config.FIXTURE_DATA and config.SWIGGY_PROVIDER == "simulated"
+                                else "demo" if config.swiggy_mode() == "demo" else "live"),
+            "swiggy_redirect_approved": config.swiggy_redirect_approved(),
+            "providers": providers.overview(),
             "storage": config.storage_status(),
             "order_edit_window_min": config.ORDER_EDIT_WINDOW_MIN,
             "modes": config.MODE_LABELS,
@@ -296,7 +376,6 @@ def create_app() -> Flask:
             "weather_provider": config.WEATHER_PROVIDER,
             "catalog_city": everyday.CITY,
             "fixture_data": config.FIXTURE_DATA,
-            "features": _FEATURE_MAP,
             # Epicure ingredient embeddings: swaps, "more like this", cuisine tilt
             "epicure": {"available": epicure.get() is not None, "cuisines": flavour.CUISINES},
         })
@@ -321,7 +400,9 @@ def create_app() -> Flask:
     @app.post("/api/plan")
     def create_plan():
         body = request.get_json(force=True, silent=True) or {}
-        pid = service.create_plan(int(body["user_id"]), body.get("mode"))
+        uid = body["user_id"]
+        # None / a list / a dict is a bad request like "abc", not a server bug (TypeError → 500)
+        pid = service.create_plan(int(uid if isinstance(uid, (int, str)) else "invalid"), body.get("mode"))
         return jsonify(service.plan_view(pid))
 
     @app.get("/api/plan/<int:plan_id>")
@@ -497,7 +578,7 @@ def create_app() -> Flask:
     def receipts_csv(user_id):
         from .domain.receipts import export_csv
         return Response(export_csv(user_id), mimetype="text/csv",
-                        headers={"Content-Disposition": "attachment; filename=smartplate_expenses.csv"})
+                        headers={"Content-Disposition": "attachment; filename=ziggy_expenses.csv"})
 
     # ---- calendar (.ics ingest) ---- #
     @app.post("/api/user/<int:user_id>/calendar/ics")
@@ -555,49 +636,129 @@ def create_app() -> Flask:
     @app.post("/api/profiles")
     def create_profile():
         ratelimit.check(f"profiles:{request.remote_addr}", 20, 3600)
-        return jsonify(everyday.create_profile(request.get_json())), 201
+        body = request.get_json()
+        choices = privacy.read_signup(body)            # the notice was shown and agreed to (DPDP s.5-6)
+        view = everyday.create_profile(body)
+        privacy.save_signup(view["user"]["id"], choices)
+        if _wants_session() and view.get("access_key"):
+            websession.bind(_session_for_binding(), view["user"]["id"])
+        return jsonify(view), 201
 
     # ---- sign-in (accounts.py): a name + password that opens a private profile anywhere ---- #
     def _presented():
         return request.headers.get(access.HEADER)
 
+    def _wants_session():
+        """The app asks for a cookie session; API scripts keep header keys (websession.py)."""
+        return request.headers.get(websession.OPT_IN_HEADER) == "cookie"
+
+    def _session_for_binding(renew=False):
+        """This browser's cookie session, started if needed; its cookie is (re)sent."""
+        session = g.get("web_session")
+        if not session:
+            session, _ = websession.start()
+            g.web_session = session
+        elif renew:
+            websession.renew(session)      # a privilege change: no planted token survives it
+        g.session_cookie = True
+        return session
+
+    def _this_device(user_id):
+        held = websession.binding(g.get("web_session"), user_id)
+        return held["device_id"] if held else None
+
     @app.post("/api/signin")
     def sign_in():
-        return jsonify(accounts.sign_in(request.get_json(), request.remote_addr or ""))
+        result = accounts.sign_in(request.get_json(), request.remote_addr or "")
+        if _wants_session():
+            websession.bind(_session_for_binding(renew=True), result["user_id"], result["device_id"])
+        return jsonify(result)
+
+    @app.get("/api/session")
+    def session_view():
+        """The private profiles this browser's cookie session may open, and its CSRF token."""
+        session = g.get("web_session")
+        return jsonify(profiles=websession.profiles(session), csrf=session["csrf"] if session else None)
+
+    @app.post("/api/session/claim")
+    def session_claim():
+        """Move a profile key (or recovery code) from the page into the HttpOnly session, once.
+        After this the app keeps no key in localStorage (#62)."""
+        ratelimit.check(f"claim:{request.remote_addr}", 30, 900)
+        body = request.get_json()
+        uid, key = body.get("user_id"), _presented() or body.get("key")
+        if isinstance(uid, bool) or not isinstance(uid, int) or not isinstance(key, str) or not key:
+            raise ValueError("Send the profile id and its key")
+        if not access.is_private(uid) or not access.allowed(uid, key):
+            return jsonify(error="That code doesn't match a profile here."), 401
+        session = _session_for_binding(renew=True)
+        websession.bind(session, uid, access.device_for(uid, key))
+        return jsonify(user_id=uid, name=models.get_user(uid)["name"], csrf=session["csrf"])
 
     @app.get("/api/user/<int:user_id>/account")
     def account(user_id):
-        return jsonify(accounts.summary(user_id, _presented()))
+        return jsonify(accounts.summary(user_id, _presented(), _this_device(user_id)))
 
     @app.post("/api/user/<int:user_id>/account")
     def set_account(user_id):
-        return jsonify(accounts.set_login(user_id, request.get_json(), _presented()))
+        return jsonify(accounts.set_login(user_id, request.get_json(), _presented(), _this_device(user_id)))
 
     @app.post("/api/user/<int:user_id>/account/rotate-key")
     def rotate_profile_key(user_id):
-        return jsonify(accounts.rotate_key(user_id, request.get_json().get("confirmation")))
+        result = accounts.rotate_key(user_id, request.get_json().get("confirmation"))
+        # Every other browser loses the profile; this one keeps it (and gets a fresh token).
+        session = g.get("web_session")
+        websession.revoke_user(user_id, keep_session=session["id"] if session else None)
+        if session:
+            websession.bind(_session_for_binding(renew=True), user_id)
+        return jsonify(result)
 
     @app.post("/api/user/<int:user_id>/devices/<int:device_id>/remove")
     def remove_device(user_id, device_id):
-        return jsonify(accounts.remove_device(user_id, device_id))
+        accounts.remove_device(user_id, device_id)
+        return jsonify(accounts.summary(user_id, _presented(), _this_device(user_id)))
 
     @app.post("/api/user/<int:user_id>/signout")
     def sign_out(user_id):
+        device = websession.unbind(g.get("web_session"), user_id)
+        if device is not None:
+            accounts.remove_device(user_id, device)
         return jsonify(accounts.sign_out(user_id, _presented()))
 
     @app.get("/api/user/<int:user_id>/data.json")
     def export_profile(user_id):
         response = jsonify(profile_data.export(user_id))
-        response.headers['Content-Disposition'] = f'attachment; filename=smartplate-profile-{user_id}.json'
+        response.headers['Content-Disposition'] = f'attachment; filename=ziggy-profile-{user_id}.json'
         return response
 
     @app.delete("/api/user/<int:user_id>")
     def delete_profile(user_id):
-        return jsonify(profile_data.delete(user_id, request.get_json().get("confirmation")))
+        result = profile_data.delete(user_id, request.get_json().get("confirmation"))
+        websession.revoke_user(user_id)            # no browser keeps a hold on a deleted profile
+        privacy.note_erasure(user_id)              # proof of erasure, kept one year (Rule 8(3))
+        return jsonify(result)
+
+    # ---- privacy notice and consent (privacy.py, DPDP Act 2023 + Rules 2025) ---- #
+    @app.get("/api/privacy/notice")
+    def privacy_notice():
+        return jsonify(privacy.notice())
+
+    @app.get("/api/user/<int:user_id>/privacy")
+    def privacy_state(user_id):
+        return jsonify({**privacy.state(user_id), "notice": privacy.notice()})
+
+    @app.post("/api/user/<int:user_id>/privacy")
+    def privacy_choice(user_id):
+        body = request.get_json()
+        if not access.is_private(user_id):
+            raise ValueError("Shared sample profiles have no consent settings. Set up your own profile.")
+        return jsonify(privacy.set_choice(user_id, body.get("purpose"), body.get("granted")))
 
     @app.patch("/api/user/<int:user_id>/setup")
     def update_setup(user_id):
-        return jsonify(everyday.update_setup(user_id, request.get_json()))
+        body = request.get_json()
+        privacy.check_setup_change(user_id, body)      # health details need the health consent
+        return jsonify(everyday.update_setup(user_id, body))
 
     @app.post("/api/user/<int:user_id>/favourites/<int:restaurant_id>")
     def toggle_favourite(user_id, restaurant_id):
@@ -614,7 +775,7 @@ def create_app() -> Flask:
         view = service.current_plan(user_id)
         body = reminders.to_ics(reminders.upcoming(view), plan_id=view["plan"]["id"], name=view["user"]["name"])
         return Response(body, mimetype="text/calendar", headers={
-            "Content-Disposition": "attachment; filename=smartplate-reminders.ics"})
+            "Content-Disposition": "attachment; filename=ziggy-reminders.ics"})
 
     # ---- push reminders at the order-by time (push.py) ---- #
     @app.get("/api/user/<int:user_id>/push")
@@ -654,6 +815,12 @@ def create_app() -> Flask:
     @app.post("/api/user/<int:user_id>/swiggy/connect")
     def swiggy_start(user_id):
         ratelimit.check(f"swiggy-connect:{user_id}", 10, 3600)
+        if (request.get_json(silent=True) or {}).get("consent") is True:
+            # The Swiggy notice was shown right before this tap (what is read, why, how to stop).
+            with _db.cursor() as cur:
+                privacy.init_schema()
+                privacy.record(cur, user_id, "swiggy", True, "swiggy-connect")
+        privacy.require(user_id, "swiggy")
         nonce = secrets.token_urlsafe(32)
         response = jsonify(authorize_url=swiggy_connect.start(user_id, _swiggy_callback_url(), nonce))
         # Ties Swiggy's redirect back to THIS browser (H-01). Lax is sent on the top-level
@@ -679,8 +846,11 @@ def create_app() -> Flask:
 
     @app.post("/api/user/<int:user_id>/swiggy/address")
     def swiggy_choose_address(user_id):
-        return jsonify({**swiggy_live.choose_address(user_id, request.get_json().get("address_id")),
-                        "order_enabled": config.LIVE_ORDERS})
+        before = address_change.snapshot(user_id)
+        chosen = swiggy_live.choose_address(user_id, request.get_json().get("address_id"))
+        # A new address can put planned restaurants out of reach: re-check the week (W7).
+        return jsonify({**chosen, "order_enabled": config.LIVE_ORDERS,
+                        "week": address_change.revalidate(user_id, before)})
 
     @app.get("/api/user/<int:user_id>/swiggy/menu")
     def swiggy_menu(user_id):
@@ -740,6 +910,21 @@ def create_app() -> Flask:
         return jsonify(dish_library.search(user, request.args.get("q", "")[:60],
                                            meal if meal in models.MEALS else None))
 
+    # How likely a restaurant dish holds each of this person's allergens, from the recipe
+    # library (founder decision 14 Oct 2026). Information only: verdicts stay fail-closed.
+    @app.get("/api/user/<int:user_id>/allergen-likelihood")
+    def allergen_likelihood(user_id):
+        from .domain import allergens as allergens_
+        user = models.get_user(user_id)
+        if not user:
+            raise KeyError("Profile not found")
+        name = (request.args.get("name") or "").strip()[:80]
+        if not name:
+            raise ValueError("Add ?name= with the dish name")
+        item = {"name": name, "description": (request.args.get("description") or "")[:200], "source": "live"}
+        return jsonify({"allergen_likelihood": allergens_.allergen_likelihood(user, name),
+                        "safety": allergens_.safety_label(user, item)})
+
     @app.get("/api/user/<int:user_id>/dishes/<key>")
     def dish_detail(user_id, key):
         from .domain import dish_library
@@ -796,7 +981,7 @@ def create_app() -> Flask:
         body = request.get_json()
         return jsonify(swiggy_live.live_cart_preview(user_id, str(body.get("restaurant_id") or ""),
                           str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
-                          str(body.get("item_name") or ""), body.get("quantity", 1)))
+                          str(body.get("item_name") or ""), body.get("quantity", 1), body.get("part", 1)))
 
     @app.post("/api/user/<int:user_id>/swiggy/live-cart")
     def swiggy_live_fill_cart(user_id):
@@ -805,7 +990,7 @@ def create_app() -> Flask:
             return jsonify(swiggy_live.fill_live_cart(user_id, str(body.get("restaurant_id") or ""),
                           str(body.get("restaurant_name") or ""), str(body.get("item_id") or ""),
                           str(body.get("item_name") or ""), body.get("expected_fingerprint"),
-                          body.get("quantity", 1)))
+                          body.get("quantity", 1), body.get("part", 1)))
         except swiggy_live.CartChanged as exc:
             return jsonify(error="cart_changed", message=str(exc)), 409
 
@@ -815,7 +1000,16 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy/checkout/preview")
     def swiggy_checkout_preview(user_id):
+        # ?payment=upi[&app=gpay]: a UPI order through Swiggy's Payment stage (live_order only);
+        # "Pay in Swiggy" when Swiggy doesn't offer it here
+        if request.args.get("payment") == "upi":
+            return jsonify(swiggy_live.live_checkout_preview(user_id, "upi", request.args.get("app") or None))
         return jsonify(swiggy_live.live_checkout_preview(user_id))
+
+    @app.post("/api/user/<int:user_id>/swiggy/orders/<order_id>/payment")
+    def swiggy_upi_payment(user_id, order_id):
+        from .integrations import swiggy_upi
+        return jsonify(swiggy_upi.payment_status(user_id, order_id))
 
     @app.post("/api/user/<int:user_id>/swiggy/checkout")
     def swiggy_checkout(user_id):
@@ -834,18 +1028,100 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy/order-history")
     def swiggy_order_history(user_id):
+        privacy.require(user_id, "swiggy")        # reading past orders is part of the Swiggy consent
         return jsonify(swiggy_live.live_order_history(user_id))
+
+    # Suggested favourites from the user's own Swiggy order history: read only on an
+    # explicit tap with consent, minimal fields kept, deletable (grill #7, #17; W7).
+    @app.get("/api/user/<int:user_id>/favourites/suggested")
+    def suggested_favourites(user_id):
+        return jsonify(swiggy_history.view(user_id))
+
+    @app.post("/api/user/<int:user_id>/favourites/suggested")
+    def import_suggested_favourites(user_id):
+        ratelimit.check(f"history-import:{user_id}", 5, 3600)
+        privacy.require(user_id, "swiggy")        # W8: reading past orders is part of the Swiggy consent
+        return jsonify(swiggy_history.import_history(user_id, request.get_json().get("consent")))
+
+    @app.delete("/api/user/<int:user_id>/favourites/suggested")
+    def delete_suggested_favourites(user_id):
+        return jsonify(swiggy_history.delete(user_id))
+
+    # Without Swiggy: a typed delivery address and typed favourites (grill #25; W7).
+    @app.get("/api/user/<int:user_id>/typed-favourites")
+    def typed_favourites(user_id):
+        return jsonify(typed_in.favourites(user_id))
+
+    @app.post("/api/user/<int:user_id>/typed-favourites")
+    def add_typed_favourite(user_id):
+        return jsonify(typed_in.add_favourite(user_id, request.get_json()))
+
+    @app.delete("/api/user/<int:user_id>/typed-favourites/<int:fav_id>")
+    def remove_typed_favourite(user_id, fav_id):
+        return jsonify(typed_in.remove_favourite(user_id, fav_id))
+
+    @app.get("/api/user/<int:user_id>/manual-address")
+    def manual_address(user_id):
+        return jsonify({"address": typed_in.address(user_id)})
+
+    @app.put("/api/user/<int:user_id>/manual-address")
+    def set_manual_address(user_id):
+        return jsonify(typed_in.set_address(user_id, request.get_json()))
+
+    @app.delete("/api/user/<int:user_id>/manual-address")
+    def delete_manual_address(user_id):
+        return jsonify(typed_in.delete_address(user_id))
 
     @app.get("/api/session/<int:session_id>/swiggy-cart/preview")
     def swiggy_cart_preview(session_id):
-        return jsonify(swiggy_live.cart_preview(session_id))
+        # part=N: cart N of a split order over Swiggy's ₹1,000 limit (sequential, each approved)
+        return jsonify(swiggy_live.cart_preview(session_id, _part(request.args.get("part", 1))))
 
     @app.post("/api/session/<int:session_id>/swiggy-cart")
     def swiggy_fill_cart(session_id):
         try:
-            return jsonify(week_orders.check_single_cart(session_id, request.get_json().get("expected_fingerprint")))
+            body = request.get_json() or {}
+            return jsonify(week_orders.check_single_cart(session_id, body.get("expected_fingerprint"),
+                                                         _part(body.get("part", 1))))
         except swiggy_live.CartChanged as exc:
             return jsonify(error="cart_changed", message=str(exc)), 409
+
+    # Plan-ahead carts (R2): opt in per meal or per day; /cron/tick fills the cart when the
+    # meal's window opens and says "pay in Swiggy". Ziggy never pays (domain/autofill).
+    @app.get("/api/session/<int:session_id>/auto-cart")
+    def auto_cart_status(session_id):
+        from .domain import autofill
+        return jsonify(autofill.status(session_id))
+
+    @app.post("/api/session/<int:session_id>/auto-cart")
+    def auto_cart_set(session_id):
+        from .domain import autofill
+        body = request.get_json() or {}
+        if body.get("on") is False:
+            return jsonify(autofill.disarm(session_id))
+        try:
+            return jsonify(autofill.arm(session_id, body.get("expected_fingerprint")))
+        except swiggy_live.CartChanged as exc:
+            return jsonify(error="cart_changed", message=str(exc)), 409
+
+    @app.get("/api/plan/<int:plan_id>/auto-cart")
+    def auto_cart_plan(plan_id):
+        from .domain import autofill
+        return jsonify({"meals": autofill.for_plan(plan_id)})
+
+    @app.post("/api/plan/<int:plan_id>/auto-cart/day")
+    def auto_cart_day(plan_id):
+        from .domain import autofill
+        body = request.get_json() or {}
+        day = body.get("day")
+        if not isinstance(day, int) or isinstance(day, bool) or not 0 <= day <= 6:
+            raise ValueError("Choose a day of the week (0–6).")
+        if body.get("on") is False:
+            return jsonify(autofill.disarm_day(plan_id, day))
+        fps = body.get("fingerprints")
+        if not isinstance(fps, dict):
+            raise ValueError("Review each meal's Swiggy item first (fingerprints by meal).")
+        return jsonify(autofill.arm_day(plan_id, day, fps))
 
     @app.post("/api/user/<int:user_id>/swiggy/disconnect")
     def swiggy_disconnect(user_id):
@@ -940,6 +1216,33 @@ def create_app() -> Flask:
     def plan_try_different_undo(plan_id):
         return jsonify(everyday.try_different_undo(plan_id))
 
+    # ---- "Decide for me" (kernel/decide.py): proposals only when the person asks (W6) ---- #
+    @app.post("/api/user/<int:user_id>/decide/today")
+    def decide_today(user_id):
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.decide_today(user_id, body.get("mode"), body.get("money")))
+
+    @app.post("/api/plan/<int:plan_id>/decide")
+    def decide_week(plan_id):
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.decide_week(plan_id, body.get("mode"), apply=body.get("apply") is True))
+
+    # Favourites that don't fit the week's money: scenarios the person picks from
+    # (domain/buildout.py; founder decision 14 Oct 2026: never a silent cheaper swap or skip).
+    @app.get("/api/plan/<int:plan_id>/buildout")
+    def buildout_view(plan_id):
+        from .domain import buildout
+        return jsonify(buildout.scenarios(plan_id))
+
+    @app.post("/api/plan/<int:plan_id>/buildout")
+    def buildout_apply(plan_id):
+        from .domain import buildout
+        body = request.get_json(force=True, silent=True) or {}
+        sid = body.get("id")
+        if not isinstance(sid, str) or not sid or len(sid) > 120:
+            raise ValueError("Pick one of the build-out choices (its id)")
+        return jsonify(buildout.apply(plan_id, sid))
+
     # ---- household (domain/household.py) ---- #
     @app.post("/api/user/<int:user_id>/household")
     def household_create(user_id):
@@ -980,6 +1283,52 @@ def create_app() -> Flask:
     def week_recap(plan_id):
         return jsonify(service.week_recap(plan_id))
 
+    # ---- money: real spend, Sunday recap, budget from real spend (domain/spend, domain/fees) ---- #
+    def _week_arg():
+        week = request.args.get("week")
+        if week is not None:
+            try:
+                dt.date.fromisoformat(week)
+            except ValueError:
+                raise ValueError("week must be a date like 2026-11-02") from None
+        return week
+
+    @app.get("/api/user/<int:user_id>/recap/week")
+    def user_week_money_recap(user_id):
+        from .domain import spend
+        return jsonify(spend.week_recap(models.get_user(user_id), _week_arg()))
+
+    @app.get("/api/recap/week")
+    def week_money_recap():
+        from .domain import spend
+        uid = request.args.get("user_id", type=int)
+        if uid is None:
+            raise ValueError("Add ?user_id= for the profile whose week to recap")
+        user = models.get_user(uid)
+        if not user:
+            return _missing("user_id", uid)
+        return jsonify(spend.week_recap(user, _week_arg()))
+
+    @app.get("/api/user/<int:user_id>/budget/suggestion")
+    def budget_suggestion(user_id):
+        from .domain import spend
+        cut, target = request.args.get("cut", type=float), request.args.get("target", type=float)
+        for v in (cut, target):
+            if v is not None and (not math.isfinite(v) or v < 0):
+                raise ValueError("cut and target must be non-negative numbers")
+        if cut is not None and cut >= 1:
+            raise ValueError("cut is a fraction: 0.2 means 20% less")
+        user = models.get_user(user_id)
+        # Cut options only when asked (?ask=cut, or their own cut/target): no automatic target.
+        asked = (request.args.get("ask") or "").lower() in ("cut", "1", "true", "yes")
+        return jsonify({**spend.suggest(user, cut=cut, target=target, asked=asked),
+                        "low_budget": spend.low_budget_check(user, target)})
+
+    @app.get("/api/fees/defaults")
+    def fee_defaults():
+        from .domain import fees
+        return jsonify(fees.defaults())
+
     @app.get("/api/plan/<int:plan_id>/swaps")
     def swap_options(plan_id):
         return jsonify(service.swap_options(plan_id, request.args.get("token", "")))
@@ -1003,35 +1352,19 @@ def create_app() -> Flask:
     def credits():
         return send_from_directory(STATIC_DIR, "credits.html")
 
+    @app.get("/privacy")
+    def privacy_page():
+        return Response(privacy.page("privacy"), mimetype="text/html")
+
+    @app.get("/terms")
+    def terms_page():
+        return Response(privacy.page("terms"), mimetype="text/html")
+
     @app.get("/api/health")
     def health():
         return jsonify({"ok": True, "app": "smartplate", "version": "1.1.0"})
 
+    ops.init_app(app)                        # /cron/tick, /admin/metrics, analytics events (W9)
+    from . import today_api                 # v3 Today: budget, pools, picks, Decide for me
+    app.register_blueprint(today_api.bp)
     return app
-
-
-_FEATURE_MAP = {
-    "5.1": [
-        {"id": 1, "name": "Allergy & medical hard-exclusions", "where": "domain/allergens.py"},
-        {"id": 2, "name": "Calendar integration", "where": "integrations/calendar_sync.py"},
-        {"id": 3, "name": "Idempotency keys on order placement", "where": "integrations/swiggy_mcp.py"},
-        {"id": 4, "name": "Explainability log per decision", "where": "kernel/explainability.py"},
-        {"id": 5, "name": "Pause / snooze / cooked", "where": "kernel/scheduler.py"},
-    ],
-    "5.2": [
-        {"id": 6, "name": "Nutrition layer", "where": "domain/nutrition.py"},
-        {"id": 7, "name": "Household / group mode", "where": "domain/household.py"},
-        {"id": 8, "name": "Leftover & home-cooking awareness", "where": "domain/leftovers.py"},
-        {"id": 9, "name": "Festival / cultural calendar", "where": "domain/festivals.py"},
-        {"id": 10, "name": "Weather adaptation", "where": "domain/weather.py"},
-        {"id": 11, "name": "Surge prediction", "where": "domain/surge.py"},
-    ],
-    "5.3": [
-        {"id": 12, "name": "Reverse mode (Instamart cook days)", "where": "domain/reverse_mode.py"},
-        {"id": 13, "name": "Community plan templates", "where": "domain/community.py"},
-        {"id": 14, "name": "Receipt / expense surface", "where": "domain/receipts.py"},
-        {"id": 15, "name": "Health / longevity integration", "where": "domain/health.py"},
-        {"id": 16, "name": "Carbon / sustainability scoring", "where": "domain/carbon.py"},
-        {"id": 17, "name": "Cooking-mode coach", "where": "domain/cooking_coach.py"},
-    ],
-}

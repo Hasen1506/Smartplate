@@ -14,12 +14,15 @@ Budget is a HARD constraint; 'skip' is the always-feasible relief valve.
 import datetime as dt
 import hashlib
 import math
+import re
+import time
 
 import pulp
 
 from .. import clock, config, db
 from ..domain import (allergens, carbon, fatigue, festivals, flavour, health, household, learning, leftovers,
-                      meal_pools, models, nutrition, profile, reverse_mode, sentiment, surge, taste, weather)
+                      meal_pools, models, nutrition, profile, reverse_mode, sentiment, surge, taste, timing,
+                      weather, fees)
 from ..integrations import calendar_sync
 from . import explainability, scheduler
 
@@ -29,9 +32,39 @@ MAX_DELIVERY_CANDIDATES = 6     # per meal, at least; grown so a week can be fil
 DISCOVERY_PER_SESSION = 2
 DISCOVERY_PEN = 0.3          # a new place must beat a usual one by this much to win
 HOLIDAY_DINNER_SURGE = 1.1   # holidays: everyone orders dinner at once
+# Whole favourite places, not "3 dishes from each" (grill #5): with saved places, every
+# safe dish there is a candidate, up to this many per meal, taken round-robin across the
+# places so no saved place is crowded out (a bound for the solver, not a taste rule).
+MAX_FAVOURITE_CANDIDATES = 40
+# A meal with a pool: other dishes at the person's places stand in only when no pool
+# dish can be planned (too dear for the money left, or not safe for someone eating).
+# The penalty makes a pool dish win whenever one fits; skipping is ruled out first
+# (fewest skips is solved before anything else — docs/planner-objective.md).
+POOL_FALLBACK_PEN = 1.0
+# The first words of a meal whose own favourites didn't fit the money (domain/buildout.py
+# finds these meals by it and offers the person scenarios to choose from).
+BUILDOUT_PREFIX = "Your favourites for this meal don't fit"
+FALLBACK_PER_MEAL = 12
+# Diet mix (usab #11): Ravi (non-veg) got two non-veg meals in 14 because the planner only
+# offered each meal its cheapest few dishes, which were all veg. A non-veg eater's lunches
+# and dinners now always include the best non-veg dishes too; taste and money then choose.
+# (A share constraint or a per-dish "non-veg" weight made the week 10-50x slower to prove
+# in CBC — W6 measurement — and the candidate fix alone gives a mixed week.)
+# prefs.nonveg_share = 0 turns it off.
+NONVEG_SHARE = 0.5
 
 
 TIEBREAK = 1e-4    # above CBC's integrality/optimality tolerances, far below any real preference
+
+
+# When the same number of meals has to be skipped either way (a variety cap, a short menu),
+# skip the later ones: today's meal is the one the person acts on now, and later days can
+# still gain dishes on a re-plan. Bigger than the hash tie-break, far below any preference.
+SKIP_LATER = 3 * TIEBREAK
+
+
+def _skip_later(session: dict, cand: dict) -> float:
+    return SKIP_LATER * (6 - int(session["day"])) / 6 if cand.get("kind") == "skip" else 0.0
 
 
 def _tiebreak(session: dict, cand: dict) -> float:
@@ -78,6 +111,18 @@ def rhythm(user: dict) -> dict:
     return r if isinstance(r, dict) else {}
 
 
+def nonveg_share(user: dict) -> float:
+    """The least share of non-veg dishes a non-veg eater's delivered meals should have
+    (prefs.nonveg_share, else NONVEG_SHARE); 0 for anyone else."""
+    if user.get("diet") != "nonveg":
+        return 0.0
+    try:
+        v = float((user.get("prefs") or {}).get("nonveg_share", NONVEG_SHARE))
+    except (TypeError, ValueError):
+        return NONVEG_SHARE
+    return min(1.0, max(0.0, v))
+
+
 def _cook_cap(user: dict) -> int:
     """Cooks/week the user is willing to do — their stated rhythm, else the default.
     Stored in health_targets so no schema change is needed; absent ⇒ the default
@@ -104,27 +149,12 @@ def _cook_effort(user: dict, meal: str) -> float:
 
 
 def _rating_filter(user: dict, items: list[dict]) -> list[dict]:
-    """Apply the rating floor as a candidate filter.
-
-    Default ("hard"): the user's ★ is a hard gate (current behaviour, and what the
-    "never below your floor" promise rests on). Optional ("soft"): filter only at
-    the low hard safety floor and let the user's aspirational ★ become a soft
-    penalty (see `_rating_pen`) so a high ★ bends under budget instead of exploding
-    it (docs §4)."""
+    """Apply the rating floor as a hard candidate filter (what the "never below your
+    floor" promise rests on). The old "soft" floor experiment is archived in
+    smartplate/archive/experiments.py."""
     user_floor = float(user.get("rating_floor", 4.0))
-    if config.RATING_FLOOR_MODE == "soft":
-        floor = min(user_floor, config.HARD_SAFETY_FLOOR)
-        return [it for it in items if it["restaurant_rating"] >= floor]
     return [it for it in items
             if it["restaurant_rating"] >= user_floor and it["item_rating"] >= user_floor - 0.3]
-
-
-def _rating_pen(user: dict, item: dict) -> float:
-    """Soft cost for a pick below the user's aspirational ★ (soft mode only)."""
-    if config.RATING_FLOOR_MODE != "soft":
-        return 0.0
-    short = max(0.0, float(user.get("rating_floor", 4.0)) - item.get("restaurant_rating", 0))
-    return round(0.8 * short, 4)
 
 
 # --------------------------------------------------------------------------- #
@@ -178,10 +208,6 @@ def build_context(user: dict, plan: dict) -> dict:
         # how far calories may drift before the nutrition term bites — the mode's
         # "what's allowed to give" knob (config.MODE_META).
         "nutri_tol": config.mode_meta(plan["mode"])["nutri_tol"],
-        # variety nudge strength: the user's variety level as a fraction, or 0 when
-        # the nudge is off (default) so the planner behaves exactly as before.
-        "variety_frac": (fatigue.VARIETY_LEVELS.get(fatigue.variety_pref(user), 0.0)
-                         if config.VARIETY_NUDGE == "on" else 0.0),
     }
 
 
@@ -211,7 +237,9 @@ def _delivery_candidate(user, plan, session, item, ctx):
     item, learned_pen = learning.adjust(item, ctx.get("learned"))
     cond = _wx(ctx, day)["condition"]
     n = portions(user, session, ctx)
-    base_cost = item["price"] * n + item["delivery_fee"]          # one delivery fee, a portion each
+    # one delivery fee and one set of per-order fees (platform, packaging, GST), a portion each
+    extra = fees.charges(item, item["price"] * n)
+    base_cost = round(item["price"] * n + item["delivery_fee"] + extra, 2)
 
     # Surge + optional time-shift (calendar-aware) -------------------------- #
     if surge.applies(item):
@@ -245,9 +273,10 @@ def _delivery_candidate(user, plan, session, item, ctx):
     nutri = nutrition.penalty(user, meal, item, tol=ctx["nutri_tol"]) if known else 0.0
     hp = health.protein_penalty(user, item) if known else 0.0
     cpen = carbon.penalty(item)
-    # usual-first (§5.2): a familiar pick is the "usual"; a novel one pays a small soft
-    # premium when USUAL_FIRST is on, so the planner keeps the user's usuals unless a
-    # swap buys goal-fit. `is_usual` drives the kept/swapped diagnostic (always computed).
+    # usual-first (§5.2, the default since Oct 2026): a familiar pick is the "usual"; a
+    # novel one pays a small soft premium once the user has order history, so the planner
+    # keeps their usuals unless a swap buys goal-fit. `is_usual` drives the kept/swapped
+    # diagnostic (always computed).
     history = ctx["taste"]["history"] or None
     novel = fatigue.novelty(item, history)
     return {
@@ -256,13 +285,13 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "item_id": item["id"], "item_name": item["name"], "rating": item["restaurant_rating"],
         "cost": cost, "base_cost": base_cost, "surge_mult": round(surge_mult, 3), "portions": n,
         "delivery_fee": item["delivery_fee"], "delivery_fee_estimated": item.get("delivery_fee_estimated"),
-        "time_shift": time_shift, "flaky": item.get("flaky", 0), "rating_pen": _rating_pen(user, item),
+        "charges": extra, "bill_estimate": fees.breakdown(item, item["price"] * n),
+        "time_shift": time_shift, "flaky": item.get("flaky", 0),
         "is_usual": (not discovery) if ctx["taste"]["favourites"] else not fatigue.is_novel(item, history),
         "familiarity": round(1.0 - novel, 4), "discovery": discovery,
         "eta_min": item.get("eta_min", 35),
         "usual_pen": (DISCOVERY_PEN if discovery else 0.0)
-                     + (round(config.USUAL_FIRST_W * novel, 4) if config.USUAL_FIRST == "on" else 0.0),
-        "novelty_bonus": round(config.VARIETY_NUDGE_W * novel * ctx.get("variety_frac", 0.0), 4),
+                     + (round(config.USUAL_FIRST_W * novel, 4) if history else 0.0),
         "taste": taste_score, "sentiment": senti, "nutri": nutri, "health": hp, "carbon_pen": cpen,
         "learned_pen": learned_pen + (AVOID_PEN if item["id"] in ctx.get("avoid", ()) else 0.0),
         "carbon_kg": carbon.estimate(item), "weather_cond": cond,
@@ -273,6 +302,7 @@ def _delivery_candidate(user, plan, session, item, ctx):
         "nutrition_unknown": not known,
         "pooled": item["id"] in ((ctx.get("pools") or {}).get(meal) or {}).get("ids", ()),
         "tags": item.get("tags", []), "flavour_why": fwhy,
+        "nonveg": not item.get("veg", 1),
     }
 
 
@@ -298,13 +328,28 @@ def _cook_candidate(user, session, ctx, recipe=None):
     return cand
 
 
+# Snacks and drinks that aren't a lunch or dinner by themselves (usab #12: "Medu Vada"
+# ₹90 was planned as dinner twice). Fine at breakfast, and always fine when chosen.
+SNACK_WORDS = ("vada", "vadai", "bonda", "bajji", "bhaji", "samosa", "puff", "cutlet", "pakora", "pakoda",
+               "chai", "tea", "coffee", "juice", "lassi", "buttermilk", "milkshake", "sundal")
+_SNACK_RE = re.compile(r"\b(" + "|".join(SNACK_WORDS) + r")s?\b")
+_NOT_SNACK_RE = re.compile(r"\b(meals?|thali|combo|biryani|rice|curry|plate)\b")
+
+
+def is_snack(name: str) -> bool:
+    n = " ".join(str(name or "").lower().replace("-", " ").split())
+    return bool(_SNACK_RE.search(n)) and not _NOT_SNACK_RE.search(n)
+
+
 def meal_suitable(item: dict, meal: str, chosen: bool = False) -> bool:
     """Keep treats and sides (Swiggy menu sections like Breads or Beverages) visible in the
     catalogue without planning them as whole meals by themselves. A dish the person chose
-    themselves (`chosen`) may be a side: a curry for dinner is their call."""
+    themselves (`chosen`) may be a side: a curry for dinner is their call. A snack or a
+    drink (vada, samosa, chai) is never planned alone as a lunch or dinner."""
     return ("dessert" not in item.get("tags", []) and (chosen or "side" not in item.get("tags", []))
             and item.get("cuisine") != "dessert"
-            and not item.get("name", "").lower().endswith(" sweet"))
+            and not item.get("name", "").lower().endswith(" sweet")
+            and (chosen or meal == "breakfast" or not is_snack(item.get("name", ""))))
 
 
 # What a dish's menu section says about the meal, as a soft preference (smaller than a
@@ -325,6 +370,27 @@ def meal_fit_pen(items: list[dict], meal: str):
         return lambda it: (OFF_MEAL_PEN if has(it, "breakfast")
                            else 0.0 if (has(it, "main") or not plates) else NOT_A_PLATE_PEN)
     return lambda it: 0.0
+
+
+# Tiffin at dinner (founder decision 14 Oct 2026: allowed by default). The planner offers
+# a dinner the best few tiffin dishes (by the same meal-fit and cost order as every other
+# candidate) next to its plates, not all of them: the same dosa as a breakfast and as a
+# dinner candidate on every day ties the week MILP in knots (a ₹3,500 week with six places
+# went from 0.6 s proven optimal to the 10 s limit, unproven, with the same plan; capped at
+# 2 it is back to 0.4 s, proven, same plan). The person's own dinner list, the Change sheet
+# and Decide for me are not bounded.
+DINNER_TIFFIN_CANDIDATES = 2
+
+
+def _bound_dinner_tiffin(cands: list[dict]) -> list[dict]:
+    out, n = [], 0
+    for c in cands:
+        if c.get("kind") == "delivery" and timing.is_breakfast_only(c.get("item_name") or ""):
+            n += 1
+            if n > DINNER_TIFFIN_CANDIDATES:
+                continue
+        out.append(c)
+    return out
 
 
 def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[dict]:
@@ -367,15 +433,23 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     cands = []
     pool = (ctx.get("pools") or {}).get(meal)
     if not fasting and pool:
-        # The person's own pool for this meal: only its dishes, hard rules still apply.
+        # The person's own pool for this meal: its dishes first, hard rules still apply.
         # (Their pick, so the treat filter and rating floor don't second-guess it.)
-        safe = [it for it in allergens.safe_items(user, ctx["menu"])
-                if it["id"] in pool["ids"] and it["id"] not in ctx["taste"]["disliked"]]
+        safe_all = [it for it in allergens.safe_items(user, ctx["menu"]) if it["id"] not in ctx["taste"]["disliked"]]
+        safe = [it for it in safe_all if it["id"] in pool["ids"]]
         safe.sort(key=lambda it: it["price"] + it["delivery_fee"])
         cands = [_delivery_candidate(user, plan, session, it, ctx) for it in safe]
+        # Favourites first, never silently cheaper (founder decision 14 Oct 2026): other
+        # dishes at their places stand in only when no list dish is safe for someone
+        # eating (said so), or when the run was asked to (ctx["allow_cheaper"]: a
+        # Decide-for-me mode the person chose). A list that's too dear for the money left
+        # is not swapped: the meal is left for the person to build out (buildout.py).
+        if not safe or ctx.get("allow_cheaper"):
+            cands += _pool_fallback(user, plan, session, ctx, pool, safe_all, unsafe_pool=not safe)
     elif not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
-        safe = [it for it in safe if meal_suitable(it, meal) and it.get("nutrition_known", 1) != 0]
+        safe = [it for it in safe if meal_suitable(it, meal) and it.get("nutrition_known", 1) != 0
+                and timing.slot_suitability(it, meal)]          # dosa at dinner is fine; snacks alone are not (meal_suitable)
         fit = meal_fit_pen(safe, meal)
         safe = _rating_filter(user, safe)                          # rating floor (hard, or soft+safety)
         safe = [it for it in safe if it["id"] not in ctx["taste"]["disliked"]]   # "not again" is a lock
@@ -387,7 +461,7 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
 
         def best(pool, n):
             picked = []
-            for it in pool[: n * 2]:
+            for it in (pool[: n * 2] if n < MAX_FAVOURITE_CANDIDATES else _round_robin(pool, n)):
                 c = _delivery_candidate(user, plan, session, it, ctx)
                 c["meal_pen"] = fit(it)
                 picked.append(c)
@@ -396,9 +470,22 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
         slots = ctx.get("delivery_slots", MAX_DELIVERY_CANDIDATES)
         # few usual dishes for many meals: offer enough new ones to fill the week
         n_fresh = DISCOVERY_PER_SESSION if ctx.get("max_repeat", MAX_ITEM_REPEAT) * len(usual) >= ctx.get("n_active", 0) else slots
-        cands = best(usual, slots) + best(fresh, n_fresh)
+        # With saved places, whole places are candidates (grill #5), not a short list.
+        n_usual = max(slots, MAX_FAVOURITE_CANDIDATES) if favs else slots
+        cands = best(usual, n_usual) + best(fresh, n_fresh)
+        if nonveg_share(user) > 0 and meal != "breakfast":
+            # a non-veg eater always sees non-veg dishes, not only the cheapest (veg) few
+            have = {c["item_id"] for c in cands}
+            cands += [c for c in best([it for it in usual if not it.get("veg", 1)], slots)
+                      if c["item_id"] not in have]
+        if meal == "dinner":
+            cands = _bound_dinner_tiffin(cands)
 
-    cook = _cook_candidate(user, session, ctx)
+    # A meal the user said they order (rhythm "order") is never turned into a cook day:
+    # the flexible "cook 1–2× a week" days only go to meals they didn't say they order.
+    # Tight Week (asked for explicitly) still offers a labelled home-cook instead of a skip.
+    ordered = rhythm(user).get(meal) == "order" and not ctx.get("tight")
+    cook = None if ordered else _cook_candidate(user, session, ctx)
     if cook:
         cands.append(cook)
 
@@ -407,14 +494,15 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
         # No restaurant dishes at all (no live Swiggy menus yet): say so, not "budget".
         skip_reason = "No real restaurant dishes yet — connect Swiggy and pick an address."
     elif pool and not any(c["kind"] == "delivery" for c in cands):
-        skip_reason = (f"Nothing in your {meal} pool is on Swiggy's menu right now, or safe for your rules. "
-                       f"Add another dish to your {meal} pool.")
+        skip_reason = _empty_pool_reason(user, ctx, pool, meal)
     elif pool:
-        skip_reason = f"Your {meal} pool didn't fit the budget this time — skipped."
+        skip_reason = f"{BUILDOUT_PREFIX} the money left — choose how to build out the week."
     if fasting:
         skip_reason = "Inside your fasting window — kept clear (cook/skip only)."
     skip = _skip(forced=False, reason=skip_reason)
     skip["fasting"] = bool(fasting)
+    skip["pooled"] = bool(pool) and not fasting and any(c.get("kind") == "delivery" and not c.get("pool_fallback")
+                                                        for c in cands)
     # An empty meal is the whole meal's nutrition missing: charge it the same banded
     # shortfall a dish with nothing in it would pay (it was a free 0 before).
     # (Tight Week; the other modes keep their flat skip penalty — docs/IDEAS.md.)
@@ -422,6 +510,71 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
                      if ctx.get("tight") and not fasting else 0.0)
     cands.append(skip)
     return cands
+
+
+def _round_robin(items: list[dict], n: int) -> list[dict]:
+    """Up to n items, one from each restaurant in turn (each list keeps its order)."""
+    by_place: dict = {}
+    for it in items:
+        by_place.setdefault(it["restaurant_id"], []).append(it)
+    out, queues = [], list(by_place.values())
+    while queues and len(out) < n:
+        for q in list(queues):
+            if q:
+                out.append(q.pop(0))
+                if len(out) >= n:
+                    break
+            if not q:
+                queues.remove(q)
+    return out
+
+
+def _pool_fallback(user, plan, session, ctx, pool, safe_all, unsafe_pool: bool) -> list[dict]:
+    """Other safe dishes at the person's own places for a pooled meal (grill #5 / usab
+    #10 / #16): a cheaper dish from a place they use beats a skip, and a pool dish that
+    isn't safe for someone eating doesn't empty the meal. Pool dishes win when they fit."""
+    meal = session["meal"]
+    favs = set(ctx["taste"]["favourites"])
+    pooled_places = {it["restaurant_id"] for it in ctx["menu"] if it["id"] in pool["ids"]}
+    places = favs | pooled_places
+    if not places:
+        return []
+    from ..domain import timing
+    extra = [it for it in safe_all if it["id"] not in pool["ids"] and it["restaurant_id"] in places
+             and meal_suitable(it, meal) and timing.slot_suitability(it, meal)]
+    extra = _rating_filter(user, extra)
+    fit = meal_fit_pen(extra, meal)
+    extra.sort(key=lambda it: (fit(it), it["price"] + it["delivery_fee"], it["id"]))
+    blocked = _pool_blocker(user, ctx, pool) if unsafe_pool else None
+    out = []
+    for it in _round_robin(extra, FALLBACK_PER_MEAL):
+        c = _delivery_candidate(user, plan, session, it, ctx)
+        c["meal_pen"] = fit(it)
+        c["usual_pen"] = c.get("usual_pen", 0.0) + POOL_FALLBACK_PEN
+        c["pool_fallback"] = True
+        c["pool_blocked"] = blocked
+        out.append(c)
+    return out
+
+
+def _pool_blocker(user, ctx, pool) -> str | None:
+    """Why the pool's dishes can't be planned, in the words of the hard rule (it names the
+    household member it protects)."""
+    for it in ctx["menu"]:
+        if it["id"] in pool["ids"]:
+            why = allergens.violates(user, it)
+            if why:
+                return why
+    return None
+
+
+def _empty_pool_reason(user, ctx, pool, meal) -> str:
+    blocked = _pool_blocker(user, ctx, pool)
+    if blocked:
+        return (f"Your {meal} dishes aren't safe for everyone eating ({blocked}), and nothing else at your "
+                f"places is. Add a {meal} dish that suits everyone.")
+    return (f"Nothing in your {meal} pool is on Swiggy's menu right now, or safe for your rules. "
+            f"Add another dish to your {meal} pool.")
 
 
 def _skip(forced: bool, reason: str) -> dict:
@@ -455,17 +608,23 @@ def _objective(cand, w, ref_cost, carbon_pref, skip_penalty):
         + w["carbon"] * cand["carbon_pen"] * carbon_pref
         + w["surge"] * surge_premium
         + effort
-        + cand.get("rating_pen", 0.0)
         + cand.get("learned_pen", 0.0)          # rating reasons: late / spicy / pricey (+), great (−)
         + cand.get("meal_pen", 0.0)             # a tiffin dish at lunch, a dal at breakfast
-        + cand.get("usual_pen", 0.0)             # ↑ objective for novel ⇒ usual picks preferred (when usual-first on)
-        - cand.get("novelty_bonus", 0.0)         # ↓ objective ⇒ novel picks preferred (when nudge on)
+        + cand.get("usual_pen", 0.0)             # ↑ objective for novel ⇒ usual picks preferred (usual-first)
         + cand["weather_bias"] + cand["festival_bias"],
         5,
     )
 
 
-SKIP_PENALTY = {"comfort": 5.0, "balanced": 3.0, "survival": 1.6}
+# Rule 4 (no silent skips, docs/planner-objective.md) in Comfort and Balanced: a skip the
+# money could avoid costs LEX_SKIP_PEN, far above what a week's preference terms can add up
+# to (each meal's cost/taste/nutrition swing is a few units), so the solver fills every
+# meal the money covers — one solve instead of a "fewest skips" stage, which made the
+# follow-up solve 10-50x slower to prove (W6 measurement). It was 5 / 3, so a ₹1,500 week
+# skipped lunches with money left. Tight Week keeps its staged solve (skips, then extra cooks).
+LEX_SKIP_PEN = 20.0
+SKIP_PENALTY = {"comfort": LEX_SKIP_PEN, "balanced": LEX_SKIP_PEN, "survival": 1.6}
+SKIP_STAGE = False             # True: also solve "fewest skips" first in every mode (exact, slower)
 # Tight Week's budget home-cook: the effort on top of a regular cook day. Large enough
 # that a delivery the money covers is preferred, smaller than any skip.
 BUDGET_COOK_PENALTY = 0.6
@@ -592,9 +751,13 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
             v = pulp.LpVariable(f"x_{s['id']}_{i}", cat="Binary")
             x[(s["id"], i)] = v
             choice_vars.append(v)
-            keep = config.STABILITY_W if previous.get(s["id"]) == _choice_key(c) else 0.0
+            # A fallback dish (not in the meal's own list) gets no stability bonus: the list is the
+            # person's word, so adding a dish to it changes today's meal too (W6: "pool dishes win
+            # when they fit"; found at integration, browser_pools).
+            keep = (config.STABILITY_W if previous.get(s["id"]) == _choice_key(c) and not c.get("pool_fallback")
+                    else 0.0)
             obj_terms.append((_objective(c, w, ref_cost, user["carbon_pref"], skip_penalty) - keep
-                              + _tiebreak(s, c)) * v)
+                              + _tiebreak(s, c) + _skip_later(s, c)) * v)
             budget_terms.append(c["cost"] * v)
             day_terms.setdefault(s["day"], []).append(c["cost"] * v)
             if c["kind"] == "cook" and c.get("recipe_key") and not c.get("routine"):
@@ -610,8 +773,13 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
 
     # Protein evenness (day-level): penalise backloading protein into one meal.
     # Each active meal's even target is daily_protein / (meals planned that day); a
-    # meal under it contributes a normalised shortfall (linearised via a slack var).
-    # Unlike the per-candidate protein term this adapts to how many meals a day has.
+    # meal under it contributes a normalised shortfall. Unlike the per-candidate protein
+    # term this adapts to how many meals a day has.
+    # Exactly one option is chosen per meal, so a meal's shortfall is its chosen option's
+    # own: sum_i x_i * max(0, tgt - protein_i). That is the same number for every whole
+    # plan as a slack >= tgt - sum_i protein_i * x_i, but the relaxation can't average half
+    # a dosa with half a chicken plate into "no shortfall" (the exact hull of the term, so
+    # the solver's bound is tighter — docs/planner-objective.md, "Solver formulation").
     if config.PROTEIN_EVEN_W > 0 and active:
         daily_protein = nutrition.targets_for(user)["protein_g"]
         by_day = {}
@@ -620,12 +788,10 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
         for day, day_sessions in by_day.items():
             tgt = daily_protein / max(1, len(day_sessions))
             for s in day_sessions:
-                cands = cand_map[s["id"]]
-                prot = pulp.lpSum((cands[i].get("nutrition") or {}).get("protein_g", 0) * x[(s["id"], i)]
-                                  for i in range(len(cands)))
-                short = pulp.LpVariable(f"pshort_{s['id']}", lowBound=0)
-                prob += short >= tgt - prot
-                obj_terms.append(config.PROTEIN_EVEN_W * short / max(tgt, 1.0))
+                for i, c in enumerate(cand_map[s["id"]]):
+                    gap = max(0.0, tgt - (c.get("nutrition") or {}).get("protein_g", 0))
+                    if gap > 0:
+                        obj_terms.append(config.PROTEIN_EVEN_W * gap / max(tgt, 1.0) * x[(s["id"], i)])
 
     prob += pulp.lpSum(obj_terms)
     committed = committed_spend(plan_id)
@@ -695,6 +861,7 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     # A small pool is the person saying "this is what I eat": its dishes may repeat as
     # often as the pool's meals need (one dish in a breakfast pool → every breakfast).
     item_cap = {}
+    item_count_vars = []
     for meal_name, pool in (ctx.get("pools") or {}).items():
         n_meal = sum(1 for s in active if s["meal"] == meal_name)
         if pool["ids"] and n_meal:
@@ -704,7 +871,16 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     for item_id, vlist in item_vars.items():                    # variety: cap repeats per dish —
         pinned_n = sum(1 for c in pinned.values() if c.get("item_id") == item_id)   # pins count too
         cap_n = item_cap.get(item_id, repeat)
-        if len(vlist) + pinned_n > cap_n:
+        if len(vlist) > 1:
+            # How many times the dish is planned, as a whole number the solver can branch on.
+            # The same dish on any of the week's days is worth almost the same, so branching
+            # on one meal's choice only moves it to another day; "this dish 0 / 1 / 2 times"
+            # settles every day at once (W6 x86 regression: 8,592 nodes -> single digits).
+            n_item = pulp.LpVariable(f"n_{len(item_count_vars)}", lowBound=0,
+                                     upBound=max(0, min(len(vlist), cap_n - pinned_n)), cat="Integer")
+            item_count_vars.append(n_item)
+            prob += pulp.lpSum(vlist) == n_item
+        elif len(vlist) + pinned_n > cap_n:
             prob += pulp.lpSum(vlist) <= max(0, cap_n - pinned_n)
     for (item_id, day), vlist in item_day_vars.items():
         pinned_same = sum(1 for sid, c in pinned.items() if c.get("item_id") == item_id
@@ -715,9 +891,14 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     # CBC minutes; a 0.1% objective gap returns the same plan in well under a second.
     # The node cap is the real work limit (the same on a busy server as on an idle one,
     # so a plan never depends on load); the time limit only guards a pathological solve.
+    # CBC's preprocessing substitutes the dish counts back out (they are sums of binaries),
+    # so it is off: with the counts and the exact protein term the root bound is within a
+    # hair of the optimum, and the ₹3,500 six-place week proves in a handful of nodes on
+    # both the x86 and the ARM CBC builds (it was 8,592 nodes / ~7 s on GitHub's x86 runner).
     solver = pulp.PULP_CBC_CMD(msg=False, gapRel=config.SOLVER_GAP, timeLimit=config.SOLVER_TIME_LIMIT_S,
-                               maxNodes=config.SOLVER_MAX_NODES)
-    if ctx["tight"] and skip_vars:
+                               maxNodes=config.SOLVER_MAX_NODES, options=["preprocess off"])
+    stages = []                    # (stage, seconds, proven) — diagnostics (LAST_SOLVE["stages"])
+    if skip_vars and (ctx["tight"] or SKIP_STAGE):
         # Tight Week never skips a meal the money left could still cover. Lexicographic:
         # first the fewest skips the budget, the daily cap and the variety rules allow,
         # then the fewest extra home-cooks (they only stand in for a skip, never for a
@@ -730,15 +911,20 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
             if not group:
                 continue
             prob.setObjective(pulp.lpSum(group))
+            t0 = time.perf_counter()
             prob.solve(solver)
+            stages.append((name, round(time.perf_counter() - t0, 3), prob.sol_status == pulp.LpSolutionOptimal))
             if prob.sol_status in (pulp.LpSolutionOptimal, pulp.LpSolutionIntegerFeasible):
                 prob += pulp.lpSum(group) <= sum(round(v.value() or 0) for v in group), name
         prob.setObjective(objective)
+    t0 = time.perf_counter()
     prob.solve(solver)
-    LAST_SOLVE.update(proven_optimal=prob.sol_status == pulp.LpSolutionOptimal, status=pulp.LpStatus[prob.status])
+    stages.append(("week", round(time.perf_counter() - t0, 3), prob.sol_status == pulp.LpSolutionOptimal))
+    LAST_SOLVE.update(proven_optimal=prob.sol_status == pulp.LpSolutionOptimal, status=pulp.LpStatus[prob.status],
+                      stages=stages)
 
+    _label_budget_skips(active, cand_map, x, room, dcap, fixed_by_day, rename=ctx["tight"])
     if ctx["tight"]:
-        _label_budget_skips(active, cand_map, x, room, dcap, fixed_by_day)
         if extra_cooks is not None and round(extra_cooks.value() or 0) > 0:
             _label_extra_cooks(active, cand_map, x, round(extra_cooks.value()))
     decisions = _persist_decisions(plan, user, sessions, active, cand_map, x, ctx, pinned, at)
@@ -751,9 +937,11 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     }
 
 
-def _label_budget_skips(active, cand_map, x, room, dcap, fixed_by_day):
+def _label_budget_skips(active, cand_map, x, room, dcap, fixed_by_day, rename=True):
     """Say plainly why a meal the solver left empty is empty: how much money is left and
-    what the cheapest safe option for that meal costs (or that the day's cap is used)."""
+    what the cheapest safe option for that meal costs (or that the day's cap is used).
+    A meal with no option at all keeps the reason it was built with (nothing safe for
+    someone eating, an empty pool) — that is not the budget's doing."""
     chosen, spend, day_spend = {}, 0.0, {}
     for s in active:
         cands = cand_map[s["id"]]
@@ -768,6 +956,8 @@ def _label_budget_skips(active, cand_map, x, room, dcap, fixed_by_day):
             continue
         options = [o["cost"] for o in cand_map[s["id"]] if o["kind"] != "skip"]
         if not options:
+            if not rename:
+                continue
             reason = "Budget skip: no safe option for this meal within your rating floor."
         else:
             cheapest = min(options)
@@ -782,7 +972,13 @@ def _label_budget_skips(active, cand_map, x, room, dcap, fixed_by_day):
             else:
                 reason = ("Budget skip: the dishes that fit the money left are already planned "
                           "as often as your variety setting allows.")
-        cand_map[s["id"]] = [{**o, "item_name": "Budget skip", "skip_reason": reason} if o is c else o
+        if c.get("pooled") and options and min(options) > left:
+            # their favourites don't fit: say so and leave the choice to them (buildout.py)
+            reason = (f"{BUILDOUT_PREFIX} ₹{left:.0f} of this week's money left (the cheapest of them is "
+                      f"₹{min(options):.0f}). Ziggy didn't swap in something cheaper: choose how to build "
+                      "out the week.")
+        label = {"item_name": "Budget skip"} if rename else {}
+        cand_map[s["id"]] = [{**o, **label, "skip_reason": reason} if o is c else o
                              for o in cand_map[s["id"]]]
 
 
@@ -890,11 +1086,15 @@ def _decision_context(user, session, chosen, ctx):
         "carbon_band": carbon.band(chosen.get("carbon_kg", 0)) if chosen["kind"] == "delivery" else None,
         "pinned": chosen.get("pinned", False),
         "carted": chosen.get("carted", False),
-        "fee": ({"amount": chosen["delivery_fee"], "estimated": chosen["delivery_fee_estimated"]}
+        "fee": ({"amount": chosen["delivery_fee"], "estimated": chosen["delivery_fee_estimated"],
+                 "bill": chosen.get("bill_estimate")}
                 if chosen.get("delivery_fee_estimated") is not None else None),
         "discovery": chosen.get("discovery", False),
         "liked": chosen.get("item_id") in ctx["taste"]["liked"],
         "flavour": chosen.get("flavour_why") or [],
+        "pool_fallback": chosen.get("pool_fallback", False),
+        "pool_blocked": chosen.get("pool_blocked"),
+        "meal": session["meal"],
     }
 
 
@@ -916,14 +1116,16 @@ def _write_decision(plan, user, session, chosen, ctx):
             "INSERT INTO decisions(session_id, plan_id, chosen_kind, restaurant_id, item_id, "
             "item_name, cost, surge_mult, substituted, reasons, nutrition, carbon_kg, "
             "recipe_key, time_shift, restaurant_name, rating, idempotency_key, created_ts, "
-            "delivery_fee, fee_estimated) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "delivery_fee, fee_estimated, charges, charges_estimated) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (row["session_id"], row["plan_id"], row["chosen_kind"], row["restaurant_id"],
              row["item_id"], row["item_name"], row["cost"], row["surge_mult"], 0,
              row["reasons"], row["nutrition"], row["carbon_kg"],
              chosen.get("recipe_key"), db.jd(chosen["time_shift"]) if chosen.get("time_shift") else None,
              chosen.get("restaurant_name"), chosen.get("rating", 0), None, now().isoformat(timespec="seconds"),
-             fee["amount"] if fee else None, (1 if fee["estimated"] else 0) if fee else None),
+             fee["amount"] if fee else None, (1 if fee["estimated"] else 0) if fee else None,
+             chosen.get("charges") if fee and fee.get("bill") else None,
+             (1 if fee["bill"]["basis"]["fees"] != "bill" else 0) if fee and fee.get("bill") else None),
         )
         row["id"] = cur.lastrowid
     return {**row, "day": session["day"], "meal": session["meal"],

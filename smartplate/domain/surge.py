@@ -1,12 +1,25 @@
-"""§5.2.11 — Surge prediction (not just reaction) + time-shift savings (§3.3).
+"""§5.2.11 — Surge prediction + time-shift savings (§3.3). ARCHIVED BEHIND A FLAG, OFF.
 
-A small predictive model returns a price multiplier for a (day, meal, weather)
-slot from seeded history, with sane fallbacks. The planner uses it two ways:
-  1. as a cost multiplier on delivery candidates, and
-  2. to offer a cheaper OFF-PEAK time-shift when the calendar allows it.
+Swiggy publishes no surge data and Ziggy has no logged bills by time slot, so every
+multiplier here is the sample catalogue's seeded demo signal, not a measured price
+(grill critiques 6 and 52). With the model off (the default) nothing is multiplied,
+nothing is "time-shifted to save ₹X", the solver objective has no surge term in
+effect (surge_mult is always 1.0), and no copy claims surge savings.
+
+Kept, not deleted, for review: set SMARTPLATE_SURGE_MODEL=on to bring the demo model
+back on the labelled sample catalogue (never on live Swiggy dishes). Re-enable for real
+only once bills logged by time slot show a real peak premium.
+
+When on, a small model returns a price multiplier for a (day, meal, weather) slot from
+seeded history, used 1. as a cost multiplier on sample delivery candidates and 2. to
+offer an off-peak time-shift when the calendar allows it.
 """
+import os
+
 from .. import db
 from .models import MEAL_WINDOWS
+
+ENABLED = os.environ.get("SMARTPLATE_SURGE_MODEL", "off") == "on"
 
 # Fallback multipliers when no history row exists.
 _BASE = {"breakfast": 1.0, "lunch": 1.15, "dinner": 1.25}
@@ -16,8 +29,9 @@ _WEATHER_BUMP = {"clear": 0.0, "hot": 0.05, "rain": 0.30, "storm": 0.45}
 def applies(item: dict) -> bool:
     """The surge model is the sample catalogue's demo signal. Swiggy publishes no surge
     data, so a live Swiggy dish is never priced above what Swiggy lists (no invented
-    multiplier, no "order earlier to save ₹X" claim)."""
-    return item.get("source") != "live"
+    multiplier, no "order earlier to save ₹X" claim). Off entirely unless the archived
+    model is switched on (ENABLED)."""
+    return ENABLED and item.get("source") != "live"
 
 
 def predict(city: str, day: int, meal: str, condition: str) -> float:

@@ -4,13 +4,21 @@ from . import clock, db
 USER_TABLES = ("calendar_events", "leftovers", "receipts", "intake_log", "favourites", "ratings",
                "logins", "devices", "push_subscriptions", "swiggy_connections", "swiggy_pending",
                "swiggy_menus", "swiggy_favourites", "swiggy_order_attempts", "swiggy_checkout_quotes",
-               "swiggy_cart_intents", "swiggy_delivery_fees", "swiggy_photos", "swiggy_issues", "swiggy_meal_pools")
+               "swiggy_cart_intents", "swiggy_delivery_fees", "swiggy_photos", "swiggy_issues", "swiggy_meal_pools",
+               "swiggy_bill_fees", "spend_ledger", "spend_sync", "events",
+               "today_settings", "today_budget", "today_picks", "pool_typed", "pool_meta",   # v3 Today (today.py)
+               "today_cart_bills", "auto_cart",                     # real cart bills, auto-fill opt-ins (R2)
+               "swiggy_history_suggestions", "typed_favourites", "manual_addresses")       # W7
 # A stable row order for the export (Postgres has no implicit insertion order).
 EXPORT_ORDER = {"favourites": "restaurant_id", "logins": "user_id", "swiggy_connections": "user_id",
                 "swiggy_pending": "created_ts, state", "swiggy_menus": "restaurant",
                 "swiggy_favourites": "address_id, restaurant_id", "swiggy_order_attempts": "created_ts, fingerprint",
                 "swiggy_checkout_quotes": "created_ts, token", "swiggy_cart_intents": "user_id",
-                "swiggy_delivery_fees": "address_id, provider_id", "swiggy_photos": "restaurant_id, dish", "swiggy_issues": "ts", "swiggy_meal_pools": "address_id, meal, added_ts, item_id", "order_queue": "session_id",
+                "swiggy_delivery_fees": "address_id, provider_id", "swiggy_photos": "restaurant_id, dish", "swiggy_issues": "ts", "swiggy_meal_pools": "address_id, meal, added_ts, item_id", "swiggy_history_suggestions": "restaurant_id, item_name", "manual_addresses": "user_id", "order_queue": "session_id",
+                "swiggy_bill_fees": "address_id, provider_id, seen_ts", "spend_ledger": "iso_date, ref", "spend_sync": "user_id",
+                "today_settings": "user_id", "today_budget": "day", "today_picks": "day, meal",
+                "pool_meta": "meal, ref",
+                "today_cart_bills": "day, restaurant_id, item_id, qty", "auto_cart": "session_id",
                 "grocery_have": "plan_id, item", "grocery_swaps": "plan_id, token",
                 "push_sent": "subscription_id, session_id, at"}
 PRIVATE_COLUMNS = frozenset({"access_hash", "pw_hash", "token_hash", "access_token", "verifier",
@@ -43,8 +51,18 @@ def _household_people(cur, hid, user_id, columns):
     return out
 
 
+def ensure_tables():
+    """Tables created on first use (v3 Today) must exist before export/delete read them."""
+    from . import privacy, today
+    from .domain import autofill
+    today.init_schema()
+    autofill.init_schema()
+    privacy.init_schema()
+
+
 def export(user_id):
     """Return all saved profile/meal records, without authentication material."""
+    ensure_tables()
     with db.cursor() as cur:
         cur.execute("BEGIN")
         user = _private(cur, user_id)
@@ -68,6 +86,9 @@ def export(user_id):
         data["household"] = _clean(cur.execute("SELECT * FROM households WHERE id=?", (hid,)).fetchall()) if hid else []
         data["household_people"] = _clean(_household_people(cur, hid, user_id, "id, name, diet, allergens, medical, prefs"))
         data["community_templates"] = _clean(cur.execute("SELECT * FROM community_templates WHERE author_user_id=? ORDER BY id", (user_id,)).fetchall())
+        # Consent given/withdrawn (privacy.py). Exported, but not purged by delete(): the erasure
+        # proof is kept one year (Rule 8(3)) and dropped by privacy.purge_expired().
+        data["consent_log"] = _clean(cur.execute("SELECT * FROM consent_log WHERE user_id=? ORDER BY ts, id", (user_id,)).fetchall())
     return {"format_version": 1, "exported_at": clock.now().isoformat(), "data": data,
             "notes": ["Authentication secrets are excluded.", "Demo weekly plans and Swiggy order attempts are separate records.",
                       "This exports local records; Swiggy maintains its own account and order history."]}
@@ -76,6 +97,7 @@ def export(user_id):
 def delete(user_id, confirmation):
     if confirmation != "DELETE":
         raise ValueError("Type DELETE to confirm permanent removal of this Ziggy profile.")
+    ensure_tables()
     with db.cursor() as cur:
         cur.execute("BEGIN IMMEDIATE")
         _private(cur, user_id)

@@ -31,7 +31,7 @@ def app_client(gt):
 def _profile(c, **over):
     body = {"name": "Kavya", "diet": "nonveg", "weekly_budget": 3500, "meals": ["lunch", "dinner"],
             "cook": "sometimes", **over}
-    r = c.post("/api/profiles", json=body)
+    r = c.post("/api/profiles", json={**body, "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201, r.get_json()
     v = r.get_json()
     return v, {"X-SmartPlate-Key": v["access_key"]}
@@ -199,6 +199,9 @@ def test_ticking_who_eats_a_meal_changes_the_split_and_is_validated(app_client):
                  if m == "lunch" and cl["status"] == "active" and cl["kind"] in ("delivery", "cook"))
     assert lunch["eaters"] == [kavya]                                          # Dev doesn't usually eat lunch
     before = {x["member"]: x["share"] for x in v["household"]["split"]}
+    dev_meals = lambda v: {cl["session_id"]: cl["cost"] / len(cl["eaters"]) for d in v["grid"]   # noqa: E731
+                           for cl in d["meals"].values() if dev in (cl.get("eaters") or [])}
+    dev_before = dev_meals(v)
     sid = lunch["session_id"]
     for bad in ([], [999], [True], "all", [kavya, "x"]):
         assert c.post(f"/api/session/{sid}/eaters", json={"eaters": bad}, headers=h).status_code == 400
@@ -206,7 +209,10 @@ def test_ticking_who_eats_a_meal_changes_the_split_and_is_validated(app_client):
     cell = next(cl for d in v["grid"] for cl in d["meals"].values() if cl["session_id"] == sid)
     assert cell["eaters"] == [kavya, dev]
     after = {x["member"]: x["share"] for x in v["household"]["split"]}
-    assert after["Dev"] == pytest.approx(before["Dev"] + cell["cost"] / 2, abs=0.02)
+    # Dev now pays half this lunch; the re-price may also re-balance another of Dev's meals
+    # (W2: a different dinner once tiffin dishes stopped being dinners), counted the same way.
+    rebalanced = sum(c - dev_before[s_] for s_, c in dev_meals(v).items() if s_ != sid and s_ in dev_before)
+    assert after["Dev"] == pytest.approx(before["Dev"] + cell["cost"] / 2 + rebalanced, abs=0.02)
     v = c.post(f"/api/session/{sid}/eaters", json={"eaters": None}, headers=h).get_json()   # back to the usual
     assert next(cl for d in v["grid"] for cl in d["meals"].values() if cl["session_id"] == sid)["eaters"] == [kavya]
     # removing a person forgets their ticks

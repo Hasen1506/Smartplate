@@ -24,8 +24,8 @@ pw = pytest.importorskip("playwright.sync_api")
 def home(gt):
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={"name": "Kavya", "diet": "nonveg", "weekly_budget": 3500,
-                                                 "meals": ["lunch", "dinner"], "cook": "never"}).get_json()
+    created = client.post("/api/profiles", json={**{"name": "Kavya", "diet": "nonveg", "weekly_budget": 3500,
+                                                 "meals": ["lunch", "dinner"], "cook": "never"}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     server = make_server("127.0.0.1", 0, app, threaded=True)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -56,7 +56,8 @@ def test_browser_household_split_grocery_and_recap(home, viewport):
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         bag = {str(k["uid"]): {"key": k["key"], "name": "Kavya"}}
-        page.add_init_script(f"""
+        page.add_init_script(f"""localStorage.setItem('ziggy.ui', 'classic');  /* classic Today, kept behind the v3 flag (docs/IA.md) */
+
             if (!localStorage.getItem('smartplate.keys')) {{
               localStorage.setItem('smartplate.keys', {json.dumps(json.dumps(bag))});
               localStorage.setItem('smartplate.user', {json.dumps(str(k['uid']))});

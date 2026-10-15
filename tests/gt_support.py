@@ -103,29 +103,66 @@ def plan_snapshot(view: dict) -> dict:
 CENT = 0.011            # costs are stored to the paisa; allow one paisa of float noise per check
 
 
+# Independent word lists for the oracle (deliberately short and written separately from
+# smartplate/domain/food_lexicon.py, so a lexicon regression can't make the oracle agree with
+# itself). Each word is unambiguous; the app's lexicon must catch at least these.
+ORACLE_NONVEG = r"chicken|mutton|prawns?|fish|crab|egg|eggs|keema|kheema|kozhi|nattukozhi|eral|nandu|meen|aatu|gosht|" \
+                r"murgh|machli|jhinga|chemmeen|muttai|anda"
+ORACLE_ALLERGEN = {"peanut": r"peanuts?|groundnut|verkadalai|moongphali|satay",
+                   "tree_nut": r"cashews?|kaju|badam|almonds?|pista|pistachios?|akhrot|walnuts?",
+                   "gluten": r"naan|parotta|roti|chapati|maida|rava|sooji|wheat",
+                   "dairy": r"paneer|ghee|curd|thayir|mor|milk|rasmalai|khoa|khoya",
+                   "fish": r"fish|meen|machli", "shellfish": r"prawns?|eral|nandu|crab|jhinga|chemmeen"}
+ORACLE_SWEET = r"kesari|halwa|payasam|kheer|jamun|rasmalai|jalebi|laddu|ladoo|barfi|burfi|sakkarai|dessert|sweet"
+
+
+def _says(pattern: str, name: str) -> bool:
+    import re
+    name = re.sub(r"egg ?less|egg ?plant|muttai ?kose|sweet ?(corn|potato|lime)|sweet (and|&|n) sour|"
+                  r"(peanut|almond|cashew) butter|(coconut|almond|soy|soya|oat|cashew|rice|peanut) (milk|cream|curd)",
+                  " ", name.lower())
+    return bool(re.search(rf"(?<![a-z])({pattern})(?![a-z])", name))
+
+
 def item_violation(user: dict, item: dict) -> str | None:
     """Independent restatement of the hard rules (not a call into allergens.py), so a
     regression there can't make the oracle agree with itself.
 
     Vegetarian follows the Indian (FSSAI) convention the app's veg/non-veg marks use:
-    eggs are non-vegetarian."""
+    eggs are non-vegetarian. Fail-closed (W1, sp-grill #37–#39): unknown is not safe — an
+    unmarked dish is not veg, a dish with no sugar figure fails diabetes, and a live dish
+    whose ingredients nothing describes fails an allergy."""
     people = [user] + list(user.get("household_members") or [])
     item_allergens = set(item.get("allergens") or [])
+    name = str(item.get("name") or item.get("title") or "")
+    for fam, words in ORACLE_ALLERGEN.items():
+        if _says(words, name):
+            item_allergens.add(fam)
+    nutrition_unknown = item.get("nutrition_known", 1) == 0 or item.get("sugar_g", 0) is None
+    live_unknown = item.get("source") == "live" and item.get("safety_basis") in (None, "name", "none")
     for p in people:
         clash = set(p.get("allergens") or []) & item_allergens
         if clash:
             return f"allergen {sorted(clash)} for {p.get('name')}"
+        if p.get("allergens") and live_unknown:
+            return f"unknown ingredients for {p.get('name')}'s allergy"
         med = set(p.get("medical") or [])
-        if "diabetes" in med and item.get("sugar_g", 0) > 20:
-            return "sugar > 20 g for diabetes"
+        if "diabetes" in med:
+            if (item.get("sugar_g") or 0) > 20:
+                return "sugar > 20 g for diabetes"
+            if _says(ORACLE_SWEET, name) or "dessert" in (item.get("tags") or []):
+                return "a sweet for diabetes"
+            if nutrition_unknown and item.get("sweet") is not False:
+                return "unknown sugar for diabetes"
         if "hypertension" in med and "high_sodium" in (item.get("tags") or []):
             return "high sodium for hypertension"
         if "celiac" in med and "gluten" in item_allergens:
             return "gluten for celiac"
         diet = p.get("diet") or "nonveg"
         if diet in ("veg", "vegan") and (not item.get("veg", 1) or "egg" in item_allergens
-                                         or "nonveg" in (item.get("tags") or [])):
-            return f"non-veg for a {diet} profile"
+                                         or "nonveg" in (item.get("tags") or []) or _says(ORACLE_NONVEG, name)
+                                         or item.get("veg_known", 1) == 0):
+            return f"non-veg or unmarked for a {diet} profile"
         if diet == "vegan" and "dairy" in item_allergens:
             return "dairy for a vegan profile"
     return None
@@ -155,7 +192,7 @@ def plan_state(plan_id: int) -> dict:
 
 def check_plan(plan_id: int, *, pins_or_spent_allowed_over: bool = True) -> list[str]:
     """Every hard invariant a stored plan must satisfy. Returns human-readable failures."""
-    from smartplate.domain import festivals, models, profile, reverse_mode
+    from smartplate.domain import festivals, models, profile, reverse_mode, surge
     from smartplate.kernel import optimizer, scheduler
 
     st = plan_state(plan_id)
@@ -194,10 +231,22 @@ def check_plan(plan_id: int, *, pins_or_spent_allowed_over: bool = True) -> list
                 why = item_violation(user, item)
                 if why and s["status"] not in ("ordered", "confirmed"):
                     bad.append(f"{label}: planned {item['name']} — {why}")
-                # 3. item + fees, times the recorded surge, is the cost
-                base = item["price"] + item["delivery_fee"]
+                # 3. item + delivery + per-order charges (platform fee, packaging, 5% GST on food;
+                #    restated here, not read from domain/fees), times the recorded surge, is the cost
+                #    (one portion: the oracle's profiles plan for one person). A live dish stores the
+                #    delivery fee and charges it was priced with; the charges always include at least
+                #    the 5% GST on the food (a plan that leaves out GST under-states the bill).
+                fee, charges = item["delivery_fee"], 0.0
+                if d.get("charges") is not None:
+                    fee, charges = d["delivery_fee"], d["charges"]
+                    if charges + CENT < round(0.05 * item["price"], 2):
+                        bad.append(f"{label}: charges {charges} leave out 5% GST on ₹{item['price']}")
+                base = item["price"] + fee + charges
                 if abs(round(base * (d["surge_mult"] or 1.0), 2) - d["cost"]) > CENT:
-                    bad.append(f"{label}: cost {d['cost']} != ({item['price']} + {item['delivery_fee']}) × {d['surge_mult']}")
+                    bad.append(f"{label}: cost {d['cost']} != ({item['price']} + {fee} + "
+                               f"{charges:.2f}) × {d['surge_mult']}")
+                if not surge.ENABLED and (d["surge_mult"] or 1.0) != 1.0:
+                    bad.append(f"{label}: surge ×{d['surge_mult']} priced in while the surge model is off")
         if kind == "cook" and d.get("recipe_key"):
             r = reverse_mode.recipe(d["recipe_key"])
             why = item_violation(user, r) if r else "unknown recipe"
@@ -344,7 +393,7 @@ def connect_swiggy(client, fake, uid: int, key: str) -> None:
     from test_followups import APP, _allow_app_host
     _allow_app_host()
     headers = {"X-SmartPlate-Key": key}
-    url = client.post(f"/api/user/{uid}/swiggy/connect", json={}, base_url=APP, headers=headers).get_json()["authorize_url"]
+    url = client.post(f"/api/user/{uid}/swiggy/connect", json={"consent": True}, base_url=APP, headers=headers).get_json()["authorize_url"]
     q = fake.approve(url)
     r = client.get(f"/swiggy/callback?state={q['state']}&code=code-1", base_url=APP, headers=headers)
     assert r.status_code == 302 and r.headers["Location"].endswith("swiggy=connected"), r.headers.get("Location")

@@ -35,9 +35,9 @@ def world(gt, monkeypatch):
     fake.dishes = {"Masala Dosa": 12000, "Veg Meals": 18000, "Paneer Butter Masala": 22000}
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     client = create_app().test_client()
-    uid = client.post("/api/profiles", json={"name": "Arun", "diet": "veg", "weekly_budget": 3000,
+    uid = client.post("/api/profiles", json={**{"name": "Arun", "diet": "veg", "weekly_budget": 3000,
         "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"}, "cook": "sometimes",
-        "allergens": [], "medical": [], "favourites": []}).get_json()["user"]["id"]
+        "allergens": [], "medical": [], "favourites": []}, "consent": {"account": True, "health": True, "learning": True}}).get_json()["user"]["id"]
     _connect(client, fake, uid=uid)
     assert client.post(f"/api/user/{uid}/swiggy/address", json={"address_id": "addr-home"}).status_code == 200
     assert client.post(f"/api/user/{uid}/swiggy/favourites", json={
@@ -100,7 +100,9 @@ def test_dish_photos_come_from_swiggy_search_and_are_cached(world):
     view = c.get(f"/api/plan/{world['plan']}").get_json()
     cells = [m for d in view["grid"] for m in d["meals"].values() if m.get("item_id") == ids["Masala Dosa"]]
     assert all(m["image"] == PHOTO for m in cells)
-    sid = next(m["session_id"] for d in view["grid"] for m in d["meals"].values() if m["kind"] == "delivery")
+    # (any non-dinner meal with the dosa planned; tiffin is fine at dinner too since Oct 2026)
+    sid = next(m["session_id"] for d in view["grid"] for meal, m in d["meals"].items()
+               if m["kind"] == "delivery" and meal != "dinner")
     opts = c.get(f"/api/session/{sid}/options").get_json()
     dishes = [x for g in opts["usual"] for x in g["dishes"]] + opts["new"]
     assert any(x["image"] == PHOTO for x in dishes if x["name"] == "Masala Dosa")

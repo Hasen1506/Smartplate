@@ -61,15 +61,17 @@ def _launch(playwright):
 @pytest.fixture
 def world(gt, monkeypatch):
     monkeypatch.setattr(config, "SWIGGY_PROVIDER", "live")
+    from smartplate.domain import timing
+    monkeypatch.setattr(timing, "CART_WINDOW_MIN", 600)   # W2 cart window: not what this suite tests; at 8:00 the lunch cart is open
     fake = MenuFake()
     fake.dishes = {"Ghee Roast Dosa": 14000, "Masala Dosa": 12000, "Chicken Biryani": 26000,
                    "Paneer Butter Masala": 22000, "Veg Meals": 18000, "Filter Coffee": 4000}
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={"name": "Arun", "diet": "nonveg", "weekly_budget": 3000,
+    created = client.post("/api/profiles", json={**{"name": "Arun", "diet": "nonveg", "weekly_budget": 3000,
         "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"}, "cook": "sometimes",
-        "allergens": [], "medical": [], "favourites": []}).get_json()
+        "allergens": [], "medical": [], "favourites": []}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid = created["user"]["id"]
     _connect(client, fake, uid=uid)
     key = client.environ_base["HTTP_X_SMARTPLATE_KEY"]
@@ -97,7 +99,8 @@ def _open(browser, w, viewport):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     bag = {str(w["uid"]): {"key": w["key"], "name": "Arun"}}
-    page.add_init_script(f"""
+    page.add_init_script(f"""localStorage.setItem('ziggy.ui', 'classic');  /* classic Today, kept behind the v3 flag (docs/IA.md) */
+
         if (!localStorage.getItem('smartplate.keys')) {{
           localStorage.setItem('smartplate.keys', {json.dumps(json.dumps(bag))});
           localStorage.setItem('smartplate.user', {json.dumps(str(w['uid']))});

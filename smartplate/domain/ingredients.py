@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-from . import epicure
+from . import epicure, food_lexicon
 
 ALLERGENS = ("peanut", "dairy", "gluten", "egg", "soy", "shellfish", "fish", "sesame", "tree_nut")
 
@@ -215,8 +215,11 @@ GUARD_EXCEPTIONS = {("soy_milk", "dairy"), ("almond_milk", "dairy"), ("oat_milk"
                     ("coconut_milk", "dairy"), ("coconut_cream", "dairy"), ("soy_yogurt", "dairy"),
                     ("rice_noodle", "gluten"), ("rice_noodle", "egg")}
 _OIL_SOURCES = {"plant_based_milk", "plant_based_cream", "plant_based_cheese"}     # unknown base: never suggested
+# Meat, fish and egg words: the shared lexicon's (domain/food_lexicon, sp-grill #60) plus
+# the pantry's own species names.
 NONVEG_WORDS = {"chicken", "mutton", "lamb", "goat", "beef", "pork", "fish", "sardine", "mackerel", "pomfret",
-                "tuna", "shrimp", "prawn", "crab", "squid", "egg", "meat", "bacon", "ham", "sausage", "gelatin"}
+                "tuna", "shrimp", "prawn", "crab", "squid", "egg", "meat", "bacon", "ham", "sausage",
+                "gelatin"} | food_lexicon.NONVEG_WORDS
 
 
 def words(token: str) -> set[str]:
@@ -228,7 +231,7 @@ def families(token: str) -> set[str]:
     out = set(PANTRY[token][2]) if token in PANTRY else set()
     w = words(token)
     for fam, kw in FAMILY_WORDS.items():
-        if w & kw and (token, fam) not in GUARD_EXCEPTIONS:
+        if w & (kw | food_lexicon.ALLERGEN_WORDS.get(fam, set())) and (token, fam) not in GUARD_EXCEPTIONS:
             out.add(fam)
     return out
 
@@ -239,8 +242,10 @@ def diet_class(token: str) -> str:
     else:
         cls = "vegan"
     w = words(token)
-    if w & NONVEG_WORDS and cls in ("vegan", "veg"):
-        cls = "egg" if w & {"egg"} else "nonveg"
+    said = food_lexicon.read(" ".join(sorted(w))) if cls in ("vegan", "veg") else None
+    if (w & NONVEG_WORDS or (said and said.nonveg)) and cls in ("vegan", "veg"):
+        cls = "egg" if (w & {"egg"} or (said and said.egg and not any(h.kind == "nonveg" for h in said.nonveg))) \
+            else "nonveg"
     if cls == "vegan" and families(token) & {"dairy"}:
         cls = "veg"
     return cls

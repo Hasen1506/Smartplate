@@ -3,8 +3,8 @@
   "budget": 900.0,
   "daily_cap": null,
   "prorated": false,
-  "remaining": 79.83,
-  "spend": 820.17,
+  "remaining": 105.0,
+  "spend": 795.0,
   "weekly_budget": 900.0
  },
  "counts": {
@@ -18,10 +18,10 @@
   "Fri 2026-11-06": {
    "breakfast": {
     "cost": 115.0,
-    "item": "Masala Dosa",
+    "item": "Idli Sambar (4 pc)",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Hotel Saravana Bhavan",
+    "restaurant": "Murugan Idli Shop",
     "status": "active"
    }
   },
@@ -37,21 +37,21 @@
   },
   "Sat 2026-11-07": {
    "breakfast": {
-    "cost": 121.55,
-    "item": "Vegan Sambar Rice",
+    "cost": 115.0,
+    "item": "Masala Dosa",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Sangeetha Veg",
+    "restaurant": "Hotel Saravana Bhavan",
     "status": "active"
    }
   },
   "Sun 2026-11-08": {
    "breakfast": {
-    "cost": 115.0,
-    "item": "Idli Sambar (4 pc)",
+    "cost": 110.0,
+    "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
-    "restaurant": "Murugan Idli Shop",
+    "restaurant": "Sangeetha Veg",
     "status": "active"
    }
   },
@@ -67,7 +67,7 @@
   },
   "Tue 2026-11-03": {
    "breakfast": {
-    "cost": 121.55,
+    "cost": 110.0,
     "item": "Vegan Sambar Rice",
     "kind": "delivery",
     "pinned": false,
@@ -77,7 +77,7 @@
   },
   "Wed 2026-11-04": {
    "breakfast": {
-    "cost": 117.07,
+    "cost": 115.0,
     "item": "Mini Tiffin",
     "kind": "delivery",
     "pinned": false,
@@ -88,7 +88,6 @@
  },
  "heads_up": [
   "holiday: Sun 08 Nov: Diwali",
-  "saving: Ordering a little earlier saves ₹47 this week",
   "weather: Sat 07 Nov: rain likely (80%)",
   "weather: Tomorrow: rain likely (80%)",
   "weather: Wed 04 Nov: 38°C"

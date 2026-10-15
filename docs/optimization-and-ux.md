@@ -5,7 +5,8 @@
 > solves, **how every control maps into it**, and the **budget-recommender** and
 > **IA/card-density** decisions. Grounded in the live code:
 > `smartplate/kernel/optimizer.py`, `smartplate/domain/nutrition.py`,
-> `smartplate/config.py`, and `project/SmartPlate Wireframes.html`.
+> `smartplate/config.py`, and the June wireframes (removed Oct 2026; git history at `9fc21e5`,
+> `docs/archive/project/`).
 
 ---
 
@@ -479,10 +480,10 @@ Per `ROADMAP` + the brainstorm + a16z ("data isn't the moat; the compounding loo
 | Novelty/variety model + levels | `domain/fatigue.py` | `test_novelty_*`, `test_pools_*` |
 | Feasibility/shortfall diagnostic | `optimizer._diagnostics` | `test_optimize_returns_diagnostics` |
 | Mode outcomes exposed to UI | `app.py` `/api/meta.mode_outcomes` | smoke |
-| Canonical Mifflin activity factors (5 levels) | `project/SmartPlate Wireframes.html` | `project/test-merged.mjs` |
-| Slider cull (5 → mode + 2 leans) + Locks/Dials/Rules grouping | `project/SmartPlate Wireframes.html` | `test-merged.mjs` |
-| Variety level control + novel **✦** marking + week chip | `project/SmartPlate Wireframes.html` | `test-merged.mjs` |
-| Budget-recommender card on the Weekly Plan | `project/SmartPlate Wireframes.html` | `test-merged.mjs` |
+| Canonical Mifflin activity factors (5 levels) | June wireframes (removed; git `9fc21e5`) | `test-merged.mjs` (removed; git `9fc21e5`) |
+| Slider cull (5 → mode + 2 leans) + Locks/Dials/Rules grouping | June wireframes (removed; git `9fc21e5`) | `test-merged.mjs` |
+| Variety level control + novel **✦** marking + week chip | June wireframes (removed; git `9fc21e5`) | `test-merged.mjs` |
+| Budget-recommender card on the Weekly Plan | June wireframes (removed; git `9fc21e5`) | `test-merged.mjs` |
 | Gated novelty nudge in the solve | `config.py`, `optimizer.py` | `test_novelty_nudge_*` |
 | "I made X" free-text lookup | `domain/intake.py`, `service.py`, `app.py` | `test_intake_*` |
 | Nested day/week/month caps (tightest binds, roll-forward, explicit credit) | `kernel/budget.py` (`nested_caps`) + Weekly Plan horizon toggle | `test_ledger_budget`, `test-merged.mjs` |
@@ -560,6 +561,6 @@ scheduled-order ToS clause.
 ## Sources / cross-refs
 
 - `smartplate/kernel/optimizer.py`, `smartplate/domain/nutrition.py`, `smartplate/config.py`
-- `project/SmartPlate Wireframes.html` (sliders, BMR panel, Taste-DNA radar, cards)
+- June wireframes (sliders, BMR panel, Taste-DNA radar, cards): removed Oct 2026, git history at `9fc21e5`
 - `ROADMAP.md` §0 (autopilot thesis), §2 (interaction answers), §6 (nutrition chain), §5 (variable rewards)
 - `SPEC.md` §1 (ledger / fatigue), §2 (menu sourcing / arbitration)

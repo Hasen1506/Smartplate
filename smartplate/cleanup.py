@@ -48,7 +48,8 @@ def _seeded_user_ids(cur) -> list[int]:
 
 def remove_seeded_samples() -> dict:
     """Delete seeded sample users and data. Idempotent; returns what was removed."""
-    from .profile_data import purge
+    from .profile_data import ensure_tables, purge
+    ensure_tables()
     removed = {"users": [], "restaurants": 0, "menu_items": 0, "weather": 0, "surge_history": 0,
                "households": 0, "open_meals_cleared": 0, "favourites": 0, "pins": 0}
     with db.cursor() as cur:

@@ -25,9 +25,9 @@ pw = pytest.importorskip("playwright.sync_api")
 def kitchen(seeded):
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={"name": "Kavya", "diet": "veg", "allergens": ["dairy"],
+    created = client.post("/api/profiles", json={**{"name": "Kavya", "diet": "veg", "allergens": ["dairy"],
                                                  "weekly_budget": 2500, "meals": ["lunch", "dinner"],
-                                                 "cook": "sometimes"}).get_json()
+                                                 "cook": "sometimes"}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid, key = created["user"]["id"], created["access_key"]
     h = {"X-SmartPlate-Key": key}
     cells = [c for d in created["grid"] for c in d["meals"].values() if c["status"] == "active"]
@@ -56,7 +56,8 @@ def _open(browser, k, viewport):
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     bag = {str(k["uid"]): {"key": k["key"], "name": "Kavya"}}
-    page.add_init_script(f"""
+    page.add_init_script(f"""localStorage.setItem('ziggy.ui', 'classic');  /* classic Today, kept behind the v3 flag (docs/IA.md) */
+
         if (!localStorage.getItem('smartplate.keys')) {{
           localStorage.setItem('smartplate.keys', {json.dumps(json.dumps(bag))});
           localStorage.setItem('smartplate.user', {json.dumps(str(k['uid']))});
@@ -124,7 +125,7 @@ def test_browser_out_of_stock_swap_more_like_this_and_credits(kitchen, viewport)
             page.get_by_role("button", name="Me: settings, money and account", exact=True).click()
             page.get_by_role("link", name="Credits & licences").click()
             pw.expect(page.get_by_role("heading", name="Epicure ingredient embeddings")).to_be_visible()
-            pw.expect(page.get_by_role("link", name="Creative Commons Attribution 4.0 International (CC BY 4.0)")).to_be_visible()
+            pw.expect(page.locator("#epicure").get_by_role("link", name="Creative Commons Attribution 4.0 International (CC BY 4.0)")).to_be_visible()   # W8 credits the recipe set (#dishes) under the same licence
             _no_overflow(page)
             assert not errors
             assert page.evaluate("policyViolations") == []

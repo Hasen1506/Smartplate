@@ -28,8 +28,8 @@ def pilot(seeded, monkeypatch):
     monkeypatch.setattr(swiggy_connect, "_http", fake)
     app = create_app()
     client = app.test_client()
-    created = client.post("/api/profiles", json={"name": "Browser test profile", "diet": "veg",
-        "weekly_budget": 2000, "meals": ["dinner"], "favourites": []}).get_json()
+    created = client.post("/api/profiles", json={**{"name": "Browser test profile", "diet": "veg",
+        "weekly_budget": 2000, "meals": ["dinner"], "favourites": []}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     uid = created["user"]["id"]
     _connect(client, fake, uid=uid)
     key = client.environ_base["HTTP_X_SMARTPLATE_KEY"]
@@ -54,7 +54,8 @@ def open_profile(browser, pilot, viewport):
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     bag = {str(pilot["uid"]): {"key": pilot["key"], "name": "Browser test profile"}}
-    page.add_init_script(f"""
+    page.add_init_script(f"""localStorage.setItem('ziggy.ui', 'classic');  /* classic Today, kept behind the v3 flag (docs/IA.md) */
+
         if (!localStorage.getItem('smartplate.keys')) {{
           localStorage.setItem('smartplate.keys', {json.dumps(json.dumps(bag))});
           localStorage.setItem('smartplate.user', {json.dumps(str(pilot['uid']))});
@@ -147,7 +148,8 @@ def test_browser_private_export_rotation_and_deletion(pilot, viewport, tmp_path)
             assert pilot["key"] not in downloaded.read_text() and pilot["fake"].token not in downloaded.read_text()
             page.get_by_text("Replace a shared or lost code", exact=True).click()
             page.get_by_role("button", name="Generate a new recovery code", exact=True).click()
-            pw.expect(page.get_by_text("New recovery code saved here. Copy it somewhere safe.", exact=True)).to_be_visible()
+            pw.expect(page.get_by_text("New recovery code saved here. Copy or download it now.", exact=True)).to_be_visible()   # W3 wording
+            pw.expect(page.get_by_role("button", name="Download as a file", exact=True)).to_be_visible()
             fresh = page.evaluate(f"JSON.parse(localStorage.getItem('smartplate.keys'))[{json.dumps(str(pilot['uid']))}].key")
             assert fresh != pilot["key"]
             assert pilot["client"].get(f"/api/user/{pilot['uid']}/plan").status_code == 401

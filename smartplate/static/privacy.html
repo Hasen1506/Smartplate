@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy notice · Ziggy</title>
+<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<main class="main credits">
+  <p><a class="btn secondary small" href="/">← Back to Ziggy</a> <a class="btn ghost small" href="/terms">Terms</a></p>
+  <h1 class="h1">Privacy notice</h1>
+  <p class="sub">Version {{NOTICE_VERSION}}. Written for India’s Digital Personal Data Protection Act, 2023 and the
+    DPDP Rules, 2025. In this notice “Ziggy”, “we” and “us” mean {{OPERATOR}}, the Data Fiduciary for your data.</p>
+
+  <section class="card" id="short">
+    <h2 class="h2">The short version</h2>
+    <ul>
+      <li>Ziggy plans your meals from what you tell it: diet, allergies, budget, meal times and favourite places.</li>
+      <li>We use your data only to plan and order your meals. We don’t sell it, show you ads, or send it to any AI service.</li>
+      <li>Health details and Swiggy access are optional. Each is asked for separately, and you can switch it off any time.</li>
+      <li>Download everything or delete your profile in <b>More → Account &amp; devices → Your data</b>. Deleting is immediate.</li>
+      <li>Ziggy is for adults (18+).</li>
+      <li>Questions or complaints: {{CONTACT}}. We reply within 7 days and always within 90.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="data">
+    <h2 class="h2">What we collect, and why</h2>
+    <p>Each group below is a separate purpose. You agree to the first when you create a profile; the others are
+      separate yes/no choices.</p>
+    <h3>1. Your profile and meal plans (needed to use Ziggy)</h3>
+    <ul>
+      <li><b>Data:</b> the profile name you choose; diet type (veg, egg, non-veg, vegan); allergies and foods you avoid;
+        weekly budget and meal times; how often you cook; favourite restaurants and dishes; the plans Ziggy makes, the meals
+        you pick, rate or skip, and spending you record; an optional sign-in name and password (we store only a one-way
+        hash of the password); people in your household you plan for (name, diet and allergies only).</li>
+      <li><b>Why:</b> to build weekly plans that respect your diet, allergies, budget and timing, and to keep them between visits.</li>
+      <li><b>Allergies</b> are used as a hard safety filter. A meal whose ingredients can’t be checked is hidden, not guessed.</li>
+    </ul>
+    <h3>2. Health details for nutrition (optional)</h3>
+    <ul>
+      <li><b>Data:</b> medical conditions you pick (for example diabetes or high blood pressure), and height, weight, age,
+        sex and activity level if you add them.</li>
+      <li><b>Why:</b> to keep meals within your health limits and show nutrition targets.</li>
+      <li><b>If you say no or switch it off:</b> these details are deleted and plans ignore them. Allergies still apply.</li>
+    </ul>
+    <h3>3. Learning from your ratings (optional)</h3>
+    <ul>
+      <li><b>Data:</b> the reasons you tap after a meal (arrived late, small portion, too spicy, too pricey, great).</li>
+      <li><b>Why:</b> to make later plans fit you better. Ziggy shows each thing it learned, with Undo.</li>
+      <li><b>If you switch it off:</b> the saved reasons are deleted and new ones are not saved.</li>
+    </ul>
+    <h3>4. Connecting Swiggy (optional, asked right before you connect)</h3>
+    <ul>
+      <li><b>Data:</b> a Swiggy access token (encrypted), your saved Swiggy delivery addresses (label, area and the
+        address Swiggy returns), live menus and prices for the address you choose, your Swiggy cart, and your recent
+        Swiggy orders (restaurants, dishes, prices, dates).</li>
+      <li><b>Why:</b> to show real menus and prices, add a meal to your Swiggy cart, place an order only after you approve
+        the exact total, and suggest your usual dishes from past orders.</li>
+      <li><b>If you switch it off:</b> we disconnect, delete the token, the menus and cart details we kept, and plan
+        without live menus. Your Swiggy account and its orders are Swiggy’s and stay with Swiggy.</li>
+    </ul>
+    <h3>Always, for security</h3>
+    <ul>
+      <li><b>Data:</b> a session cookie, sign-in device names (“Phone”, “Computer”) and when they were last used, rate-limit
+        counters keyed to your IP address, and short server logs (request path, time, status, a request id).</li>
+      <li><b>Why:</b> to keep your profile private to you and to stop password guessing and abuse.</li>
+    </ul>
+    <p>We never ask for card or UPI details. Ziggy does not take payments.</p>
+  </section>
+
+  <section class="card" id="processors">
+    <h2 class="h2">Who else handles your data</h2>
+    <p>These companies process data for us under their terms, only to run Ziggy:</p>
+    <ul>
+      <li><b>Render</b> (render.com) runs the Ziggy server, in its Singapore region.</li>
+      <li><b>Neon</b> (neon.tech) hosts the database on Amazon Web Services in Singapore (ap-southeast-1).</li>
+      <li><b>Push services</b> run by your browser’s maker (Google, Mozilla, Microsoft or Apple) deliver reminders if you
+        turn them on. They receive an encrypted message and a delivery address for your browser.</li>
+    </ul>
+    <p><b>Swiggy</b> (Bundl Technologies) is a separate company with its own privacy policy. When you connect, Ziggy reads
+      from and writes to your Swiggy account on your instruction. What Swiggy does with your Swiggy data is governed by
+      Swiggy’s policy, not this notice.</p>
+    <p>The weather forecast is fetched from Open-Meteo for your city only; no personal data is sent. Fonts are served by
+      Ziggy itself. There are no analytics or advertising trackers.</p>
+    <p>Your data is stored and processed in Singapore. The DPDP Act allows this unless the Government restricts a country;
+      Singapore is not restricted today. If that changes, we will move the data or tell you.</p>
+  </section>
+
+  <section class="card" id="retention">
+    <h2 class="h2">How long we keep it</h2>
+    <ul>
+      <li><b>Your profile and plans:</b> until you delete them. {{INACTIVE_RULE}}</li>
+      <li><b>Swiggy token and menus:</b> until you disconnect, switch Swiggy off, or Swiggy ends the sign-in.</li>
+      <li><b>Sign-in sessions:</b> end after 60 days without use.</li>
+      <li><b>Record of your consent choices:</b> kept while your profile exists and for one year after you delete it,
+        as the DPDP Rules require for processing logs. It holds your profile number, the choices and their dates, never your
+        name, diet or health details.</li>
+      <li><b>Database history:</b> our database host keeps a rolling history for recovery ({{BACKUP_WINDOW}}).
+        Deleted data leaves that history when the window passes.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="rights">
+    <h2 class="h2">Your rights, and how to use them</h2>
+    <ul>
+      <li><b>See your data:</b> More → Account &amp; devices → Your data → <i>Download my data</i> gives you everything we hold
+        about your profile as a file. You can also ask us for a summary and the list of companies above.</li>
+      <li><b>Correct it:</b> change any answer in More → Food &amp; budget.</li>
+      <li><b>Withdraw consent:</b> switch health details, learning or Swiggy off in More → Privacy, as easily as you switched
+        them on. Processing stops and the related data is deleted.</li>
+      <li><b>Erase it:</b> More → Account &amp; devices → Your data → <i>Delete my Ziggy profile</i> deletes your profile and
+        everything linked to it straight away.</li>
+      <li><b>Nominate someone</b> to use these rights if you die or can’t act: write to us at the contact below.</li>
+      <li><b>Complain:</b> write to our grievance contact below with your profile number (the part of your recovery code before
+        the dot, shown in Account &amp; devices). We reply within 7 days and always within 90 days. If you are not satisfied,
+        you can complain to the <b>Data Protection Board of India</b> through its online portal.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="security">
+    <h2 class="h2">How we protect it</h2>
+    <ul>
+      <li>Connections use HTTPS. Your session cookie can’t be read by page scripts and is replaced every day you use Ziggy.</li>
+      <li>Swiggy tokens are encrypted with a key kept outside the database. Passwords are stored as one-way hashes.</li>
+      <li>Profiles are private: only browsers you signed in on, or that hold your recovery code, can open them.</li>
+      <li>Error messages and logs about Swiggy replies have addresses, phone numbers and tokens removed.</li>
+      <li>If a breach affects your data we will tell you in the app, and the Data Protection Board, without delay.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="contact">
+    <h2 class="h2">Contact and grievances</h2>
+    <p>{{GRIEVANCE}}</p>
+    <p>Changes to this notice are dated above. If a change affects what you agreed to, Ziggy asks you again.</p>
+  </section>
+</main>
+</body>
+</html>

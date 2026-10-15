@@ -298,7 +298,9 @@ def test_ordering_gate_and_unsupported_tools_are_refused(client, swiggy):
     _connect(client, swiggy)
     with pytest.raises(SwiggyError, match="disabled"):
         swiggy_live.call(1, "place_food_order", {})
-    for name in ["apply_food_coupon", "confirm_order"]:
+    with pytest.raises(SwiggyError, match="disabled"):      # UPI confirm: live_order only (swiggy_upi)
+        swiggy_live.call(1, "confirm_order", {})
+    for name in ["apply_food_coupon", "fetch_food_coupons"]:
         with pytest.raises(SwiggyError, match="does not support"):
             swiggy_live.call(1, name, {})
     assert swiggy.tool_calls() == []
@@ -370,15 +372,17 @@ def test_live_menu_needs_a_connection_and_is_private(client, swiggy):
     body = r.get_json()                       # not connected is the user's to fix: 409 + Connect, never 502
     assert r.status_code == 409 and body["error"] == "swiggy_not_connected"
     assert "Connect your Swiggy account" in body["message"] and body["action"]["act"] == "swiggy-connect"
-    v = client.post("/api/profiles", json={"name": "P", "diet": "veg", "weekly_budget": 2000,
-                                           "meals": ["dinner"], "favourites": [6]}).get_json()
+    v = client.post("/api/profiles", json={**{"name": "P", "diet": "veg", "weekly_budget": 2000,
+                                           "meals": ["dinner"], "favourites": [6]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     assert client.get(f"/api/user/{v['user']['id']}/swiggy/addresses").status_code == 401
 
 
 def test_vegetarians_do_not_see_non_veg_dishes(client, swiggy, monkeypatch):
     _connect(client, swiggy, uid=2)                                          # Meera is vegan
     client.post("/api/user/2/swiggy/address", json={"address_id": "addr-home"})
-    swiggy.dishes = {"Chana Masala": 16000, "Chicken 65": 22000}
+    # (Chana Masala used to stand in for the veg dish; restaurant recipes for it usually hold
+    # ghee or butter, so a vegan no longer sees it: the fail-closed checker, sp-grill #39.)
+    swiggy.dishes = {"Masala Dosa": 16000, "Chicken 65": 22000}
     orig = swiggy.tool
     def tool(name, args):
         out = orig(name, args)
@@ -388,7 +392,9 @@ def test_vegetarians_do_not_see_non_veg_dishes(client, swiggy, monkeypatch):
         return out
     monkeypatch.setattr(swiggy, "tool", tool)
     m = client.get("/api/user/2/swiggy/menu?restaurant=FreshMenu").get_json()
-    assert [i["name"] for i in m["items"]] == ["Chana Masala"] and m["hidden_nonveg"] == 1 and m["diet"] == "vegan"
+    assert [i["name"] for i in m["items"]] == ["Masala Dosa"] and m["hidden_nonveg"] == 1 and m["diet"] == "vegan"
+    assert m["items"][0]["safety"]["status"] == "not_checked"            # vegan: never called "safe"
+    assert [h["name"] for h in m["hidden_items"]] == ["Chicken 65"]
 
 
 def test_reading_helpers():
@@ -640,7 +646,7 @@ def test_dish_search_never_invents_pages_or_ignores_diet(client, swiggy, monkeyp
     original = swiggy.tool
     monkeypatch.setattr(swiggy, "tool", lambda name, args: {"structuredContent": {"success": True, "data": {
         "items": [{"menu_item_id": "chicken", "name": "Chicken", "isVeg": False},
-                  {"menu_item_id": "veg", "name": "Plain rice", "isVeg": True}], "hasMore": False}}}
+                  {"menu_item_id": "veg", "name": "Veg Fried Rice", "isVeg": True}], "hasMore": False}}}
         if name == "search_menu" else original(name, args))
     route = "/api/user/2/swiggy/dishes?restaurant_id=r-1&restaurant_name=Hotel&query=rice"
     result = client.get(route).get_json()

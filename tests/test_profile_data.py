@@ -15,8 +15,8 @@ def client(seeded):
 
 
 def private(client, name):
-    result = client.post("/api/profiles", json={"name": name, "diet": "veg", "weekly_budget": 2000,
-                                               "meals": ["dinner"], "favourites": [6]}).get_json()
+    result = client.post("/api/profiles", json={**{"name": name, "diet": "veg", "weekly_budget": 2000,
+                                               "meals": ["dinner"], "favourites": [6]}, "consent": {"account": True, "health": True, "learning": True}}).get_json()
     return result["user"]["id"], {"X-SmartPlate-Key": result["access_key"]}, result["plan"]["id"]
 
 
@@ -57,7 +57,8 @@ def test_delete_removes_dependents_and_preserves_other_users(client):
                     (uid, "https://fcm.googleapis.com/delete-device", "key", "auth", "now"))
         sub = dict(cur.execute("SELECT * FROM push_subscriptions WHERE user_id=?", (uid,)).fetchone())
         session = cur.execute("SELECT id FROM sessions WHERE plan_id=? LIMIT 1", (pid,)).fetchone()[0]
-        cur.execute("INSERT INTO push_sent VALUES (?,?,?,?)", (sub["id"], session, "due", "now"))
+        cur.execute("INSERT INTO push_sent(subscription_id, session_id, at, sent_ts) VALUES (?,?,?,?)",
+                    (sub["id"], session, "due", "now"))
     result = client.delete(f"/api/user/{uid}", headers=headers, json={"confirmation": "DELETE"})
     assert result.status_code == 200 and result.get_json()["deleted"]
     with db.cursor() as cur:

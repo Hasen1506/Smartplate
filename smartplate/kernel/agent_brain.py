@@ -2,11 +2,9 @@
 
 AgentBrain decides anything that *could* be done with an LLM. The default
 DeterministicBrain uses the solver, local sentiment, and templates — so v1.1 has
-no per-decision API spend. LLMBrain is a pluggable, opt-in upgrade; it is never on
-the critical path. This is the concrete answer to "agentic execution costs a lot":
-the expensive path is optional and isolated behind this interface.
+no per-decision API spend. The opt-in LLMBrain stub was archived (smartplate/archive/
+experiments.py, Oct 2026); this seam stays so a paid path can only ever be added here.
 """
-from .. import config
 from . import explainability
 
 
@@ -43,21 +41,7 @@ class DeterministicBrain:
         return intent
 
 
-class LLMBrain(DeterministicBrain):
-    """Optional upgrade. Falls back to deterministic everywhere it isn't wired,
-    so enabling it can never break planning — it only adds prose/NL when a key
-    and budget are present. Intentionally not called in the default code path."""
-
-    name = "llm"
-    cost_per_decision = None  # depends on provider/model; only paid when used
-
-    def narrate(self, reasons: list[str]) -> str:  # pragma: no cover - opt-in path
-        # A real implementation would call the configured model here. We keep the
-        # deterministic join so the app never depends on a paid call to function.
-        return super().narrate(reasons)
-
-
 def get_brain():
-    if config.AGENT_BRAIN == "llm":
-        return LLMBrain()
+    """Always the deterministic brain. The SMARTPLATE_BRAIN=llm stub is archived in
+    smartplate/archive/experiments.py (off since June 2026, no tests)."""
     return DeterministicBrain()

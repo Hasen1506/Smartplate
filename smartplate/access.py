@@ -7,6 +7,9 @@ present it in the `X-SmartPlate-Key` header. CSV and calendar downloads use fetc
 with that header so keys are never embedded in URLs. Sample profiles, and profiles
 made before keys existed, have no key and stay open.
 
+A browser can instead hold an HttpOnly session cookie that names the profiles it may open
+(websession.py, grill #62); app.py accepts either, so nothing has to live in localStorage.
+
 A profile can also get a name + password (accounts.py). Each browser that signs in
 gets its own device token, which this check accepts alongside the profile key. Without
 a sign-in, the "recovery code" (`<id>.<key>`) shown in the app is the way to move a
@@ -85,3 +88,19 @@ def _device(user_id: int, hashed: str) -> bool:
                         (now.isoformat(timespec="seconds"), dev["id"],
                          (now - dt.timedelta(hours=1)).isoformat(timespec="seconds")))
     return bool(dev)
+
+
+def device_for(user_id: int, presented: str | None) -> int | None:
+    """The sign-in device a presented key belongs to (None for the profile key itself)."""
+    if not presented:
+        return None
+    with db.cursor() as cur:
+        row = cur.execute("SELECT id FROM devices WHERE user_id=? AND token_hash=?",
+                          (user_id, digest(presented))).fetchone()
+    return row["id"] if row else None
+
+
+def is_private(user_id: int) -> bool:
+    with db.cursor() as cur:
+        row = cur.execute("SELECT access_hash FROM users WHERE id=?", (user_id,)).fetchone()
+    return bool(row and row["access_hash"])

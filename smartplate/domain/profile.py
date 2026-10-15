@@ -125,6 +125,17 @@ def validate_body(body) -> dict | None:
     return out
 
 
+MEDICAL_PAUSED = ("Health-condition filters are paused in this beta. Ziggy is not a medical service: "
+                  "please ask your doctor what to eat, and filter by ingredients or allergies instead.")
+
+
+def medical_allowed() -> None:
+    """Refuse new health conditions when config.MEDICAL_FILTERS is off (sp-grill #41)."""
+    from .. import config
+    if not config.MEDICAL_FILTERS:
+        raise ValueError(MEDICAL_PAUSED)
+
+
 def validate_setup(body: dict) -> dict:
     """Normalise an onboarding / settings payload. Every field is optional except
     what a first-time profile needs; unknown keys are rejected."""
@@ -151,6 +162,8 @@ def validate_setup(body: dict) -> dict:
     for key, allowed_values in (("allergens", ALLERGENS), ("medical", MEDICAL), ("observances", OBSERVANCES)):
         if key in body:
             out[key] = _choices(body[key], key, allowed_values)
+    if out.get("medical"):
+        medical_allowed()
     if "weekly_budget" in body:
         out["weekly_budget"] = weekly_budget(body["weekly_budget"])
     if "daily_cap" in body:

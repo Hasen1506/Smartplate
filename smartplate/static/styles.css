@@ -542,3 +542,16 @@ ul.olist{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
 .olqty .stepper{gap:12px}
 .olbar{position:sticky;bottom:calc(84px + env(safe-area-inset-bottom));z-index:2;display:grid;gap:8px}
 @media (min-width:900px){.olbar{bottom:16px}}
+/* Consent ticks at sign-up (privacy.py) */
+.consent .tick{display:flex;gap:10px;align-items:flex-start;font-weight:400;line-height:1.4;
+  /* reset the older .tick badge (green 28px circle) this consent label shares a class with */
+  width:auto;height:auto;border-radius:0;background:none;color:inherit;font-size:14px;place-items:normal}
+.consent .tick input{width:20px;min-width:20px;height:20px;min-height:20px;margin:2px 0 0;flex:none}
+/* A closed place: greyed (name in the secondary ink, icon faded), no Menu button. */
+.mrow.closed .t b{color:var(--ink2)}
+.mrow.closed .ico{opacity:.5;filter:grayscale(1)}
+.lang-switch{display:flex;justify-content:center}
+/* Tamil: the brand fonts carry Latin only, so Tamil falls back to the phone's Tamil font. */
+:root[lang="ta"]{--display:"Bricolage Grotesque","Noto Sans Tamil","Latha",ui-rounded,system-ui,sans-serif;--body:"Figtree","Noto Sans Tamil","Latha",ui-sans-serif,system-ui,sans-serif}
+/* Phones: toasts sit at the top, so they don't cover the card you act on next (usability #41). */
+@media (max-width:720px){.toast{bottom:auto;top:calc(env(safe-area-inset-top) + 14px)}}

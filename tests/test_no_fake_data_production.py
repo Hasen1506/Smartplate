@@ -33,11 +33,12 @@ def prod(monkeypatch):
 
 
 SETUP = {"name": "Priya", "diet": "veg", "weekly_budget": 1500, "cook": "sometimes",
-         "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"}}
+         "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "order"},
+         "consent": {"account": True, "health": True, "learning": True}}
 
 
 def _new_profile(client):
-    r = client.post("/api/profiles", json=dict(SETUP))
+    r = client.post("/api/profiles", json={**dict(SETUP), "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201, r.get_json()
     body = r.get_json()
     client.environ_base["HTTP_X_SMARTPLATE_KEY"] = body["access_key"]
@@ -84,6 +85,17 @@ def test_new_profile_without_swiggy_plans_home_cooking_only_and_says_why(prod):
     cells = [c for d in view["grid"] for c in d["meals"].values()]
     assert cells and all(c["kind"] in ("cook", "skip", "leftover", "past") for c in cells), {c["kind"] for c in cells}
     assert not any(c["kind"] == "delivery" for c in cells)
+    # W2 (usability #13): meals the person said they *order* are never turned into cook
+    # days, so with no Swiggy yet they stay empty and say why (connect Swiggy).
+    ordered = [c for c in cells if c["kind"] == "skip"]
+    assert ordered and all("connect Swiggy" in " ".join(c["reasons"]) for c in ordered)
+    assert "connect Swiggy" in view["plan_summary"]["message"]
+    # a meal they cook is home cooking
+    client = create_app().test_client()
+    r = client.post("/api/profiles", json={**SETUP, "rhythm": {"breakfast": "skip", "lunch": "order", "dinner": "cook"}})
+    assert r.status_code == 201, r.get_json()
+    view = r.get_json()
+    cells = [c for d in view["grid"] for c in d["meals"].values()]
     src = view["source"]
     assert src["kind"] == "none" and src["needs"] == "connect"
     assert "sample" not in json.dumps(src).lower()
@@ -205,7 +217,7 @@ def test_no_live_pick_possible_says_why_and_never_fakes_one(prod, swiggy):
 def test_profile_created_with_sign_in_opens_on_another_device(prod):
     app = create_app()
     first = app.test_client()
-    r = first.post("/api/profiles", json={**SETUP, "login": "Priya@Example.com", "password": "long enough pw"})
+    r = first.post("/api/profiles", json={**{**SETUP, "login": "Priya@Example.com", "password": "long enough pw"}, "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201, r.get_json()
     body = r.get_json()
     assert body["login"] == "priya@example.com"
@@ -218,9 +230,9 @@ def test_profile_created_with_sign_in_opens_on_another_device(prod):
 
 def test_bad_or_taken_sign_in_creates_no_profile(prod):
     client = create_app().test_client()
-    assert client.post("/api/profiles", json={**SETUP, "login": "priya", "password": "short"}).status_code == 400
-    assert client.post("/api/profiles", json={**SETUP, "login": "priya", "password": "long enough pw"}).status_code == 201
-    taken = client.post("/api/profiles", json={**SETUP, "login": "PRIYA", "password": "another long pw"})
+    assert client.post("/api/profiles", json={**{**SETUP, "login": "priya", "password": "short"}, "consent": {"account": True, "health": True, "learning": True}}).status_code == 400
+    assert client.post("/api/profiles", json={**{**SETUP, "login": "priya", "password": "long enough pw"}, "consent": {"account": True, "health": True, "learning": True}}).status_code == 201
+    taken = client.post("/api/profiles", json={**{**SETUP, "login": "PRIYA", "password": "another long pw"}, "consent": {"account": True, "health": True, "learning": True}})
     assert taken.status_code == 400 and "taken" in taken.get_json()["error"]
     with db.cursor() as cur:
         assert cur.execute("SELECT COUNT(*) n FROM users").fetchone()["n"] == 1

@@ -168,7 +168,9 @@ def _row(session_id: int) -> dict:
 def check_cart(session_id: int, expected_fingerprint: str | None) -> dict:
     """Step 1: the reviewed dish goes into the Swiggy cart; record the true bill."""
     from ..integrations import swiggy_live
+    from .. import service
     row = _row(session_id)
+    service.require_cart_window(session_id)          # not before the meal's order window
     result = swiggy_live.fill_cart(session_id, expected_fingerprint)
     record_cart(row["plan_id"], session_id, result)
     next_step = ({"mode": "approve_and_place", "label": f"Approve ₹{result['to_pay']:.2f} and place"}
@@ -177,15 +179,24 @@ def check_cart(session_id: int, expected_fingerprint: str | None) -> dict:
     return {**result, "next": next_step, "budget": budget_check(row["plan_id"], session_id)}
 
 
-def check_single_cart(session_id: int, expected_fingerprint: str | None) -> dict:
+def check_single_cart(session_id: int, expected_fingerprint: str | None, part: int = 1) -> dict:
     """One planned meal into the Swiggy cart (the meal's own "Order" button): the same
-    real bill is kept for the plan and compared with the week's budget."""
+    real bill is kept for the plan and compared with the week's budget. A meal over
+    Swiggy's ₹1,000 limit goes as sequential carts (part 1, 2, …), each approved; the
+    meal's real total is the sum of its carts' bills."""
     from ..integrations import swiggy_live
     session = models.get_session(session_id)
     if not session:
         raise ValueError("Meal not found")
-    result = swiggy_live.fill_cart(session_id, expected_fingerprint)
+    from .. import service
+    service.require_cart_window(session_id)          # tomorrow's breakfast can't be paid for (and delivered) now
+    result = swiggy_live.fill_cart(session_id, expected_fingerprint, part)
     if result.get("to_pay") is not None:
+        if part > 1:
+            prior = real_totals(session["plan_id"]).get(session_id)
+            if prior and prior.get("to_pay") is not None:
+                result = {**result, "to_pay": round(prior["to_pay"] + result["to_pay"], 2),
+                          "cart_to_pay": result["to_pay"]}
         record_cart(session["plan_id"], session_id, result)
     return {**result, "budget": budget_check(session["plan_id"], session_id)}
 
@@ -200,10 +211,12 @@ def place(session_id: int, user_id: int, expected_fingerprint: str | None, over_
     budget = budget_check(row["plan_id"], session_id)
     if budget["over"] and over_budget_ok is not True:
         raise OverBudget(budget)
+    from . import spend
     if not config.LIVE_ORDERS:
         with db.cursor() as cur:
             cur.execute("UPDATE order_queue SET state='handed_off', updated_ts=? WHERE session_id=?",
                         (clock.now().isoformat(timespec="seconds"), session_id))
+        spend.record_handoff(user_id, session_id, row["to_pay"])     # a real bill, payment not yet known
         return {"mode": "tap_to_place", "placed": False, "url": swiggy_live.CHECKOUT_URL,
                 "message": "Your cart is ready in Swiggy. Tap to place it there."}
     result = swiggy_live.place_live_order(user_id, expected_fingerprint)
@@ -211,4 +224,6 @@ def place(session_id: int, user_id: int, expected_fingerprint: str | None, over_
         with db.cursor() as cur:
             cur.execute("UPDATE order_queue SET state='placed', updated_ts=? WHERE session_id=?",
                         (clock.now().isoformat(timespec="seconds"), session_id))
+        spend.record_placed(user_id, session_id, result.get("to_pay", row["to_pay"]), result.get("order_id"),
+                            result.get("restaurant") or "")
     return {"mode": "placed", **result}

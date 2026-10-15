@@ -260,6 +260,8 @@ Ideas met while building this (not built):
 
 ## Dark redesign: three places, honest money, one-tap changes (Oct 8, 2026)
 
+> **Superseded (14 Oct 2026):** the navigation described here is replaced by [docs/IA.md](IA.md), the single source of truth for Ziggy's tabs and screens. Kept for history.
+
 Built: the Dark v2 tokens app-wide; Today / Plan / You (bottom tabs on phones, a sidebar from
 1024 px); the next pick on Today with its reasons in plain words and one saffron action;
 Swiggy's real bill drawn line by line once a cart is checked; estimates grey with "est.",
@@ -282,3 +284,32 @@ Ideas met while building this (not built):
   so the week can show it too.
 - **Offline copy of the plan.** The service worker never caches API replies (by design);
   an explicit read-only snapshot would let the offline screen show more than what is loaded.
+
+## Founder ideas, Round 2 (Oct 2026) — all **idea, not built**
+
+- **Photo-based kcal estimate** *(idea, not built)*. Tap a food photo → a vision model returns a
+  kcal estimate for the plate. Opt-in only (a photo of someone's food is personal data: its own
+  consent line in the privacy notice, and the processor named). Shown as a range with "estimate",
+  never one number: portion size, oil and gravy are invisible in a photo, so it is inaccurate (±)
+  and worst on mixed Indian dishes. Each photo is a paid API call; choose a provider and measure the
+  cost per call before building, and cap calls per user. Never feeds a safety decision (veg,
+  allergens) — nutrition display only, and only when nutrition is turned on.
+- **WhatsApp reminders and ordering** *(idea, not built)*. Reminders first: a Meta-approved utility
+  template behind the same `/cron/tick`, with an "Order now" button that opens Ziggy's ready cart in
+  the browser (≈ ₹8 per user per month at 2 reminders a day; docs/reliability.md §6). Ordering inside
+  WhatsApp **needs Swiggy's OK** first — ask Builders Club whether their access covers a WhatsApp
+  channel acting on a user's Swiggy session.
+- **Ask Swiggy for kcal and allergen fields** *(idea, not built)*. Write to `builders@swiggy.in`:
+  FSSAI Labelling & Display Regulations 2020, reg 9(5), says e-commerce food businesses shall get the
+  kcal / allergen / veg information from restaurants that must publish it (Central licence or 10+
+  outlets, reg 9(1)–(2)) and provide it on their platform. Ask for those fields in
+  `get_restaurant_menu` / `search_menu` (today: `isVeg` only; docs/safety/fail-closed.md "Research
+  notes"). Ziggy already reads `allergens` / `kcal` if they appear (`swiggy_live._provider_facts`).
+- **Price comparison with Toing / Zomato** *(idea, not built; blocked)*. No API (Toing) or no
+  third-party use allowed (Zomato MCP), and Swiggy's Builders Club rules bar competitive
+  benchmarking (docs/research/platform-2026-10.md). The only allowed version: a price **the user
+  typed** for the other app, labelled as theirs. Today's compare row shows "Other apps · coming".
+- **Hindi and Telugu** *(idea, not built)*. The W3 string table already has English + Tamil and a
+  switch; add Hindi and Telugu tables (Today, Week, onboarding first), each checked by a native
+  speaker before release. The privacy notice must also be available in the language on request
+  (DPDP s.5(3)); the W1 allergen lexicon already knows Hindi and Telugu dish words.

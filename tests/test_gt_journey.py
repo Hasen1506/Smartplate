@@ -45,7 +45,7 @@ def test_golden_journey_signup_to_settings(world):
     transcript = {}
 
     # 1. sign-up / onboarding --------------------------------------------------
-    r = c.post("/api/profiles", json=ASHA)
+    r = c.post("/api/profiles", json={**ASHA, "consent": {"account": True, "health": True, "learning": True}})
     assert r.status_code == 201, r.get_json()
     view = r.get_json()
     uid, pid, key = view["user"]["id"], view["plan"]["id"], view["access_key"]
@@ -91,6 +91,13 @@ def test_golden_journey_signup_to_settings(world):
     dishes = c.get(f"/api/user/{uid}/swiggy/dishes", query_string={"restaurant_id": place["id"],
                    "restaurant_name": place["name"], "query": "tiffin"}, headers=h).get_json()
     tiffin = next(i for i in dishes["items"] if i["name"] == "Mini Tiffin")
+    # W1 fail-closed: the peanut dish is left out of both views, with the reason, and what
+    # is shown is "not checked", never "safe" (sp-grill #39).
+    for view in (menu, dishes):
+        assert "Peanut Chutney Dosa" not in {i["name"] for i in view["items"]}
+        left_out = {h["name"]: h for h in view["hidden_items"]}
+        assert left_out["Peanut Chutney Dosa"]["code"] == "allergen:peanut"
+        assert all(i["safety"]["status"] == "not_checked" for i in view["items"])
     review = c.post(f"/api/user/{uid}/swiggy/live-cart/preview", json={
         "restaurant_id": place["id"], "restaurant_name": place["name"],
         "item_id": tiffin["id"], "item_name": tiffin["name"]}, headers=h).get_json()
@@ -104,6 +111,7 @@ def test_golden_journey_signup_to_settings(world):
     transcript["4_live_search_and_review"] = {
         "restaurants": [[p["id"], p["name"]] for p in found["restaurants"]],
         "menu": [[i["name"], i["price"]] for i in menu["items"]],
+        "menu_hidden": [[i["name"], i["code"], i["reason"]] for i in menu["hidden_items"]],
         "dish_search": [[i["name"], i["price"], i.get("veg")] for i in dishes["items"]],
         "review": {k: review[k] for k in ("restaurant", "item", "menu_price", "orderable", "reason", "address")}}
 

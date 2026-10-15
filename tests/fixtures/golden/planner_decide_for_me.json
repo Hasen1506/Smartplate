@@ -1,0 +1,122 @@
+{
+ "today favourites_only": {
+  "method": "exact",
+  "money": 257.14,
+  "picks": [
+   "Mon lunch: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits today's money.",
+   "Mon dinner: Ghee Pongal ₹135 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹135 fits today's money."
+  ],
+  "spent": 250.0
+ },
+ "today favourites_plus_cook": {
+  "method": "exact",
+  "money": 257.14,
+  "picks": [
+   "Mon lunch: Dal + rice ₹45 — Cook Dal + rice at home (≈₹45 in groceries): you allowed cook days.",
+   "Mon dinner: Egg Curry Meals ₹195 — From Junior Kuppanna, one of your places (4.4★); ₹195 fits today's money."
+  ],
+  "spent": 240.0
+ },
+ "today favourites_plus_new": {
+  "method": "exact",
+  "money": 257.14,
+  "picks": [
+   "Mon lunch: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits today's money.",
+   "Mon dinner: Ghee Pongal ₹135 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹135 fits today's money."
+  ],
+  "spent": 250.0
+ },
+ "today surprise_me": {
+  "method": "exact",
+  "money": 257.14,
+  "picks": [
+   "Mon lunch: Masala Dosa ₹115 — New place Hotel Saravana Bhavan (4.5★), meets your 4.0★ rule; ₹115 fits today's money.",
+   "Mon dinner: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits today's money."
+  ],
+  "spent": 230.0
+ },
+ "week favourites_only": {
+  "method": "milp",
+  "money": 1800.0,
+  "picks": [
+   "Mon lunch: skip ₹0 — Skipped: the dishes that fit the money left are already planned as often as your variety setting allows. Add a dish or a place, or allow cooking or new places, to fill it.",
+   "Mon dinner: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits this week's money.",
+   "Tue lunch: Egg Curry Meals ₹195 — From Junior Kuppanna, one of your places (4.4★); ₹195 fits this week's money.",
+   "Tue dinner: Chicken Chettinad + Rice ₹255 — From Junior Kuppanna, one of your places (4.4★); ₹255 fits this week's money.",
+   "Wed lunch: skip ₹0 — Skipped: the dishes that fit the money left are already planned as often as your variety setting allows. Add a dish or a place, or allow cooking or new places, to fill it.",
+   "Wed dinner: Ghee Pongal ₹135 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹135 fits this week's money.",
+   "Thu lunch: skip ₹0 — Skipped: the dishes that fit the money left are already planned as often as your variety setting allows. Add a dish or a place, or allow cooking or new places, to fill it.",
+   "Thu dinner: Grilled Chicken Salad ₹270 — From FreshMenu, one of your places (4.2★); ₹270 fits this week's money.",
+   "Fri lunch: Egg Curry Meals ₹195 — From Junior Kuppanna, one of your places (4.4★); ₹195 fits this week's money.",
+   "Fri dinner: Chicken Chettinad + Rice ₹255 — From Junior Kuppanna, one of your places (4.4★); ₹255 fits this week's money.",
+   "Sat lunch: skip ₹0 — Skipped: the dishes that fit the money left are already planned as often as your variety setting allows. Add a dish or a place, or allow cooking or new places, to fill it.",
+   "Sat dinner: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits this week's money.",
+   "Sun lunch: skip ₹0 — Skipped: the dishes that fit the money left are already planned as often as your variety setting allows. Add a dish or a place, or allow cooking or new places, to fill it.",
+   "Sun dinner: Ghee Pongal ₹135 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹135 fits this week's money."
+  ],
+  "spent": 1670.0
+ },
+ "week favourites_plus_cook": {
+  "method": "milp",
+  "money": 1800.0,
+  "picks": [
+   "Mon lunch: Chicken Chettinad + Rice ₹255 — From Junior Kuppanna, one of your places (4.4★); ₹255 fits this week's money.",
+   "Mon dinner: Ghee Pongal ₹135 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹135 fits this week's money.",
+   "Tue lunch: skip ₹0 — Skipped: ₹40 of this week's money is left; the cheapest allowed lunch is ₹115.",
+   "Tue dinner: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits this week's money.",
+   "Wed lunch: skip ₹0 — Skipped: ₹40 of this week's money is left; the cheapest allowed lunch is ₹115.",
+   "Wed dinner: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits this week's money.",
+   "Thu lunch: skip ₹0 — Skipped: ₹40 of this week's money is left; the cheapest allowed lunch is ₹115.",
+   "Thu dinner: Egg Curry Meals ₹195 — From Junior Kuppanna, one of your places (4.4★); ₹195 fits this week's money.",
+   "Fri lunch: Dal + rice ₹45 — Cook Dal + rice at home (≈₹45 in groceries): you allowed cook days.",
+   "Fri dinner: Chicken Chettinad + Rice ₹255 — From Junior Kuppanna, one of your places (4.4★); ₹255 fits this week's money.",
+   "Sat lunch: Ghee Pongal ₹135 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹135 fits this week's money.",
+   "Sat dinner: Egg Curry Meals ₹195 — From Junior Kuppanna, one of your places (4.4★); ₹195 fits this week's money.",
+   "Sun lunch: Dal + rice ₹45 — Cook Dal + rice at home (≈₹45 in groceries): you allowed cook days.",
+   "Sun dinner: Grilled Chicken Salad ₹270 — From FreshMenu, one of your places (4.2★); ₹270 fits this week's money."
+  ],
+  "spent": 1760.0
+ },
+ "week favourites_plus_new": {
+  "method": "milp",
+  "money": 1800.0,
+  "picks": [
+   "Mon lunch: Idli Sambar (4 pc) ₹115 — New place Murugan Idli Shop (4.3★), meets your 4.0★ rule; ₹115 fits this week's money.",
+   "Mon dinner: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits this week's money.",
+   "Tue lunch: Egg Curry Meals ₹195 — From Junior Kuppanna, one of your places (4.4★); ₹195 fits this week's money.",
+   "Tue dinner: Curd Rice ₹100 — New place Sangeetha Veg (4.2★), meets your 4.0★ rule; ₹100 fits this week's money.",
+   "Wed lunch: Egg Curry Meals ₹195 — From Junior Kuppanna, one of your places (4.4★); ₹195 fits this week's money.",
+   "Wed dinner: Masala Dosa ₹115 — New place Hotel Saravana Bhavan (4.5★), meets your 4.0★ rule; ₹115 fits this week's money.",
+   "Thu lunch: Curd Rice ₹100 — New place Sangeetha Veg (4.2★), meets your 4.0★ rule; ₹100 fits this week's money.",
+   "Thu dinner: Masala Dosa ₹115 — New place Hotel Saravana Bhavan (4.5★), meets your 4.0★ rule; ₹115 fits this week's money.",
+   "Fri lunch: Ghee Pongal ₹135 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹135 fits this week's money.",
+   "Fri dinner: Vegan Sambar Rice ₹110 — New place Sangeetha Veg (4.2★), meets your 4.0★ rule; ₹110 fits this week's money.",
+   "Sat lunch: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits this week's money.",
+   "Sat dinner: Idli Sambar (4 pc) ₹115 — New place Murugan Idli Shop (4.3★), meets your 4.0★ rule; ₹115 fits this week's money.",
+   "Sun lunch: Ghee Pongal ₹135 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹135 fits this week's money.",
+   "Sun dinner: Vegan Sambar Rice ₹110 — New place Sangeetha Veg (4.2★), meets your 4.0★ rule; ₹110 fits this week's money."
+  ],
+  "spent": 1770.0
+ },
+ "week surprise_me": {
+  "method": "milp",
+  "money": 1800.0,
+  "picks": [
+   "Mon lunch: Masala Dosa ₹115 — New place Hotel Saravana Bhavan (4.5★), meets your 4.0★ rule; ₹115 fits this week's money.",
+   "Mon dinner: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits this week's money.",
+   "Tue lunch: Veg Meals ₹150 — New place Hotel Saravana Bhavan (4.5★), meets your 4.0★ rule; ₹150 fits this week's money.",
+   "Tue dinner: Curd Rice ₹100 — New place Sangeetha Veg (4.2★), meets your 4.0★ rule; ₹100 fits this week's money.",
+   "Wed lunch: Masala Dosa ₹115 — New place Hotel Saravana Bhavan (4.5★), meets your 4.0★ rule; ₹115 fits this week's money.",
+   "Wed dinner: Mini Tiffin ₹115 — From Adyar Ananda Bhavan, one of your places (4.3★); ₹115 fits this week's money.",
+   "Thu lunch: Vegan Sambar Rice ₹110 — New place Sangeetha Veg (4.2★), meets your 4.0★ rule; ₹110 fits this week's money.",
+   "Thu dinner: Idli Sambar (4 pc) ₹115 — New place Murugan Idli Shop (4.3★), meets your 4.0★ rule; ₹115 fits this week's money.",
+   "Fri lunch: Idli Sambar (4 pc) ₹115 — New place Murugan Idli Shop (4.3★), meets your 4.0★ rule; ₹115 fits this week's money.",
+   "Fri dinner: Ghee Podi Dosa ₹155 — New place Murugan Idli Shop (4.3★), meets your 4.0★ rule; ₹155 fits this week's money.",
+   "Sat lunch: Egg Curry Meals ₹195 — From Junior Kuppanna, one of your places (4.4★); ₹195 fits this week's money.",
+   "Sat dinner: Parotta + Veg Kurma ₹140 — New place Sangeetha Veg (4.2★), meets your 4.0★ rule; ₹140 fits this week's money.",
+   "Sun lunch: Curd Rice ₹100 — New place Sangeetha Veg (4.2★), meets your 4.0★ rule; ₹100 fits this week's money.",
+   "Sun dinner: Pesarattu + Chutney ₹145 — New place Murugan Idli Shop (4.3★), meets your 4.0★ rule; ₹145 fits this week's money."
+  ],
+  "spent": 1785.0
+ }
+}

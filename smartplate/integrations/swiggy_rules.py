@@ -32,6 +32,10 @@ RULES = [
      "plain": "Prices, delivery fees and what's open all depend on the address. Swiggy ties your cart to the "
               "address it was started for.",
      "fix": "Choose the same address in Ziggy as in Swiggy, or clear the cart in Swiggy."},
+    {"id": "out_of_area", "whose": "swiggy", "title": "Not delivering to this address",
+     "plain": "Each restaurant delivers to a limited area, and Swiggy decides it for your chosen address. "
+              "A place you liked at one address may not reach another.",
+     "fix": "Pick a place that delivers here, or choose another delivery address."},
     {"id": "exact_dish", "whose": "ziggy", "title": "Only the exact dish",
      "plain": "Ziggy adds a dish only when Swiggy confirms exactly one match at that restaurant. Similar names "
               "are never guessed.",
@@ -50,10 +54,12 @@ RULES = [
     {"id": "cart_cap", "whose": "swiggy", "title": "₹1,000 per order for now",
      "plain": "While Ziggy is in Swiggy's developer programme, an order placed through Ziggy can't be over "
               "₹1,000.",
-     "fix": "Pay larger orders in Swiggy."},
+     "fix": "Ziggy splits a larger order into carts under ₹1,000, one after the other, each for your "
+            "approval. One dish over ₹1,000 by itself is ordered in the Swiggy app."},
     {"id": "payment", "whose": "swiggy", "title": "You pay in Swiggy",
-     "plain": "Ziggy never handles your money. Where Swiggy allows it, Ziggy can place a Cash on Delivery "
-              "order; everything else is paid in Swiggy.",
+     "plain": "Ziggy never handles your money and never pays without your explicit approval. Where Swiggy "
+              "allows it, Ziggy can place a Cash on Delivery order you approved; everything else is paid "
+              "in Swiggy.",
      "fix": "Open Swiggy to pay with UPI, a card or a wallet."},
     {"id": "no_blind_retry", "whose": "swiggy", "title": "An order is never retried blindly",
      "plain": "Placing an order can't be safely repeated: if the answer was unclear, the order may already "
@@ -80,7 +86,35 @@ BY_ID = {r["id"]: r for r in RULES}
 
 CODES = {"swiggy_not_connected": "sign_in", "swiggy_auth_expired": "sign_in",
          "swiggy_browser_mismatch": "sign_in", "swiggy_rate_limited": "rate_limit",
-         "swiggy_cart_other_address": "address", "swiggy_item_unmatched": "exact_dish"}
+         "swiggy_cart_other_address": "address", "swiggy_item_unmatched": "exact_dish",
+         "swiggy_demo_mode": "approval", "swiggy_read_only": "approval", "swiggy_out_of_area": "out_of_area"}
+
+# Swiggy's ways of saying a restaurant can't deliver to the chosen address.
+OUT_OF_AREA = (r"(does not|doesn't|do not|cannot|can't|not able to) deliver|not deliverable|unserviceable|"
+               r"not serviceable|non[- ]serviceable|outside (the |your )?(delivery|service) (area|zone)|"
+               r"out of (delivery|service) (area|range|zone)|too far")
+
+# Plain sentences for raw provider messages (grill W10 finding: users saw raw JSON).
+PLAIN = [
+    (re.compile(OUT_OF_AREA, re.I), "This restaurant doesn't deliver to your selected address."),
+]
+
+
+def plain_message(raw) -> str:
+    """One readable sentence from whatever Swiggy sent: known causes in plain words, the
+    provider's own message when it is a short sentence, and never JSON or stack text."""
+    text = raw
+    if isinstance(raw, dict):
+        err = raw.get("error")
+        text = (err.get("message") if isinstance(err, dict) else err) or raw.get("message") or raw.get("text")
+    text = str(text or "").strip()
+    for rx, sentence in PLAIN:
+        if rx.search(text):
+            return sentence
+    if not text or text[:1] in "{[" or "\"success\"" in text or "Traceback" in text:
+        return "Swiggy couldn't complete that request. Try again in a moment, or use the Swiggy app."
+    return text[:200]
+
 
 # First match wins: specific causes before the generic "Swiggy didn't answer".
 PATTERNS = [
@@ -95,6 +129,7 @@ PATTERNS = [
     ("sign_in", r"sign-in|access token|private ziggy profile|shared profile"),
     ("rate_limit", r"limiting requests|too many"),
     ("exact_dish", r"exact|couldn't find|no dishes ziggy can plan"),
+    ("out_of_area", OUT_OF_AREA),
     ("address", r"address"),
     ("choices", r"options|add-ons|customi[sz]ation"),
     ("open_in_stock", r"in stock|closed"),
@@ -121,6 +156,11 @@ def explain(error) -> dict:
     return {k: rule[k] for k in ("id", "whose", "title", "plain", "fix")}
 
 
+def _redact(text: str) -> str:
+    from .. import privacy
+    return privacy.redact(text)          # the problem log keeps no addresses, phones or tokens (#45)
+
+
 def note(user_id: int | None, error) -> None:
     """Keep this problem on the profile (best effort: logging a problem never fails a request)."""
     if not user_id:
@@ -133,7 +173,7 @@ def note(user_id: int | None, error) -> None:
             if not cur.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
                 return
             cur.execute("INSERT OR REPLACE INTO swiggy_issues(user_id, ts, rule, message) VALUES (?,?,?,?)",
-                        (user_id, now.isoformat(timespec="microseconds"), classify(error), str(error)[:300]))
+                        (user_id, now.isoformat(timespec="microseconds"), classify(error), _redact(str(error))[:300]))
             old = cur.execute("SELECT ts FROM swiggy_issues WHERE user_id=? ORDER BY ts DESC",
                               (user_id,)).fetchall()[KEEP:]
             for row in old:
