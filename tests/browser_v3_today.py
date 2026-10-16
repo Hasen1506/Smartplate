@@ -143,6 +143,8 @@ def usual(page, viewport, meal):
     if viewport["width"] >= 1024:
         return page.locator(".v3-pool", has=page.get_by_role("heading", name=f"Usual {meal}{'es' if meal == 'lunch' else 's'}", exact=True))
     btn = page.locator(f'[data-v3-usual="{meal}"]')
+    if not btn.is_visible() and page.locator("[data-v3-other]").count():   # usab #32: other meals folded away
+        page.locator("[data-v3-other]").click()
     if btn.get_attribute("aria-expanded") != "true":
         btn.click()
     expect(btn).to_have_attribute("aria-expanded", "true")
@@ -184,7 +186,7 @@ def test_today_favourites_first_journey(town, viewport, theme):
         expect(today.locator(".v3-budget")).to_contain_text("(B+L)")
         expect(today.get_by_label("Weather today")).to_be_visible()
         rules = today.get_by_label("Your rules")
-        for chip in ("Vegetarian", "4★ and up", "≤ 30 min"):
+        for chip in ("Vegetarian", "Any rating", "≤ 45 min", "Ziggy defaults"):     # usab #10
             expect(rules).to_contain_text(chip)
         expect(page.locator(".v3-compare")).to_have_count(0)            # no data → no price row
         assert page.locator("[data-v3-pick]").count() == 0

@@ -112,3 +112,5 @@
 .v3-confirm, .v3-decide-note { margin-top: 8px; }
 .v3-other-usual > summary { cursor: pointer; padding: 6px 0; list-style-position: inside; }
 .v3-week-decide { gap: 8px; align-items: center; margin: 4px 0 8px; }
+/* "Cart opens 19:40 · remind me" is longer than "Place order": it takes the whole first row (usab #21) */
+.v3-actions > [data-v3-remind]{grid-column:1 / -1}
