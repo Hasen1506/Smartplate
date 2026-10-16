@@ -284,6 +284,7 @@ const photoOf = (x) => x?.image || (x?.item_id != null ? (S.photos || {})[x.item
 // Today asks Swiggy for the photos of the dishes it shows (the server caches them; a dish
 // Swiggy shows no photo for keeps its icon). Only with live menus and a Swiggy sign-in.
 async function loadPhotos(items) {
+  if (globalThis.ZiggyV3?.on?.()) return;             // v3 shows no dish photos here: no Swiggy call (audit #16)
   if (S.view?.source?.kind !== "live" || !swiggyReady()) return;
   S.photos = S.photos || {}; S.photoAsked = S.photoAsked || new Set();
   const ids = items.filter(x => x && x.item_id != null && !x.image && !S.photoAsked.has(x.item_id))
@@ -551,7 +552,8 @@ async function loadOrCreatePlan() {
   S.exec = await api(`/api/plan/${S.planId}/orders`);
   S.swiggy = await api(`/api/user/${S.userId}/swiggy`).catch(() => null);
   S.liveFavourites = swiggyReady() ? await api(`/api/user/${S.userId}/swiggy/favourites`).catch(() => null) : null;
-  if (swiggyReady()) await refreshLiveCart(false);
+  // v3 reads the cart only when a pick can go in it or the cart block is open (audit #16)
+  if (swiggyReady() && !globalThis.ZiggyV3?.on?.()) await refreshLiveCart(false);
   matchCartToNextMeal();
 }
 // Swiggy's cart already holds the next meal (added on another device, or before a reload):
@@ -929,7 +931,16 @@ async function autoSyncLive() {
   S.liveSyncTried[addr] = true;
   S.liveSync = "loading"; render();
   try {
-    adoptView(await api(`/api/plan/${S.planId}/live-menus`, "POST", {}));
+    // A background job the app polls, so opening Ziggy never waits on every menu (audit #16)
+    let job = await api(`/api/plan/${S.planId}/live-menus?background=1`, "POST", {});
+    for (let i = 0; job.state === "running" && i < LIVE_SYNC_POLLS; i++) {
+      await new Promise(r => setTimeout(r, LIVE_SYNC_POLL_MS));
+      job = await api(`/api/plan/${S.planId}/live-menus/status`);
+    }
+    if (job.state === "error") { const e = new Error(job.error); e.code = job.code; throw e; }
+    if (job.state === "running") { S.liveSync = null; render(); return; }    // still reading: the next open looks again
+    adoptView(await api(`/api/plan/${S.planId}`));
+    globalThis.ZiggyV3?.invalidate?.();
     S.liveSync = null;
   } catch (e) {
     if (SWIGGY_RECONNECT.has(e.code)) { S.liveSync = null; S.error = e.message; S.errorCode = e.code; }
@@ -937,6 +948,7 @@ async function autoSyncLive() {
   }
   render();
 }
+const LIVE_SYNC_POLLS = 90, LIVE_SYNC_POLL_MS = 1500;
 /* One tap: Ziggy reads the exact live item, then puts exactly that in your Swiggy cart and
    shows Swiggy's own bill. The elephant rolls across the button meanwhile. You still pay
    in Swiggy; nothing is ordered here. */
@@ -1445,7 +1457,7 @@ function trackingCard() {
    away (no sheet), and any meal whose time it is now, even one the week leaves out. */
 const quickKey = (c) => `${c.session_id}:${c.kind}:${c.item_id ?? c.recipe_key ?? ""}`;
 function queueQuick() {
-  if (S.tab !== "today" || !S.view || S.offline) return;
+  if (S.tab !== "today" || !S.view || S.offline || globalThis.ZiggyV3?.on?.()) return;   // classic Today only
   const c = S.view.next_up?.cell;
   if (!c || c.status !== "active" || !["delivery", "cook"].includes(c.kind) || (S.carts || {})[c.session_id]) return;
   const key = quickKey(c);
@@ -2442,6 +2454,9 @@ function orderHistoryCard() {
 // Swiggy doesn't document the unit of a bare menu price; the server reads either form and
 // marks inferred ones. A menu price is an estimate until Swiggy's cart prices the order.
 function livePrice(price) { return price == null ? "Price in cart" : est(price, true); }
+// The review's price, read fresh for this exact dish: Swiggy's own number when the server
+// confirmed it on the sectioned menu just read (price_estimated false, audit #20), else ≈ est.
+const reviewPrice = (r) => r.price_estimated === false ? rupee(r.menu_price) : livePrice(r.menu_price);
 function etaMinutes(eta) { const m = /\d+/.exec(String(eta ?? "")); return m ? Number(m[0]) : null; }
 const FAST_MIN = 30;
 function filterChip(key, label, extra = "") {
@@ -2542,7 +2557,7 @@ function liveOrderReviewDialog() {
     <div class="sheet-head"><div><p class="eyebrow">Fresh from Swiggy</p><h2 class="h2" id="live-review-title">${r.orderable === false ? "Check this dish" : "Add this to your cart?"}</h2></div>
       <button class="icon-btn" data-close-live-review="1" aria-label="Close live item review">${ICON.close}</button></div>
     <div class="dish-row">${dishIcon(r.item, { image: r.image, lg: true })}<div class="t"><b class="h3">${esc(r.item)}</b><span class="muted">${esc(r.restaurant)} · to ${esc(r.address)}</span></div>
-      <b>${r.menu_price == null ? "Price in cart" : (r.quantity || 1) > 1 ? `${r.quantity} × ${livePrice(r.menu_price)}` : livePrice(r.menu_price)}</b></div>
+      <b>${r.menu_price == null ? "Price in cart" : (r.quantity || 1) > 1 ? `${r.quantity} × ${reviewPrice(r)}` : reviewPrice(r)}</b></div>
     <p class="fine">Swiggy shows the exact total, with fees and taxes, once it's in your cart.</p>
     ${r.orderable === false ? `<div class="fine" role="note">${esc(r.reason)}${ruleWhy(r.rule)}</div>
       <a class="btn primary" href="${esc(r.handoff_url)}" target="_blank" rel="noopener">Open in Swiggy ${ICON.out}</a>

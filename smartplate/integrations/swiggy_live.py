@@ -30,7 +30,7 @@ import statistics
 import threading
 
 from .. import clock, config, db
-from . import swiggy_connect as sc, swiggy_rules
+from . import swiggy_connect as sc, swiggy_offers, swiggy_rules
 from .swiggy_connect import SwiggyError
 from .swiggy_schema import (  # noqa: F401  (split out, grill #57; re-exported)
     ALIASES,
@@ -68,15 +68,17 @@ from .swiggy_money import (  # noqa: F401  (split out, grill #57; re-exported)
     cancellation_note,
     _line_scale,
     billed_delivery_fee,
+    list_price,
 )
 
 ALLOWED = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu",
                      "get_food_cart", "update_food_cart", "flush_food_cart", "get_payment_options",
+                     "fetch_food_coupons",                       # read at the cart only (audit #9); never applied
                      "place_food_order", "get_food_orders", "track_food_order",
                      "check_payment_status", "confirm_order"})     # UPI Payment stage (live_order only)
 # Tools that only read: safe to send again on a fresh MCP session after a session error.
 READ_ONLY = frozenset({"get_addresses", "search_restaurants", "get_restaurant_menu", "search_menu",
-                       "get_food_cart", "get_payment_options", "get_food_orders", "track_food_order",
+                       "get_food_cart", "fetch_food_coupons", "get_payment_options", "get_food_orders", "track_food_order",
                        "check_payment_status"})
 # Tools that place or confirm a real order: only in mode live_order, never re-sent.
 ORDER_WRITES = frozenset({"place_food_order", "confirm_order"})
@@ -543,6 +545,7 @@ def search_live_restaurants(user_id: int, query: str, offset: int = 0) -> dict:
         found.append({"id": rid, "name": name, "sponsored": name != raw_name, "rating": _get(row, "rating"),
                       "eta": _get(row, "eta"), "area": _get(row, "area"),
                       "availability": _get(row, "availability"), "distance": _get(row, "distance"),
+                      "offer": swiggy_offers.restaurant_offer(row),
                       "cuisines": [str(c)[:40] for c in cuisines if isinstance(c, str)][:6]
                                   if isinstance(cuisines, list) else []})
     _note_rating(user_id, {r["id"]: r["rating"] for r in found})
@@ -584,7 +587,8 @@ def toggle_live_favourite(user_id: int, restaurant_id: str, restaurant_name: str
             cur.execute("DELETE FROM swiggy_favourites WHERE user_id=? AND address_id=? AND restaurant_id=?",
                         (user_id, address_id, restaurant_id))
         return {"favourite": False, "restaurants": live_favourites(user_id)}
-    place = live_menu(user_id, restaurant_id, restaurant_name)["restaurant"]
+    from . import swiggy_menu_cache
+    place = swiggy_menu_cache.place(user_id, restaurant_id, restaurant_name)
     with db.cursor() as cur:
         cur.execute("INSERT INTO swiggy_favourites(user_id, address_id, restaurant_id, restaurant_name) "
                     "VALUES (?,?,?,?)", (user_id, address_id, restaurant_id, place["name"]))
@@ -620,12 +624,15 @@ def _menu_sections(body: dict) -> tuple[list[tuple[dict, list[str]]], list[dict]
     return rows, cut
 
 
-def _read_menu(user_id: int, conn: dict, restaurant_id: str) -> tuple[dict, list[tuple[dict, list[str]]], dict]:
-    """Every page of a menu: (first reply body, (dish, sections) rows, notes)."""
+def _read_menu(user_id: int, conn: dict, restaurant_id: str, pages_max: int = MENU_PAGES,
+               start: int = 1) -> tuple[dict, list[tuple[dict, list[str]]], dict]:
+    """Pages `start`..`pages_max` of a menu: (first reply body, (dish, sections) rows, notes).
+    notes["unread"] is True when Swiggy has more pages that were left for later (page 1 first,
+    the rest in the background: UX audit #3)."""
     tool = _tool(conn, "get_restaurant_menu")
     paged = bool(_find((tool.get("input_schema") or {}).get("properties") or {}, "page"))
-    first, rows, cut, pages = None, [], [], 0
-    for page in range(1, MENU_PAGES + 1):
+    first, rows, cut, pages, last = None, [], [], 0, {}
+    for page in range(start, pages_max + 1):
         args = {"restaurant": restaurant_id, "address": _address(conn)}
         if paged:
             args.update(page=page, page_size=MENU_PAGE_SIZE)
@@ -633,6 +640,7 @@ def _read_menu(user_id: int, conn: dict, restaurant_id: str) -> tuple[dict, list
         body = data.get("data", data) if isinstance(data, dict) else {}
         body = body if isinstance(body, dict) else {}
         pages += 1
+        last = body
         if first is None:
             first = body
         if not isinstance(body.get("categories"), list):
@@ -646,35 +654,50 @@ def _read_menu(user_id: int, conn: dict, restaurant_id: str) -> tuple[dict, list
         cut += short
         if not paged or body.get("hasMore") is not True:
             break
-    more = bool(first and first.get("hasMore") is True and pages >= MENU_PAGES and paged)
-    return first or {}, rows, {"cut": cut, "more_sections": more, "pages": pages,
+    done = start - 1 + pages
+    left = bool(paged and last.get("hasMore") is True)
+    more = left and done >= MENU_PAGES
+    return first or {}, rows, {"cut": cut, "more_sections": more, "pages": pages, "next_page": done + 1,
+                               "unread": left and done < MENU_PAGES,
                                "sectioned": isinstance((first or {}).get("categories"), list),
                                "sections_total": (first or {}).get("totalCategories")}
 
 
-def live_menu(user_id: int, restaurant_id: str, restaurant_name: str, *, screen: bool = True) -> dict:
+def live_menu(user_id: int, restaurant_id: str, restaurant_name: str, *, screen: bool = True,
+              pages: int = MENU_PAGES) -> dict:
     """Browse the exact provider restaurant ID, with a fresh menu for this address: every
     section Swiggy returns (up to MENU_PAGES pages), each dish once, with its sections.
 
     With `screen` (every view the person sees), dishes that break their diet, allergies or
     health filters, or that Ziggy can't vouch for, are moved to `hidden_items`, each with
     its reason. The live catalogue reads the whole menu (screen=False); the planner then
-    applies the same checker to every dish it considers."""
+    applies the same checker to every dish it considers.
+
+    A whole menu read is kept for MENU_TTL (swiggy_menu_cache) so the next tap shows it at
+    once; `pages=1` reads only the first page (marked `partial`)."""
     if not restaurant_id or not restaurant_name:
         raise ValueError("Choose a restaurant from live Swiggy search")
     conn = _conn(user_id)
-    body, rows, notes = _read_menu(user_id, conn, restaurant_id)
-    from ..domain import models
-    user = models.get_user(user_id)
+    body, rows, notes = _read_menu(user_id, conn, restaurant_id, pages)
+    raw = menu_raw(user_id, conn, restaurant_id, body, rows, notes)
+    from . import swiggy_menu_cache
+    swiggy_menu_cache.store(user_id, raw)
+    return menu_view(user_id, raw, screen=screen)
+
+
+def menu_raw(user_id: int, conn: dict, restaurant_id: str, body: dict, rows: list, notes: dict) -> dict:
+    """A menu as Swiggy gave it (nobody's screening applied yet), ready to cache."""
     provider_restaurant = body.get("restaurant")
     if (not isinstance(provider_restaurant, dict) or str(_get(provider_restaurant, "id")) != restaurant_id
             or not _get(provider_restaurant, "name")):
         raise SwiggyError("Swiggy did not verify this exact restaurant for your address. Search again.")
     if provider_restaurant.get("isOpen") is False:
         raise SwiggyError("This restaurant is closed right now. Search again later.", code="restaurant_closed")
+    from . import swiggy_offers
     place = {"id": restaurant_id, "name": str(_get(provider_restaurant, "name")),
-             "area": _get(provider_restaurant, "area"), "rating": _get(provider_restaurant, "rating")}
-    items, by_id, hidden = [], {}, 0
+             "area": _get(provider_restaurant, "area"), "rating": _get(provider_restaurant, "rating"),
+             "offer": swiggy_offers.restaurant_offer(provider_restaurant)}
+    items, by_id = [], {}
     # Live finding (9 Oct 2026): the sectioned menu's bare `price` is whole rupees (Idiyappam
     # 3 pcs: 153, as the Swiggy app shows), so those prices are not marked as estimates.
     verified = notes["sectioned"]
@@ -690,12 +713,11 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str, *, screen:
                     known["categories"].append(c)
             continue
         veg = _row_veg(row)
-        if user["diet"] in ("veg", "vegan", "jain") and veg in (False, 0):
-            hidden += 1
         name = str(_get(row, "name"))
         desc = row.get("description") if isinstance(row.get("description"), str) else None
         item = {"id": iid, "name": name,
-                "price": rupees(row, unit), "price_estimated": price_estimated(row) and not verified, "veg": veg,
+                "price": rupees(row, unit), "list_price": list_price(row, unit),
+                "price_estimated": price_estimated(row) and not verified, "veg": veg,
                 "in_stock": _flag(_get(row, "stock")),
                 "has_options": _flag(_get(row, "variants")) is True or _flag(_get(row, "addons")) is True,
                 "categories": list(sections), "bestseller": row.get("isBestseller") is True,
@@ -710,19 +732,39 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str, *, screen:
             if c not in categories:
                 categories.append(c)
     remember_photos(user_id, restaurant_id, items)
-    _note_rating(user_id, {restaurant_id: place["rating"]})
-    not_for_you, by_code = [], {}
-    if screen:
-        items, not_for_you, by_code = _screen(user, items)
+    _note_rating(user_id, {restaurant_id: place["rating"]})     # r3 history-favs: ratings learned from places
     total = body.get("totalItems")
     return {"restaurant": place, "address": conn.get("address_label") or _address(conn),
-            "items": items, "categories": categories, "hidden_nonveg": hidden,
-            # every dish left out for this person, with the reason in plain words
-            "hidden": len(not_for_you), "hidden_items": not_for_you, "hidden_by": by_code,
+            "address_id": _address(conn), "items": items, "categories": categories,
             "total_items": total if isinstance(total, int) and not isinstance(total, bool) else None,
             "truncated": bool(body.get("truncated")) or bool(notes["cut"]) or notes["more_sections"],
             "cut_sections": notes["cut"], "more_sections": notes["more_sections"],
-            "fetched": clock.now().isoformat(timespec="minutes")}
+            "partial": bool(notes.get("unread")), "next_page": notes.get("next_page"),
+            "verified_prices": verified, "fetched": clock.now().isoformat(timespec="minutes")}
+
+
+def menu_view(user_id: int, raw: dict, *, screen: bool = True) -> dict:
+    """A cached or fresh menu as this person sees it: screened for their diet, allergies and
+    health filters (each hidden dish with its reason), non-veg counted for vegetarians."""
+    from ..domain import models
+    user = models.get_user(user_id)
+    items = [dict(i, categories=list(i.get("categories") or [])) for i in raw["items"]]
+    hidden = sum(1 for i in items if user["diet"] in ("veg", "vegan", "jain") and i.get("veg") in (False, 0))
+    not_for_you, by_code = [], {}
+    if screen:
+        items, not_for_you, by_code = _screen(user, items)
+    return {**{k: v for k, v in raw.items() if k not in ("items", "address_id")},
+            "items": items, "hidden_nonveg": hidden,
+            # every dish left out for this person, with the reason in plain words
+            "hidden": len(not_for_you), "hidden_items": not_for_you, "hidden_by": by_code}
+
+
+def verify_place(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
+    """The exact restaurant, open now, for this address: one menu page, not the whole menu
+    (the cart review and dish search only need the place; audit #3)."""
+    if not restaurant_id or not restaurant_name:
+        raise ValueError("Choose a restaurant from live Swiggy search")
+    return live_menu(user_id, restaurant_id, restaurant_name, pages=1)["restaurant"]
 
 
 def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, query: str, offset=0) -> dict:
@@ -732,7 +774,8 @@ def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, q
         raise ValueError("Search for a dish using 2–80 characters")
     if not isinstance(offset, int) or isinstance(offset, bool) or not 0 <= offset <= 10000:
         raise ValueError("Invalid menu page")
-    menu = live_menu(user_id, restaurant_id, restaurant_name)
+    from . import swiggy_menu_cache
+    place = swiggy_menu_cache.place(user_id, restaurant_id, restaurant_name)
     conn = _conn(user_id)
     tool = _tool(conn, "search_menu")
     props = (tool.get("input_schema") or {}).get("properties") or {}
@@ -762,7 +805,7 @@ def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, q
         seen.add(item_id)
         name = str(_get(row, "name"))
         desc = row.get("description") if isinstance(row.get("description"), str) else None
-        items.append({"id": item_id, "name": name, "price": rupees(row, unit),
+        items.append({"id": item_id, "name": name, "price": rupees(row, unit), "list_price": list_price(row, unit),
                       "price_estimated": price_estimated(row), "veg": veg,
                       "in_stock": _flag(_get(row, "stock")), "has_options": _has_options(row),
                       "categories": _categories(row), "bestseller": row.get("isBestseller") is True,
@@ -774,7 +817,7 @@ def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, q
     next_offset = body.get("nextOffset") if more else None
     if more and (not isinstance(next_offset, int) or isinstance(next_offset, bool) or not offset < next_offset <= 10000):
         raise SwiggyError("Swiggy returned unusable menu pagination. Search again later.")
-    return {"restaurant": menu["restaurant"], "items": items, "query": query, "has_more": more,
+    return {"restaurant": place, "items": items, "query": query, "has_more": more,
             "next_offset": next_offset, "hidden_nonveg": hidden, "hidden": len(not_for_you),
             "hidden_items": not_for_you, "hidden_by": by_code, "fetched": clock.now().isoformat(timespec="minutes")}
 
@@ -1026,7 +1069,7 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
     user = models.get_user(user_id)
     if not user:
         raise ValueError("Profile not found")
-    place = live_menu(user_id, restaurant_id, restaurant_name)["restaurant"]
+    place = verify_place(user_id, restaurant_id, restaurant_name)
     conn = _conn(user_id)
     address_id = _address(conn)
     tool = _tool(conn, "search_menu")
@@ -1075,6 +1118,15 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
               "menu_price": price, "menu_total": None if price is None else round(price * quantity, 2),
               "price_estimated": price_estimated(item),
               "image": _image(item), "handoff_url": timing.swiggy_handoff(place["name"], str(_get(item, "name")))}
+    if review["price_estimated"] and price is not None:
+        # The same dish at the same price on the sectioned menu just read (whole rupees, live
+        # finding 9 Oct): the price is Swiggy's own, not an inferred estimate (audit #20).
+        from . import swiggy_menu_cache
+        kept, _ = swiggy_menu_cache.load(user_id, restaurant_id)
+        same = next((i for i in (kept or {}).get("items") or [] if i["id"] in (str(item_id), details["item_id"])), None)
+        if kept and kept.get("verified_prices") and same and same.get("price") is not None \
+                and abs(float(same["price"]) - price) < 0.5:
+            review["price_estimated"] = False
     blocked = None
     from ..domain import allergens
     verdict = allergens.check({**user, "household_members": []},       # this person's own order
@@ -1111,7 +1163,7 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
             q, split = _split_part(price, quantity, model, part)
             details["quantity"] = q
             details["part"] = part
-            review.update(quantity=q, menu_total=round(price * q, 2), split=split)
+            review.update(quantity=q, menu_total=round(price * q, 2), split=split, part=part)
         elif not cap["fits"]:
             blocked = cap["message"]
     if blocked:
@@ -1369,7 +1421,14 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     if before["items"]:
         if before["cart_address_id"]:
             raise _other_address_error(before, conn, "Your Swiggy cart already has items and")
-        raise SwiggyError("Your Swiggy cart already has items. Review or clear it in Swiggy before starting a new order.")
+        # Never for cart 2+ of a split order: an identical cart then is cart 1, still unpaid.
+        if before["address_verified"] and int(preview.get("part") or 1) == 1 and \
+                _cart_mismatch(before, restaurant_id, preview["item_id"], preview.get("quantity", 1)) is None:
+            # Already exactly the reviewed dish (Ziggy filled it a moment ago, or on another
+            # device): that cart is the answer, not an error (audit #13). Nothing is changed.
+            return _filled(user_id, preview, before, current)
+        raise SwiggyError("Your Swiggy cart already has items. Review or clear it in Swiggy before starting a new order.",
+                          code="swiggy_cart_busy")
     # An unconfirmed "empty" reply is never a safe base to add to. A structured empty
     # cart is, whichever address Swiggy last tied it to: the update below sends the
     # chosen address, and the bill is accepted only if Swiggy echoes that address back.
@@ -1389,6 +1448,12 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     if part:
         raise SwiggyError(f"Ziggy could not confirm the {CONFIRM_WORDS[part].format(n=preview.get('quantity', 1))} in Swiggy's cart. "
                           "The item may be in your Swiggy cart: check it there before trying again.")
+    return _filled(user_id, preview, view, cart)
+
+
+def _filled(user_id: int, preview: dict, view: dict, cart) -> dict:
+    """Record a cart that holds exactly the reviewed dish and answer with Swiggy's bill."""
+    restaurant_id = preview["restaurant_id"]
     with db.cursor() as cur:
         cur.execute("INSERT OR REPLACE INTO swiggy_cart_intents(user_id, address_id, restaurant_id, restaurant_name, "
                     "item_id, menu_price, quantity) VALUES (?,?,?,?,?,?,?)",
@@ -1613,6 +1678,20 @@ def live_order_status(user_id: int, order_id: str) -> dict:
         "subtitle": str(order.get("subtitle") or "") if order else "",
         "eta": str(order.get("etaText") or "") if order else "",
         "message": str(body.get("statusMessage") or "")}}
+
+
+def cart_coupons(user_id: int) -> dict:
+    """Coupons Swiggy lists for the person's cart (fetch_food_coupons), read only when they are
+    at the cart (audit #9). Ziggy shows them; applying one stays in Swiggy (apply_food_coupon
+    is not allowed here), and a coupon is never counted as a saving until the bill shows it."""
+    conn = _conn(user_id)
+    try:
+        tool = _tool(conn, "fetch_food_coupons")
+    except SwiggyError:
+        return {"coupons": [], "available": False}
+    data = call(user_id, "fetch_food_coupons", build_args(tool, {"address": _address(conn)}))
+    return {"coupons": swiggy_offers.coupons(data), "available": True,
+            "note": "Offers Swiggy lists for this cart. Apply one in Swiggy at checkout if it fits."}
 
 
 def live_order_history(user_id: int) -> dict:

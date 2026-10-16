@@ -39,7 +39,8 @@ FIELDS = {
     "name": ["name", "restaurantName", "itemName", "title"],
     "label": ["annotation", "label", "tag", "addressTag", "addressCategory", "addressType", "type"],
     "text": ["formattedAddress", "address", "addressLine", "addressLine1", "displayAddress", "area", "locality"],
-    "price": ["priceInPaise", "price_in_paise", "priceInRupees", "price_in_rupees", "price", "finalPrice", "defaultPrice", "cost"],
+    # finalPrice (what Swiggy charges after a dish discount) before the list `price` (audit #9)
+    "price": ["priceInPaise", "price_in_paise", "priceInRupees", "price_in_rupees", "finalPrice", "price", "defaultPrice", "cost"],
     "rating": ["avgRating", "rating", "avg_rating"],
     "eta": ["deliveryTimeMinutes", "deliveryTimeRange", "deliveryTime", "eta", "sla", "slaString", "delivery_time"],
     "area": ["areaName", "locality", "area", "cuisines"],

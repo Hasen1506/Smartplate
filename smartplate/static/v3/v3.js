@@ -62,6 +62,15 @@
     catch (e) { v.error = e.message; }
     finally { v.loading = false; }
     render();
+    readCartOnce();
+  }
+  // The Swiggy cart is read once a session, and only when a pick could go in it (audit #16).
+  function readCartOnce() {
+    const v = st(), d = v.data;
+    if (!d || v.cartRead || typeof swiggyReady !== "function" || !swiggyReady()) return;
+    if (!Object.values(d.picks || {}).some(p => p.source === "swiggy" && p.kind === "order")) return;
+    v.cartRead = true;
+    refreshLiveCart(false).then(() => render()).catch(() => {});
   }
   async function post(path, body, msg) {
     const r = await api(`/api/user/${S.userId}/today${path}`, "POST", body || {});
@@ -230,7 +239,8 @@
   }
   function compareRow(d) {
     const c = d.price_compare;
-    if (!c) return "";                     // no data, no row: never a made-up comparison
+    // Hidden until there is a second source to compare with (audit #35): one price is no comparison.
+    if (!c || !c.others || c.others === "coming") return "";
     return `<div class="v3-compare" role="note" aria-label="Price compare"><span><b>Swiggy</b> ${money(c.swiggy)}</span>
       <span class="muted">Other apps · coming</span><span class="fine">${esc(c.basis)}</span></div>`;
   }
@@ -267,7 +277,22 @@
   function cartBlock() {
     const keep = S.carts;
     S.carts = null;
-    try { return `<div class="v3-cart">${liveCartBlock()}</div>`; } finally { S.carts = keep; }
+    try { return `<div class="v3-cart">${liveCartBlock()}${cartOffers()}</div>`; } finally { S.carts = keep; }
+  }
+  // At the cart, and only there: the coupons Swiggy lists for it (audit #9). Shown, never applied.
+  function cartOffers() {
+    const c = S.liveCart, v = st();
+    if (!c || c.orderable === false) return "";
+    const key = `${c.item}|${c.to_pay}`;
+    if (v.offersKey !== key) {
+      v.offersKey = key; v.offers = null;
+      api(`/api/user/${S.userId}/swiggy/live-cart/offers`).then(r => { if (v.offersKey === key) { v.offers = r; render(); } }).catch(() => {});
+    }
+    const list = v.offers?.coupons || [];
+    if (!list.length) return "";
+    return `<section class="card tight v3-coupons" aria-label="Offers for this cart"><p class="k">Offers Swiggy lists for this cart</p>
+      <ul class="fine">${list.map(o => `<li><b>${esc(o.code)}</b>${o.title ? ` · ${esc(o.title)}` : ""}</li>`).join("")}</ul>
+      <p class="fine">Apply one in Swiggy at checkout if it fits. Ziggy counts a saving only once Swiggy's bill shows it.</p></section>`;
   }
   function setupCard(d) {
     const fav = MEAL_ORDER.some(m => (d.pools[m] || []).length);
@@ -419,7 +444,12 @@
       ? (d.swiggy.connected ? `<p class="fine">No ${usual(meal)} yet. Add one from a Swiggy menu or type it in.</p>`
         : `<p class="fine">Swiggy isn't connected yet, so Swap can only offer dishes you add yourself. ${swiggySignInOpen() ? `<button class="link" data-act="connect-open">Connect Swiggy</button> to swap from real menus, or add` : "Add"} a ${meal} you usually have.</p>`)
       : `<p class="fine">None of your ${usual(meal)} passes your rules yet.</p>`;
+    // Swap's "Nearby now" (audit #26): only once Swiggy is connected (menus already read for the address)
+    const nb = s.nearby?.dishes || [];
+    const nearby = nb.length ? `<p class="k">Nearby now</p><div class="stack" style="gap:6px">${nb.map((x, n) => `<button class="pick v3-swap-row" data-v3-nearby="${n}"><span class="t"><b>${esc(x.name)}</b><span>${esc([x.restaurant, `₹${Math.round(x.price)}`, x.rating != null ? `${x.rating}★` : null].filter(Boolean).join(" · "))}</span></span></button>`).join("")}</div>
+      <p class="fine">${esc(s.nearby.note || "")}</p>` : "";
     return sheet("swap", `Swap ${meal}`, `${ok.length ? `<p class="k">From your ${usual(meal)}</p><div class="stack" style="gap:6px">${ok.map(row).join("")}</div>` : empty}
+      ${nearby}
       ${off.length ? `<details><summary>${off.length} greyed out by your rules</summary><ul class="fine v3-off-list">${off.map(e => `<li>${esc(e.name)} — ${esc(e.reasons.join(" · "))}</li>`).join("")}</ul></details>` : ""}
       ${d.picks[meal] ? `<button class="ghost small" data-v3-swapto="${meal}|">Clear ${meal}</button>` : ""}
       <p class="k">More ways</p><div class="row">${classic}</div>`, `swap ${meal}`);
@@ -486,6 +516,57 @@
       ? `<button class="chip small" data-v3-place="${esc(h.id)}" data-v3-pname="${esc(h.name)}" data-v3-prating="${h.rating ?? ""}" data-v3-peta="">${esc(h.name)}</button>`
       : `<button class="chip small" data-v3-hist="${esc(h.name)}">${esc(h.name)}</button>`).join("")}</div>`;
   }
+  /* ---- a restaurant's menu in the Add sheet (audit #17, #9, #19, #34) ---- */
+  const MENU_SHOWN = 60;
+  // "30" → "30 min"; a range or text Swiggy sends ("25-30 mins") is shown as it is.
+  const etaText = (e) => e == null || e === "" ? null : /^\d+(\.\d+)?$/.test(String(e).trim()) ? `${String(e).trim()} min` : String(e);
+  const offerChip = (o) => o?.label ? `<span class="tag good v3-offer" title="${esc(o.text || o.label)}. Swiggy applies it at checkout if your order qualifies.">${esc(o.label)}</span>` : "";
+  function menuRow(i) {
+    const price = i.price != null ? `${i.list_price ? `<s class="muted">₹${Math.round(i.list_price)}</s> ` : ""}₹${Math.round(i.price)}` : "Price in cart";
+    const badges = [i.best_value ? `<span class="tag hot v3-best">Best value</span>` : "", i.bestseller ? `<span class="tag v3-bestseller">Bestseller</span>` : ""].join("");
+    const notes = [i.has_options ? "sizes or add-ons: chosen in Swiggy" : null, i.in_stock === false ? "out of stock" : null, i.safety?.note || null].filter(Boolean);
+    return `<button class="pick v3-swap-row v3-menu-row" data-v3-additem="${esc(i.id)}" data-name="${esc(i.name.toLowerCase())}" data-veg="${i.veg ? 1 : 0}" ${i.in_stock === false ? "disabled" : ""}>
+      ${i.image ? `<img class="v3-thumb" src="${esc(i.image)}" alt="" loading="lazy" width="44" height="44">` : ""}
+      <span class="vegdot ${i.veg ? "veg" : "nonveg"}" aria-label="${i.veg ? "Vegetarian" : "Not marked vegetarian"}"></span>
+      <span class="t"><b>${esc(i.name)}</b><span>${price}${badges ? ` ${badges}` : ""}${notes.length ? ` · ${esc(notes.join(" · "))}` : ""}</span></span>${ICON.plus}</button>`;
+  }
+  function menuBody(s, menu) {
+    const veg = !!s.vegOnly;
+    const items = menu.items.filter(i => !veg || i.veg);
+    const shown = items.slice(0, MENU_SHOWN);
+    // Sections in Swiggy's order; a dish shows once, under its first section.
+    const groups = [];
+    const at = {};
+    for (const i of shown) {
+      const sec = (i.categories && i.categories[0]) || "Menu";
+      if (!(sec in at)) { at[sec] = groups.length; groups.push([sec, []]); }
+      groups[at[sec]][1].push(i);
+    }
+    const total = menu.total_items && menu.total_items > menu.items.length ? menu.total_items : items.length;
+    const best = menu.value ? `<p class="fine v3-value-note">${esc(menu.value.why)}</p>` : "";
+    const status = menu.refreshing ? `<p class="fine v3-menu-status" role="status">${menu.partial ? "More dishes loading…" : "Checking for changes…"}</p>`
+      : menu.source === "cache" && menu.age_min ? `<p class="fine v3-menu-status">Menu checked ${menu.age_min} min ago.</p>` : "";
+    const sections = groups.map(([sec, rows], n) => `<details class="v3-sec" ${n < 4 || groups.length <= 6 ? "open" : ""}><summary class="k">${esc(sec)} <span class="fine v3-sec-n">· ${rows.length}</span></summary>
+      <div class="stack" style="gap:6px">${rows.map(menuRow).join("")}</div></details>`).join("");
+    const more = shown.length < total ? `<p class="fine v3-menu-count">Showing ${shown.length} of ${total}. Search to find the rest.</p>` : "";
+    const found = s.menuSearch ? `<div class="stack v3-menu-found" style="gap:6px"><p class="k">On Swiggy for “${esc(s.menuSearch.query)}”</p>${s.menuSearch.items.length ? s.menuSearch.items.map(menuRow).join("") : `<p class="fine">No dish called that here.</p>`}</div>` : "";
+    return `<button class="link small" data-v3-act="add-back">${ICON.back}All places</button>
+      <p class="k v3-menu-head">${esc(menu.restaurant.name)}${s.place?.rating ? ` · ${s.place.rating}★` : ""}${etaText(s.place?.eta) ? ` · ${esc(etaText(s.place.eta))}` : ""} ${offerChip(menu.restaurant.offer || s.place?.offer)}</p>
+      <form id="v3-menu-search" class="row v3-menu-tools"><label class="sr" for="v3-mq">Search this menu</label><input id="v3-mq" type="search" placeholder="Search this menu" value="${esc(s.menuQ || "")}" maxlength="80" style="flex:1;min-width:0">
+        ${["veg", "vegan"].includes(st().data?.rules?.diet) ? "" : `<label class="chip small"><input type="checkbox" data-v3-vegonly ${veg ? "checked" : ""}> Veg only</label>`}</form>
+      ${status}${best}${found}
+      <div class="stack v3-menu" style="gap:6px">${sections || `<p class="fine">No dishes to show.</p>`}</div>${more}
+      ${hiddenList(menu)}`;
+  }
+  // Typing filters the dishes already shown (no request); Enter asks Swiggy for the rest.
+  function filterMenu(q) {
+    const want = (q || "").trim().toLowerCase();
+    document.querySelectorAll?.(".v3-menu [data-v3-additem]")?.forEach(b => { b.hidden = !!want && !String(b.dataset.name || "").includes(want); });
+    document.querySelectorAll?.(".v3-menu details.v3-sec")?.forEach(d => {
+      const any = [...d.querySelectorAll("[data-v3-additem]")].some(b => !b.hidden);
+      d.hidden = !any; if (want && any) d.open = true;
+    });
+  }
   function addSheet() {
     const s = st().sheet, d = st().data, meal = s.meal;
     const tab = s.tab || (d.swiggy.connected && d.swiggy.address ? "swiggy" : "type");
@@ -495,18 +576,16 @@
     if (tab === "swiggy") {
       const res = s.results, menu = s.menu;
       if (menu) {
+        body = menuBody(s, menu);
+      } else if (s.opening) {
         body = `<button class="link small" data-v3-act="add-back">${ICON.back}All places</button>
-          <p class="k">${esc(menu.restaurant.name)}${s.place?.rating ? ` · ${s.place.rating}★` : ""}${s.place?.eta ? ` · ${esc(String(s.place.eta))}` : ""}</p>
-          <div class="stack v3-menu" style="gap:6px">${menu.items.slice(0, 60).map(i => `<button class="pick v3-swap-row" data-v3-additem="${esc(i.id)}" ${i.has_options || i.in_stock === false ? "disabled" : ""}>
-            <span class="vegdot ${i.veg ? "veg" : "nonveg"}" aria-label="${i.veg ? "Vegetarian" : "Not marked vegetarian"}"></span>
-            <span class="t"><b>${esc(i.name)}</b><span>${i.price != null ? `₹${Math.round(i.price)}` : "Price in cart"}${i.has_options ? " · has options, order in Swiggy" : ""}${i.in_stock === false ? " · out of stock" : ""}${i.safety?.note ? ` · ${esc(i.safety.note)}` : ""}</span></span>${ICON.plus}</button>`).join("")}</div>
-          ${hiddenList(menu)}`;
+          <p class="k">${esc(s.opening.name)}</p><div class="skeleton" aria-busy="true"><i></i><i></i><i></i></div>`;
       } else {
         body = `<form id="v3-search" class="row"><label class="sr" for="v3-q">Search Swiggy</label><input id="v3-q" type="search" placeholder="A restaurant or a dish" value="${esc(s.q || "")}" minlength="2" maxlength="80" style="flex:1;min-width:0">
           <button class="secondary small" type="submit">${ICON.search}<span>Search</span></button></form>
           ${histChips(s)}
-          ${res ? (res.restaurants.length ? `<div class="stack" style="gap:6px">${res.restaurants.map(r => `<button class="pick v3-swap-row" data-v3-place="${esc(r.id)}" data-v3-pname="${esc(r.name)}" data-v3-prating="${r.rating ?? ""}" data-v3-peta="${esc(r.eta ?? "")}">
-              <span class="t"><b>${esc(r.name)}${r.sponsored ? ` <span class="tag">Ad</span>` : ""}</b><span>${esc([r.rating != null ? `${r.rating}★` : null, r.eta, r.area].filter(Boolean).join(" · "))}</span></span>${ICON.right}</button>`).join("")}</div>`
+          ${res ? (res.restaurants.length ? `<div class="stack" style="gap:6px">${res.restaurants.map(r => `<button class="pick v3-swap-row" data-v3-place="${esc(r.id)}" data-v3-pname="${esc(r.name)}" data-v3-prating="${r.rating ?? ""}" data-v3-peta="${esc(r.eta ?? "")}" data-v3-poffer="${esc(r.offer?.label || "")}">
+              <span class="t"><b>${esc(r.name)}${r.sponsored ? ` <span class="tag">Ad</span>` : ""}</b><span>${esc([r.rating != null ? `${r.rating}★` : null, etaText(r.eta), r.area].filter(Boolean).join(" · "))} ${offerChip(r.offer)}</span></span>${ICON.right}</button>`).join("")}</div>`
             : `<p class="fine">Nothing found for “${esc(s.q)}”.</p>`) : ""}`;
       }
     } else {
@@ -518,7 +597,10 @@
         <button class="primary" type="submit">Add to your ${usual(meal)}</button>
         <p class="fine">Typed dishes are yours: Ziggy can share or cook them, but can only put Swiggy menu dishes in a cart.</p></form>`;
     }
-    return sheet("add", "New item / restaurant", `${meals}${d.swiggy.connected ? suggBlock(s, meal) : ""}${tabs}${body}`, "add a dish");
+    // A place is open (audit #18): the menu takes the sheet; suggestions and tabs come back on "All places".
+    const placeOpen = tab === "swiggy" && (s.menu || s.opening);
+    return sheet("add", placeOpen ? `Add to your ${usual(meal)}` : "New item / restaurant",
+      placeOpen ? body : `${meals}${d.swiggy.connected ? suggBlock(s, meal) : ""}${tabs}${body}`, "add a dish");
   }
   function orderSheet() {
     const d = st().data;
@@ -607,11 +689,45 @@
     s.results = await api(`/api/user/${S.userId}/swiggy/restaurants?query=${encodeURIComponent(q)}`);
     render();
   }
-  async function openPlace(id, name, rating, eta) {
+  const menuUrl = (id, name) => `/api/user/${S.userId}/swiggy/live-menu?restaurant_id=${encodeURIComponent(id)}&restaurant_name=${encodeURIComponent(name)}`;
+  const sheetTop = () => { const el = typeof document !== "undefined" ? document.querySelector(".v3-sheet") : null; if (el && el.scrollTo) el.scrollTo(0, 0); else if (el) el.scrollTop = 0; };
+  const MENU_POLL_MS = 1500, MENU_POLLS = 12;
+  async function openPlace(id, name, rating, eta, offer) {
     const s = st().sheet;
-    s.place = { id, name, rating: rating ? Number(rating) : null, eta };
-    s.menu = await api(`/api/user/${S.userId}/swiggy/live-menu?restaurant_id=${encodeURIComponent(id)}&restaurant_name=${encodeURIComponent(name)}`);
-    render();
+    s.place = { id, name, rating: rating ? Number(rating) : null, eta, offer: offer ? { label: offer } : null };
+    s.menu = null; s.menuQ = ""; s.menuSearch = null; s.opening = { id, name };
+    render(); sheetTop();
+    try { s.menu = await api(menuUrl(id, name)); } finally { s.opening = null; }
+    if (st().sheet !== s) return;
+    render(); sheetTop();
+    if (s.menu?.refreshing) pollMenu(s, id, name, 0);
+  }
+  // A kept menu is shown at once; when Swiggy is being re-read (or more pages are coming) look again.
+  async function pollMenu(s, id, name, n) {
+    if (n >= MENU_POLLS) return;
+    await new Promise(r => setTimeout(r, MENU_POLL_MS));
+    if (st().sheet !== s || s.menu?.restaurant?.id !== id) return;
+    let m;
+    try { m = await api(menuUrl(id, name)); } catch (_) { return; }
+    if (st().sheet !== s || s.menu?.restaurant?.id !== id) return;
+    const changed = m.items.length !== s.menu.items.length || m.partial !== s.menu.partial || m.source !== s.menu.source;
+    s.menu = m;
+    if (changed || !m.refreshing) { const q = document.getElementById?.("v3-mq")?.value; if (q != null) s.menuQ = q; render(); if (s.menuQ) filterMenu(s.menuQ); }
+    if (m.refreshing) pollMenu(s, id, name, n + 1);
+  }
+  async function searchMenu(q) {
+    const s = st().sheet, m = s.menu;
+    if (!m || (q || "").trim().length < 2) { s.menuSearch = null; render(); return; }
+    s.menuQ = q;
+    const r = await api(`/api/user/${S.userId}/swiggy/dishes?restaurant_id=${encodeURIComponent(m.restaurant.id)}&restaurant_name=${encodeURIComponent(m.restaurant.name)}&query=${encodeURIComponent(q.trim())}`);
+    const have = new Set(m.items.map(i => i.id));
+    s.menuSearch = { query: q.trim(), items: (r.items || []).filter(i => !have.has(i.id)) };
+    for (const i of s.menuSearch.items) m.items.push(i);           // so a found dish can be added
+    render(); filterMenu(q);
+  }
+  // Opening the Add sheet reads the menus of the person's own places in the background (audit #3).
+  function prefetchMenus() {
+    api(`/api/user/${S.userId}/swiggy/menus/prefetch`, "POST", {}).catch(() => {});
   }
   // A background read re-renders the sheet: keep what the person is typing in the search box.
   const keepTyped = () => { const el = typeof document !== "undefined" ? document.getElementById("v3-q") : null;
@@ -685,6 +801,21 @@
       price: val("v3-t-price") ? Number(val("v3-t-price")) : null, veg: vegRaw === "" || vegRaw == null ? null : vegRaw === "1",
       kind: radio("v3-t-kind") || "order" }, `${name} added to your ${usual(s.meal)}`);
     st().sheet = null; render();
+  }
+  // Swap's "Nearby now" (audit #26): from menus already read for the address, no Swiggy call.
+  async function loadNearby(meal) {
+    const s = st().sheet;
+    if (!s || !st().data?.swiggy?.connected) return;
+    try { s.nearby = await api(`/api/user/${S.userId}/swiggy/nearby?meal=${encodeURIComponent(meal)}`); } catch (_) { s.nearby = null; }
+    if (st().sheet === s) render();
+  }
+  async function pickNearby(n) {
+    const s = st().sheet, x = s.nearby?.dishes?.[n];
+    if (!x) return;
+    await post("/pool", { source: "swiggy", meal: s.meal, restaurant_id: x.restaurant_id, restaurant_name: x.restaurant,
+      item_id: x.item_id, rating: x.rating });
+    await post("/pick", { meal: s.meal, ref: `sw:${x.restaurant_id}:${x.item_id}` }, `${x.name} for ${s.meal}`);
+    T(null);
   }
   async function decide(mode) {
     if (st().sheet?.scope === "week") return decideWeek();
@@ -867,17 +998,19 @@
     on("[data-v3-usual]", "click", (e) => { const m = e.currentTarget.dataset.v3Usual, v0 = v();
       v0.usualOpen = { ...(v0.usualOpen || {}), [m]: !v0.usualOpen?.[m] }; render();
       document.querySelector?.(`[data-v3-usual="${m}"]`)?.focus?.(); });
-    on("[data-v3-swap]", "click", (e) => T({ kind: "swap", meal: e.currentTarget.dataset.v3Swap }));
+    on("[data-v3-swap]", "click", (e) => { const meal = e.currentTarget.dataset.v3Swap; T({ kind: "swap", meal }); loadNearby(meal); });
     on("[data-v3-swapto]", "click", (e) => { const [meal, ref] = e.currentTarget.dataset.v3Swapto.split("|");
       guard(async () => { await post("/pick", { meal, ref: ref || null }); T(null); }, `Swap ${meal}`); });
     on("[data-v3-add]", "click", (e) => { const meal = e.currentTarget.dataset.v3Add; T({ kind: "add", meal });
       // background reads (each catches its own error): not through guard(), which drops a call while
       // another runs and would block the person's first tap in the sheet
-      if (v().data?.swiggy.connected) { loadHistory(); loadSugg(); } });
+      if (v().data?.swiggy.connected) { loadHistory(); loadSugg(); if (v().data.swiggy.address) prefetchMenus(); } });
     on("[data-v3-addtab]", "click", (e) => { v().sheet.tab = e.currentTarget.dataset.v3Addtab; render(); });
     on("[data-v3-addmeal]", "click", (e) => { v().sheet.meal = e.currentTarget.dataset.v3Addmeal; render(); });
     on("[data-v3-hist]", "click", (e) => { const q = e.currentTarget.dataset.v3Hist; guard(() => searchSwiggy(q), `Search Swiggy for “${q}”`); });
-    on("[data-v3-place]", "click", (e) => { const d = e.currentTarget.dataset; guard(() => openPlace(d.v3Place, d.v3Pname, d.v3Prating, d.v3Peta), `Open “${d.v3Pname}”`); });
+    on("[data-v3-place]", "click", (e) => { const d = e.currentTarget.dataset; guard(() => openPlace(d.v3Place, d.v3Pname, d.v3Prating, d.v3Peta, d.v3Poffer), `Open “${d.v3Pname}”`); });
+    on("[data-v3-vegonly]", "change", (e) => { v().sheet.vegOnly = e.currentTarget.checked; const q = document.getElementById("v3-mq")?.value; v().sheet.menuQ = q || ""; render(); if (q) filterMenu(q); });
+    on("[data-v3-nearby]", "click", (e) => { const n = Number(e.currentTarget.dataset.v3Nearby); guard(() => pickNearby(n), "Pick a nearby dish"); });
     on("[data-v3-additem]", "click", (e) => { const id = e.currentTarget.dataset.v3Additem; guard(() => addItem(id), "Add to your usual meals"); });
     on("[data-v3-recap-share]", "click", (e) => { const text = e.currentTarget.dataset.v3RecapShare;
       guard(async () => { if (typeof navigator !== "undefined" && navigator.share) { try { await navigator.share({ text }); return; } catch (_) { return; } }
@@ -890,7 +1023,7 @@
       const a = e.currentTarget.dataset.v3Act;
       const f = { order: async () => T({ kind: "order" }), share, cook: cookIt, decide, reload: load,
         "budget-save": () => post("/budget", { amount: Number(document.getElementById("v3-budget-in").value) }).then(() => T(null)),
-        "add-back": async () => { v().sheet.menu = null; render(); },
+        "add-back": async () => { const sh = v().sheet; sh.menu = null; sh.opening = null; sh.menuSearch = null; render(); },
         "sugg-import": importSugg, "sugg-delete": deleteSugg, "sugg-refresh": refreshSugg, "sugg-places": savePlaces,
         "sugg-later": async () => { store.set(suggKey(), "1"); render(); },
         "sugg-open": async () => { v().sheet.suggOpen = true; render(); },
@@ -900,6 +1033,10 @@
         olist: async () => { T(null); await openOrderList(); } }[a];
       if (f) guard(f);
     });
+    const mq = document.getElementById("v3-mq");
+    if (mq) mq.oninput = () => { v().sheet.menuQ = mq.value; filterMenu(mq.value); };
+    const msearch = document.getElementById("v3-menu-search");
+    if (msearch) msearch.onsubmit = (e) => { e.preventDefault(); const q = document.getElementById("v3-mq").value; guard(() => searchMenu(q), `Search the menu for “${q}”`); };
     const search = document.getElementById("v3-search");
     if (search) search.onsubmit = (e) => { e.preventDefault(); const q = document.getElementById("v3-q").value; guard(() => searchSwiggy(q), `Search Swiggy for “${q}”`); };
     const sugg = document.getElementById("v3-sugg");
@@ -951,12 +1088,13 @@
       const day = (S.view?.grid || []).find(x => x.date === todayIso());
       const meal = day && MEAL_ORDER.find(m => day.meals[m]?.session_id === Number(sid));
       if (!meal || !st().data) return false;
-      T({ kind: "swap", meal });
+      T({ kind: "swap", meal }); loadNearby(meal);
       return true;
     },
     // After any plan change, re-read Today.
     invalidate() { if (S.v3) S.v3.data = null; },
     _test: { load, post, decide, share, startOnboard, finishOb, obTap, today, cookScreen, overlays, hiddenList, suggBlock, addSugg, histChips, savePlaces, snackRow, recapCard, actions, orderSheet,
-      rulesRow, mealLine, swapSheet, remindSheet, relaxFor, earlyOrder, askTime, decideNote, weekTop },
+      rulesRow, mealLine, swapSheet, remindSheet, relaxFor, earlyOrder, askTime, decideNote, weekTop,
+      menuBody, menuRow, etaText, openPlace, addSheet, compareRow, cartOffers, readCartOnce },
   };
 })();

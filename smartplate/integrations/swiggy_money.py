@@ -33,6 +33,8 @@ def _price_raw(record: dict) -> tuple[float | None, str | None]:
         value, unit = record[key], None
         if isinstance(value, bool) or value is None:
             continue
+        if key.lower() == "finalprice" and (not isinstance(value, (int, float)) or value <= 0):
+            continue                          # no discounted price: the list price is the price
         if isinstance(value, str):
             match = _PRICE_TEXT.fullmatch(value)
             if not match:
@@ -51,6 +53,24 @@ def _price_raw(record: dict) -> tuple[float | None, str | None]:
             unit = "rupees"
         return value, unit
     return None, None
+
+
+def list_price(record: dict, unit_hint: str | None = None) -> float | None:
+    """The list price Swiggy strikes through when `finalPrice` is lower (audit #9), else None."""
+    if not isinstance(record, dict):
+        return None
+    final = rupees(record, unit_hint)
+    lowered = {k.lower(): k for k in record}
+    if "finalprice" not in lowered or final is None:
+        return None
+    for alias in ("price", "defaultPrice"):
+        key = lowered.get(alias.lower())
+        value = record.get(key) if key else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            unit = unit_hint or infer_unit([value])
+            full = round(value / 100, 2) if unit == "paise" else round(float(value), 2)
+            return full if full > final + 0.5 else None
+    return None
 
 
 def infer_unit(values) -> str:

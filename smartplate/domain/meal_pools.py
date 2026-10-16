@@ -162,10 +162,15 @@ def _replan(user_id: int) -> None:
     optimizer.optimize(plan["plan"]["id"])
 
 
-def add(user_id: int, meal: str, restaurant_id: str, restaurant_name: str, item_id: str, *, menu=None) -> dict:
+def add(user_id: int, meal: str, restaurant_id: str, restaurant_name: str, item_id: str,
+        allow_options: bool = False, *, menu=None) -> dict:
     """Add one dish from a restaurant's live menu to a meal's pool (and save the place).
-    `menu` is that live menu when the caller has just read it (one read for several dishes)."""
-    from ..integrations import swiggy_live
+    The menu is the one the person was just shown (kept 6 h, swiggy_menu_cache), so adding
+    needs no second menu read; `menu` is that screened menu when the caller already holds it
+    (one read for several dishes, history import). `allow_options` (v3 Today, audit #19): a
+    dish with sizes or add-ons may be a favourite; its options are chosen in Swiggy when it is
+    ordered."""
+    from ..integrations import swiggy_menu_cache
     from ..integrations.swiggy_connect import SwiggyError
     from . import live_catalog, models
     _check_meal(meal)
@@ -177,14 +182,16 @@ def add(user_id: int, meal: str, restaurant_id: str, restaurant_name: str, item_
         return view(user_id)
     if sum(1 for r in rows if r["meal"] == meal) >= MAX_PER_MEAL:
         raise ValueError(f"Your {meal} pool is full ({MAX_PER_MEAL} dishes). Remove one first.")
-    menu = menu or swiggy_live.live_menu(user_id, restaurant_id, restaurant_name)
-    item = next((i for i in menu["items"] if i["id"] == item_id), None)
-    left_out = next((i for i in menu.get("hidden_items") or [] if i["id"] == item_id), None)
+    if menu is not None:
+        item = next((i for i in menu["items"] if i["id"] == item_id), None)
+        left_out = next((i for i in menu.get("hidden_items") or [] if i["id"] == item_id), None)
+    else:
+        menu, item, left_out = swiggy_menu_cache.item(user_id, restaurant_id, restaurant_name, item_id)
     if left_out:                                   # the shared safety checker said no: say why
         raise ValueError(f"Not safe for you: {left_out['reason']}.")
     if not item:
         raise SwiggyError(f"That dish isn't on {menu['restaurant']['name']}'s Swiggy menu for your address now.")
-    if item.get("has_options"):
+    if item.get("has_options") and not allow_options:
         raise SwiggyError("This dish has options (sizes or add-ons), so Ziggy can't fill it into your cart. "
                           "Pick another, or order it in Swiggy.")
     user = models.get_user(user_id)

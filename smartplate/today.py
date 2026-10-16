@@ -607,7 +607,7 @@ def add_swiggy(user_id: int, body: dict) -> dict:
     from .domain import meal_pools
     meal = _meal(body.get("meal"))
     rid, iid = str(body.get("restaurant_id") or ""), str(body.get("item_id") or "")
-    meal_pools.add(user_id, meal, rid, str(body.get("restaurant_name") or ""), iid)
+    meal_pools.add(user_id, meal, rid, str(body.get("restaurant_name") or ""), iid, allow_options=True)
     rating = _num(body.get("rating"), 0, 5, "Rating")
     eta = _num(body.get("eta_min"), 0, 300, "Delivery time")
     init_schema()
@@ -670,7 +670,7 @@ def add_suggested(user_id: int, body: dict) -> dict:
     found on the live menu now goes in as the person's own typed dish (name and place only:
     no price or veg mark is invented, so a veg profile sees it greyed out until they say)."""
     from .domain import meal_pools
-    from .integrations import swiggy_history, swiggy_live
+    from .integrations import swiggy_history, swiggy_live, swiggy_menu_cache
     from .integrations.swiggy_connect import SwiggyError
     _user(user_id)
     ticked = body.get("items")
@@ -692,9 +692,11 @@ def add_suggested(user_id: int, body: dict) -> dict:
     added, refused, typed = [], [], []
     for meal, src, dishes in plan:
         rid, place = str(src["restaurant_id"]), src["restaurant_name"]
-        if rid not in menus:                       # one live menu read per restaurant
+        if rid not in menus:                       # one menu per restaurant: the kept copy, else one live read
             try:
-                menus[rid] = swiggy_live.live_menu(user_id, rid, place)
+                kept, _ = swiggy_menu_cache.load(user_id, rid)
+                menus[rid] = (swiggy_live.menu_view(user_id, kept) if kept is not None and not kept.get("partial")
+                              else swiggy_live.live_menu(user_id, rid, place))
             except (SwiggyError, Exception):
                 menus[rid] = None
         for d in dishes:
@@ -702,7 +704,7 @@ def add_suggested(user_id: int, body: dict) -> dict:
             item_id = _menu_match(menu, name, d.get("menu_item_id")) if menu else None
             if item_id:
                 try:
-                    meal_pools.add(user_id, meal, rid, place, item_id, menu=menu)
+                    meal_pools.add(user_id, meal, rid, place, item_id, allow_options=True, menu=menu)   # audit #19
                     _set_meta_qty(user_id, meal, f"sw:{rid}:{item_id}", d["qty"], src.get("rating"))
                     added.append(name)
                     continue
