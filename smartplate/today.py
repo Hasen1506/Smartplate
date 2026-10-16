@@ -194,6 +194,28 @@ def budget_for(user: dict) -> dict:
             "basis": f"Your weekly ₹{weekly:,.0f} ÷ 7" if weekly else None}
 
 
+def presets_for(daily) -> list[int]:
+    """Today's quick amounts around the person's own day (weekly ÷ 7), not fixed rupees (ux #15)."""
+    if not daily or daily < 50:
+        return list(BUDGET_PRESETS)
+    r = lambda x: max(50, int(round(x / 50.0)) * 50)                          # noqa: E731
+    return sorted({r(daily * 0.75), r(daily), r(daily * 1.25)})
+
+
+def _eaters(user_id: int) -> int:
+    """Default portions for a new usual dish: "How many eat?" from onboarding (ux #15)."""
+    from .domain import profile
+    return profile.eaters(_user(user_id))
+
+
+def follow_week(user_id: int) -> None:
+    """The weekly budget just changed: today goes back to following it (weekly ÷ 7), so Today
+    and Week never show two unrelated budgets (r3 one budget model)."""
+    init_schema()
+    with db.cursor() as cur:
+        cur.execute("DELETE FROM today_budget WHERE user_id=? AND day=?", (user_id, _today()))
+
+
 def set_budget(user_id: int, amount) -> dict:
     _user(user_id)
     a = _num(amount, 50, 20000, "Today's budget")
@@ -353,7 +375,7 @@ def add_swiggy(user_id: int, body: dict) -> dict:
     init_schema()
     with db.cursor() as cur:
         cur.execute("INSERT OR REPLACE INTO pool_meta(user_id, meal, ref, qty, rating, eta_min) VALUES (?,?,?,?,?,?)",
-                    (user_id, meal, f"sw:{rid}:{iid}", _qty(body.get("qty") or 1), rating,
+                    (user_id, meal, f"sw:{rid}:{iid}", _qty(body.get("qty") or _eaters(user_id)), rating,
                      None if eta is None else int(eta)))
     return view(user_id)
 
@@ -701,8 +723,12 @@ def _weather(user: dict) -> dict:
         w = None
     if not w or w.get("source") == "none" or w.get("temp_c") is None:
         return {"known": False}
+    # Where and from whom (live-audit-1): the forecast is for the profile's city, not the
+    # person's GPS or IP, and it comes from Open-Meteo; the card says both.
     return {"known": True, "condition": w["condition"], "temp_c": w["temp_c"], "rain_prob": w.get("rain_prob"),
-            "source": w.get("source"), "note": weather.note(w["condition"])}
+            "source": w.get("source"), "note": weather.note(w["condition"]),
+            "place": user.get("city"), "attribution": "Open-Meteo" if w.get("source") == "live" else None,
+            "attribution_url": "https://open-meteo.com/" if w.get("source") == "live" else None}
 
 
 def _account_saved(user_id: int) -> bool:
@@ -809,7 +835,7 @@ def view(user_id: int) -> dict:
     return {
         "date": _today(), "weekday": clock.today().strftime("%A"),
         "meals": meals, "label": "+".join(LETTER[m] for m in meals),
-        "budget": {**b, "presets": list(BUDGET_PRESETS), "picked": round(picked, 2),
+        "budget": {**b, "presets": presets_for(b.get("default")), "picked": round(picked, 2),
                    "picked_dishes": round(dishes, 2),
                    "left": left, "unpriced": unknown,
                    "left_after_fees": left if swiggy_bases else None,

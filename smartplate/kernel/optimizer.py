@@ -165,13 +165,18 @@ def now() -> dt.datetime:
     return clock.now()
 
 
+def days_covered(plan: dict) -> int:
+    """How many days of its Mon–Sun week a plan covers: 7, or fewer when it was made part-way
+    through (a plan made on Friday covers Fri, Sat, Sun = 3)."""
+    created = dt.date.fromisoformat((plan.get("created_ts") or plan["week_start"])[:10])
+    start = dt.date.fromisoformat(plan["week_start"])
+    return 7 - min(6, max(0, (created - start).days))
+
+
 def week_cap(user: dict, plan: dict) -> float:
     """The weekly budget, prorated when a plan starts part-way through its week —
     a plan made on Thursday covers 4 days, so it gets 4/7 of the weekly budget."""
-    created = dt.date.fromisoformat((plan.get("created_ts") or plan["week_start"])[:10])
-    start = dt.date.fromisoformat(plan["week_start"])
-    covered = 7 - min(6, max(0, (created - start).days))
-    return round(user["weekly_budget"] * covered / 7, 2)
+    return round(user["weekly_budget"] * days_covered(plan) / 7, 2)
 
 
 def build_context(user: dict, plan: dict) -> dict:
