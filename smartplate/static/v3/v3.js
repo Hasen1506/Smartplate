@@ -408,7 +408,7 @@
     const best = menu.value ? `<p class="fine v3-value-note">${esc(menu.value.why)}</p>` : "";
     const status = menu.refreshing ? `<p class="fine v3-menu-status" role="status">${menu.partial ? "More dishes loading…" : "Checking for changes…"}</p>`
       : menu.source === "cache" && menu.age_min ? `<p class="fine v3-menu-status">Menu checked ${menu.age_min} min ago.</p>` : "";
-    const sections = groups.map(([sec, rows], n) => `<details class="v3-sec" ${n < 4 || groups.length <= 6 ? "open" : ""}><summary class="k">${esc(sec)} <span class="fine">${rows.length}</span></summary>
+    const sections = groups.map(([sec, rows], n) => `<details class="v3-sec" ${n < 4 || groups.length <= 6 ? "open" : ""}><summary class="k">${esc(sec)} <span class="fine v3-sec-n">· ${rows.length}</span></summary>
       <div class="stack" style="gap:6px">${rows.map(menuRow).join("")}</div></details>`).join("");
     const more = shown.length < total ? `<p class="fine v3-menu-count">Showing ${shown.length} of ${total}. Search to find the rest.</p>` : "";
     const found = s.menuSearch ? `<div class="stack v3-menu-found" style="gap:6px"><p class="k">On Swiggy for “${esc(s.menuSearch.query)}”</p>${s.menuSearch.items.length ? s.menuSearch.items.map(menuRow).join("") : `<p class="fine">No dish called that here.</p>`}</div>` : "";
