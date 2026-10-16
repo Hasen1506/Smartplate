@@ -92,15 +92,23 @@ HOSTILE = {
         ("Veg Meals", 15000, True, "Meals", True, False),                 # the plain control
     ]),
 }
-QUERY_WORDS = {"meals": None}          # "meals" is Swiggy's broad query: every place answers
+QUERY_WORDS = {"meals": None}
+PAGE_SECTIONS = 2                      # sections per menu page in paged mode
+OFFERS = {"r-101": "20% OFF UPTO ₹50", "r-104": "₹100 OFF ABOVE ₹399"}       # deals mode only
+DEALS = {"Masala Dosa": 9900, "Veg Thali": 19900}                           # finalPrice, paise          # "meals" is Swiggy's broad query: every place answers
 
 
 class TownFake(FakeLive):
     """FakeLive's sign-in and checkout, with many restaurants and full menus."""
 
-    def __init__(self, hostile: bool = False):
+    def __init__(self, hostile: bool = False, paged: bool = False, deals: bool = False):
         super().__init__()
         self.places = {**PLACES, **(HOSTILE if hostile else {})}
+        # paged: answer get_restaurant_menu as real Swiggy does when the schema offers `page`
+        # (sections, PAGE_SECTIONS a page, hasMore). deals: restaurant offers + discounted
+        # finalPrice on DEALS dishes, and fetch_food_coupons. Both opt-in (menus-offers, r3).
+        self.paged, self.deals = paged, deals
+        self.menu_reads = []                               # (restaurant id, page) per menu call
         self.cart_rid, self.cart_items = None, []          # [(menu_item_id, quantity)]
         self.searches = []
 
@@ -109,8 +117,38 @@ class TownFake(FakeLive):
 
     def _row(self, rid):
         name, area, rating, eta, cuisines, is_open, _ = self.places[rid]
-        return {"id": rid, "name": name, "cuisines": cuisines, "avgRating": rating, "areaName": area,
-                "deliveryTimeMinutes": eta, "availabilityStatus": "OPEN" if is_open else "CLOSED"}
+        row = {"id": rid, "name": name, "cuisines": cuisines, "avgRating": rating, "areaName": area,
+               "deliveryTimeMinutes": eta, "availabilityStatus": "OPEN" if is_open else "CLOSED"}
+        if self.deals and rid in OFFERS:
+            row["aggregatedDiscountInfo"] = {"header": OFFERS[rid]}
+        return row
+
+    def _dish(self, iid, d, paise, veg, cat, best, opts):
+        row = {"id": iid, "name": d, "price": paise, "inStock": 1, "hasVariants": opts,
+               "hasAddons": False, "categories": [cat], "isBestseller": best,
+               **({} if veg is None else {"isVeg": veg})}
+        if self.deals and d in DEALS:
+            row["finalPrice"] = DEALS[d]
+        return row
+
+    def _menu_page(self, rid, page):
+        """One page of a sectioned menu (rupees, as the live sectioned menu is)."""
+        p = self.places[rid]
+        sections = {}
+        for iid, d, paise, veg, cat, best, opts in self._items(rid):
+            row = self._dish(iid, d, paise // 100, veg, cat, best, opts)
+            if "finalPrice" in row:
+                row["finalPrice"] = row["finalPrice"] // 100
+            sections.setdefault(cat, []).append(row)
+        cats = list(sections)
+        chunk = cats[(page - 1) * PAGE_SECTIONS: page * PAGE_SECTIONS]
+        restaurant = {"id": rid, "name": p[0], "areaName": p[1], "avgRating": p[2], "isOpen": p[5]}
+        if self.deals and rid in OFFERS:
+            restaurant["aggregatedDiscountInfo"] = {"header": OFFERS[rid]}
+        return ok({"restaurant": restaurant,
+                   "categories": [{"title": c, "items": sections[c]} for c in chunk],
+                   "hasMore": page * PAGE_SECTIONS < len(cats), "totalCategories": len(cats),
+                   "totalItems": sum(len(v) for v in sections.values())})
 
     def _find(self, item_id):
         for rid in self.places:
@@ -133,12 +171,16 @@ class TownFake(FakeLive):
                 return {"structuredContent": {"success": False, "error": {"message": "Restaurant not found"}},
                         "isError": True}
             p = self.places[rid]
-            items = [{"id": iid, "name": d, "price": paise, "inStock": 1, "hasVariants": opts,
-                      "hasAddons": False, "categories": [cat], "isBestseller": best,
-                      **({} if veg is None else {"isVeg": veg})}       # no mark: the key is absent
+            self.menu_reads.append((rid, args.get("page")))
+            if self.paged and args.get("page"):
+                return self._menu_page(rid, int(args["page"]))
+            items = [self._dish(iid, d, paise, veg, cat, best, opts)    # no veg mark: the key is absent
                      for iid, d, paise, veg, cat, best, opts in self._items(rid)]
+            restaurant = {"id": rid, "name": p[0], "areaName": p[1], "avgRating": p[2], "isOpen": p[5]}
+            if self.deals and rid in OFFERS:
+                restaurant["aggregatedDiscountInfo"] = {"header": OFFERS[rid]}
             cats = list(dict.fromkeys(i["categories"][0] for i in items))
-            return ok({"restaurant": {"id": rid, "name": p[0], "areaName": p[1], "avgRating": p[2], "isOpen": p[5]},
+            return ok({"restaurant": restaurant,
                        "items": items, "categoryLabels": cats, "totalItems": len(items),
                        "totalCategories": len(cats)})
         if name == "search_menu":
@@ -178,6 +220,9 @@ class TownFake(FakeLive):
             return {"structuredContent": {"success": True, "data": {"addressId": args["addressId"], "data": {
                 "restaurant": {"id": self.cart_rid, "name": self.places[self.cart_rid][0]}, "items": out,
                 "pricing": {"item_total": total, "delivery_charge": 35, "to_pay": total + 35}}}}}
+        if name == "fetch_food_coupons" and self.deals:
+            return ok({"coupons": [{"code": "TRYNEW", "title": "Flat ₹50 off on orders above ₹199",
+                                    "discountAmount": 50, "minOrder": 199}]})
         if name == "flush_food_cart":
             self.cart_rid, self.cart_items, self.cart = None, [], None
             return ok({"statusCode": 0})

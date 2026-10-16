@@ -347,7 +347,7 @@ def add_swiggy(user_id: int, body: dict) -> dict:
     from .domain import meal_pools
     meal = _meal(body.get("meal"))
     rid, iid = str(body.get("restaurant_id") or ""), str(body.get("item_id") or "")
-    meal_pools.add(user_id, meal, rid, str(body.get("restaurant_name") or ""), iid)
+    meal_pools.add(user_id, meal, rid, str(body.get("restaurant_name") or ""), iid, allow_options=True)
     rating = _num(body.get("rating"), 0, 5, "Rating")
     eta = _num(body.get("eta_min"), 0, 300, "Delivery time")
     init_schema()

@@ -226,7 +226,8 @@ def create_app() -> Flask:
         response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after, rule=rule)
         if error.retry_after is not None:
             response.headers['Retry-After'] = str(error.retry_after)
-        if error.code in ('swiggy_cart_other_address', 'price_unit_changed', 'cart_over_cap', 'swiggy_out_of_area'):
+        if error.code in ('swiggy_cart_other_address', 'price_unit_changed', 'cart_over_cap', 'swiggy_out_of_area',
+                          'swiggy_cart_busy'):
             return response, 409        # the user's address/cart/catalogue choice (W4, W7): not an outage
         if error.code == 'restaurant_closed':
             return response, 409        # the place is shut right now: information for the user, not an outage
@@ -464,10 +465,21 @@ def create_app() -> Flask:
         plan = models.get_plan(plan_id)
         if not plan:
             raise ValueError("Plan not found")
+        if request.args.get("background") == "1":          # boot: a job the app polls (audit #16)
+            from . import catalog_jobs
+            return jsonify(catalog_jobs.start(plan_id, plan["user_id"])), 202
         ratelimit.check(f"live-menus:{plan['user_id']}", 10, 3600)
         result = live_catalog.refresh(plan["user_id"])
         service.reoptimize(plan_id)
         return jsonify({**service.plan_view(plan_id), "refreshed": result})
+
+    @app.get("/api/plan/<int:plan_id>/live-menus/status")
+    def plan_live_menus_status(plan_id):
+        from . import catalog_jobs
+        plan = models.get_plan(plan_id)
+        if not plan:
+            raise ValueError("Plan not found")
+        return jsonify(catalog_jobs.status(plan["user_id"]))
 
     @app.post("/api/plan/<int:plan_id>/sample-menus")
     def plan_from_sample_menus(plan_id):
@@ -880,8 +892,29 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy/live-menu")
     def swiggy_live_menu(user_id):
-        return jsonify(swiggy_live.live_menu(user_id, request.args.get("restaurant_id", ""),
-                                            request.args.get("restaurant_name", "")))
+        # Kept menu at once, revalidated in the background; page 1 first when nothing is kept (audit #3)
+        from .integrations import swiggy_menu_cache
+        return jsonify(swiggy_menu_cache.view(user_id, request.args.get("restaurant_id", ""),
+                                              request.args.get("restaurant_name", ""),
+                                              fresh=request.args.get("fresh") == "1"))
+
+    @app.post("/api/user/<int:user_id>/swiggy/menus/prefetch")
+    def swiggy_prefetch_menus(user_id):
+        """The Add sheet opened: read the menus of the person's own places in the background."""
+        from .integrations import swiggy_menu_cache
+        ratelimit.check(f"menu-prefetch:{user_id}", 30, 3600)
+        extra = (request.get_json(silent=True) or {}).get("restaurants")
+        return jsonify(swiggy_menu_cache.prefetch(user_id, extra if isinstance(extra, list) else None))
+
+    @app.get("/api/user/<int:user_id>/swiggy/nearby")
+    def swiggy_nearby(user_id):
+        """Swap's "Nearby now": dishes from the person's live catalogue within rules and budget."""
+        from .domain import nearby
+        return jsonify(nearby.for_meal(user_id, request.args.get("meal", "")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/live-cart/offers")
+    def swiggy_cart_offers(user_id):
+        return jsonify(swiggy_live.cart_coupons(user_id))
 
     @app.get("/api/user/<int:user_id>/swiggy/dishes")
     def swiggy_dishes(user_id):
