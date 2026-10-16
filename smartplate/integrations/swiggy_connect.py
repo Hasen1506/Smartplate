@@ -266,6 +266,35 @@ def redirect_allowed(redirect_uri: str) -> bool:
     return host in allowed
 
 
+_WHITELIST_SEEN: dict = {}            # redirect_uri -> (checked_at, whitelisted)
+WHITELIST_TTL = dt.timedelta(minutes=10)
+NOT_WHITELISTED = ("Swiggy hasn't approved Ziggy's sign-in address yet, so its sign-in page would "
+                   "only say “isn't whitelisted”. Ziggy keeps planning without Swiggy meanwhile; "
+                   "try again once Swiggy confirms the approval.")
+
+
+def redirect_whitelisted(redirect_uri: str) -> bool | None:
+    """Swiggy's own answer to "may sign-in come back to this address?" (the check its sign-in
+    page makes before it shows the OTP form). True / False, or None when Swiggy didn't say
+    (unreachable, another shape): then sign-in goes ahead as before (fail open)."""
+    host = (urllib.parse.urlsplit(redirect_uri).hostname or "").lower()
+    if host in ("localhost", "127.0.0.1"):
+        return True
+    seen = _WHITELIST_SEEN.get(redirect_uri)
+    if seen and clock.now() - seen[0] < WHITELIST_TTL:
+        return seen[1]
+    url = f"{config.SWIGGY_MCP_BASE}/auth/check-redirect-uri?" + urllib.parse.urlencode({"redirect_uri": redirect_uri})
+    try:
+        status, _, raw = _json("GET", url)
+        answer = json.loads(raw).get("whitelisted") if status == 200 else None
+    except (SwiggyError, ValueError, AttributeError):
+        answer = None
+    if not isinstance(answer, bool):
+        return None
+    _WHITELIST_SEEN[redirect_uri] = (clock.now(), answer)
+    return answer
+
+
 def _client_id(meta: dict, redirect_uri: str) -> str:
     with db.cursor() as cur:
         row = cur.execute("SELECT client_id FROM swiggy_clients WHERE redirect_uri=?", (redirect_uri,)).fetchone()
@@ -331,6 +360,9 @@ def start(user_id: int, redirect_uri: str, browser_nonce: str | None = None) -> 
                           "Set SMARTPLATE_PUBLIC_URL (or SMARTPLATE_ALLOWED_HOSTS) to the app's HTTPS address.")
     init_schema()
     meta = _metadata()
+    if redirect_whitelisted(redirect_uri) is False:
+        # Swiggy's page would stop at "isn't whitelisted yet": say so here, in Ziggy.
+        raise SwiggyError(NOT_WHITELISTED, code="swiggy_redirect_not_whitelisted")
     client_id = _client_id(meta, redirect_uri)
     verifier, challenge = pkce_pair()
     state = secrets.token_urlsafe(24)

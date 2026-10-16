@@ -87,7 +87,8 @@ BY_ID = {r["id"]: r for r in RULES}
 CODES = {"swiggy_not_connected": "sign_in", "swiggy_auth_expired": "sign_in",
          "swiggy_browser_mismatch": "sign_in", "swiggy_rate_limited": "rate_limit",
          "swiggy_cart_other_address": "address", "swiggy_item_unmatched": "exact_dish",
-         "swiggy_demo_mode": "approval", "swiggy_read_only": "approval", "swiggy_out_of_area": "out_of_area"}
+         "swiggy_demo_mode": "approval", "swiggy_read_only": "approval", "swiggy_out_of_area": "out_of_area",
+         "swiggy_redirect_not_whitelisted": "approval"}
 
 # Swiggy's ways of saying a restaurant can't deliver to the chosen address.
 OUT_OF_AREA = (r"(does not|doesn't|do not|cannot|can't|not able to) deliver|not deliverable|unserviceable|"
