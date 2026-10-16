@@ -17,6 +17,8 @@
 (function () {
   const g = globalThis;
   const MEAL_ORDER = ["breakfast", "lunch", "dinner"];
+  // r3 #6: snack is an optional favourites list (never planned): it can be added and picked.
+  const ADD_MEALS = [...MEAL_ORDER, "snack"];
   const MIN_RATINGS = [[0, "Any"], [3.5, "3.5★+"], [4, "4★+"], [4.5, "4.5★+"]];
   const MAX_ETAS = [[0, "Any"], [20, "≤20 min"], [30, "≤30 min"], [45, "≤45 min"]];
   const STEP = 50;
@@ -34,7 +36,10 @@
   };
   const money = (n) => rupee0(n);
   // "Usual meals" (the founder's word; the API and storage still say pool).
-  const USUAL = { breakfast: "usual breakfasts", lunch: "usual lunches", dinner: "usual dinners" };
+  const USUAL = { breakfast: "usual breakfasts", lunch: "usual lunches", dinner: "usual dinners", snack: "usual snacks" };
+  const mealName = (meal) => (meal === "snack" ? "Snack (optional)" : cap1(meal));
+  // Today's meals plus a picked snack (counted in money and orders, never in the rhythm).
+  const pickedMeals = (d) => [...d.meals, ...(d.picks?.snack ? ["snack"] : [])];
   const usual = (meal) => USUAL[meal] || `usual ${meal}s`;
   // Phones get a drawer per meal line; computers (≥ 1024 px) the three panels side by side.
   const WIDE_Q = "(min-width:1024px)";
@@ -135,7 +140,7 @@
   function mealLine(d, meal) {
     const p = d.picks[meal], pool = d.pools[meal] || [];
     const opts = pool.map(e => `<option value="${esc(e.ref)}" ${p && p.ref === e.ref ? "selected" : ""} ${e.hard ? "disabled" : ""}>${esc(entryLabel(e))}${e.reasons.length ? ` — ${esc(e.reasons[0])}` : ""}</option>`).join("");
-    const label = cap1(meal);
+    const label = mealName(meal);
     const id = `v3-pick-${meal}`;
     const qty = p ? `<span class="stepper sm v3-qty"><button type="button" data-v3-pqty="${meal}:-1" aria-label="One fewer ${esc(p.name)}" ${p.qty <= 1 ? "disabled" : ""}>${ICON.minus}</button><b aria-live="polite">${p.qty}×</b><button type="button" data-v3-pqty="${meal}:1" aria-label="One more ${esc(p.name)}" ${p.qty >= 8 ? "disabled" : ""}>${ICON.plus}</button></span>` : "";
     const why = p && p.reasons?.length ? `<p class="fine v3-why">${esc(p.reasons.join(" · "))}</p>` : "";
@@ -168,7 +173,7 @@
   const remindBtn = (e, cls) => `<button class="${cls}" data-remind="${e.sid}" data-remind-at="${esc(e.at)}">${ICON.cart}<span>Remind me at ${esc(e.at)}</span></button>`;
   function actions(d) {
     const mode = st().mode, any = Object.keys(d.picks).length;
-    const cartable = d.meals.filter(m => d.picks[m] && d.picks[m].source === "swiggy" && d.picks[m].kind === "order");
+    const cartable = pickedMeals(d).filter(m => d.picks[m] && d.picks[m].source === "swiggy" && d.picks[m].kind === "order");
     const early = cartable.map(earlyOrder);
     const allEarly = cartable.length && early.every(Boolean) ? early.reduce((a, b) => (a.at <= b.at ? a : b)) : null;
     const place = allEarly ? remindBtn(allEarly, mode === "order" ? "primary" : "secondary")
@@ -200,6 +205,10 @@
   function poolCard(d, meal) {
     return `<section class="card v3-pool" aria-labelledby="v3-pool-${meal}"><h2 class="h3" id="v3-pool-${meal}">${cap1(usual(meal))}</h2>
       ${usualList(d, meal)}</section>`;
+  }
+  // r3 #6: the snack line shows only once there is a usual snack (or one is picked).
+  function snackRow(d) {
+    return (d.pools.snack || []).length || d.picks.snack ? mealLine(d, "snack") : "";
   }
   // Phone: usual meals for a meal that isn't on today (say dinner on a B+L day) stay reachable.
   function otherUsual(d) {
@@ -249,7 +258,7 @@
       <div class="seg v3-mode" role="group" aria-label="Order or cook">
         <button data-v3-mode="order" aria-pressed="${v.mode === "order"}">Order</button><button data-v3-mode="cook" aria-pressed="${v.mode === "cook"}">Cook</button></div>
       ${setupCard(d)}
-      <section class="card v3-meals" aria-label="Today's meals">${d.meals.map(m => mealLine(d, m)).join("")}
+      <section class="card v3-meals" aria-label="Today's meals">${d.meals.map(m => mealLine(d, m)).join("")}${snackRow(d)}
         <div class="row v3-decide"><button class="secondary small" data-v3-sheet="decide">Decide for me</button>
           <span class="fine">Only when you ask. Picks from your usual meals within your rules and ${money(d.budget.amount)}.</span></div>${wide() ? "" : otherUsual(d)}</section>
       ${actions(d)}
@@ -259,7 +268,7 @@
       ${saveCard(d)}</div>
       <div class="v3-side"><div class="v3-top">${budgetCard(d)}${weatherCard(d.weather)}</div>${rulesRow(d)}</div></div>
       ${wide() ? `<h2 class="k v3-pools-h">Your usual meals</h2>
-      <div class="v3-pools">${MEAL_ORDER.map(m => poolCard(d, m)).join("")}</div>` : ""}
+      <div class="v3-pools">${MEAL_ORDER.map(m => poolCard(d, m)).join("")}${(d.pools.snack || []).length ? poolCard(d, "snack") : ""}</div>` : ""}
     </div>`;
   }
   function cookScreen() {
@@ -319,7 +328,7 @@
       `<button class="secondary small" data-v3-add="${meal}">${ICON.plus}New item / restaurant</button>`,
       swiggyReady() ? `<button class="secondary small" data-v3-act="olist">Order several meals</button>` : "",
       cell ? `<button class="secondary small" data-sheet="${cell.session_id}">Change in the week plan (cook, keep, skip)</button>` : "",
-      swiggyReady() && !cell ? `<button class="secondary small" data-hungry="${meal}">Add ${meal} to the week plan now</button>` : "",
+      swiggyReady() && !cell && meal !== "snack" ? `<button class="secondary small" data-hungry="${meal}">Add ${meal} to the week plan now</button>` : "",
     ].filter(Boolean).join("");
     return sheet("swap", `Swap ${meal}`, `${ok.length ? `<p class="k">From your ${usual(meal)}</p><div class="stack" style="gap:6px">${ok.map(row).join("")}</div>` : `<p class="fine">None of your ${usual(meal)} passes your rules yet.</p>`}
       ${off.length ? `<details><summary>${off.length} greyed out by your rules</summary><ul class="fine v3-off-list">${off.map(e => `<li>${esc(e.name)} — ${esc(e.reasons.join(" · "))}</li>`).join("")}</ul></details>` : ""}
@@ -333,27 +342,66 @@
     return `<details class="v3-hidden"><summary class="fine">${h.length} dish${h.length === 1 ? "" : "es"} hidden for you</summary>
       <ul class="fine">${h.slice(0, 60).map(i => `<li><b>${esc(i.name)}</b> — ${esc(i.reason || "Not checked")}</li>`).join("")}</ul></details>`;
   }
-  // Suggested favourites from the person's own Swiggy orders (W7: read once, only after this
-  // consent, minimal fields, deletable). Ticked ones go into W5's Today pools.
+  // Suggested favourites from the person's own Swiggy orders (W7: read only on a tap, after this
+  // consent, minimal fields, deletable). Ticked ones go into W5's Today pools. r3: the consent is
+  // one line + Details (#29, "Not now" remembered); whole past orders come as usual orders with
+  // quantities (#7); sides only ever ordered with a main aren't offered alone; the places save
+  // in one tap (#8); "Refresh from my orders" shows when they were last read (#30).
+  const suggKey = () => `ziggy.v3.sugg-later.${S.userId}`;
+  const sameMeal = (i, meal) => (i.pool_meals || [i.pool_meal]).includes(meal);
+  function suggRows(g, meal) {
+    const pool = new Set((st().data.pools[meal] || []).map(e => `${(e.restaurant || "").toLowerCase()}|${e.name.toLowerCase()}`));
+    const has = (rest, name) => pool.has(`${rest.toLowerCase()}|${name.toLowerCase()}`);
+    const combos = (g.combos || []).filter(c => sameMeal(c, meal) && !c.items.every(i => has(c.restaurant_name, i.name)))
+      .map(c => ({ kind: "combo", ...c }));
+    const dishes = g.items.filter(i => sameMeal(i, meal) && !i.with_main_only && !has(i.restaurant_name, i.item_name))
+      .map(i => ({ kind: "dish", ...i }));
+    return [...combos, ...dishes];
+  }
+  function suggRow(i, n) {
+    const title = i.kind === "combo" ? i.label : `${i.qty > 1 ? `${i.qty}× ` : ""}${i.item_name}`;
+    const meta = [i.restaurant_name, `${i.times}× ordered`, i.rating != null ? `${i.rating}★` : null, i.side ? "side" : null];
+    return `<label class="v3-check v3-sugg-row"><input type="checkbox" data-v3-sugg="${n}"><span class="t"><span><b>${esc(title)}</b>${i.kind === "combo" ? ` <span class="tag">whole order</span>` : ""}</span>
+      <span class="fine">${esc(meta.filter(Boolean).join(" · "))}</span></span></label>`;
+  }
   function suggBlock(s, meal) {
     const g = s.sugg;
     if (!g) return "";
-    if (!g.imported) return `<section class="v3-sugg stack" aria-label="Suggestions from your Swiggy orders"><p class="k">Suggest from my Swiggy orders</p>
-      <p class="fine">${esc(g.consent)}</p><button class="secondary small" data-v3-act="sugg-import">Suggest from my Swiggy orders</button></section>`;
-    const pool = new Set((st().data.pools[meal] || []).map(e => `${(e.restaurant || "").toLowerCase()}|${e.name.toLowerCase()}`));
-    const items = g.items.filter(i => i.pool_meal === meal && !pool.has(`${i.restaurant_name.toLowerCase()}|${i.item_name.toLowerCase()}`));
+    if (!g.imported) {
+      if (store.get(suggKey()) === "1" && !s.suggOpen) return `<p class="fine v3-sugg-later"><button class="link small" data-v3-act="sugg-open">Suggest from my Swiggy orders</button></p>`;
+      return `<section class="v3-sugg stack" aria-label="Suggestions from your Swiggy orders"><p class="k">Suggest from my Swiggy orders</p>
+      <p class="fine">${esc(g.consent_short || g.consent)}</p><details class="v3-consent-more"><summary class="fine">Details</summary><p class="fine">${esc(g.consent)}</p></details>
+      <div class="row"><button class="secondary small" data-v3-act="sugg-import">Suggest from my Swiggy orders</button><button class="ghost small" data-v3-act="sugg-later">Not now</button></div></section>`;
+    }
+    const items = suggRows(g, meal);
     s.suggShown = items;
+    const unsaved = (g.restaurants || []).filter(r => !r.saved);
+    const places = unsaved.length ? `<div class="row v3-sugg-places"><span class="fine" style="flex:1">${esc(unsaved.slice(0, 5).map(r => r.restaurant_name).join(", "))}${unsaved.length > 5 ? "…" : ""}</span>
+      <button class="secondary small" data-v3-act="sugg-places">Save ${unsaved.length === 1 ? "this place" : `these ${unsaved.length} places`}</button></div>` : "";
+    const when = g.imported_at ? String(g.imported_at).slice(0, 10).split("-").reverse().join("/") : null;
     return `<section class="v3-sugg stack" aria-label="Suggestions from your Swiggy orders"><p class="k">From your Swiggy orders</p>
-      ${items.length ? `<form id="v3-sugg" class="stack" style="gap:6px">${items.map((i, n) => `<label class="tick v3-sugg-row"><input type="checkbox" data-v3-sugg="${n}"> <span><b>${esc(i.item_name)}</b> <span class="fine">${esc([i.restaurant_name, `${i.times}× ordered`, i.rating != null ? `${i.rating}★` : null].filter(Boolean).join(" · "))}</span></span></label>`).join("")}
+      ${items.length ? `<form id="v3-sugg" class="stack" style="gap:6px">${items.map(suggRow).join("")}
         <button class="secondary small" type="submit">Add ticked to your ${usual(meal)}</button></form>`
         : `<p class="fine">Nothing new for ${meal} in your recent Swiggy orders.</p>`}
-      <p class="fine">${esc(g.note)}${g.attribution ? ` ${esc(g.attribution)}.` : ""} <button class="link small" data-v3-act="sugg-delete">Delete these suggestions</button></p></section>`;
+      ${places}
+      <p class="fine">${esc(g.note)}${g.attribution ? ` ${esc(g.attribution)}.` : ""}</p>
+      <p class="fine v3-sugg-foot">${when ? `Last read ${esc(when)} · ` : ""}<button class="link small" data-v3-act="sugg-refresh">Refresh from my orders</button> · <button class="link small" data-v3-act="sugg-delete">Delete these suggestions</button></p></section>`;
+  }
+  // r3 #8: places from past orders open their menu in one tap (the id comes with them).
+  function histChips(s) {
+    const g = s.sugg;
+    const list = g?.imported ? g.restaurants.map(r => ({ id: r.restaurant_id, name: r.restaurant_name, rating: r.rating }))
+      : (s.history || []).map(h => (typeof h === "string" ? { id: null, name: h } : h));
+    if (!list.length) return "";
+    return `<p class="k">From your Swiggy orders</p><div class="chips">${list.slice(0, 8).map(h => h.id
+      ? `<button class="chip small" data-v3-place="${esc(h.id)}" data-v3-pname="${esc(h.name)}" data-v3-prating="${h.rating ?? ""}" data-v3-peta="">${esc(h.name)}</button>`
+      : `<button class="chip small" data-v3-hist="${esc(h.name)}">${esc(h.name)}</button>`).join("")}</div>`;
   }
   function addSheet() {
     const s = st().sheet, d = st().data, meal = s.meal;
     const tab = s.tab || (d.swiggy.connected && d.swiggy.address ? "swiggy" : "type");
     const tabs = `<div class="seg" role="group" aria-label="How to add">${d.swiggy.connected && d.swiggy.address ? `<button data-v3-addtab="swiggy" aria-pressed="${tab === "swiggy"}">Search Swiggy</button>` : ""}<button data-v3-addtab="type" aria-pressed="${tab === "type"}">Type it in</button></div>`;
-    const meals = `<div class="chips" role="group" aria-label="Which meal">${MEAL_ORDER.map(m => `<button class="chip small" data-v3-addmeal="${m}" aria-pressed="${m === meal}">${cap1(m)}</button>`).join("")}</div>`;
+    const meals = `<div class="chips" role="group" aria-label="Which meal">${ADD_MEALS.map(m => `<button class="chip small" data-v3-addmeal="${m}" aria-pressed="${m === meal}">${cap1(m)}</button>`).join("")}</div>`;
     let body;
     if (tab === "swiggy") {
       const res = s.results, menu = s.menu;
@@ -367,7 +415,7 @@
       } else {
         body = `<form id="v3-search" class="row"><label class="sr" for="v3-q">Search Swiggy</label><input id="v3-q" type="search" placeholder="A restaurant or a dish" value="${esc(s.q || "")}" minlength="2" maxlength="80" style="flex:1;min-width:0">
           <button class="secondary small" type="submit">${ICON.search}<span>Search</span></button></form>
-          ${s.history?.length ? `<p class="k">From your Swiggy orders</p><div class="chips">${s.history.map(h => `<button class="chip small" data-v3-hist="${esc(h)}">${esc(h)}</button>`).join("")}</div>` : ""}
+          ${histChips(s)}
           ${res ? (res.restaurants.length ? `<div class="stack" style="gap:6px">${res.restaurants.map(r => `<button class="pick v3-swap-row" data-v3-place="${esc(r.id)}" data-v3-pname="${esc(r.name)}" data-v3-prating="${r.rating ?? ""}" data-v3-peta="${esc(r.eta ?? "")}">
               <span class="t"><b>${esc(r.name)}${r.sponsored ? ` <span class="tag">Ad</span>` : ""}</b><span>${esc([r.rating != null ? `${r.rating}★` : null, r.eta, r.area].filter(Boolean).join(" · "))}</span></span>${ICON.right}</button>`).join("")}</div>`
             : `<p class="fine">Nothing found for “${esc(s.q)}”.</p>`) : ""}`;
@@ -385,7 +433,7 @@
   }
   function orderSheet() {
     const d = st().data;
-    const picks = d.meals.filter(m => d.picks[m]).map(m => [m, d.picks[m]]);
+    const picks = pickedMeals(d).filter(m => d.picks[m]).map(m => [m, d.picks[m]]);
     const rows = picks.map(([m, p]) => {
       const cartable = p.source === "swiggy" && p.kind === "order";
       return `<div class="mrow" style="cursor:default"><span class="t"><b>${cap1(m)}: ${p.qty}× ${esc(p.name)}</b><span class="s">${esc(p.restaurant || (p.kind === "cook" ? "Cook at home" : ""))}</span></span>
@@ -452,7 +500,9 @@
     if (!s) return;
     try {
       const h = await api(`/api/user/${S.userId}/swiggy/order-history`);
-      s.history = [...new Set((h.provider_orders || []).map(o => o.restaurant).filter(Boolean))].slice(0, 8);
+      const seen = new Set();
+      s.history = (h.provider_orders || []).filter(o => o.restaurant && !seen.has(o.restaurant_id || o.restaurant) && seen.add(o.restaurant_id || o.restaurant))
+        .map(o => ({ id: o.restaurant_id || null, name: o.restaurant })).slice(0, 8);
     } catch (_) { s.history = []; }
     if (st().sheet !== s) return;
     keepTyped(); render();
@@ -467,6 +517,19 @@
   async function importSugg() {
     const s = st().sheet;
     s.sugg = await api(`/api/user/${S.userId}/favourites/suggested`, "POST", { consent: true });
+    store.del(suggKey());
+    render();
+  }
+  async function refreshSugg() {
+    await importSugg();
+    toast("Read your latest Swiggy orders");
+  }
+  async function savePlaces() {
+    const s = st().sheet;
+    const r = await api(`/api/user/${S.userId}/favourites/suggested/places`, "POST", {});
+    s.sugg = r;
+    const n = (r.places_saved || []).length;
+    toast(n ? `Saved ${n} place${n === 1 ? "" : "s"}. Ziggy plans from your saved places.` : "Already in your saved places");
     render();
   }
   async function deleteSugg() {
@@ -477,7 +540,8 @@
   async function addSugg() {
     const s = st().sheet, shown = s.suggShown || [];
     const items = [...document.querySelectorAll("[data-v3-sugg]")].filter(b => b.checked).map(b => shown[Number(b.dataset.v3Sugg)])
-      .filter(Boolean).map(i => ({ restaurant_id: i.restaurant_id, item_name: i.item_name, meal: s.meal }));
+      .filter(Boolean).map(i => (i.kind === "combo" ? { restaurant_id: i.restaurant_id, combo: i.label, meal: s.meal }
+        : { restaurant_id: i.restaurant_id, item_name: i.item_name, meal: s.meal }));
     if (!items.length) throw new Error("Tick at least one suggestion");
     const r = await post("/pool/suggested", { meal: s.meal, items });
     const a = r.suggested_added || { swiggy: [], typed: [], refused: [] };
@@ -654,7 +718,9 @@
       const f = { order: async () => T({ kind: "order" }), share, cook: cookIt, decide, reload: load,
         "budget-save": () => post("/budget", { amount: Number(document.getElementById("v3-budget-in").value) }).then(() => T(null)),
         "add-back": async () => { v().sheet.menu = null; render(); },
-        "sugg-import": importSugg, "sugg-delete": deleteSugg,
+        "sugg-import": importSugg, "sugg-delete": deleteSugg, "sugg-refresh": refreshSugg, "sugg-places": savePlaces,
+        "sugg-later": async () => { store.set(suggKey(), "1"); render(); },
+        "sugg-open": async () => { v().sheet.suggOpen = true; render(); },
         "save-later": async () => { store.set(`ziggy.v3.saved-later.${S.userId}`, "1"); render(); },
         olist: async () => { T(null); await openOrderList(); } }[a];
       if (f) guard(f);
@@ -711,6 +777,6 @@
     },
     // After any plan change, re-read Today.
     invalidate() { if (S.v3) S.v3.data = null; },
-    _test: { load, post, decide, share, startOnboard, finishOb, obTap, today, cookScreen, overlays, hiddenList, suggBlock, addSugg, recapCard, actions, orderSheet },
+    _test: { load, post, decide, share, startOnboard, finishOb, obTap, today, cookScreen, overlays, hiddenList, suggBlock, addSugg, histChips, savePlaces, snackRow, recapCard, actions, orderSheet },
   };
 })();

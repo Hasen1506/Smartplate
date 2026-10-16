@@ -358,7 +358,12 @@ test('private profile keys are sent as a header and merged into the profile list
   await vm.runInContext("api('/api/user/2/plan')", context);
   assert.equal(calls.at(-1).options.headers['X-SmartPlate-Key'], 'secret-key-123456789');
   const users = JSON.parse(vm.runInContext("JSON.stringify(mergeUsers([{ id: 1, name: 'Sample' }, { id: 2, name: 'Meera' }]))", context));
-  assert.deepEqual(users.map(u => [u.id, !!u.private]), [[2, true], [1, false]]);
+  // r3 #33: with a private profile of their own, the shared samples are hidden (an open one stays)
+  assert.deepEqual(users.map(u => [u.id, !!u.private]), [[2, true]]);
+  vm.runInContext("S.userId = 1", context);
+  const open = JSON.parse(vm.runInContext("JSON.stringify(mergeUsers([{ id: 1, name: 'Sample' }, { id: 3, name: 'Other' }]))", context));
+  assert.deepEqual(open.map(u => [u.id, !!u.private]), [[2, true], [1, false]]);
+  vm.runInContext("S.userId = 2", context);
   assert.match(vm.runInContext('receiptsPanel()', context), /data-act="download-csv"/);
   assert.match(vm.runInContext('meScreen()', context), /data-act="download-ics"/);
   assert.ok(!source.includes('withKey('));
