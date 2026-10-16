@@ -142,10 +142,11 @@ workstreams, merged in this order on top of `ziggy/last-three-gaps` (PR #44, inc
   dish with options in as a Swiggy dish (#19), instead of typing it in.
 - Swap shows today-truth's empty/not-connected message and menus-offers' "Nearby now" together.
 - The cart coupons read never errors the cart screen (no coupon tool → empty list), and what is
-  typed in the Swiggy search survives a background re-render.
+  typed in the Swiggy search or the "Type it in" form survives a background re-render (the
+  background menu job and the suggestions load redraw the open sheet).
 - Tests: `tests/test_r3_integration.py` (snack in Week money and meal times; kept-menu import).
   The persona scenario expects other-address favourites kept and greyed (#2). Browser tests follow the new sheet title "Add to your usual …" and the hidden compare row. CI
-  now runs every r3 node and browser test (and `frontend_w03`, `browser_w03`).
+  now runs every r3 node and browser test (and `frontend_w03`).
 - Tests: Python 1,102 passed, 6 skipped, 0 failed (SQLite, 86 files + `tests/scenarios`, `-n 2` in
   chunks); node `tests/*.cjs` 165 passed; `menu-source.test.js` 10 passed; Playwright, 12 files, 29 passed.
 

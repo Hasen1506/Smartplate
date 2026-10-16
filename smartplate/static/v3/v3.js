@@ -589,11 +589,11 @@
             : `<p class="fine">Nothing found for “${esc(s.q)}”.</p>`) : ""}`;
       }
     } else {
-      body = `<form id="v3-typed" class="stack"><label>Dish<input id="v3-t-name" required minlength="2" maxlength="80" placeholder="Cappuccino, burrito, idli…"></label>
-        <div class="grid2"><label>Place (optional)<input id="v3-t-place" maxlength="80" placeholder="Where from"></label>
-        <label>Price you pay (₹)<input id="v3-t-price" type="number" inputmode="numeric" min="1" max="20000"></label></div>
-        <fieldset class="v3-fs"><legend class="k">Vegetarian?</legend><div class="chips">${[["1", "Yes"], ["0", "No"], ["", "Not sure"]].map(([v, l]) => `<label class="chip small"><input type="radio" name="v3-t-veg" value="${v}" ${v === "" ? "checked" : ""}> ${l}</label>`).join("")}</div></fieldset>
-        <fieldset class="v3-fs"><legend class="k">I usually</legend><div class="chips">${[["order", "Order it"], ["cook", "Cook it"]].map(([v, l]) => `<label class="chip small"><input type="radio" name="v3-t-kind" value="${v}" ${v === "order" ? "checked" : ""}> ${l}</label>`).join("")}</div></fieldset>
+      body = `<form id="v3-typed" class="stack"><label>Dish<input id="v3-t-name" required minlength="2" maxlength="80" placeholder="Cappuccino, burrito, idli…" value="${esc(s.draft?.name || "")}"></label>
+        <div class="grid2"><label>Place (optional)<input id="v3-t-place" maxlength="80" placeholder="Where from" value="${esc(s.draft?.place || "")}"></label>
+        <label>Price you pay (₹)<input id="v3-t-price" type="number" inputmode="numeric" min="1" max="20000" value="${esc(s.draft?.price || "")}"></label></div>
+        <fieldset class="v3-fs"><legend class="k">Vegetarian?</legend><div class="chips">${[["1", "Yes"], ["0", "No"], ["", "Not sure"]].map(([v, l]) => `<label class="chip small"><input type="radio" name="v3-t-veg" value="${v}" ${v === (s.draft?.veg ?? "") ? "checked" : ""}> ${l}</label>`).join("")}</div></fieldset>
+        <fieldset class="v3-fs"><legend class="k">I usually</legend><div class="chips">${[["order", "Order it"], ["cook", "Cook it"]].map(([v, l]) => `<label class="chip small"><input type="radio" name="v3-t-kind" value="${v}" ${v === (s.draft?.kind || "order") ? "checked" : ""}> ${l}</label>`).join("")}</div></fieldset>
         <button class="primary" type="submit">Add to your ${usual(meal)}</button>
         <p class="fine">Typed dishes are yours: Ziggy can share or cook them, but can only put Swiggy menu dishes in a cart.</p></form>`;
     }
@@ -1046,6 +1046,10 @@
     if (sugg) sugg.onsubmit = (e) => { e.preventDefault(); guard(addSugg, "Add suggestions to your usual meals"); };
     const typed = document.getElementById("v3-typed");
     if (typed) typed.onsubmit = (e) => { e.preventDefault(); guard(addTyped, "Add to your usual meals"); };
+    // The typed dish survives a re-render (a background menu job or suggestions load redraws the sheet)
+    if (typed) typed.oninput = typed.onchange = () => { const sh = v().sheet; if (!sh) return;
+      const f = (id) => document.getElementById(id)?.value || "", r = (n) => typed.querySelector(`input[name="${n}"]:checked`)?.value;
+      sh.draft = { name: f("v3-t-name"), place: f("v3-t-place"), price: f("v3-t-price"), veg: r("v3-t-veg") ?? "", kind: r("v3-t-kind") || "order" }; };
     const times = document.getElementById("v3-times");
     if (times) times.onsubmit = (e) => { e.preventDefault(); const f = new FormData(times), body = {};
       for (const [k, val] of f.entries()) body[k] = val || null;
