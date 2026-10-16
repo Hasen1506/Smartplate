@@ -15,6 +15,8 @@ is still planned, with no nutrition figures (live_catalog.unestimated).
 from .. import clock, db
 
 MEALS = ("breakfast", "lunch", "dinner")
+# Snacks (r3 #6) are a favourites list only: kept and shown on Today as optional, never planned.
+POOL_MEALS = MEALS + ("snack",)
 MAX_PER_MEAL = 20
 MAX_PLACES = 6           # pooled restaurants read on a refresh, beyond the saved places
 
@@ -34,6 +36,29 @@ def _rows(user_id: int) -> list[dict]:
         return [dict(r) for r in cur.execute(
             "SELECT * FROM swiggy_meal_pools WHERE user_id=? AND address_id=? ORDER BY added_ts, item_id",
             (user_id, address)).fetchall()]
+
+
+def _all_rows(user_id: int) -> list[dict]:
+    """Every pooled dish, at any delivery address the person used (r3 #2): a change of
+    address keeps the favourites. A dish saved for another address is marked `elsewhere`
+    unless the same dish is also pooled here."""
+    from ..integrations import swiggy_connect
+    address = _address(user_id)
+    if not address:
+        return []
+    swiggy_connect.init_schema()
+    with db.cursor() as cur:
+        rows = [dict(r) for r in cur.execute(
+            "SELECT * FROM swiggy_meal_pools WHERE user_id=? ORDER BY added_ts, item_id", (user_id,)).fetchall()]
+    here = {(r["meal"], r["restaurant_id"], r["item_id"]) for r in rows if r["address_id"] == address}
+    out, seen = [], set()
+    for r in rows:
+        key = (r["meal"], r["restaurant_id"], r["item_id"])
+        if r["address_id"] != address and key in here or key in seen:
+            continue
+        seen.add(key)
+        out.append({**r, "elsewhere": r["address_id"] != address})
+    return out
 
 
 def keys(user_id: int) -> set[tuple[str, str]]:
@@ -73,6 +98,8 @@ def for_planner(user_id: int) -> dict:
     cat = _catalogue(user_id)
     out = {}
     for r in rows:
+        if r["meal"] not in MEALS:                 # snacks are never planned
+            continue
         pool = out.setdefault(r["meal"], {"ids": set(), "size": 0})
         pool["size"] += 1
         local = cat.get((r["restaurant_id"], r["item_id"]))
@@ -84,10 +111,12 @@ def for_planner(user_id: int) -> dict:
 def view(user_id: int) -> dict:
     from ..integrations import swiggy_connect
     cat = _catalogue(user_id)
-    meals = {m: [] for m in MEALS}
-    for r in _rows(user_id):
+    meals = {m: [] for m in POOL_MEALS}
+    for r in _all_rows(user_id):
+        if r["meal"] not in meals:
+            continue
         local = cat.get((r["restaurant_id"], r["item_id"]))
-        meals[r["meal"]].append({
+        meals[r["meal"]].append({"elsewhere": r["elsewhere"] and not local,
             "restaurant_id": r["restaurant_id"], "restaurant_name": r["restaurant_name"],
             "item_id": r["item_id"], "name": r["name"], "veg": None if r["veg"] is None else bool(r["veg"]),
             "price": local["price"] if local else r["price"], "on_menu": bool(local),
@@ -121,8 +150,8 @@ def _palette(user_id: int) -> list[dict]:
 
 
 def _check_meal(meal) -> str:
-    if meal not in MEALS:
-        raise ValueError("Choose breakfast, lunch or dinner")
+    if meal not in POOL_MEALS:
+        raise ValueError("Choose breakfast, lunch, dinner or snack")
     return meal
 
 
@@ -133,8 +162,9 @@ def _replan(user_id: int) -> None:
     optimizer.optimize(plan["plan"]["id"])
 
 
-def add(user_id: int, meal: str, restaurant_id: str, restaurant_name: str, item_id: str) -> dict:
-    """Add one dish from a restaurant's live menu to a meal's pool (and save the place)."""
+def add(user_id: int, meal: str, restaurant_id: str, restaurant_name: str, item_id: str, *, menu=None) -> dict:
+    """Add one dish from a restaurant's live menu to a meal's pool (and save the place).
+    `menu` is that live menu when the caller has just read it (one read for several dishes)."""
     from ..integrations import swiggy_live
     from ..integrations.swiggy_connect import SwiggyError
     from . import live_catalog, models
@@ -147,7 +177,7 @@ def add(user_id: int, meal: str, restaurant_id: str, restaurant_name: str, item_
         return view(user_id)
     if sum(1 for r in rows if r["meal"] == meal) >= MAX_PER_MEAL:
         raise ValueError(f"Your {meal} pool is full ({MAX_PER_MEAL} dishes). Remove one first.")
-    menu = swiggy_live.live_menu(user_id, restaurant_id, restaurant_name)
+    menu = menu or swiggy_live.live_menu(user_id, restaurant_id, restaurant_name)
     item = next((i for i in menu["items"] if i["id"] == item_id), None)
     left_out = next((i for i in menu.get("hidden_items") or [] if i["id"] == item_id), None)
     if left_out:                                   # the shared safety checker said no: say why
@@ -179,10 +209,11 @@ def add(user_id: int, meal: str, restaurant_id: str, restaurant_name: str, item_
 
 
 def remove(user_id: int, meal: str, restaurant_id: str, item_id: str) -> dict:
+    """Take a dish out of a meal's pool, at every address it was saved for."""
     _check_meal(meal)
     with db.cursor() as cur:
-        cur.execute("DELETE FROM swiggy_meal_pools WHERE user_id=? AND address_id=? AND meal=? AND restaurant_id=? "
-                    "AND item_id=?", (user_id, _address(user_id), meal, str(restaurant_id), str(item_id)))
+        cur.execute("DELETE FROM swiggy_meal_pools WHERE user_id=? AND meal=? AND restaurant_id=? "
+                    "AND item_id=?", (user_id, meal, str(restaurant_id), str(item_id)))
     _replan(user_id)
     return view(user_id)
 
@@ -211,3 +242,12 @@ def move(user_id: int, meal: str, to_meal: str, restaurant_id: str, item_id: str
                      row["name"], row["price"], row["veg"], clock.now().isoformat(timespec="microseconds")))
     _replan(user_id)
     return view(user_id)
+
+
+def address_summary(user_id: int) -> dict:
+    """After a change of delivery address (r3 #2): how many usual dishes were kept, and how
+    many were saved for another address and aren't checked for this one yet."""
+    rows = _all_rows(user_id)
+    cat = _catalogue(user_id)
+    elsewhere = [r for r in rows if r["elsewhere"] and (r["restaurant_id"], r["item_id"]) not in cat]
+    return {"kept": len(rows), "not_checked_here": len(elsewhere)}
