@@ -878,6 +878,25 @@ def overlay_decisions(user: dict, plan: dict, decisions: list[dict]) -> None:
                   "today_total_basis": basis})
 
 
+def snack_spend(user: dict, plan: dict) -> float:
+    """Today's optional snack pick (r3 #6) at its whole bill, when today is in this plan's week:
+    the Week's money counts it like Today does, so the two never disagree. The snack is never a
+    Week cell (the planner never plans one)."""
+    import datetime as _dt
+    try:
+        ws = _dt.date.fromisoformat(plan["week_start"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+    if not ws <= clock.today() <= ws + _dt.timedelta(days=6):
+        return 0.0
+    init_schema()
+    p = _picks(user["id"]).get(SNACK)
+    if not p:
+        return 0.0
+    total, _ = _total(p, p["qty"], _cart_bills(user["id"]), _fee_rule(user["id"]))
+    return round(float(total or 0), 2)
+
+
 def _when(user: dict, meal: str, p: dict, condition: str = "clear") -> dict:
     """When to order today's pick: the same arithmetic the Week uses (timing.order_plan +
     order_status) at the person's own meal time, so Today and Week agree to the minute."""

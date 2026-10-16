@@ -137,7 +137,8 @@ def test_name_match_reads_each_menu_once_and_keeps_quantities(town, orders):  # 
     one = town["fake"].tool_calls().count("get_restaurant_menu")
     swiggy_live.live_menu(uid, "r-101", "Annapoorna Tiffin Room")
     per_menu = town["fake"].tool_calls().count("get_restaurant_menu") - one
-    assert used == 3 * per_menu                                           # three places, one read each
+    # three places, at most one read each; a menu kept by the 6 h menu cache (r3 menus-offers) is not re-read
+    assert used <= 3 * per_menu
     dinner = {e["name"]: e for e in t["pools"]["dinner"]}
     assert dinner["Veg Biryani"]["source"] == "swiggy" and dinner["Veg Biryani"]["qty"] == 1
     assert dinner["Raita"]["source"] == "swiggy" and dinner["Raita"]["qty"] == 2   # "2 x Raita" kept

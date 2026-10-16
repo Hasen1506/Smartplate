@@ -222,7 +222,10 @@ def plan_view(plan_id: int) -> dict:
     # a past meal the user never confirmed is unknown, not spent (reconcile, don't assume)
     spend_rows = [d for d in decisions if d["chosen_kind"] in ("delivery", "cook") and not d["past"]]
     cap = optimizer.week_cap(user, plan)
-    env = budget.envelope(cap, spend_rows)
+    # today's optional snack pick (r3 #6) costs money in the Week too (one source of truth, #1)
+    snack = today_mod.snack_spend(user, plan)
+    env = budget.envelope(cap, spend_rows + ([{"cost": snack}] if snack else []))
+    env["snack_today"] = snack or None
     env["weekly_budget"] = user["weekly_budget"]
     env["prorated"] = cap < user["weekly_budget"]
     # One budget model (r3): the weekly budget is the person's number; a day is a seventh of
