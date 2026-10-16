@@ -86,6 +86,34 @@ def test_budget_card_fields_match_the_frontend(town):  # noqa: F811
     assert b["left_after_fees"] == b["left"] == round(b["amount"] - 131.5 - 150, 2) and b["left_estimated"] is False
 
 
+def test_todays_bill_and_left_add_up_estimate_then_real_cart_bill(town):  # noqa: F811
+    """Today's money is one sum (gap: "left" vs the fees line). The card's "₹X with delivery,
+    fees & GST" and "₹Y left after fees" add up to today's budget, first on the fee estimate
+    and then on Swiggy's real cart bill, which replaces the estimate in both and in the pick's
+    own bill line (no "~₹140 (estimate)" next to a "real bill" tag)."""
+    from smartplate import today
+    c, uid = town["c"], town["uid"]
+    _typed(c, uid, "lunch", "Home Thali", 150)
+    lunch_ref = c.get(f"/api/user/{uid}/today").get_json()["pools"]["lunch"][0]["ref"]
+    c.post(f"/api/user/{uid}/today/pick", json={"meal": "lunch", "ref": lunch_ref})
+    t = c.post(f"/api/user/{uid}/today/pool", json={"source": "swiggy", "meal": "breakfast", "restaurant_id": "r-101",
+                                                     "restaurant_name": "Annapoorna Tiffin Room", "item_id": "r-101-i5",
+                                                     "rating": 4.4, "eta_min": 25}).get_json()
+    ref = t["pools"]["breakfast"][0]["ref"]
+    b = c.post(f"/api/user/{uid}/today/pick", json={"meal": "breakfast", "ref": ref}).get_json()["budget"]
+    estimate = round(90 + fees.DELIVERY + fees.DEFAULT_FIXED + round(fees.GST_FOOD_RATE * 90, 2), 2)
+    assert b["picked_bill"] == b["picked"] == round(estimate + 150, 2) and b["bill_estimated"] is True
+    assert b["left_after_fees"] == round(b["amount"] - b["picked_bill"], 2) and b["left_estimated"] is True
+
+    today.record_cart_bill(uid, "r-101", "r-101-i5", 1, 131.5)                   # the Swiggy cart's to_pay
+    t = c.get(f"/api/user/{uid}/today").get_json()
+    b, bill = t["budget"], t["picks"]["breakfast"]["bill"]
+    assert bill["total"] == 131.5 and bill["estimated"] is False and bill["other"] == 41.5
+    assert "estimate" not in bill["label"] and "cart bill" in bill["label"]
+    assert b["picked_bill"] == b["picked"] == 281.5 and b["bill_estimated"] is False
+    assert b["left_after_fees"] == b["left"] == round(b["amount"] - 281.5, 2) and b["left_estimated"] is False
+
+
 def test_plan_view_sends_the_per_user_meal_floor(gt, monkeypatch):
     """The onboarding warning reads S.view.meal_floor: this person's cheapest favourite with
     fees, or nothing without favourites (no flat ₹60)."""

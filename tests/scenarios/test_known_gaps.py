@@ -112,6 +112,8 @@ def test_a_pin_that_breaks_the_week_is_flagged(run_week):
     assert v["budget"]["over"]
     warned = [h for h in v["heads_up"] if h["kind"] == "budget" and "over" in (h["title"] + h["body"]).lower()]
     assert warned, [h["title"] for h in v["heads_up"]]
+    # v3 Today shows the budget heads-up that carries the raise-budget action (static/v3 weekMoney)
+    assert any(a.get("act") == "raise-budget" for h in warned for a in h.get("actions") or []), warned
 
 
 # ---- W6 · planner ---------------------------------------------------------------------------

@@ -742,6 +742,17 @@ def _bills(user_id: int, priced: list[dict]) -> None:
         p["bill"] = fees.breakdown({"fees": rule}, _cost(p, p["qty"]))
 
 
+def _real_bill(p: dict) -> dict:
+    """A carted Swiggy pick's bill as Swiggy's cart gave it (`to_pay`, today_cart_bills): the
+    dish total and everything else on the bill as one line, never split into guessed parts."""
+    items, real = round(_cost(p, p["qty"]), 2), round(float(p["total"]), 2)
+    other = round(real - items, 2)
+    return {"items": items, "delivery": None, "fees": None, "gst": None, "other": other,
+            "total": real, "estimated": False, "range": [real, real],
+            "basis": {"delivery": "swiggy_cart", "fees": "swiggy_cart"},
+            "label": f"₹{real:.0f} incl. ₹{other:.0f} delivery, fees & GST (Swiggy's cart bill)"}
+
+
 def _recap(user: dict) -> dict | None:
     """On Sunday: W4's week recap (domain/spend.week_recap), real Swiggy bills only."""
     if clock.today().weekday() != 6:
@@ -779,11 +790,13 @@ def view(user_id: int) -> dict:
     priced = [p for m, p in picks.items() if m in meals and p["kind"] == "order" and p.get("source") == "swiggy"
               and p.get("price") is not None]
     _bills(user_id, priced)
-    bill_total = None
-    if priced:
-        bill_total = round(sum(p["bill"]["total"] for p in priced if p.get("bill"))
-                           + sum(_cost(p, p["qty"]) for m, p in picks.items()
-                                 if m in meals and p not in priced and p.get("price") is not None), 2)
+    for p in priced:                        # a carted pick shows Swiggy's real bill, not the estimate
+        if p.get("total_basis") == "swiggy_cart":
+            p["bill"] = _real_bill(p)
+    # The whole bill and "left" are one sum: every pick at p["total"] (a Swiggy pick at its real
+    # cart bill once carted, else the fee estimate; any other priced pick at its price), so the
+    # card's "₹X with fees" and "₹Y left after fees" always add up to today's budget.
+    bill_total = round(picked, 2) if priced else None
     compare = None
     if priced:
         compare = {"swiggy": round(sum(_cost(p, p["qty"]) for p in priced), 2), "others": "coming",
@@ -806,7 +819,7 @@ def view(user_id: int) -> dict:
                                   "until the Swiggy cart shows the real one)."),
                    # W4: what the Swiggy picks cost with delivery, platform fee, packaging and GST
                    "picked_bill": bill_total,
-                   "bill_estimated": any((p.get("bill") or {}).get("estimated") for p in priced)},
+                   "bill_estimated": any(p.get("total_basis") == "estimate" for p in priced)},
         "recap": _recap(user),
         "weather": _weather(user),
         "rules": {"diet": user.get("diet"), "allergens": user.get("allergens") or [],

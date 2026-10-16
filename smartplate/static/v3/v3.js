@@ -97,13 +97,18 @@
     const n = Math.round(net * 100) / 100;
     return `<b class="v3-left">${n >= 0 ? `${money(n)} left after fees` : `${money(-n)} over after fees`}</b> <span class="tag ${est ? "" : "good"} v3-left-tag">${est ? "estimate" : "real bill"}</span>`;
   }
-  // W4: the week's target against real Swiggy bills (plan view budget.kind/actual), and the
-  // low-budget heads-up. Read from S.view; nothing shown when the plan doesn't carry them.
+  // W4: the week's target against real Swiggy bills (plan view budget.kind/actual), the
+  // low-budget heads-up, and (usab #17) the plan's "₹N over this week's target" heads-up when
+  // the person's own picks take the week over: said on Today, not only as a red number in Week.
+  // Read from S.view; nothing shown when the plan doesn't carry them.
   function weekMoney() {
-    const wb = S.view?.budget, a = wb?.actual;
+    const wb = S.view?.budget, a = wb?.actual, hs = S.view?.heads_up || [];
     const line = wb?.kind === "target" && a ? `<p class="fine v3-week-money">This week: ${money(a.amount)} spent on Swiggy of a ${money(wb.budget)} target${a.complete ? "" : " (so far, from the bills Ziggy has seen)"}</p>` : "";
-    const low = (S.view?.heads_up || []).find(h => h.kind === "low_budget");
-    return line + (low ? `<div class="note warn" role="note"><span style="flex:1"><b>${esc(low.title)}</b> ${esc(low.body || "")}</span></div>` : "");
+    const low = hs.find(h => h.kind === "low_budget");
+    const over = wb?.over ? hs.find(h => h.kind === "budget" && (h.actions || []).some(x => x.act === "raise-budget")) : null;
+    return line + (over ? `<div class="note warn v3-week-over" role="alert"><span style="flex:1"><b>${esc(over.title)}</b> ${esc(over.body || "")}
+        <span class="acts"><button class="link" data-act="budget">Change the weekly target</button> <button class="link" data-tab="week">See the week</button></span></span></div>` : "")
+      + (low ? `<div class="note warn" role="note"><span style="flex:1"><b>${esc(low.title)}</b> ${esc(low.body || "")}</span></div>` : "");
   }
   // W4 Sunday recap: real Swiggy bills only; "kept" only when the order history was read.
   function recapCard(d) {

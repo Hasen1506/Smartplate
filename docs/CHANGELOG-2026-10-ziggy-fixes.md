@@ -58,6 +58,26 @@ Vijay), **not done**. One line each; detail is in the commit messages and the do
   deleted (≈ 6.2 MB; in git history at `9fc21e5`); `.gitignore` covers logs, local DBs, shots and
   scratch dirs; `docs/branches-cleanup.md` lists the 31 remote branches to delete.
 
+## Last three gaps (branch `ziggy/last-three-gaps`, 16 Oct 2026)
+
+- **Usab #17, ₹300 pin warning, now on Today.** The server already raised it (round 2), but
+  v3 Today only showed the low-budget note, so the warning never reached the screen people use.
+  The budget card now shows the plan's "₹N over this week's target" heads-up (the one with the
+  raise-budget action, only while `budget.over`), with *Change the weekly target* and *See the
+  week*. Node test in `tests/frontend_v3.test.cjs`; the scenario test also checks the action.
+- **Usab #18, "usual week".** Already honest since round 2 (needs order history); no strict
+  or non-strict xfail is left in `tests/scenarios/test_known_gaps.py`.
+- **Today's fees, one sum.** "₹X with delivery, fees & GST" (`budget.picked_bill`) was summed
+  from the fee estimate even after Swiggy's cart gave the real bill, while "₹Y left after fees"
+  used the real bill, so the two didn't add up to today's budget and the pick said "~₹140
+  (estimate)" next to a *real bill* tag. Now both come from the same per-pick total (real cart
+  bill once carted, else the estimate, the same `domain/fees` model the plan uses), a carted
+  pick's bill line is Swiggy's (`estimated: false`, "Swiggy's cart bill"), and
+  `bill_estimated` follows the basis. Test:
+  `test_todays_bill_and_left_add_up_estimate_then_real_cart_bill`.
+- Tests: Python 1,040 passed, 6 skipped, 0 xfailed, 0 failed (SQLite, 85 files, `-n 2` in
+  chunks); node `tests/*.cjs` 132 passed; `menu-source.test.js` passed; Playwright, 9 files, 24 passed.
+
 ## sp-grill critiques (1–72)
 
 | # | Topic | Status | Note |
@@ -155,8 +175,8 @@ Vijay), **not done**. One line each; detail is in the commit messages and the do
 | 14 | "Better fits" isn't better | not done | not re-checked |
 | 15 | Alternatives over the money left not flagged | partly | W2 sheet limits counted like Today |
 | 16 | Household conflicts resolve silently | partly | W6 names the member a dish isn't safe for, proposes splits; splits can't be applied to the grid yet |
-| 17 | ₹300 profile accepts a ₹355 pin silently | not done | still a strict xfail in `tests/scenarios/test_known_gaps.py` |
-| 18 | "Your usual week costs ₹5,915" with no history | not done | still a strict xfail |
+| 17 | ₹300 profile accepts a ₹355 pin silently | fixed | Round 2 (`8703ba8`): a pin that takes the week over its target raises a "₹N over this week's target" heads-up naming the person's own picks, with a raise-the-target action; last-three-gaps: v3 Today's budget card now shows it (it was only on classic Today), with *Change the weekly target* / *See the week*. Strict xfail removed; `test_a_pin_that_breaks_the_week_is_flagged` passes |
+| 18 | "Your usual week costs ₹5,915" with no history | fixed | Round 2 (`8703ba8`): "Your usual week" only once order history exists, else "Planning every one of these meals from places near you costs about ₹X a week". Strict xfail removed; `test_no_usual_week_claim_without_order_history` passes |
 | 19 | Plan cost leaves out fees | fixed | W4 |
 | 20 | Two budget numbers | fixed | W2 sheet money matches Today |
 | 21 | "≈₹125est." label | fixed | W4 labelled estimates with ranges |
@@ -206,7 +226,7 @@ Vijay), **not done**. One line each; detail is in the commit messages and the do
 
 | Suite | Result (14 Oct 2026, local) |
 |---|---|
-| Python, SQLite, all 80 files | 978 passed, 6 skipped, 2 xfailed (known W4 gaps: usab #17 ₹300 pin warning, #18 "usual week" claim), 0 failed |
+| Python, SQLite, all 80 files | 978 passed, 6 skipped, 2 xfailed (known W4 gaps: usab #17 ₹300 pin warning, #18 "usual week" claim), 0 failed. Both xfails removed since (round 2); see "Last three gaps" for current totals |
 | node --check app.js, v3.js | OK |
 | node --test tests/*.cjs | 127 passed |
 | src/sourcing/menu-source.test.js | 10 passed |
