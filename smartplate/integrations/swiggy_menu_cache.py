@@ -51,6 +51,10 @@ def store(user_id: int, raw: dict) -> None:
     if not raw or not raw.get("items") or raw.get("address_id") != _address_id(user_id):
         return                                # an empty reply is never kept: nothing to show from it
     rid = str(raw["restaurant"]["id"])
+    if raw.get("partial"):
+        kept, _ = load(user_id, rid)
+        if kept is not None and not kept.get("partial"):
+            return                            # one page (a cart review's place check) never replaces a whole menu
     with db.cursor() as cur:
         cur.execute("INSERT OR REPLACE INTO swiggy_menus(user_id, restaurant, payload, fetched_ts) VALUES (?,?,?,?)",
                     (user_id, KEY + rid, db.jd(raw), clock.now().isoformat()))
