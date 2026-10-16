@@ -1152,7 +1152,7 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
             q, split = _split_part(price, quantity, model, part)
             details["quantity"] = q
             details["part"] = part
-            review.update(quantity=q, menu_total=round(price * q, 2), split=split)
+            review.update(quantity=q, menu_total=round(price * q, 2), split=split, part=part)
         elif not cap["fits"]:
             blocked = cap["message"]
     if blocked:
@@ -1410,8 +1410,9 @@ def _fill_reviewed_cart(user_id: int, preview: dict) -> dict:
     if before["items"]:
         if before["cart_address_id"]:
             raise _other_address_error(before, conn, "Your Swiggy cart already has items and")
-        if before["address_verified"] and _cart_mismatch(before, restaurant_id, preview["item_id"],
-                                                         preview.get("quantity", 1)) is None:
+        # Never for cart 2+ of a split order: an identical cart then is cart 1, still unpaid.
+        if before["address_verified"] and int(preview.get("part") or 1) == 1 and \
+                _cart_mismatch(before, restaurant_id, preview["item_id"], preview.get("quantity", 1)) is None:
             # Already exactly the reviewed dish (Ziggy filled it a moment ago, or on another
             # device): that cart is the answer, not an error (audit #13). Nothing is changed.
             return _filled(user_id, preview, before, current)
