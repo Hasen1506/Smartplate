@@ -78,6 +78,77 @@ Vijay), **not done**. One line each; detail is in the commit messages and the do
 - Tests: Python 1,040 passed, 6 skipped, 0 xfailed, 0 failed (SQLite, 85 files, `-n 2` in
   chunks); node `tests/*.cjs` 132 passed; `menu-source.test.js` passed; Playwright, 9 files, 24 passed.
 
+## Fix round 3: live UX audit (branch `ziggy/r3-integration`, 16 Oct 2026)
+
+Issue numbers are those of the 16 Oct UX scenario audit (`work/ux-audit-2026-10-16.md`). Four
+workstreams, merged in this order on top of `ziggy/last-three-gaps` (PR #44, included here).
+
+**Connect + budget** (`ziggy/r3-connect-budget`)
+- Fixed: **Connect Swiggy** (live audit) asks Swiggy's own allow-list before sign-in; a callback
+  Swiggy hasn't whitelisted is a clear `503 swiggy_redirect_not_whitelisted`, not Swiggy's dead
+  page; the Swiggy notice is an in-sheet tick (no native `confirm`, which webviews suppress) and
+  connect errors show in the sheet.
+- Fixed: **#15** onboarding asks Day/Week on the same weekly number plus "How many eat?" (1/2/3/4+,
+  used as default portions); presets are relative to the person's day. **#23** one budget model:
+  the weekly budget is the number, a day is a seventh of it, every figure names its period, a
+  mid-week plan says "of ₹X for Fri–Sun", a weekly change resets today's figure. **#12** recovery
+  code card on the first Today. **#36** theme renamed "Saffron". **#37** landing copy. **#38**
+  weather tile only with a live forecast, with place and Open-Meteo credit, stacked under 480 px.
+
+**Today truth** (`ziggy/r3-today-truth`, details in `docs/fix-round-3-today-truth.md`)
+- Fixed: **#1** one source of truth for today (Today's picks are the Week cell, money, next-up and
+  reminder). **#14** per-person meal times (late dinner up to 23:45; order-by, cart window,
+  reminders follow). **#21** "Cart opens 18:15 · remind me". **#22** per-meal reminders with a
+  calendar (.ics) fallback. **#24** new profiles' weeks hold only chosen meals ("Open" + Decide for
+  me); landing reworded. **#25** "+ Add another". **#27** "Pick anyway?" with a one-tap relax.
+  **#28** Decide says why a meal stayed empty. **#32** "Meals I order". **#10** rule defaults
+  learned from the person's places. **#11** Jain and eggetarian diets. Swap without Swiggy says
+  it isn't connected.
+- Known limits: an overlaid Week cell is a read model (the classic Week cart button still carts the
+  plan's own dish); per-meal reminders are for today's meals.
+
+**History → favourites** (`ziggy/r3-history-favs`)
+- Fixed: **#4** past dishes matched by name on the live menu before falling back to typed. **#5**
+  readable suggestion checklist at 390 px. **#6** snack bucket (15:30–18:30), name/section hints,
+  one dish in two meals; snack is an optional favourites list, never planned. **#7** whole past
+  orders as usual orders with quantities; sides not offered alone. **#8** history chips open the
+  menu in one tap; "Save these N places". **#2** an address change keeps favourites, greyed with
+  the reason, and says what changed. **#29** one-line consent + Details. **#30** refresh from my
+  orders. **#31** ratings filled from menus/search. **#33** sample profiles hidden once you have
+  your own.
+
+**Instant menus + offers** (`ziggy/r3-menus-offers`, report `work/menus-offers-report.md`)
+- Fixed: **#3** menus kept 6 h per address, served at once, revalidated in the background,
+  catalogue first look, page 1 first, Add sheet prefetches the person's own places (≤6). **#16**
+  no unseen Swiggy calls on boot; catalogue refresh is a background job. **#17** sections, in-menu
+  search, thumbnails, veg-only toggle. **#18** an open place takes the sheet. **#19** dishes with
+  options can be usual meals (options chosen in Swiggy). **#9** offers parsed and shown (never
+  claimed as applied), list price struck through, Bestseller, one "Best value"; cart coupons read
+  only at the cart, never applied. **#34** ETA in minutes. **#35** compare row hidden until a
+  second source exists. **#26** Swap "Nearby now". **#13** same-dish refill returns the existing
+  cart; a busy cart is `409 swiggy_cart_busy`, not 502.
+- Partly: **#20** the review shows Swiggy's exact price when the same dish/price is on the menu just
+  read; menu-list prices stay "≈".
+
+**Integration decisions**
+- Landing/title/manifest use one wording: "Your meals, planned within your budget." with "Works
+  with your Swiggy account" and a "Swiggy sign-in is coming soon" note only while sign-in is
+  closed (connect-budget's #37 copy; it also drops "already decided", which was today-truth's #24
+  ask). Today-truth's alternative hero ("Your meals, your picks…") was not kept.
+- A snack picked on Today now counts in the Week's money too (`today.snack_spend`, `budget.snack_today`),
+  so Today and Week agree; it is never a Week cell, has no order-by/reminder, and per-person meal
+  times don't apply to it. Swap's "Nearby now" budget share also counts a picked snack.
+- Importing past orders uses the 6 h kept menu (no second Swiggy read when it is whole) and lets a
+  dish with options in as a Swiggy dish (#19), instead of typing it in.
+- Swap shows today-truth's empty/not-connected message and menus-offers' "Nearby now" together.
+- The cart coupons read never errors the cart screen (no coupon tool → empty list), and what is
+  typed in the Swiggy search survives a background re-render.
+- Tests: `tests/test_r3_integration.py` (snack in Week money and meal times; kept-menu import).
+  Browser tests follow the new sheet title "Add to your usual …" and the hidden compare row. CI
+  now runs every r3 node and browser test (and `frontend_w03`, `browser_w03`).
+- Tests: Python 1,066 passed, 6 skipped, 0 failed (SQLite, 86 files, `-n 2` in chunks); node
+  `tests/*.cjs` 165 passed; `menu-source.test.js` 10 passed; Playwright, 12 files, 29 passed.
+
 ## sp-grill critiques (1–72)
 
 | # | Topic | Status | Note |
