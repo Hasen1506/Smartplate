@@ -185,21 +185,21 @@ test('integration: suggested favourites ask consent first, then list this meal\'
   assert.match(html, /data-v3-act="sugg-delete"/);
 });
 
-test('integration: too early for the cart → "Remind me at …" instead of Place order (W2 cart_state)', async () => {
+test('integration: too early for the cart → "Cart opens … · remind me" instead of Place order (W2 cart_state, usab #21)', async () => {
   const w = world({ today: { ...TODAY, picks: { breakfast: PONGAL } } }); await w.context.bootPromise; await run(w, 'ZiggyV3._test.load()');
   run(w, `S.view.grid = [{ date: todayIso(), meals: { breakfast: { session_id: 7, status: 'active', order: { cart_state: 'early', label: '08:15', cart_opens_label: '07:45' } } } }]`);
   let html = run(w, 'ZiggyV3._test.actions(S.v3.data)');
-  assert.match(html, /data-remind="7"[^>]*>.*Remind me at 08:15/);
+  assert.match(html, /data-v3-remind="breakfast"[^>]*>.*Cart opens 07:45 · remind me/);
   assert.doesNotMatch(html, /Place order/);
   run(w, 'S.v3.sheet = { kind: "order" }');
   html = run(w, 'ZiggyV3.overlays()');
-  assert.match(html, /Remind me at 08:15/);
-  assert.match(html, /Cart opens 07:45/);
+  assert.match(html, /Cart opens 07:45 · remind me/);
+  assert.match(html, /Order by 08:15/);
   assert.doesNotMatch(html, /data-v3-cart="breakfast"/);
   run(w, `S.view.grid[0].meals.breakfast.order = { cart_state: 'open', label: '08:15' }`);
   html = run(w, 'ZiggyV3._test.actions(S.v3.data)');
   assert.match(html, /Place order/);
-  assert.doesNotMatch(html, /Remind me/);
+  assert.doesNotMatch(html, /remind me/);
 });
 
 test('integration: a Swiggy pick shows its whole bill (W4 charges); typed picks show only their price', async () => {

@@ -123,12 +123,21 @@
     return `<section class="card v3-recap" aria-labelledby="v3-recap-h"><h2 class="h3" id="v3-recap-h">Your week</h2>${lines.join("")}
       <p class="fine">${esc(r.basis)}</p>${share}</section>`;
   }
+  const DIET_WORD = { veg: "Vegetarian", egg: "Eggetarian", jain: "Jain / no onion-garlic", vegan: "Vegan", nonveg: "Non-veg" };
+  // usab #10: rating / time Ziggy chose (or learned from the person's places), said so.
+  function defaultsTag(r) {
+    const src = r.source || {};
+    if (src.min_rating === "you" && src.max_eta === "you") return "";
+    const learned = src.min_rating === "learned" || src.max_eta === "learned";
+    return `<span class="tag v3-defaults" title="${esc(r.defaults_basis || "Ziggy's defaults until you change them")}">${learned ? "Learned from your places" : "Ziggy defaults"}</span>`;
+  }
   function rulesRow(d) {
     const r = d.rules, chips = [];
-    chips.push(`<span class="tag ${r.diet === "nonveg" ? "" : "good"}">${{ veg: "Vegetarian", vegan: "Vegan", nonveg: "Non-veg" }[r.diet] || esc(r.diet)}</span>`);
+    chips.push(`<span class="tag ${r.diet === "nonveg" ? "" : "good"}">${DIET_WORD[r.diet] || esc(r.diet)}</span>`);
     (r.allergens || []).forEach(a => chips.push(`<span class="tag warn">No ${esc(a.replace("_", " "))}</span>`));
     chips.push(`<span class="tag">${r.min_rating ? `${r.min_rating}★ and up` : "Any rating"}</span>`);
     chips.push(`<span class="tag">${r.max_eta ? `≤ ${r.max_eta} min` : "Any delivery time"}</span>`);
+    chips.push(defaultsTag(r));
     return `<div class="v3-rules" aria-label="Your rules">${chips.join("")}<button class="link small" data-v3-sheet="rules">Edit rules</button></div>`;
   }
   const entryLabel = (e) => `${e.name}${e.price != null ? ` · ₹${Math.round(e.price)}` : ""}${e.restaurant ? ` · ${e.restaurant}` : ""}`;
@@ -143,12 +152,40 @@
     const select = pool.length || p
       ? `<label class="sr" for="${id}">${label} from your usual meals</label><select id="${id}" class="v3-select" data-v3-pick="${meal}">
           <option value="" ${p ? "" : "selected"}>${pool.length ? `Pick from your ${usual(meal)}` : `No ${usual(meal)} yet`}</option>${opts}
-          ${p && !pool.some(e => e.ref === p.ref) ? `<option value="${esc(p.ref)}" selected>${esc(entryLabel(p))}</option>` : ""}</select>`
+          ${p && !pool.some(e => e.ref === p.ref) ? `<option value="${esc(p.ref)}" selected>${esc(entryLabel(p))}</option>` : ""}
+          <option value="${ADD_ANOTHER}">+ Add another ${meal}…</option></select>`
       : `<button class="secondary small" data-v3-add="${meal}">${ICON.plus}Add a usual ${meal}</button>`;
-    return `<div class="v3-meal" data-v3-meal="${meal}"><span class="v3-meal-name">${label}</span>
+    return `<div class="v3-meal" data-v3-meal="${meal}"><span class="v3-meal-name">${label}${mealTime(d, meal)}</span>
       <div class="v3-meal-pick">${select}${qty}</div>
       <div class="v3-meal-meta">${p?.price != null ? `<span class="fine">${money(p.price * p.qty)}${p.price_basis ? ` <i>(${esc(p.price_basis)})</i>` : ""}${p.bill ? ` <span class="v3-bill" title="${esc(p.bill.label)}">· ${p.bill.estimated ? "~" : ""}${money(p.bill.total)} with delivery, fees &amp; GST${p.bill.estimated ? " (estimate)" : ""}</span>` : ""}</span>` : ""}${how}
-        ${wide() ? "" : usualBtn(meal, pool.length)}<button class="link small" data-v3-swap="${meal}" aria-haspopup="dialog" aria-label="Swap ${meal}: other options">${ICON.swap}Swap</button></div>${why}${wide() ? "" : usualDrawer(d, meal)}</div>`;
+        ${wide() ? "" : usualBtn(meal, pool.length)}<button class="link small" data-v3-swap="${meal}" aria-haspopup="dialog" aria-label="Swap ${meal}: other options">${ICON.swap}Swap</button></div>${why}${confirmNote(d, meal)}${wide() ? "" : usualDrawer(d, meal)}</div>`;
+  }
+  const ADD_ANOTHER = "__add__";
+  const WEEK_MODES = { favourites: "From my favourites only", favourites_cook: "Favourites + cook at home",
+    favourites_new: "Favourites + new places at or above my rating", surprise: "Surprise me (within my rules)" };
+  // usab #14: a meal eaten at the person's own time shows it ("Dinner · 23:00").
+  const mealTime = (d, meal) => d.meal_times?.[meal]?.own ? ` <span class="fine">· ${esc(d.meal_times[meal].at)}</span>` : "";
+  // usab #27: a dish greyed out by a soft rule (rating, delivery time, not on the menu now) is
+  // picked only after "Pick anyway", or with the rule relaxed just enough to let it in.
+  function relaxFor(e, rules) {
+    if (rules.max_eta && e.eta_min != null && e.eta_min > rules.max_eta) {
+      const v = MAX_ETAS.map(([n]) => n).find(n => n && n >= e.eta_min) || 0;
+      return { key: "max_eta", value: v, label: v ? `Relax to ≤${v} min` : "Any delivery time" };
+    }
+    if (rules.min_rating && e.rating != null && e.rating < rules.min_rating) {
+      const v = [...MIN_RATINGS].map(([n]) => n).reverse().find(n => n <= e.rating) || 0;
+      return { key: "min_rating", value: v, label: v ? `Relax to ${v}★+` : "Any rating" };
+    }
+    return null;
+  }
+  function confirmNote(d, meal) {
+    const c = st().confirm;
+    if (!c || c.meal !== meal) return "";
+    const e = (d.pools[meal] || []).find(x => x.ref === c.ref);
+    if (!e) return "";
+    const relax = relaxFor(e, d.rules);
+    return `<div class="note warn v3-confirm" role="alert"><span style="flex:1"><b>${esc(e.name)}</b>: ${esc(e.reasons.join(" · "))}. Pick anyway?
+      <span class="acts"><button class="link" data-v3-confirm="pick">Pick anyway</button>${relax ? ` <button class="link" data-v3-confirm="relax" data-v3-relax="${relax.key}:${relax.value}">${esc(relax.label)}</button>` : ""} <button class="link" data-v3-confirm="cancel">Cancel</button></span></span></div>`;
   }
   // Phone: the meal's usual meals open under its line (a dropdown drawer), not as a separate block.
   function usualBtn(meal, n) {
@@ -161,11 +198,16 @@
   }
   // W2: a meal's Swiggy cart opens a while before its order-by time; paying earlier would
   // deliver now. The plan's cell for today's meal carries order.cart_state / label.
+  // usab #1: today's pick carries its own "when" (same arithmetic as the Week); the plan cell
+  // is only the fallback.
   function earlyOrder(meal) {
+    const w = st().data?.picks?.[meal]?.when;
+    if (w) return w.cart_state === "early" ? { meal, sid: w.session_id, at: w.label || w.order_at, opens: w.cart_opens_label, on: !!w.reminder } : null;
     const o = todayCell(meal)?.order;
-    return o && o.cart_state === "early" ? { sid: todayCell(meal).session_id, at: o.label || o.order_at, opens: o.cart_opens_label } : null;
+    return o && o.cart_state === "early" ? { meal, sid: todayCell(meal).session_id, at: o.label || o.order_at, opens: o.cart_opens_label } : null;
   }
-  const remindBtn = (e, cls) => `<button class="${cls}" data-remind="${e.sid}" data-remind-at="${esc(e.at)}">${ICON.cart}<span>Remind me at ${esc(e.at)}</span></button>`;
+  // usab #21: say when the cart opens, and remind then (per meal, #22).
+  const remindBtn = (e, cls) => `<button class="${cls}" data-v3-remind="${e.meal}" aria-haspopup="dialog">${ICON.cart}<span>${e.opens ? `Cart opens ${esc(e.opens)} · ${e.on ? "reminder set" : "remind me"}` : `Remind me at ${esc(e.at)}`}</span></button>`;
   function actions(d) {
     const mode = st().mode, any = Object.keys(d.picks).length;
     const cartable = d.meals.filter(m => d.picks[m] && d.picks[m].source === "swiggy" && d.picks[m].kind === "order");
@@ -205,7 +247,7 @@
   function otherUsual(d) {
     const rest = MEAL_ORDER.filter(m => !d.meals.includes(m));
     if (!rest.length) return "";
-    return `<div class="v3-other-usual">${rest.map(m => `<div class="v3-other-row"><span class="fine">${cap1(m)} (not today)</span>${usualBtn(m, (d.pools[m] || []).length)}</div>${usualDrawer(d, m)}`).join("")}</div>`;
+    return `<details class="v3-other-usual"${st().otherOpen ? " open" : ""}><summary class="fine" data-v3-other="1">Show other meals</summary>${rest.map(m => `<div class="v3-other-row"><span class="fine">${cap1(m)} (not today)</span>${usualBtn(m, (d.pools[m] || []).length)}</div>${usualDrawer(d, m)}`).join("")}</details>`;
   }
   // The Swiggy cart, its real bill, checkout and tracking: the classic block, always shown
   // here (the classic Today hides it when its meal card already shows the bill).
@@ -251,7 +293,7 @@
       ${setupCard(d)}
       <section class="card v3-meals" aria-label="Today's meals">${d.meals.map(m => mealLine(d, m)).join("")}
         <div class="row v3-decide"><button class="secondary small" data-v3-sheet="decide">Decide for me</button>
-          <span class="fine">Only when you ask. Picks from your usual meals within your rules and ${money(d.budget.amount)}.</span></div>${wide() ? "" : otherUsual(d)}</section>
+          <span class="fine">Only when you ask. Picks from your usual meals within your rules and ${money(d.budget.amount)}.</span></div>${decideNote()}${askTime(d)}${wide() ? "" : otherUsual(d)}</section>
       ${actions(d)}
       ${compareRow(d)}
       ${cartBlock()}
@@ -261,6 +303,21 @@
       ${wide() ? `<h2 class="k v3-pools-h">Your usual meals</h2>
       <div class="v3-pools">${MEAL_ORDER.map(m => poolCard(d, m)).join("")}</div>` : ""}
     </div>`;
+  }
+  // usab #14: asked once, "When do you usually eat dinner?" (a late-dinner hint from Swiggy history).
+  function askTime(d) {
+    const a = d.ask_meal_time;
+    if (!a) return "";
+    const opts = [...new Set([a.hint?.at, ...a.options].filter(Boolean))];
+    return `<div class="v3-ask-time" role="group" aria-label="When do you usually eat ${a.meal}?"><p class="fine"><b>When do you usually eat ${a.meal}?</b> ${a.hint ? esc(a.hint.why) : "Order-by times and reminders follow it."}</p>
+      <div class="chips">${opts.map(t => `<button class="chip small" data-v3-mealtime="${a.meal}:${t}">${t}</button>`).join("")}<button class="chip small ghost" data-v3-mealtime="dismiss">Not now</button></div></div>`;
+  }
+  // usab #28: why Decide couldn't fill a meal, with what to do about it.
+  function decideNote() {
+    const n = st().decideNote;
+    if (!n) return "";
+    const btn = (a) => a.act === "add" ? `<button class="link" data-v3-add="${a.meal}">${esc(a.label)}</button>` : `<button class="link" data-v3-surprise="1">${esc(a.label)}</button>`;
+    return `<div class="note warn v3-decide-note" role="status"><span style="flex:1">${esc(n.note)} <span class="acts">${n.actions.map(btn).join(" ")} <button class="link" data-v3-decidenote="close">OK</button></span></span></div>`;
   }
   function cookScreen() {
     return `<div class="v3-cook"><h1 class="h1">Cook</h1>
@@ -275,7 +332,9 @@
       return `<div class="nut ${ratio < 0.8 ? "low" : ratio > 1.15 ? "high" : "ok"}"><div class="nb-h"><span>${label}</span><span><b>${Math.round(val)}</b>${u} of ${Math.round(t[k])}${u}</span></div>
         <div class="nb-t" role="img" aria-label="${label}: ${Math.round(ratio * 100)}% of your daily target"><i style="width:${Math.min(100, ratio * 100).toFixed(0)}%"></i></div></div>`;
     }).join("") : "";
-    return `<div class="row v3-week-top"><label class="check"><input type="checkbox" data-v3-nutrition ${on ? "checked" : ""}> Show nutrition</label>
+    const open = (S.view?.grid || []).some(d => Object.values(d.meals).some(m => m.open));
+    const decideBtn = open ? `<div class="row v3-week-decide"><button class="secondary small" data-v3-weekdecide="1">Decide for me</button><span class="fine">Open meals stay open until you ask.</span></div>` : "";
+    return `${decideBtn}<div class="row v3-week-top"><label class="check"><input type="checkbox" data-v3-nutrition ${on ? "checked" : ""}> Show nutrition</label>
       <span class="fine">${on ? "A day, on average, from dish-name estimates. Unknown dishes add nothing." : "Off by default. Turn on to see the week against your daily targets."}</span></div>
       ${bars ? `<section class="card v3-nut" aria-label="Nutrition">${bars}</section>` : ""}`;
   }
@@ -290,8 +349,9 @@
     <span class="grab" aria-hidden="true"></span><div class="sheet-head"><h2 class="h2" id="v3-${ov}-h">${title}</h2>
     <button class="icon-btn" data-v3-close="1" aria-label="Close ${label || "sheet"}">${ICON.close}</button></div>${body}</section></div>`;
   function decideSheet() {
-    const d = st().data, pick = st().sheet.choice || null;
-    return sheet("decide", "Decide for me", `<p class="sub">How should Ziggy pick ${d.meals.filter(m => !d.picks[m]).join(" and ") || "today"}? Meals you already picked stay.</p>
+    const d = st().data || { meals: [], picks: {}, modes: WEEK_MODES }, pick = st().sheet.choice || null;
+    const what = st().sheet.scope === "week" ? "the week's open meals" : d.meals.filter(m => !d.picks[m]).join(" and ") || "today";
+    return sheet("decide", "Decide for me", `<p class="sub">How should Ziggy pick ${what}? Meals you already picked stay.</p>
       <div class="stack" role="radiogroup" aria-label="How to decide">${Object.entries(d.modes).map(([k, l]) => `<button type="button" class="opt" role="radio" aria-checked="${pick === k}" data-v3-choice="${k}"><span><b>${esc(l)}</b></span></button>`).join("")}</div>
       <button class="primary" data-v3-act="decide" ${pick ? "" : "disabled"}>Decide</button>
       <p class="fine">Never past your diet or allergies. Dishes that break a rule stay greyed out.</p>`, "Decide for me");
@@ -301,8 +361,17 @@
     return sheet("rules", "Your rules", `<p class="k">Minimum rating</p><div class="chips">${MIN_RATINGS.map(([v, l]) => `<button class="chip" data-v3-rule="min_rating:${v}" aria-pressed="${Number(r.min_rating) === v}">${l}</button>`).join("")}</div>
       <p class="k">Delivery time</p><div class="chips">${MAX_ETAS.map(([v, l]) => `<button class="chip" data-v3-rule="max_eta:${v}" aria-pressed="${Number(r.max_eta) === v}">${l}</button>`).join("")}</div>
       <p class="fine">Dishes outside these stay in your usual meals, greyed out with the reason. Rating and time are what Swiggy showed when you added the dish.</p>
-      <p class="k">Diet and allergies</p><p class="fine">${esc({ veg: "Vegetarian", vegan: "Vegan", nonveg: "Non-vegetarian" }[r.diet] || r.diet)}${r.allergens.length ? ` · avoiding ${esc(r.allergens.join(", ").replace(/_/g, " "))}` : ""}. A dish not marked vegetarian is treated as not vegetarian.</p>
+      ${mealsSetting(st().data)}
+      <p class="k">Diet and allergies</p><p class="fine">${esc(DIET_WORD[r.diet] || r.diet)}${r.allergens.length ? ` · avoiding ${esc(r.allergens.join(", ").replace(/_/g, " "))}` : ""}. A dish not marked vegetarian is treated as not vegetarian.</p>
       <button class="secondary" data-go="more:settings">Change diet or allergies</button>`, "rules");
+  }
+  // usab #32 + #14: which meals the person orders, and when they eat them.
+  function mealsSetting(d) {
+    const on = new Set(d.meals), times = d.meal_times || {};
+    return `<p class="k">Meals I order</p><div class="chips" role="group" aria-label="Meals I order">${MEAL_ORDER.map(m => `<button class="chip" data-v3-mymeal="${m}" aria-pressed="${on.has(m)}">${cap1(m)}</button>`).join("")}</div>
+      <p class="k">When I eat</p><form id="v3-times" class="v3-times">${d.meals.map(m => `<label>${cap1(m)} <input type="time" name="${m}" value="${esc(times[m]?.at || "")}" step="900"></label>`).join("")}
+        <button class="secondary small" type="submit">Save times</button></form>
+      <p class="fine">Order-by times, the cart window and reminders follow these.</p>`;
   }
   function budgetSheet() {
     const b = st().data.budget;
@@ -321,7 +390,11 @@
       cell ? `<button class="secondary small" data-sheet="${cell.session_id}">Change in the week plan (cook, keep, skip)</button>` : "",
       swiggyReady() && !cell ? `<button class="secondary small" data-hungry="${meal}">Add ${meal} to the week plan now</button>` : "",
     ].filter(Boolean).join("");
-    return sheet("swap", `Swap ${meal}`, `${ok.length ? `<p class="k">From your ${usual(meal)}</p><div class="stack" style="gap:6px">${ok.map(row).join("")}</div>` : `<p class="fine">None of your ${usual(meal)} passes your rules yet.</p>`}
+    const empty = !(d.pools[meal] || []).length
+      ? (d.swiggy.connected ? `<p class="fine">No ${usual(meal)} yet. Add one from a Swiggy menu or type it in.</p>`
+        : `<p class="fine">Swiggy isn't connected yet, so Swap can only offer dishes you add yourself. ${swiggySignInOpen() ? `<button class="link" data-act="connect-open">Connect Swiggy</button> to swap from real menus, or add` : "Add"} a ${meal} you usually have.</p>`)
+      : `<p class="fine">None of your ${usual(meal)} passes your rules yet.</p>`;
+    return sheet("swap", `Swap ${meal}`, `${ok.length ? `<p class="k">From your ${usual(meal)}</p><div class="stack" style="gap:6px">${ok.map(row).join("")}</div>` : empty}
       ${off.length ? `<details><summary>${off.length} greyed out by your rules</summary><ul class="fine v3-off-list">${off.map(e => `<li>${esc(e.name)} — ${esc(e.reasons.join(" · "))}</li>`).join("")}</ul></details>` : ""}
       ${d.picks[meal] ? `<button class="ghost small" data-v3-swapto="${meal}|">Clear ${meal}</button>` : ""}
       <p class="k">More ways</p><div class="row">${classic}</div>`, `swap ${meal}`);
@@ -389,17 +462,49 @@
     const rows = picks.map(([m, p]) => {
       const cartable = p.source === "swiggy" && p.kind === "order";
       return `<div class="mrow" style="cursor:default"><span class="t"><b>${cap1(m)}: ${p.qty}× ${esc(p.name)}</b><span class="s">${esc(p.restaurant || (p.kind === "cook" ? "Cook at home" : ""))}</span></span>
-        ${cartable ? (earlyOrder(m) ? `<span class="stack" style="gap:2px;align-items:flex-end">${remindBtn(earlyOrder(m), "secondary small")}<span class="fine">Cart opens ${esc(earlyOrder(m).opens || "later")}</span></span>`
+        ${cartable ? (earlyOrder(m) ? `<span class="stack" style="gap:2px;align-items:flex-end">${remindBtn(earlyOrder(m), "secondary small")}<span class="fine">Order by ${esc(earlyOrder(m).at)}</span></span>`
           : `<button class="secondary small" data-v3-cart="${m}">Add to Swiggy cart</button>`) : `<span class="fine">${p.kind === "cook" ? "Cook it" : "Typed by you: order it in your app"}</span>`}</div>`;
     }).join("");
     return sheet("order", "Place order", `<p class="fine">Swiggy carts hold one restaurant at a time, so each meal goes in on its own. You check the bill and pay in Swiggy.</p>
       <div class="card tight">${rows}</div>`, "place order");
   }
+  // usab #22: a reminder for this one meal: a push nudge when its cart opens, or the meal's
+  // own calendar file where push isn't available (iPhone outside the installed app).
+  function remindSheet() {
+    const d = st().data, meal = st().sheet.meal, e = earlyOrder(meal) || {};
+    const ps = typeof pushState === "function" ? pushState() : "none";
+    const ics = `/api/user/${S.userId}/reminders.ics?meal=${meal}&date=${d.date}`;
+    const push = ps === "ready" || ps === "on" || (ps === "none" && typeof Notification !== "undefined")
+      ? `<button class="primary" data-v3-act="remind-push">${e.on ? "Reminder set on this phone" : "Notify me on this phone"}</button>` : "";
+    const ios = ps === "ios-install" ? `<p class="fine">On iPhone, notifications need Ziggy on your Home Screen (Share → Add to Home Screen). The calendar works everywhere.</p>` : "";
+    return sheet("remind", `Remind me: ${meal}`, `<p class="sub">${e.opens ? `Ziggy nudges you at ${esc(e.opens)}, when the Swiggy cart opens. Order by ${esc(e.at)}.` : `Order by ${esc(e.at || "its time")}.`}</p>
+      ${push}${ios}<button class="secondary" data-v3-act="remind-ics" data-v3-ics="${esc(ics)}">Add to my calendar</button>
+      <p class="fine">Only this meal. For every meal, turn on Order reminders in Me.</p>`, `remind ${meal}`);
+  }
+  async function remindPush() {
+    const meal = st().sheet.meal;
+    await api(`/api/user/${S.userId}/today/remind`, "POST", { meal });
+    const ps = typeof pushState === "function" ? pushState() : "none";
+    if (ps === "ready") {
+      if (await Notification.requestPermission() !== "granted") { toast("Notifications are blocked for this site. Add it to your calendar instead."); return; }
+      await subscribePush();
+    } else if (ps === "none" && typeof Notification !== "undefined" && Notification.permission !== "granted") {
+      if (await Notification.requestPermission() !== "granted") { toast("Notifications are blocked here. Add it to your calendar instead."); return; }
+    }
+    st().sheet = null; await load();
+    toast(`Reminder set for ${meal}`);
+  }
+  async function remindIcs(path) {
+    await api(`/api/user/${S.userId}/today/remind`, "POST", { meal: st().sheet.meal }).catch(() => {});
+    if (typeof downloadPrivate === "function") await downloadPrivate(path, "ziggy-reminder.ics", "text/calendar");
+    else window.open(path, "_blank", "noopener");
+    st().sheet = null; await load();
+  }
   function overlays() {
     if (!ON || !S.v3?.sheet || !S.v3.data) return "";
     const k = S.v3.sheet.kind;
     return k === "decide" ? decideSheet() : k === "rules" ? rulesSheet() : k === "budget" ? budgetSheet()
-      : k === "swap" ? swapSheet() : k === "add" ? addSheet() : k === "order" ? orderSheet() : "";
+      : k === "swap" ? swapSheet() : k === "add" ? addSheet() : k === "order" ? orderSheet() : k === "remind" ? remindSheet() : "";
   }
   function todayCell(meal) {
     const day = (S.view?.grid || []).find(x => x.date === todayIso());
@@ -501,11 +606,23 @@
       kind: radio("v3-t-kind") || "order" }, `${name} added to your ${usual(s.meal)}`);
     st().sheet = null; render();
   }
-  async function decide() {
-    const r = await post("/decide", { mode: st().sheet.choice });
+  async function decide(mode) {
+    if (st().sheet?.scope === "week") return decideWeek();
+    const r = await post("/decide", { mode: mode || st().sheet.choice });
     st().sheet = null;
     const dd = r.decided;
-    toast(dd.note || `Picked ${dd.filled.join(" and ")}: ${dd.label}`);
+    st().decideNote = dd.note && dd.actions?.length ? { note: dd.note, actions: dd.actions } : null;
+    if (!st().decideNote) toast(dd.note || `Picked ${dd.filled.join(" and ")}: ${dd.label}`);
+    render();
+  }
+  // usab #24: the Week stays open until the person asks; this fills its open meals (pins).
+  const WEEK_MODE = { favourites: "favourites_only", favourites_cook: "favourites_plus_cook", favourites_new: "favourites_plus_new", surprise: "surprise_me" };
+  async function decideWeek() {
+    const r = await api(`/api/plan/${S.planId}/decide`, "POST", { mode: WEEK_MODE[st().sheet.choice], apply: true });
+    st().sheet = null;
+    if (r.view) adoptView(r.view);
+    if (S.v3) S.v3.data = null;
+    toast(r.note || `Filled ${r.picks.filter(p => p.kind !== "skip").length} open meals`);
     render();
   }
   async function saveAccount(form) {
@@ -530,7 +647,7 @@
     if (o.step === 0) {
       ready = !!o.diet;
       body = `<h1 class="h1">What do you eat?</h1>
-        <div class="stack" style="gap:10px" role="radiogroup" aria-label="Diet">${[["veg", "Vegetarian", "No meat, fish or egg", ""], ["nonveg", "Non-vegetarian", "Everything is on the menu", "nonveg"], ["vegan", "Vegan", "No animal products at all", ""]].map(([k, l, s, dot]) =>
+        <div class="stack" style="gap:10px" role="radiogroup" aria-label="Diet">${DIET_CHOICES.map(([k, l, s, dot]) =>
           `<button type="button" class="opt" role="radio" data-v3-ob="diet:${k}" aria-checked="${o.diet === k}"><span class="dot ${dot}"></span><span><b>${l}</b><span class="muted">${s}</span></span></button>`).join("")}</div>
         <p class="k">Anything you must avoid? (optional)</p>
         <div class="chips">${ALLERGY_LIST.map(a => `<button type="button" class="chip" data-v3-ob="allergen:${a}" aria-pressed="${o.allergens.includes(a)}">${cap1(a.replace("_", " "))}</button>`).join("")}</div>
@@ -620,7 +737,31 @@
     on("[data-v3-choice]", "click", (e) => { v().sheet.choice = e.currentTarget.dataset.v3Choice; render(); });
     on("[data-v3-rule]", "click", (e) => { const [k, n] = e.currentTarget.dataset.v3Rule.split(":"); guard(() => post("/rules", { [k]: Number(n) }), "Change your rules"); });
     on("[data-v3-pick]", "change", (e) => { const meal = e.currentTarget.dataset.v3Pick, ref = e.currentTarget.value || null;
+      if (ref === ADD_ANOTHER) { T({ kind: "add", meal }); if (v().data?.swiggy.connected) { loadHistory(); loadSugg(); } return; }
+      const entry = (v().data?.pools[meal] || []).find(x => x.ref === ref);
+      if (entry && entry.reasons.length && !entry.hard) { v().confirm = { meal, ref }; render(); return; }
+      v().confirm = null;
       guard(() => post("/pick", { meal, ref }), `Pick ${meal}`); });
+    on("[data-v3-confirm]", "click", (e) => { const c = v().confirm, what = e.currentTarget.dataset.v3Confirm, relax = e.currentTarget.dataset.v3Relax;
+      v().confirm = null;
+      if (!c || what === "cancel") { render(); return; }
+      guard(async () => { if (what === "relax" && relax) { const [k, n] = relax.split(":"); await post("/rules", { [k]: Number(n) }); }
+        await post("/pick", { meal: c.meal, ref: c.ref }); }, `Pick ${c.meal}`); });
+    on("[data-v3-remind]", "click", (e) => T({ kind: "remind", meal: e.currentTarget.dataset.v3Remind }));
+    on("[data-v3-mealtime]", "click", (e) => { const a = e.currentTarget.dataset.v3Mealtime;
+      const body = a === "dismiss" ? { dismiss: true } : { [a.split(":")[0]]: a.slice(a.indexOf(":") + 1) };
+      guard(() => post("/meal-times", body, a === "dismiss" ? null : "Meal time saved. Order-by and reminders follow it."), "Meal time"); });
+    on("[data-v3-mymeal]", "click", (e) => { const m = e.currentTarget.dataset.v3Mymeal, cur = new Set(v().data.meals);
+      if (cur.has(m)) cur.delete(m); else cur.add(m);
+      if (!cur.size) { toast("Keep at least one meal"); return; }
+      guard(async () => { const meals = MEAL_ORDER.filter(x => cur.has(x));
+        const view = await api(`/api/user/${S.userId}/setup`, "PATCH", { meals });
+        if (view?.plan) adoptView(view);
+        await load(); }, "Meals I order"); });
+    on("[data-v3-other]", "click", () => { v().otherOpen = !v().otherOpen; });
+    on("[data-v3-surprise]", "click", () => { v().decideNote = null; guard(() => decide("surprise"), "Surprise me"); });
+    on("[data-v3-decidenote]", "click", () => { v().decideNote = null; render(); });
+    on("[data-v3-weekdecide]", "click", () => guard(async () => { if (!v().data) await load(); T({ kind: "decide", scope: "week" }); }, "Decide for me"));
     on("[data-v3-pqty]", "click", (e) => { const [meal, dn] = e.currentTarget.dataset.v3Pqty.split(":"), p = v().data.picks[meal];
       guard(() => post("/pick", { meal, ref: p.ref, qty: Math.max(1, Math.min(8, p.qty + Number(dn))) }), "Change quantity"); });
     on("[data-v3-qty]", "click", (e) => { const [meal, ref, dn] = e.currentTarget.dataset.v3Qty.split("|"), cur = v().data.pools[meal].find(x => x.ref === ref);
@@ -655,6 +796,7 @@
         "budget-save": () => post("/budget", { amount: Number(document.getElementById("v3-budget-in").value) }).then(() => T(null)),
         "add-back": async () => { v().sheet.menu = null; render(); },
         "sugg-import": importSugg, "sugg-delete": deleteSugg,
+        "remind-push": remindPush, "remind-ics": () => remindIcs(e.currentTarget.dataset.v3Ics),
         "save-later": async () => { store.set(`ziggy.v3.saved-later.${S.userId}`, "1"); render(); },
         olist: async () => { T(null); await openOrderList(); } }[a];
       if (f) guard(f);
@@ -665,6 +807,10 @@
     if (sugg) sugg.onsubmit = (e) => { e.preventDefault(); guard(addSugg, "Add suggestions to your usual meals"); };
     const typed = document.getElementById("v3-typed");
     if (typed) typed.onsubmit = (e) => { e.preventDefault(); guard(addTyped, "Add to your usual meals"); };
+    const times = document.getElementById("v3-times");
+    if (times) times.onsubmit = (e) => { e.preventDefault(); const f = new FormData(times), body = {};
+      for (const [k, val] of f.entries()) body[k] = val || null;
+      guard(() => post("/meal-times", body, "Meal times saved"), "Meal times"); };
     const save = document.getElementById("v3-save");
     if (save) save.onsubmit = (e) => { e.preventDefault(); guard(() => saveAccount(save), "Save sign-in"); };
   }
@@ -711,6 +857,7 @@
     },
     // After any plan change, re-read Today.
     invalidate() { if (S.v3) S.v3.data = null; },
-    _test: { load, post, decide, share, startOnboard, finishOb, obTap, today, cookScreen, overlays, hiddenList, suggBlock, addSugg, recapCard, actions, orderSheet },
+    _test: { load, post, decide, share, startOnboard, finishOb, obTap, today, cookScreen, overlays, hiddenList, suggBlock, addSugg, recapCard, actions, orderSheet,
+      rulesRow, mealLine, swapSheet, remindSheet, relaxFor, earlyOrder, askTime, decideNote, weekTop },
   };
 })();

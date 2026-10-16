@@ -365,7 +365,10 @@ def set_meal_reminder(user_id: int, meal, on=True) -> dict:
         if on:
             cur.execute("INSERT OR REPLACE INTO meal_reminders(user_id, day, meal, created_ts) VALUES (?,?,?,?)",
                         (user_id, _today(), meal, clock.now().isoformat(timespec="seconds")))
-            if not cur.execute("SELECT 1 FROM reminder_prefs WHERE user_id=?", (user_id,)).fetchone():
+            # a person with no push device yet starts on "only the meals I ask for"; one who
+            # already turned reminders on for every meal keeps that
+            if not cur.execute("SELECT 1 FROM reminder_prefs WHERE user_id=?", (user_id,)).fetchone() and \
+                    not cur.execute("SELECT 1 FROM push_subscriptions WHERE user_id=?", (user_id,)).fetchone():
                 cur.execute("INSERT INTO reminder_prefs(user_id, scope) VALUES (?, 'meals')", (user_id,))
         else:
             cur.execute("DELETE FROM meal_reminders WHERE user_id=? AND day=? AND meal=?", (user_id, _today(), meal))
@@ -472,8 +475,7 @@ def _hard_reason(user: dict, name: str, veg, allergens=None) -> str | None:
     reason = allergen_rules.violates(user, item)
     # unmarked (typed, no veg answer) is "not marked", never "marked non-veg" (W1's wording for veg=0)
     if reason and veg is None and reason.lower().startswith(("not ", "marked non-veg")):
-        word = {"jain": "veg (Jain)", "egg": "veg or egg"}.get(user.get("diet"),
-                                                                                                 user.get("diet"))
+        word = {"jain": "veg (Jain)", "egg": "veg or egg"}.get(user.get("diet"), user.get("diet"))
         return f"Not marked {word}"
     return cap(reason) if reason else None
 
