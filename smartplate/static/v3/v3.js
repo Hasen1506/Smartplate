@@ -1038,6 +1038,9 @@
     const msearch = document.getElementById("v3-menu-search");
     if (msearch) msearch.onsubmit = (e) => { e.preventDefault(); const q = document.getElementById("v3-mq").value; guard(() => searchMenu(q), `Search the menu for “${q}”`); };
     const search = document.getElementById("v3-search");
+    // What's typed survives any re-render (the background menu job reloads Today while the Add sheet is open)
+    const qIn = document.getElementById("v3-q");
+    if (qIn) qIn.oninput = () => { if (v().sheet) v().sheet.q = qIn.value; };
     if (search) search.onsubmit = (e) => { e.preventDefault(); const q = document.getElementById("v3-q").value; guard(() => searchSwiggy(q), `Search Swiggy for “${q}”`); };
     const sugg = document.getElementById("v3-sugg");
     if (sugg) sugg.onsubmit = (e) => { e.preventDefault(); guard(addSugg, "Add suggestions to your usual meals"); };

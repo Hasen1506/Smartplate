@@ -1687,9 +1687,11 @@ def cart_coupons(user_id: int) -> dict:
     conn = _conn(user_id)
     try:
         tool = _tool(conn, "fetch_food_coupons")
-    except SwiggyError:
+        data = call(user_id, "fetch_food_coupons", build_args(tool, {"address": _address(conn)}))
+    except (SwiggyError, KeyError, ValueError):
+        # Offers are a nice-to-have beside the cart: a Swiggy that doesn't offer (or can't
+        # answer) the coupon read leaves the list out, never an error on the cart screen.
         return {"coupons": [], "available": False}
-    data = call(user_id, "fetch_food_coupons", build_args(tool, {"address": _address(conn)}))
     return {"coupons": swiggy_offers.coupons(data), "available": True,
             "note": "Offers Swiggy lists for this cart. Apply one in Swiggy at checkout if it fits."}
 

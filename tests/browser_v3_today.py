@@ -26,6 +26,8 @@ import tempfile
 from pathlib import Path
 from threading import Thread
 
+import re
+
 import pytest
 from werkzeug.serving import make_server
 
@@ -165,7 +167,9 @@ def _add_from_swiggy(page, meal_btn, search, place, dish):
     sheet.get_by_role("searchbox", name="Search Swiggy").fill(search)
     sheet.get_by_role("button", name="Search", exact=True).click()
     sheet.get_by_role("button", name=place).click()
-    sheet.get_by_role("button", name=dish).click()
+    # r3 menus-offers (#18): an open place takes the sheet, titled "Add to your usual …"
+    menu = page.get_by_role("dialog", name=re.compile(r"^Add to your usual "))
+    menu.get_by_role("button", name=dish).click()
     expect(page.locator(".toast")).to_contain_text(f"{dish} added")
 
 
@@ -232,8 +236,8 @@ def test_today_favourites_first_journey(town, viewport, theme):
         expect(page.locator(".v3-budget .v3-left")).to_contain_text("left after fees")
         expect(page.locator(".v3-budget .v3-left-tag")).to_have_text("estimate")
         # price compare row appears now that a Swiggy price exists
-        expect(page.locator(".v3-compare")).to_contain_text("Swiggy ₹180")
-        expect(page.locator(".v3-compare")).to_contain_text("Other apps · coming")
+        # r3 menus-offers (#35): no compare row until a second source exists (Swiggy only today)
+        expect(page.locator(".v3-compare")).to_have_count(0)
         # the greyed-out dish can't be picked
         option = page.locator("#v3-pick-lunch option", has_text="Chicken Burrito")
         assert option.get_attribute("disabled") is not None

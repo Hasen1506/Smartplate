@@ -62,8 +62,10 @@ def test_history_to_favourites_at_390(town):  # noqa: F811
         # #8: a place from the orders opens its menu in one tap
         sheet.get_by_role("button", name="Search Swiggy").click()
         sheet.locator(".chips").get_by_role("button", name="Wok Street").click()
-        expect(sheet.get_by_text("Veg Hakka Noodles")).to_be_visible()
-        expect(sheet.get_by_role("button", name="All places")).to_be_visible()
+        # r3 menus-offers: with a place open the sheet is titled "Add to your usual lunches"
+        menu = page.get_by_role("dialog", name="Add to your usual lunches")
+        expect(menu.get_by_text("Veg Hakka Noodles")).to_be_visible()
+        expect(menu.get_by_role("button", name="All places")).to_be_visible()
         shot(page, "r3-02-menu-from-chip-390")
         assert not [e for e in errors if "favicon" not in e], errors
         browser.close()
