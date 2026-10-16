@@ -163,18 +163,20 @@ test('Today never shows a sample or demo banner; without live menus it says how 
 test('connected with an address: Today shows a skeleton and reads real dishes by itself, once', async () => {
   const live = { plan: { id: 42, mode: 'balanced', week_start: '2026-09-14' }, user: { id: 2, name: 'Meera', allergens: [], medical: [] },
     budget: { spend: 0, budget: 1500 }, grid: [], week_context: [], source: { kind: 'live', label: 'Live Swiggy menus', note: '' } };
-  const { context, calls } = fixture({ '/api/plan/42/live-menus': live }); await context.bootPromise;
+  // The refresh runs as a background job the app polls (audit #16), then the plan is re-read.
+  const { context, calls } = fixture({ '/api/plan/42/live-menus?background=1': { state: 'done' }, '/api/plan/42': live }); await context.bootPromise;
   vm.runInContext("S.swiggy = { connected: true, address: { id: 'addr-home', label: 'Home' } }; S.view.source = { kind: 'none', connected: true, needs: 'sync' }", context);
   assert.match(vm.runInContext('realDishesState()', context), /Finding real dishes near you/);
   await vm.runInContext('autoSyncLive()', context);
   assert.equal(vm.runInContext('S.view.source.kind', context), 'live');
   vm.runInContext("S.view.source = { kind: 'none', connected: true, needs: 'sync' }", context);
   await vm.runInContext('autoSyncLive()', context);                 // never loops for the same address
-  assert.equal(calls.filter(c => c.url === '/api/plan/42/live-menus').length, 1);
+  assert.equal(calls.filter(c => c.url.startsWith('/api/plan/42/live-menus')).length, 1);
+  assert.equal(calls.find(c => c.url.startsWith('/api/plan/42/live-menus')).options.method, 'POST');
 });
 
 test('a failed live sync says why and offers Try again and search, never a fake dish', async () => {
-  const { context } = fixture({ '/api/plan/42/live-menus': { __status: 502, error: "Swiggy's menus had no dishes Ziggy can plan with yet." } });
+  const { context } = fixture({ '/api/plan/42/live-menus?background=1': { state: 'error', error: "Swiggy's menus had no dishes Ziggy can plan with yet." } });
   await context.bootPromise;
   vm.runInContext("S.swiggy = { connected: true, address: { id: 'addr-w', label: 'Work' } }; S.view.source = { kind: 'none', connected: true, needs: 'sync' }", context);
   await vm.runInContext('autoSyncLive()', context);

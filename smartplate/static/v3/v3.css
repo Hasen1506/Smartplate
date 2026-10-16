@@ -103,3 +103,13 @@
 @media (min-width:1180px){
   .body:has(.v3-today){grid-template-columns:minmax(0,1120px);padding:0 32px}
 }
+/* Menu in the Add sheet (audit #17, #9): sections, search, thumbnails, value badges */
+.v3-menu-tools{gap:8px;align-items:center}
+.v3-menu-tools .chip{white-space:nowrap}
+.v3-sec>summary{cursor:pointer;padding:6px 0;list-style-position:inside}
+.v3-sec[hidden],.v3-menu-row[hidden]{display:none}
+.v3-thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none}
+.v3-menu-row s{opacity:.7}
+.v3-menu-row .tag,.v3-offer{font-size:11.5px;padding:2px 7px;margin-left:2px;vertical-align:1px}
+.v3-menu-head{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.v3-coupons ul{margin:4px 0 6px 18px;padding:0}

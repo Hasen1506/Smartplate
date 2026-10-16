@@ -1107,6 +1107,15 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
               "menu_price": price, "menu_total": None if price is None else round(price * quantity, 2),
               "price_estimated": price_estimated(item),
               "image": _image(item), "handoff_url": timing.swiggy_handoff(place["name"], str(_get(item, "name")))}
+    if review["price_estimated"] and price is not None:
+        # The same dish at the same price on the sectioned menu just read (whole rupees, live
+        # finding 9 Oct): the price is Swiggy's own, not an inferred estimate (audit #20).
+        from . import swiggy_menu_cache
+        kept, _ = swiggy_menu_cache.load(user_id, restaurant_id)
+        same = next((i for i in (kept or {}).get("items") or [] if i["id"] in (str(item_id), details["item_id"])), None)
+        if kept and kept.get("verified_prices") and same and same.get("price") is not None \
+                and abs(float(same["price"]) - price) < 0.5:
+            review["price_estimated"] = False
     blocked = None
     from ..domain import allergens
     verdict = allergens.check({**user, "household_members": []},       # this person's own order
