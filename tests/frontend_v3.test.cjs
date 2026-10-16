@@ -122,10 +122,12 @@ test('?ui=classic (ziggy.ui=classic) keeps the previous Today and three tabs', a
 test('integration: v3 Today shows the W4 weekly target vs real spend and the low-budget warning', async () => {
   const w = world(); await w.context.bootPromise;
   await run(w, 'ZiggyV3._test.load()');
-  run(w, `S.view.budget = { spend: 0, budget: 4200, kind: 'target', actual: { amount: 340, orders: 2, complete: false } };
+  run(w, `S.view.budget = { spend: 0, budget: 1800, weekly_budget: 4200, prorated: true, kind: 'target', actual: { amount: 340, orders: 2, complete: false } };
     S.view.heads_up = [{ kind: 'low_budget', title: '₹300 covers about 3 delivered meals a week', body: 'Plan 3 delivered meals and cook the rest.' }];`);
   const html = run(w, 'tabBody()');
-  assert.match(html, /This week: ₹340 spent on Swiggy of a ₹4,200 target \(so far/);
+  // ux #23: Mon–Sun spend against the whole week's ₹4,200, never the pro-rated ₹1,800
+  assert.match(html, /This week \(Mon–Sun\): ₹340 spent on Swiggy of your ₹4,200 a week \(so far/);
+  assert.doesNotMatch(html, /of a ₹1,800/);
   assert.match(html, /₹300 covers about 3 delivered meals a week/);
 });
 

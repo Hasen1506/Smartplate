@@ -68,13 +68,16 @@
 
   /* -------------------------------------------------------------- pieces */
   const WX = { clear: "☀", hot: "☀", rain: "☂", storm: "⛈" };
+  // ux #38: no card without a live forecast (no "sample data" tile squeezing the budget);
+  // live-audit-1: say whose forecast it is and for which place.
   function weatherCard(w) {
-    if (!w || !w.known) return `<section class="card v3-wx" aria-label="Weather today"><p class="k">Weather today</p>
-      <p class="fine">No live forecast for your area yet.</p></section>`;
+    if (!w || !w.known || w.source !== "live") return "";
+    const credit = w.attribution ? ` · <a href="${esc(w.attribution_url || "https://open-meteo.com/")}" target="_blank" rel="noopener">${esc(w.attribution)}</a>` : "";
     return `<section class="card v3-wx" aria-label="Weather today"><p class="k">Weather today</p>
       <div class="v3-wx-row"><span class="v3-wx-ico" aria-hidden="true">${WX[w.condition] || "☀"}</span>
         <b class="money">${Math.round(w.temp_c)}°</b></div>
-      <span class="fine">${esc(cap1(w.condition))}${w.rain_prob != null ? ` · rain ${Math.round(w.rain_prob)}%` : ""}${w.source === "sample" ? " · sample data" : ""}</span></section>`;
+      <span class="fine">${esc(cap1(w.condition))}${w.rain_prob != null ? ` · rain ${Math.round(w.rain_prob)}%` : ""}</span>
+      <span class="fine v3-wx-src">${w.place ? `For ${esc(w.place)}` : "Forecast"}${credit}</span></section>`;
   }
   function budgetCard(d) {
     const b = d.budget;
@@ -103,7 +106,8 @@
   // Read from S.view; nothing shown when the plan doesn't carry them.
   function weekMoney() {
     const wb = S.view?.budget, a = wb?.actual, hs = S.view?.heads_up || [];
-    const line = wb?.kind === "target" && a ? `<p class="fine v3-week-money">This week: ${money(a.amount)} spent on Swiggy of a ${money(wb.budget)} target${a.complete ? "" : " (so far, from the bills Ziggy has seen)"}</p>` : "";
+    // ux #23: like with like. Spend counts the whole Mon–Sun week, so the target is the whole week's too.
+    const line = wb?.kind === "target" && a ? `<p class="fine v3-week-money">This week (Mon–Sun): ${money(a.amount)} spent on Swiggy of your ${money(wb.weekly_budget ?? wb.budget)} a week${a.complete ? "" : " (so far, from the bills Ziggy has seen)"}</p>` : "";
     const low = hs.find(h => h.kind === "low_budget");
     const over = wb?.over ? hs.find(h => h.kind === "budget" && (h.actions || []).some(x => x.act === "raise-budget")) : null;
     return line + (over ? `<div class="note warn v3-week-over" role="alert"><span style="flex:1"><b>${esc(over.title)}</b> ${esc(over.body || "")}
@@ -235,6 +239,18 @@
         <div class="row"><button class="secondary small" type="submit">Save</button><button class="ghost small" type="button" data-v3-act="save-later">Later</button></div></form></section>`;
   }
 
+  // ux #12: the recovery code, once, on the first Today after onboarding (it was only ever in
+  // Me → Account, so nobody saw it). Copy / Download reuse app.js's actions; "I've saved it" hides it.
+  function recoveryCard() {
+    const code = S.freshCode && S.freshCode.startsWith(`${S.userId}.`) ? S.freshCode : null;
+    if (!code || S.codeAcked === S.userId) return "";
+    return `<section class="card v3-recovery" aria-labelledby="v3-rec-h"><h2 class="h3" id="v3-rec-h">Save your recovery code</h2>
+      <p class="fine">It opens this profile on another phone or after clearing your browser. Ziggy shows it only now; you can make a new one later in Me → Account &amp; devices.</p>
+      <code class="code v3-rec-code">${esc(code)}</code>
+      <div class="row"><button class="small secondary" data-act="copy-recovery">Copy code</button><button class="small secondary" data-act="download-recovery">Download</button><button class="small ghost" data-v3-act="code-saved">I've saved it</button></div>
+      <p class="fine">Anyone with this code can open your profile. Don't share it.</p></section>`;
+  }
+
   /* -------------------------------------------------------------- screens */
   function today() {
     const v = st();
@@ -248,7 +264,7 @@
       <div class="v3-head"><h1 class="h1">${greeting()}${first}</h1><p class="muted">${esc(d.weekday)} · ${esc(d.date.split("-").reverse().join("/"))}</p></div>
       <div class="seg v3-mode" role="group" aria-label="Order or cook">
         <button data-v3-mode="order" aria-pressed="${v.mode === "order"}">Order</button><button data-v3-mode="cook" aria-pressed="${v.mode === "cook"}">Cook</button></div>
-      ${setupCard(d)}
+      ${recoveryCard()}${setupCard(d)}
       <section class="card v3-meals" aria-label="Today's meals">${d.meals.map(m => mealLine(d, m)).join("")}
         <div class="row v3-decide"><button class="secondary small" data-v3-sheet="decide">Decide for me</button>
           <span class="fine">Only when you ask. Picks from your usual meals within your rules and ${money(d.budget.amount)}.</span></div>${wide() ? "" : otherUsual(d)}</section>
@@ -257,7 +273,7 @@
       ${cartBlock()}
       ${recapCard(d)}
       ${saveCard(d)}</div>
-      <div class="v3-side"><div class="v3-top">${budgetCard(d)}${weatherCard(d.weather)}</div>${rulesRow(d)}</div></div>
+      <div class="v3-side"><div class="v3-top${weatherCard(d.weather) ? "" : " solo"}">${budgetCard(d)}${weatherCard(d.weather)}</div>${rulesRow(d)}</div></div>
       ${wide() ? `<h2 class="k v3-pools-h">Your usual meals</h2>
       <div class="v3-pools">${MEAL_ORDER.map(m => poolCard(d, m)).join("")}</div>` : ""}
     </div>`;
@@ -518,7 +534,7 @@
   /* -------------------------------------------------------------- onboarding (≤ 2 questions before value) */
   function startOnboard() {
     if (!ON) return false;
-    S.v3ob = { step: 0, diet: null, allergens: [], budget: null, meals: [], consent: false };
+    S.v3ob = { step: 0, diet: null, allergens: [], budget: null, meals: [], consent: false, per: "day", eaters: 1 };
     S.welcome = false; S.sheet = null; S.connectSheet = false; S.error = null; S.onboard = null; render();
     return true;
   }
@@ -536,13 +552,18 @@
         <div class="chips">${ALLERGY_LIST.map(a => `<button type="button" class="chip" data-v3-ob="allergen:${a}" aria-pressed="${o.allergens.includes(a)}">${cap1(a.replace("_", " "))}</button>`).join("")}</div>
         <p class="fine">Ziggy filters by dish name and Swiggy's veg mark. Menus don't list every ingredient, so check with the restaurant when it matters.</p>`;
     } else {
-      ready = o.budget >= 50 && o.meals.length > 0 && o.consent;
-      body = `<h1 class="h1">Today's food budget</h1><p class="sub">For the meals you'll order or cook today. Change it any day.</p>
+      ready = obBudgetOk(o) && o.meals.length > 0 && o.consent;
+      const wk = o.per === "week", lim = obLimits(o);
+      body = `<h1 class="h1">Your food budget</h1><p class="sub">${wk ? "For the whole week, everyone included." : "For a day of meals, everyone included."} Change it any time.</p>
+        <p class="k">How many eat?</p>
+        <div class="chips" role="group" aria-label="How many eat">${[1, 2, 3, 4].map(n => `<button type="button" class="chip" data-v3-ob="eaters:${n}" aria-pressed="${o.eaters === n}">${n === 4 ? "4+" : n}</button>`).join("")}</div>
+        <div class="chips" role="group" aria-label="Budget per" style="justify-content:center">${[["day", "A day"], ["week", "A week"]].map(([k, l]) => `<button type="button" class="chip" data-v3-ob="per:${k}" aria-pressed="${o.per === k}">${l}</button>`).join("")}</div>
         <section class="card" style="align-items:center;padding:22px 18px">
-          <div class="stepper"><button type="button" data-v3-ob="budget:-${STEP}" aria-label="Lower budget by ${STEP} rupees">${ICON.minus}</button>
-            <label class="sr" for="v3-ob-budget">Today's budget in rupees</label><input id="v3-ob-budget" class="money" type="number" inputmode="numeric" min="50" max="20000" value="${o.budget ?? ""}" placeholder="₹" style="font-size:40px;width:170px;text-align:center;border:0;background:transparent;min-height:56px">
-            <button type="button" data-v3-ob="budget:${STEP}" aria-label="Raise budget by ${STEP} rupees">${ICON.plus}</button></div></section>
-        <div class="chips" style="justify-content:center">${[300, 600, 1000].map(n => `<button type="button" class="chip" data-v3-ob="preset:${n}" aria-pressed="${o.budget === n}">${money(n)}</button>`).join("")}</div>
+          <div class="stepper"><button type="button" data-v3-ob="budget:-${wk ? STEP * 5 : STEP}" aria-label="Lower budget by ${wk ? STEP * 5 : STEP} rupees">${ICON.minus}</button>
+            <label class="sr" for="v3-ob-budget">Budget ${wk ? "a week" : "a day"} in rupees</label><input id="v3-ob-budget" class="money" type="number" inputmode="numeric" min="${lim[0]}" max="${lim[1]}" value="${o.budget ?? ""}" placeholder="₹" style="font-size:40px;width:170px;text-align:center;border:0;background:transparent;min-height:56px">
+            <button type="button" data-v3-ob="budget:${wk ? STEP * 5 : STEP}" aria-label="Raise budget by ${wk ? STEP * 5 : STEP} rupees">${ICON.plus}</button></div>
+          ${o.budget ? `<p class="fine" id="v3-ob-equiv">${wk ? `About ${money(Math.round(o.budget / 7))} a day` : `About ${money(o.budget * 7)} a week`}</p>` : ""}</section>
+        <div class="chips" style="justify-content:center">${obPresets(o).map(n => `<button type="button" class="chip" data-v3-ob="preset:${n}" aria-pressed="${o.budget === n}">${money(n)}</button>`).join("")}</div>
         <p class="k">Which meals today?</p>
         <div class="chips">${MEAL_ORDER.map(m => `<button type="button" class="chip" data-v3-ob="meal:${m}" aria-pressed="${o.meals.includes(m)}">${cap1(m)}</button>`).join("")}</div>
         <section class="card stack consent" aria-label="Your data">
@@ -555,6 +576,13 @@
       <button class="primary big" data-v3-ob="nav:next" ${ready ? "" : "disabled"}>${o.step ? "Show my day" : "Continue"}</button>
       <p class="fine center">Next: your address and favourite dishes. Saving an account comes later.</p></main>`;
   }
+  // ux #15: a day or a week, and presets that scale with how many eat (never fixed amounts).
+  const obLimits = (o) => o.per === "week" ? [100, 100000] : [50, 14000];
+  const obBudgetOk = (o) => { const [lo, hi] = obLimits(o); return o.budget >= lo && o.budget <= hi; };
+  function obPresets(o) {
+    const n = o.eaters || 1, day = [250, 400, 600].map(x => x * n);
+    return o.per === "week" ? day.map(x => Math.round((x * 7) / 500) * 500) : day;
+  }
   function readOb() {
     const o = S.v3ob, el = document.getElementById("v3-ob-budget");
     if (el) { const n = Math.round(Number(el.value)); o.budget = n > 0 ? n : null; }
@@ -566,7 +594,9 @@
     readOb();
     if (k === "diet") o.diet = v;
     else if (k === "allergen") o.allergens = o.allergens.includes(v) ? o.allergens.filter(a => a !== v) : [...o.allergens, v];
-    else if (k === "budget") o.budget = Math.min(20000, Math.max(50, (o.budget || 0) + Number(v)));
+    else if (k === "budget") { const [lo, hi] = obLimits(o); o.budget = Math.min(hi, Math.max(lo, (o.budget || 0) + Number(v))); }
+    else if (k === "per" && v !== o.per) { o.per = v; if (o.budget) o.budget = v === "week" ? o.budget * 7 : Math.round(o.budget / 7); }
+    else if (k === "eaters") o.eaters = Number(v);
     else if (k === "preset") o.budget = Number(v);
     else if (k === "meal") o.meals = o.meals.includes(v) ? o.meals.filter(m => m !== v) : [...o.meals, v];
     else if (k === "nav" && v === "back") { if (o.step) o.step -= 1; else { S.v3ob = null; S.welcome = !S.view; } }
@@ -578,7 +608,8 @@
   }
   async function finishOb() {
     const o = S.v3ob;
-    if (!(o.budget >= 50 && o.budget <= 20000)) throw new Error("Today's budget must be between ₹50 and ₹20,000");
+    if (!obBudgetOk(o)) { const [lo, hi] = obLimits(o); throw new Error(`Your budget ${o.per === "week" ? "a week" : "a day"} must be between ${money(lo)} and ${money(hi)}`); }
+    const weekly = o.per === "week" ? o.budget : o.budget * 7;
     if (!o.meals.length) throw new Error("Pick at least one meal for today");
     if (!o.consent) throw new Error("Please read the privacy notice and tick “I'm 18 or older and I agree”");
     const rhythm = Object.fromEntries(MEAL_ORDER.map(m => [m, o.meals.includes(m) ? "order" : "skip"]));
@@ -586,7 +617,7 @@
     let view;
     try {
       view = await api("/api/profiles", "POST", { name: "Me", diet: o.diet, allergens: o.allergens, medical: [],
-        weekly_budget: o.budget * 7, rhythm, cook: "sometimes", consent: { account: true } });
+        weekly_budget: weekly, eaters: o.eaters || 1, rhythm, cook: "sometimes", consent: { account: true } });
     } finally { S.planning = false; }
     // W8: the browser keeps no key (cookie session); the recovery code is shown once in Me → Account.
     if (view.access_key) { keys.put(view.user.id, null, view.user.name); S.freshCode = view.recovery_code; }
@@ -594,7 +625,8 @@
     S.v3ob = null; S.userId = view.user.id; store.set("smartplate.user", String(S.userId));
     adoptView(view);
     S.swiggy = await api(`/api/user/${S.userId}/swiggy`).catch(() => null);
-    st().data = await api(`/api/user/${S.userId}/today/budget`, "POST", { amount: o.budget });
+    // One budget model: today is the weekly budget ÷ 7 unless the person changes today alone.
+    st().data = await api(`/api/user/${S.userId}/today`);
     S.tab = "today"; S.more = null;
     toast("Here's your day. Add your favourite dishes next."); render();
   }
@@ -606,7 +638,7 @@
     const v = () => st();
     on("[data-v3-ob]", "click", (e) => { e.preventDefault(); const a = e.currentTarget.dataset.v3Ob; guard(() => obTap(a)); });
     const obIn = document.getElementById("v3-ob-budget");
-    const obReady = () => { readOb(); const b = document.querySelector('[data-v3-ob="nav:next"]'); if (b) b.disabled = !(S.v3ob.budget >= 50 && S.v3ob.meals.length && S.v3ob.consent); };
+    const obReady = () => { readOb(); const b = document.querySelector('[data-v3-ob="nav:next"]'); if (b) b.disabled = !(obBudgetOk(S.v3ob) && S.v3ob.meals.length && S.v3ob.consent); };
     if (obIn) obIn.oninput = obReady;
     const obC = document.getElementById("v3-ob-consent");
     if (obC) obC.onchange = obReady;                 // W8: the notice must be agreed to before a profile exists
@@ -656,6 +688,7 @@
         "add-back": async () => { v().sheet.menu = null; render(); },
         "sugg-import": importSugg, "sugg-delete": deleteSugg,
         "save-later": async () => { store.set(`ziggy.v3.saved-later.${S.userId}`, "1"); render(); },
+        "code-saved": async () => { S.codeAcked = S.userId; render(); },
         olist: async () => { T(null); await openOrderList(); } }[a];
       if (f) guard(f);
     });

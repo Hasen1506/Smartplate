@@ -73,9 +73,9 @@ async function migrateKeys() {
   } catch (_) {}
 }
 
-/* Appearance: light, dark or the phone's setting; Ember or Zomato × Swiggy colours. */
+/* Appearance: light, dark or the phone's setting; Ember or Saffron colours (ux #36: no partner brand names). */
 const THEMES = [["system", "Auto"], ["light", "Light"], ["dark", "Dark"]];
-const PALETTES = [["ember", "Ember", "#D63E1C"], ["mesh", "Zomato × Swiggy", "linear-gradient(135deg,#E23744,#FC8019)"]];
+const PALETTES = [["ember", "Ember", "#D63E1C"], ["mesh", "Saffron", "linear-gradient(135deg,#E23744,#FC8019)"]];
 const look = () => ({ theme: store.get("ziggy.theme") || "system", palette: store.get("ziggy.palette") || "ember" });
 function applyLook() {
   if (typeof document === "undefined" || !document.documentElement || !document.documentElement.setAttribute) return;
@@ -120,7 +120,7 @@ const I18N = { ta: {
   "Save your profile": "உங்கள் சுயவிவரத்தைச் சேமிக்கவும்",
   "Continue": "தொடரவும்", "Plan my week": "என் வாரத்தைத் திட்டமிடு", "Back": "பின்செல்", "Cancel": "ரத்து செய்",
   "Step {n} of {total}": "படி {n} / {total}",
-  "Your week of meals, already decided.": "உங்கள் வார உணவு, ஏற்கனவே முடிவு செய்யப்பட்டது.",
+  "Your meals, planned within your budget.": "உங்கள் பட்ஜெட்டுக்குள் திட்டமிட்ட உணவு.",
   "Get started": "தொடங்கு", "I already have an account": "எனக்கு ஏற்கனவே கணக்கு உள்ளது",
   "Language": "மொழி",
 } };
@@ -568,7 +568,7 @@ function resetProfileState() {
   for (const key of ["exec", "receipts", "recap", "orderReview", "sheet", "moving", "places", "calendar", "account", "swiggy",
     "swAddrs", "carts", "acctDraft", "liveResults", "liveFavourites", "liveBrowseMenu", "liveOrderReview", "liveCart",
     "checkoutReview", "placedOrder", "liveOrderStatus", "liveOrderHistory", "liveCartError", "liveCartEmpty", "saved",
-    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "cook", "dish", "cookAlong", "budgetSheet", "olist"]) S[key] = null;
+    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "cook", "dish", "cookAlong", "budgetSheet", "budgetUndo", "olist"]) S[key] = null;
   S.welcome = false; S.tab = "today"; S.more = null; S.connectSheet = false; S.addrSheet = false; S.ask = false;
 }
 async function switchUser(id) {
@@ -741,11 +741,24 @@ const cartEligible = (c) => {
 };
 async function loadAddresses() { S.swAddrs = await api(`/api/user/${S.userId}/swiggy/addresses`); render(); }
 async function openAddresses() { S.addrSheet = true; S.connectSheet = false; S.swAddrs = null; render(); await loadAddresses(); }
+// The Swiggy notice is a ticked line inside the Connect sheet (never a native confirm():
+// browsers and in-app webviews can suppress it, which left the tap doing nothing). Any
+// failure is said inside the sheet, where the user is looking.
 async function connectSwiggy() {
-  if (!S.privacyNotice) S.privacyNotice = await api("/api/privacy/notice");
-  if (!askConsent(S.privacyNotice.purposes.swiggy)) return;   // the Swiggy notice, right before connecting
-  const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", { consent: true });
+  S.connectError = null;
+  if (!S.connectConsent) { S.connectError = "Tick the line above to agree, then continue."; render(); return; }
+  let r;
+  try { r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", { consent: true }); }
+  catch (e) { S.connectError = e.message || String(e); render(); return; }
+  if (!r?.authorize_url) { S.connectError = "Swiggy didn't give Ziggy a sign-in page. Try again in a minute."; render(); return; }
   rememberResume(); location.href = r.authorize_url;
+}
+function connectConsentLine() {
+  const n = S.privacyNotice?.purposes?.swiggy;
+  const what = n ? n.data.join("; ") : "a Swiggy access token (encrypted), your saved addresses, live menus, your cart and recent orders";
+  return `<label class="row v3-connect-consent" style="flex-wrap:nowrap;gap:10px;align-items:flex-start"><input type="checkbox" id="connect-consent"${S.connectConsent ? " checked" : ""}>
+    <span class="fine">I agree that Ziggy uses ${esc(what)}${n ? ` — ${esc(String(n.why).replace(/\.\s*$/, ""))}` : ""}. Switch it off any time in Me → Privacy. <a href="/privacy" target="_blank" rel="noopener">Full notice</a></span></label>
+    ${S.connectError ? `<p class="inline-err" role="alert" id="connect-error">${esc(S.connectError)}</p>` : ""}`;
 }
 // Everything read for one delivery address; dropped whenever the address changes.
 function forgetAddressState() {
@@ -972,8 +985,12 @@ function storageBanner() {
 function welcomeLede() {
   // Restaurant dishes come only from Swiggy for the user's own address; nothing is sample data.
   return swiggySignInOpen()
-    ? "Ziggy picks every meal from Swiggy places near you, inside your budget, and tells you exactly when to order."
-    : "Ziggy plans every meal around your diet and budget. Real Swiggy dishes appear once Swiggy approves connecting from Ziggy.";
+    ? "Choose your usual meals from Swiggy places near you. Ziggy keeps them inside your budget and tells you when to order."
+    : "Works with your Swiggy account. Ziggy plans your meals around your diet and budget.";
+}
+// ux #37: said only while sign-in is closed, as a short note, not an internal status line.
+function welcomeSoon() {
+  return swiggySignInOpen() ? "" : `<p class="fine">Swiggy sign-in is coming soon.</p>`;
 }
 function render() {
   const app = document.getElementById("app");
@@ -1097,8 +1114,8 @@ function welcomeScreen() {
   return `<main class="welcome">
     ${mascot("float")}
     <div class="wordmark" style="font-size:30px">ziggy</div>
-    <h1 class="hero-h">${t("Your week of meals, already decided.")}</h1>
-    <p class="sub" style="font-size:17px">${welcomeLede()}</p>
+    <h1 class="hero-h">${t("Your meals, planned within your budget.")}</h1>
+    <p class="sub" style="font-size:17px">${welcomeLede()}</p>${welcomeSoon()}
     <ul class="promise">
       <li><span><b>One tap to your Swiggy cart.</b> You check the bill and pay in Swiggy.</span></li>
       <li><span><b>Your rules, every meal.</b> Diet and budget shape each pick. Check ingredients with the restaurant.</span></li>
@@ -1635,11 +1652,11 @@ function weekScreen() {
   return `<div class="row rise" style="justify-content:space-between;align-items:flex-end"><h1 class="h1">${t("Week of {d}", { d: esc(fmtDate(v.plan.week_start)) })}</h1>
       <button class="secondary small" data-act="reopt" title="Re-plan every meal that isn't kept, ordered or in your cart">${t("Re-plan")}</button></div>
     <section class="card rise" aria-label="Budget">
-      <div class="row" style="justify-content:space-between;align-items:baseline"><span><span class="money" style="font-size:26px">${est(b.spend || 0)}</span> <span class="muted">${t("planned of {x}", { x: rupee0(b.budget) })}</span></span>
+      <div class="row" style="justify-content:space-between;align-items:baseline"><span><span class="money" style="font-size:26px">${est(b.spend || 0)}</span> <span class="muted">${t("planned of {x}", { x: rupee0(b.budget) })}${b.prorated && b.covers ? ` for ${esc(b.covers)}` : ""}</span></span>
         <b style="color:${left < 0 ? "var(--bad)" : "var(--leaf-ink)"}">${left < 0 ? t("{x} over", { x: rupee0(-left) }) : t("{x} left", { x: rupee0(left) })}</b></div>
       <div class="bar"><i class="${left < 0 ? "over" : ""}" style="width:${pct}%"></i></div>
-      <span class="fine">${t("{o} to order · {c} to cook", { o: n("delivery"), c: n("cook") })}${b.prorated ? ` · rest of the week only` : ""}${b.daily_cap ? ` · daily limit ${rupee0(b.daily_cap)}` : ""} · ${esc(v.plan.mode_label || "")}</span>
-      <div class="row" style="gap:8px;margin-top:10px"><button class="small secondary" data-act="budget">${t("Change budget")}</button>${n("delivery") ? `<button class="small secondary" data-act="try-different" title="Swap the dishes Ziggy picked for others that still fit your rules and budget">Try different dishes</button>` : ""}</div></section>
+      <span class="fine">${t("{o} to order · {c} to cook", { o: n("delivery"), c: n("cook") })}${b.prorated ? ` · ${esc(b.covers || "rest of the week")} only, from ${rupee0(b.weekly_budget)} a week` : ""}${b.daily_cap ? ` · daily limit ${rupee0(b.daily_cap)}` : ""} · ${esc(v.plan.mode_label || "")}</span>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="small secondary" data-act="budget">${t("Change budget")}</button>${n("delivery") ? `<button class="small secondary" data-act="try-different" title="Swap the dishes Ziggy picked for others that still fit your rules and budget">Try different dishes</button>` : ""}</div>${budgetUndoLine()}</section>
     ${sourceLine(v.source)}${globalThis.ZiggyV3?.weekTop?.() || ""}
     ${S.moving ? `<div class="note" role="status"><span class="ic">${ICON.swap}</span><span style="flex:1">Tap the meal to swap it with, on any day.</span><button class="small ghost" data-act="cancel-move">Cancel</button></div>` : ""}
     ${day ? `<nav class="days rise2" aria-label="Days">${days.map((d, i) => {
@@ -1736,38 +1753,71 @@ const BUDGET_STEP = 250;
 function mealsLeft() {
   return (S.view.grid || []).flatMap(d => Object.values(d.meals)).filter(m => m && m.status === "active").length;
 }
+// One budget model (r3): the weekly budget is the person's number and a day is a seventh of
+// it. A plan made mid-week targets only the days it covers (budget.covers, e.g. "Fri–Sun"),
+// so every figure here names its period and its meal count from the same plan.
+function weekShare(weekly) {
+  const b = S.view.budget || {};
+  return b.weekly_budget ? (weekly * (b.budget || 0)) / b.weekly_budget : weekly;
+}
 function perMealText(weekly) {
   const b = S.view.budget || {}, n = mealsLeft();
-  if (!weekly || !n) return "";
-  const share = b.weekly_budget ? (b.budget || 0) / b.weekly_budget : 1;
-  return `about ${rupee0((weekly * share) / n)} a meal for the ${n} meal${n === 1 ? "" : "s"} left${b.prorated ? " (this week counts from today)" : ""}`;
+  if (!weekly) return "";
+  const parts = [`${rupee0(weekly / 7)} a day · ${rupee0(weekly)} a week`];
+  if (b.prorated) parts.push(`${rupee0(weekShare(weekly))} for ${b.covers || "the rest of this week"}`);
+  if (n) parts.push(`about ${rupee0(weekShare(weekly) / n)} a meal for the ${n} meal${n === 1 ? "" : "s"} left`);
+  return parts.join(" · ");
 }
+// Presets around the person's own budget (ux #15), never fixed amounts.
+function budgetPresets(weekly, per) {
+  const base = per === "day" ? weekly / 7 : weekly, step = per === "day" ? 50 : 250;
+  const r = (x) => Math.max(step, Math.round(x / step) * step);
+  return [...new Set([r(base * 0.75), r(base), r(base * 1.25)])];
+}
+const budgetShown = (d) => d.per === "day" ? Math.round((d.value || 0) / 7) : (d.value || 0);
+const budgetSaveText = (d) => d.value ? `Re-plan with ${rupee0(budgetShown(d))} a ${d.per === "day" ? "day" : "week"}` : "Re-plan with this budget";
 function budgetSheet() {
-  const d = S.budgetSheet, b = S.view.budget || {};
+  const d = S.budgetSheet, b = S.view.budget || {}, per = d.per || "week", shown = budgetShown(d);
+  const step = per === "day" ? 50 : BUDGET_STEP, cur = per === "day" ? Math.round((b.weekly_budget || 0) / 7) : b.weekly_budget;
   return `<div class="sheet-bg" data-ov="budget" data-close-budget="1"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="budget-title">
     <span class="grab" aria-hidden="true"></span>
-    <div class="sheet-head"><div><p class="eyebrow">Now ${rupee0(b.weekly_budget)} a week</p><h2 class="h2" id="budget-title">Weekly food budget</h2></div>
+    <div class="sheet-head"><div><p class="eyebrow">Now ${rupee0((b.weekly_budget || 0) / 7)} a day · ${rupee0(b.weekly_budget)} a week</p><h2 class="h2" id="budget-title">Food budget</h2></div>
       <button class="icon-btn" data-close-budget="1" aria-label="Close">${ICON.close}</button></div>
+    <div class="seg" role="group" aria-label="Budget per" style="justify-content:center">${["day", "week"].map(k => `<button type="button" class="chip" data-budget-per="${k}" aria-pressed="${per === k}">A ${k}</button>`).join("")}</div>
     <div class="row" style="justify-content:center;align-items:center;gap:14px">
-      <span class="stepper"><button type="button" data-budget-step="-${BUDGET_STEP}" aria-label="${rupee0(BUDGET_STEP)} less" ${d.value <= 250 ? "disabled" : ""}>${ICON.minus}</button></span>
-      <label class="sr" for="budget-in">Weekly budget in rupees</label>
-      <input id="budget-in" class="money" type="number" inputmode="numeric" min="100" max="100000" step="50" value="${d.value || ""}" style="font-size:36px;width:170px;text-align:center">
-      <span class="stepper"><button type="button" data-budget-step="${BUDGET_STEP}" aria-label="${rupee0(BUDGET_STEP)} more" ${d.value >= 100000 ? "disabled" : ""}>${ICON.plus}</button></span></div>
+      <span class="stepper"><button type="button" data-budget-step="-${step}" aria-label="${rupee0(step)} less" ${shown <= step ? "disabled" : ""}>${ICON.minus}</button></span>
+      <label class="sr" for="budget-in">Budget a ${per} in rupees</label>
+      <input id="budget-in" class="money" type="number" inputmode="numeric" min="${per === "day" ? 15 : 100}" max="100000" step="50" value="${shown || ""}" style="font-size:36px;width:170px;text-align:center">
+      <span class="stepper"><button type="button" data-budget-step="${step}" aria-label="${rupee0(step)} more" ${d.value >= 100000 ? "disabled" : ""}>${ICON.plus}</button></span></div>
     <p class="muted" id="budget-per" style="text-align:center">${esc(perMealText(d.value))}</p>
-    <div class="chips" style="justify-content:center">${[...new Set([...BUDGET_PRESETS, b.weekly_budget].filter(Boolean))].sort((x, y) => x - y).map(n => `<button class="chip" data-budget-preset="${n}" aria-pressed="${d.value === n}">${rupee0(n)}</button>`).join("")}</div>
-    <button class="primary" data-act="save-budget" ${!d.value || d.value === b.weekly_budget ? "disabled" : ""}>Re-plan with ${d.value ? rupee0(d.value) : "this budget"}</button>
+    <div class="chips" style="justify-content:center">${budgetPresets(b.weekly_budget || d.value, per).map(n => `<button class="chip" data-budget-preset="${n}" aria-pressed="${shown === n}">${rupee0(n)}${n === cur ? " (now)" : ""}</button>`).join("")}</div>
+    <button class="primary" data-act="save-budget" ${!d.value || d.value === b.weekly_budget ? "disabled" : ""}>${budgetSaveText(d)}</button>
     <p class="fine">Meals you kept, ordered or put in your Swiggy cart stay as they are. Undo puts the old budget back.</p>
   </section></div>`;
 }
-function openBudget() { S.budgetSheet = { value: S.view.budget?.weekly_budget || S.view.user?.weekly_budget || 0 }; render(); }
+// The last budget change, with its Undo kept on the Week budget card (a toast alone vanishes).
+function budgetUndoLine() {
+  const u = S.budgetUndo;
+  if (!u || !S.view?.budget || S.view.budget.weekly_budget !== u.to) return "";
+  return `<p class="fine v3-budget-undo" role="status">Budget changed to ${rupee0(u.to)} a week (was ${rupee0(u.from)}). <button class="link" data-act="budget-undo">Undo</button></p>`;
+}
+function openBudget() { S.budgetSheet = { value: S.view.budget?.weekly_budget || S.view.user?.weekly_budget || 0, per: "week" }; render(); }
 async function setBudget(weekly, undoTo) {
   const before = S.view.budget?.weekly_budget;
   adoptView(await api(`/api/user/${S.userId}/setup`, "PATCH", { weekly_budget: weekly }));
   S.budgetSheet = null;
   const b = S.view.budget || {};
-  const msg = undoTo ? `Back to ${rupee0(weekly)} a week` : `${rupee0(weekly)} a week: about ${rupee0(b.spend || 0)} planned`;
-  toast(msg, undoTo ? null : () => setBudget(before, true));
+  S.budgetUndo = undoTo || !before || before === weekly ? null : { from: before, to: weekly };
+  globalThis.ZiggyV3?.invalidate?.();            // Today follows the new weekly ÷ 7 (server resets today's figure)
+  const period = b.prorated ? ` (${rupee0(b.budget)} for ${b.covers || "the rest of the week"})` : "";
+  const msg = undoTo ? `Back to ${rupee0(weekly)} a week${period}` : `${rupee0(weekly)} a week${period}: about ${rupee0(b.spend || 0)} planned`;
+  toast(msg, S.budgetUndo ? undoBudget : null);
   render();
+}
+async function undoBudget() {
+  const u = S.budgetUndo;
+  if (!u) return;
+  await setBudget(u.from, true);
 }
 async function saveBudget() {
   const v = Math.round(Number(S.budgetSheet?.value));
@@ -2515,7 +2565,8 @@ function connectSheet() {
   else body = `<h2 class="h2">${sw.needs_reconnect || sw.expired ? "Reconnect Swiggy" : "Connect Swiggy"}</h2>
     <p class="sub">${sw.needs_reconnect ? "This server can no longer read the saved Swiggy sign-in. " : sw.expired ? "Swiggy sign-ins last about 5 days. " : ""}Sign in on Swiggy's own page with your phone and OTP, about 20 seconds.${resume}</p>
     <div class="stack" style="gap:10px"><div class="row" style="flex-wrap:nowrap"><span class="tick n">1</span><span>Sign in on Swiggy</span></div><div class="row" style="flex-wrap:nowrap"><span class="tick n">2</span><span>Tap the address you order to</span></div><div class="row" style="flex-wrap:nowrap"><span class="tick n">3</span><span>Ziggy never orders or pays without you</span></div></div>
-    <button class="primary" data-act="swiggy-connect">Continue with Swiggy</button><button class="ghost" data-close-connect="1">Not now</button>`;
+    ${connectConsentLine()}
+    <button class="primary" data-act="swiggy-connect"${S.connectConsent ? "" : " disabled"}>Continue with Swiggy</button><button class="ghost" data-close-connect="1">Not now</button>`;
   return `<div class="sheet-bg" data-ov="connect" data-close-connect="1"><section class="sheet" role="dialog" aria-modal="true" aria-label="Connect Swiggy"><span class="grab" aria-hidden="true"></span>${body}</section></div>`;
 }
 function addressSheet() {
@@ -3150,6 +3201,13 @@ function wire() {
   on("[data-filter]", "click", (e) => toggleFilter(e.currentTarget.dataset.filter));
   on("[data-cat]", "click", (e) => { S.menuCat = e.currentTarget.dataset.cat || null; render(); });
   on("[data-close-addr]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.addrSheet = false; render(); } });
+  on("#connect-consent", "change", (e) => { S.connectConsent = !!e.currentTarget.checked; S.connectError = null;
+    const b = document.querySelector('[data-act="swiggy-connect"]'); if (b) b.disabled = !S.connectConsent;
+    document.getElementById("connect-error")?.remove(); });
+  if (S.connectSheet && !S.privacyNotice && !S.noticeLoading) {      // the notice's own words in the consent line
+    S.noticeLoading = true;
+    api("/api/privacy/notice").then(n => { S.privacyNotice = n; if (S.connectSheet) render(); }).catch(() => {}).finally(() => { S.noticeLoading = false; });
+  }
   on("[data-close-connect]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.connectSheet = false; S.pendingResume = null; render(); } });
   on("[data-close-menu]", "click", (e) => { if (e.target === e.currentTarget) { S.liveBrowseMenu = null; render(); } });
   on("[data-mode]", "click", (e) => guard(() => setMode(e.currentTarget.dataset.mode)));
@@ -3181,16 +3239,20 @@ function wire() {
   const olq = document.getElementById("ol-q");
   if (olq) olq.oninput = () => { S.olist.q = olq.value; S.olist.show = OL_SHOW; render(); refocus("ol-q"); };
   on("[data-close-budget]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.budgetSheet = null; render(); } });
+  // The sheet edits the weekly budget; "A day" shows and takes it as a seventh (one model).
+  const toWeekly = (n) => S.budgetSheet.per === "day" ? Math.round(n * 7) : Math.round(n);
+  on("[data-budget-per]", "click", (e) => { S.budgetSheet.per = e.currentTarget.dataset.budgetPer; render(); });
   on("[data-budget-step]", "click", (e) => {
-    S.budgetSheet.value = Math.min(100000, Math.max(250, (Number(S.budgetSheet.value) || 0) + Number(e.currentTarget.dataset.budgetStep))); render(); });
-  on("[data-budget-preset]", "click", (e) => { S.budgetSheet.value = Number(e.currentTarget.dataset.budgetPreset); render(); });
+    const shown = budgetShown(S.budgetSheet) + Number(e.currentTarget.dataset.budgetStep);
+    S.budgetSheet.value = Math.min(100000, Math.max(100, toWeekly(shown))); render(); });
+  on("[data-budget-preset]", "click", (e) => { S.budgetSheet.value = toWeekly(Number(e.currentTarget.dataset.budgetPreset)); render(); });
   const bin = document.getElementById("budget-in");
   if (bin) {
     bin.oninput = () => {
-      S.budgetSheet.value = Math.round(Number(bin.value)) || 0;
+      S.budgetSheet.value = toWeekly(Number(bin.value) || 0);
       const per = document.getElementById("budget-per"); if (per) per.textContent = perMealText(S.budgetSheet.value);
       const save = document.querySelector('[data-act="save-budget"]');
-      if (save) { save.disabled = !S.budgetSheet.value || S.budgetSheet.value === S.view.budget?.weekly_budget; save.textContent = `Re-plan with ${S.budgetSheet.value ? rupee0(S.budgetSheet.value) : "this budget"}`; }
+      if (save) { save.disabled = !S.budgetSheet.value || S.budgetSheet.value === S.view.budget?.weekly_budget; save.textContent = budgetSaveText(S.budgetSheet); }
     };
     bin.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); guard(saveBudget, "Re-plan"); } };
   }
@@ -3247,7 +3309,7 @@ function wire() {
     budget: async () => openBudget(),
     "order-list": () => openOrderList(), "ol-cart": olCart,
     "ol-veg": async () => { S.olist.veg = !S.olist.veg; S.olist.show = OL_SHOW; render(); },
-    "ol-more": async () => { S.olist.show = (S.olist.show || OL_SHOW) + OL_SHOW; render(); }, "save-budget": saveBudget, "try-different": tryDifferent,
+    "ol-more": async () => { S.olist.show = (S.olist.show || OL_SHOW) + OL_SHOW; render(); }, "save-budget": saveBudget, "budget-undo": undoBudget, "try-different": tryDifferent,
     "confirm-live-cart": addLiveItemToCart,
     "review-live-checkout": reviewLiveCheckout, "place-live-order": placeLiveOrder,
     "track-live-order": trackLiveOrder, "live-order-history": loadLiveOrderHistory,

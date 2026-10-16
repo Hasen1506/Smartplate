@@ -926,7 +926,9 @@ test('welcome on the simulated, unapproved server never promises real Swiggy res
   await vm.runInContext('boot()', context);
   const html = element.innerHTML;
   assert.doesNotMatch(html, /sample|demo/i);
-  assert.match(html, /once Swiggy approves connecting/);
+  assert.match(html, /Works with your Swiggy account/);                 // ux #37: no internal status line
+  assert.match(html, /Swiggy sign-in is coming soon/);
+  assert.doesNotMatch(html, /once Swiggy approves connecting|already decided/);
   assert.doesNotMatch(html, /connect Swiggy to find real restaurants/i);
   assert.doesNotMatch(html, /browse their current Swiggy menus/);
 });
@@ -1480,19 +1482,24 @@ test('budget changes in place with a per-meal figure, and Try different dishes c
     budget: { spend: 900, budget: 1500, weekly_budget: 1500 }, grid: [], try_different: { changed: 3, meals: 5, can_undo: true } };
   const { context, calls } = fixture({ '/api/plan/42/try-different': tried });
   await context.bootPromise;
-  vm.runInContext(`S.view.budget = { spend: 1000, budget: 750, weekly_budget: 1500, prorated: true };
+  vm.runInContext(`S.view.budget = { spend: 1000, budget: 750, weekly_budget: 1500, prorated: true, covers: 'Thu–Sun' };
     S.view.grid = [{ day: 'Thu', date: '2026-09-17', meals: { lunch: { status: 'active', kind: 'delivery' }, dinner: { status: 'past', kind: 'delivery' } } },
                    { day: 'Fri', date: '2026-09-18', meals: { lunch: { status: 'active', kind: 'cook' }, dinner: { status: 'skipped', kind: 'skip' } } }];
-    S.budgetSheet = { value: 2000 };`, context);
+    S.budgetSheet = { value: 2000, per: 'week' };`, context);
   const sheet = vm.runInContext('budgetSheet()', context);
-  assert.match(sheet, /Now ₹1,500 a week/);
-  assert.match(sheet, /about ₹500 a meal for the 2 meals left \(this week counts from today\)/);   // 2000 × (750/1500) ÷ 2
-  assert.match(sheet, /Re-plan with ₹2,000/);
-  assert.match(sheet, /data-budget-preset="1500"/);
+  assert.match(sheet, /Now ₹214 a day · ₹1,500 a week/);
+  // r3 one budget model: every figure names its period, from the same plan
+  assert.match(sheet, /₹286 a day · ₹2,000 a week · ₹1,000 for Thu–Sun · about ₹500 a meal for the 2 meals left/);   // 2000 × (750/1500) ÷ 2
+  assert.match(sheet, /Re-plan with ₹2,000 a week/);
+  assert.match(sheet, /data-budget-preset="1500"/);                                   // presets around their own ₹1,500
+  assert.match(sheet, /data-budget-preset="1250"/);
+  assert.match(sheet, /data-budget-per="day"/);
   vm.runInContext('S.budgetSheet = { value: 1500 }', context);
   assert.match(vm.runInContext('budgetSheet()', context), /data-act="save-budget" disabled/);   // nothing to change
   const week = vm.runInContext('weekScreen()', context);
   assert.match(week, /data-act="budget">Change budget/);
+  assert.match(week, /planned of ₹750 for Thu–Sun/);
+  assert.match(week, /Thu–Sun only, from ₹1,500 a week/);
   assert.match(week, /data-act="try-different"/);
   assert.match(vm.runInContext('todayScreen()', context), /data-act="budget"/);
   await vm.runInContext('tryDifferent()', context);
