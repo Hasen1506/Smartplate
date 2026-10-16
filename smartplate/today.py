@@ -25,6 +25,10 @@ import json
 from . import clock, db
 
 MEALS = ("breakfast", "lunch", "dinner")
+# Snack (r3 #6): an optional favourites list shown under Today's meals. Picking one counts in
+# today's money; it is never planned, decided for you or part of the meal rhythm.
+SNACK = "snack"
+POOL_MEALS = MEALS + (SNACK,)
 LETTER = {"breakfast": "B", "lunch": "L", "dinner": "D"}
 MODES = {
     "favourites": "From my favourites only",
@@ -130,8 +134,8 @@ def _today() -> str:
 
 
 def _meal(meal) -> str:
-    if meal not in MEALS:
-        raise ValueError("Choose breakfast, lunch or dinner")
+    if meal not in POOL_MEALS:
+        raise ValueError("Choose breakfast, lunch, dinner or snack")
     return meal
 
 
@@ -515,6 +519,9 @@ def _soft_reasons(rules: dict, rating, eta) -> list[str]:
     return out
 
 
+ELSEWHERE = "Saved for your other address; not checked for this one yet"
+
+
 def pools(user: dict, rules: dict | None = None) -> dict:
     """{meal: [entry]} — every dish the person put in a pool, each with ok + reasons."""
     from .domain import live_catalog
@@ -522,8 +529,10 @@ def pools(user: dict, rules: dict | None = None) -> dict:
     rules = rules or settings(uid)
     meta = _meta(uid)
     live = live_catalog.has_live(uid)
-    out = {m: [] for m in MEALS}
+    out = {m: [] for m in POOL_MEALS}
     for meal, dishes in _swiggy_pool(uid).items():
+        if meal not in out:
+            continue
         for d in dishes:
             ref = f"sw:{d['restaurant_id']}:{d['item_id']}"
             m = meta.get((meal, ref), {})
@@ -531,15 +540,20 @@ def pools(user: dict, rules: dict | None = None) -> dict:
             hard = _hard_reason(user, d["name"], d.get("veg"))
             if hard:
                 reasons.append(hard)
-            if live and not d.get("on_menu"):
+            if d.get("elsewhere"):          # r3 #2: kept after a change of address, greyed with the reason
+                reasons.append(ELSEWHERE)
+            elif live and not d.get("on_menu"):
                 reasons.append("Not on the menu for your address right now")
             reasons += _soft_reasons(rules, m.get("rating"), m.get("eta_min"))
             out[meal].append({"ref": ref, "source": "swiggy", "kind": "order", "name": d["name"],
                               "restaurant": d.get("restaurant_name"), "restaurant_id": d["restaurant_id"],
                               "item_id": d["item_id"], "price": d.get("price"), "veg": d.get("veg"),
+                              "elsewhere": bool(d.get("elsewhere")),
                               "rating": m.get("rating"), "eta_min": m.get("eta_min"), "qty": m.get("qty") or 1,
                               "hard": bool(hard), "reasons": reasons})
     for t in _w7_typed(uid):            # typed in elsewhere (W7 "typed favourites", no platform needed)
+        if t["meal"] not in out:
+            continue
         ref = f"tf:{t['id']}"
         m = meta.get((t["meal"], ref), {})
         hard = _hard_reason(user, t["item_name"], None)
@@ -548,6 +562,8 @@ def pools(user: dict, rules: dict | None = None) -> dict:
                                "platform": t.get("platform"), "rating": None, "eta_min": None,
                                "qty": m.get("qty") or 1, "hard": bool(hard), "reasons": [hard] if hard else []})
     for t in _typed(uid):
+        if t["meal"] not in out:
+            continue
         ref = f"t:{t['id']}"
         m = meta.get((t["meal"], ref), {})
         veg = None if t["veg"] is None else bool(t["veg"])
@@ -605,15 +621,56 @@ def add_swiggy(user_id: int, body: dict) -> dict:
 MAX_SUGGESTED_AT_ONCE = 15
 
 
+def _menu_match(menu: dict, name: str, item_id) -> str | None:
+    """The live menu's dish id for a past order's dish: Swiggy's own id when it is on the
+    menu, else an exact name match (case and punctuation ignored), else the one dish whose
+    name starts with it ("Butter Naan" -> "Butter Naan (2 pcs)"). Dishes the safety check
+    left out count too, so the refusal reason is shown rather than a silent typed dish."""
+    from .integrations.swiggy_history import norm
+    rows = list(menu.get("items") or []) + list(menu.get("hidden_items") or [])
+    if item_id and any(str(i.get("id")) == str(item_id) for i in rows):
+        return str(item_id)
+    want = norm(name)
+    exact = [i for i in rows if norm(i.get("name")) == want]
+    if exact:
+        return str(exact[0]["id"])
+    loose = [i for i in rows if want and norm(i.get("name")).startswith(want + " ")]
+    return str(loose[0]["id"]) if len(loose) == 1 else None
+
+
+def _suggested_dishes(stored: dict, combos: dict, t: dict) -> tuple[dict, list[dict]]:
+    """A ticked row -> (where it came from, [{name, menu_item_id, qty}]). Only stored
+    suggestions and stored usual orders can be ticked."""
+    rid = str(t.get("restaurant_id") or "")
+    if t.get("combo"):
+        c = combos.get((rid, str(t.get("combo")).lower()))
+        if not c:
+            raise ValueError("That order isn't in your suggestions any more. Refresh them first.")
+        return c, [{"name": i["name"], "menu_item_id": i.get("menu_item_id"), "qty": i.get("qty") or 1}
+                   for i in c["items"]]
+    r = stored.get((rid, str(t.get("item_name") or "").lower()))
+    if not r:
+        raise ValueError("That suggestion isn't in your list any more. Refresh it first.")
+    return r, [{"name": r["item_name"], "menu_item_id": r.get("menu_item_id"), "qty": r.get("qty") or 1}]
+
+
+def _set_meta_qty(user_id: int, meal: str, ref: str, qty: int, rating=None) -> None:
+    """A dish's usual quantity from the order it came from; a quantity the person set stays."""
+    with db.cursor() as cur:
+        cur.execute("INSERT OR IGNORE INTO pool_meta(user_id, meal, ref, qty, rating, eta_min) VALUES (?,?,?,?,?,?)",
+                    (user_id, meal, ref, _qty(qty), rating, None))
+
+
 def add_suggested(user_id: int, body: dict) -> dict:
     """Tick suggestions from the person's Swiggy order history (integrations/swiggy_history,
-    read once with consent) into the pools. Only stored suggestions can be added. A dish still
-    on the restaurant's live Swiggy menu goes in as a Swiggy dish (the shared safety check
-    runs; a refusal is reported, never worked around); one that can't be read off the menu now
-    goes in as the person's own typed dish (name and place only: no price or veg mark is
-    invented, so a veg profile sees it greyed out until they say)."""
+    read with consent) into the pools: single dishes, or a whole past order ("Dal Makhani +
+    2 Butter Naan") with its quantities. Each restaurant's live menu is read once; a dish is
+    found on it by Swiggy's id or by name (r3 #4) and goes in as a Swiggy dish (the shared
+    safety check runs; a refusal is reported, never worked around). Only a dish that can't be
+    found on the live menu now goes in as the person's own typed dish (name and place only:
+    no price or veg mark is invented, so a veg profile sees it greyed out until they say)."""
     from .domain import meal_pools
-    from .integrations import swiggy_history
+    from .integrations import swiggy_history, swiggy_live
     from .integrations.swiggy_connect import SwiggyError
     _user(user_id)
     ticked = body.get("items")
@@ -621,36 +678,49 @@ def add_suggested(user_id: int, body: dict) -> dict:
         raise ValueError("Tick at least one suggestion")
     if len(ticked) > MAX_SUGGESTED_AT_ONCE:
         raise ValueError(f"Add up to {MAX_SUGGESTED_AT_ONCE} at a time")
-    stored = {(str(r["restaurant_id"]), r["item_name"].lower()): r for r in swiggy_history.view(user_id)["items"]}
-    added, refused, typed = [], [], []
+    sugg = swiggy_history.view(user_id)
+    stored = {(str(r["restaurant_id"]), r["item_name"].lower()): r for r in sugg["items"]}
+    combos = {(str(c["restaurant_id"]), c["label"].lower()): c for c in sugg.get("combos") or []}
+    plan = []
     for t in ticked:
         if not isinstance(t, dict):
             raise ValueError("Tick a suggestion from the list")
-        r = stored.get((str(t.get("restaurant_id") or ""), str(t.get("item_name") or "").lower()))
-        if not r:
-            raise ValueError("That suggestion isn't in your list any more. Refresh it first.")
-        meal = _meal(t.get("meal") or body.get("meal") or r["pool_meal"])
-        name = r["item_name"]
-        if r.get("menu_item_id"):
+        src, dishes = _suggested_dishes(stored, combos, t)
+        plan.append((_meal(t.get("meal") or body.get("meal") or src["pool_meal"]), src, dishes))
+    init_schema()
+    menus: dict[str, dict | None] = {}
+    added, refused, typed = [], [], []
+    for meal, src, dishes in plan:
+        rid, place = str(src["restaurant_id"]), src["restaurant_name"]
+        if rid not in menus:                       # one live menu read per restaurant
             try:
-                meal_pools.add(user_id, meal, str(r["restaurant_id"]), r["restaurant_name"], str(r["menu_item_id"]))
-                init_schema()
+                menus[rid] = swiggy_live.live_menu(user_id, rid, place)
+            except (SwiggyError, Exception):
+                menus[rid] = None
+        for d in dishes:
+            name, menu = d["name"], menus[rid]
+            item_id = _menu_match(menu, name, d.get("menu_item_id")) if menu else None
+            if item_id:
+                try:
+                    meal_pools.add(user_id, meal, rid, place, item_id, menu=menu)
+                    _set_meta_qty(user_id, meal, f"sw:{rid}:{item_id}", d["qty"], src.get("rating"))
+                    added.append(name)
+                    continue
+                except ValueError as e:          # safety / diet refusal or a full pool: say so, don't work around it
+                    refused.append(f"{name}: {e}")
+                    continue
+                except (SwiggyError, Exception):  # has options / not addable now: keep it as typed
+                    pass
+            try:
+                add_typed(user_id, {"meal": meal, "name": name, "restaurant_name": place, "kind": "order"})
                 with db.cursor() as cur:
-                    cur.execute("INSERT OR IGNORE INTO pool_meta(user_id, meal, ref, qty, rating, eta_min) "
-                                "VALUES (?,?,?,?,?,?)", (user_id, meal, f"sw:{r['restaurant_id']}:{r['menu_item_id']}",
-                                                         1, r.get("rating"), None))
-                added.append(name)
-                continue
-            except ValueError as e:              # safety / diet refusal or a full pool: say so, don't work around it
+                    row = cur.execute("SELECT MAX(id) AS id FROM pool_typed WHERE user_id=? AND meal=? AND name=?",
+                                      (user_id, meal, name)).fetchone()
+                if row and row["id"]:
+                    _set_meta_qty(user_id, meal, f"t:{row['id']}", d["qty"])
+                typed.append(name)
+            except ValueError as e:
                 refused.append(f"{name}: {e}")
-                continue
-            except (SwiggyError, Exception):      # not readable on the live menu now: keep it as typed
-                pass
-        try:
-            add_typed(user_id, {"meal": meal, "name": name, "restaurant_name": r["restaurant_name"], "kind": "order"})
-            typed.append(name)
-        except ValueError as e:
-            refused.append(f"{name}: {e}")
     out = view(user_id)
     out["suggested_added"] = {"swiggy": added, "typed": typed, "refused": refused}
     return out
@@ -722,6 +792,8 @@ def pick(user_id: int, meal, ref, qty=None) -> dict:
         raise ValueError("Pick a dish from your pool for this meal")
     if entry["hard"]:
         raise ValueError(f"{entry['name']} breaks your food rules: {entry['reasons'][0]}")
+    if entry.get("elsewhere"):
+        raise ValueError(f"{entry['name']} was saved for your other address. Add it again from this address's menu.")
     with db.cursor() as cur:
         _save_pick(cur, user_id, meal, entry, _qty(qty or entry["qty"]), "you")
     _unpin_today(user_id, meal)
@@ -1129,21 +1201,22 @@ def view(user_id: int) -> dict:
     b = budget_for(user)
     pool = pools(user, rules)
     picks = _picks(user_id)
+    counted = meals + ([SNACK] if SNACK in picks else [])     # an optional snack pick costs money too
     for meal, p in picks.items():           # a pick whose pool dish now breaks a rule says so
         now = next((e for e in pool.get(meal, []) if e["ref"] == p["ref"]), None)
         p["reasons"] = now["reasons"] if now else []
     bills, rule = _cart_bills(user_id), _fee_rule(user_id)
     for m, p in picks.items():
         p["total"], p["total_basis"] = _total(p, p["qty"], bills, rule)
-    dishes = sum(_cost(p, p["qty"]) for m, p in picks.items() if m in meals)
+    dishes = sum(_cost(p, p["qty"]) for m, p in picks.items() if m in counted)
     # "left" subtracts fees (estimated from learned bills; the real cart bill once carted)
-    picked = sum(p["total"] or 0 for m, p in picks.items() if m in meals)
-    unknown = [m for m, p in picks.items() if m in meals and p.get("price") is None]
+    picked = sum(p["total"] or 0 for m, p in picks.items() if m in counted)
+    unknown = [m for m, p in picks.items() if m in counted and p.get("price") is None]
     try:
         conn = swiggy_connect.status(user_id)
     except Exception:
         conn = {"connected": False}
-    priced = [p for m, p in picks.items() if m in meals and p["kind"] == "order" and p.get("source") == "swiggy"
+    priced = [p for m, p in picks.items() if m in counted and p["kind"] == "order" and p.get("source") == "swiggy"
               and p.get("price") is not None]
     _bills(user_id, priced)
     for p in priced:                        # a carted pick shows Swiggy's real bill, not the estimate
@@ -1169,7 +1242,7 @@ def view(user_id: int) -> dict:
             p["when"]["session_id"] = s["id"] if s else None
             p["when"]["reminder"] = m in reminded
     swiggy_bases = [p["total_basis"] for m, p in picks.items()
-                    if m in meals and p.get("total_basis") in ("estimate", "swiggy_cart")]
+                    if m in counted and p.get("total_basis") in ("estimate", "swiggy_cart")]
     left = round(b["amount"] - picked, 2)
     return {
         "date": _today(), "weekday": clock.today().strftime("%A"),
@@ -1192,9 +1265,9 @@ def view(user_id: int) -> dict:
         "other_meals": [m for m in MEALS if m not in meals],
         "rules": {"diet": user.get("diet"), "allergens": user.get("allergens") or [],
                   "medical": user.get("medical") or [], **rules},
-        "pools": pool, "picks": {m: picks[m] for m in meals if m in picks},
+        "pools": pool, "picks": {m: picks[m] for m in counted if m in picks},
         "modes": MODES, "price_compare": compare,
         "swiggy": {"connected": bool(conn.get("connected")), "address": (conn.get("address") or {}).get("label")},
         "account_saved": _account_saved(user_id),
-        "share_text": share_text(user, meals, picks, b["amount"]),
+        "share_text": share_text(user, counted, picks, b["amount"]),
     }

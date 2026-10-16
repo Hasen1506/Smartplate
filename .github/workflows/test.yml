@@ -37,6 +37,7 @@ jobs:
       - run: node --test tests/frontend.test.cjs
       - run: node --check smartplate/static/v3/v3.js
       - run: node --test tests/frontend_v3.test.cjs
+      - run: node --test tests/frontend_r3_history.test.cjs
       - run: python -m pip install playwright==1.63.0
       - run: python -m playwright install --with-deps chromium
       - name: Browser E2E (golden first-week journey, smoke, household, Epicure swaps, Ziggy redesign 375/1280 light+dark, live-only production mode)

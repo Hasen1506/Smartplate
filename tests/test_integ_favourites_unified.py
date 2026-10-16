@@ -28,14 +28,15 @@ def test_ticked_suggestions_go_into_the_today_pools(town):  # noqa: F811
         {"restaurant_id": biryani["restaurant_id"], "item_name": "Veg Biryani", "meal": "dinner"}]})
     assert r.status_code == 200, r.get_json()
     t = r.get_json()
-    assert t["suggested_added"] == {"swiggy": ["Masala Dosa"], "typed": ["Veg Biryani"], "refused": []}
+    # r3 #4: Swiggy sent no id for Veg Biryani, but it is on the live menu by name: a Swiggy dish
+    assert t["suggested_added"] == {"swiggy": ["Masala Dosa", "Veg Biryani"], "typed": [], "refused": []}
     lunch = t["pools"]["lunch"]
     assert [(e["name"], e["source"]) for e in lunch] == [("Masala Dosa", "swiggy")]
     assert lunch[0]["ref"] == f"sw:{dosa['restaurant_id']}:{dosa['menu_item_id']}" and lunch[0]["price"] is not None
     dinner = t["pools"]["dinner"]
-    assert [(e["name"], e["source"], e["price"]) for e in dinner] == [("Veg Biryani", "typed", None)]
-    assert dinner[0]["restaurant"] == "Biryani Junction"
-    assert dinner[0]["hard"] and dinner[0]["reasons"] == ["Not marked veg"]       # no veg mark invented
+    assert [(e["name"], e["source"]) for e in dinner] == [("Veg Biryani", "swiggy")]
+    assert dinner[0]["restaurant"] == "Biryani Junction" and dinner[0]["price"] is not None
+    assert not dinner[0]["hard"] and dinner[0]["veg"] is True                      # Swiggy's own veg mark
     # nothing else became a favourite
     assert t["pools"]["breakfast"] == []
 

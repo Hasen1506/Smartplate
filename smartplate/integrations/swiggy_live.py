@@ -545,6 +545,7 @@ def search_live_restaurants(user_id: int, query: str, offset: int = 0) -> dict:
                       "availability": _get(row, "availability"), "distance": _get(row, "distance"),
                       "cuisines": [str(c)[:40] for c in cuisines if isinstance(c, str)][:6]
                                   if isinstance(cuisines, list) else []})
+    _note_rating(user_id, {r["id"]: r["rating"] for r in found})
     nxt = body.get("nextOffset")
     more = body.get("hasMore") is True and isinstance(nxt, int) and not isinstance(nxt, bool) and nxt > offset
     total = body.get("totalRestaurants")
@@ -552,6 +553,15 @@ def search_live_restaurants(user_id: int, query: str, offset: int = 0) -> dict:
             "query": query, "restaurants": found, "offset": offset,
             "next_offset": nxt if more else None, "has_more": more,
             "total": total if isinstance(total, int) and not isinstance(total, bool) else None}
+
+
+def _note_rating(user_id: int, ratings: dict) -> None:
+    """A ★ Swiggy just showed fills a suggested place that had none (r3 #31); never fails a read."""
+    try:
+        from . import swiggy_history
+        swiggy_history.note_ratings(user_id, ratings)
+    except Exception:
+        pass
 
 
 def live_favourites(user_id: int) -> list[dict]:
@@ -700,6 +710,7 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str, *, screen:
             if c not in categories:
                 categories.append(c)
     remember_photos(user_id, restaurant_id, items)
+    _note_rating(user_id, {restaurant_id: place["rating"]})
     not_for_you, by_code = [], {}
     if screen:
         items, not_for_you, by_code = _screen(user, items)
@@ -1622,6 +1633,7 @@ def live_order_history(user_id: int) -> dict:
         return str(items or "") if isinstance(items, str) else ""
 
     recent = [{"order_id": str(r.get("orderId")), "restaurant": str(r.get("restaurantName") or ""),
+               "restaurant_id": str(r.get("restaurantId") or "") or None,
                "item": item_names(r), "total": str(r.get("orderTotal") or ""),
                "status": str(r.get("orderStatus") or ""), "ordered_time": str(r.get("orderedTime") or "")}
               for r in rows if isinstance(r, dict) and r.get("orderId")]

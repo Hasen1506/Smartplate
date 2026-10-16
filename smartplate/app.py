@@ -856,8 +856,13 @@ def create_app() -> Flask:
         before = address_change.snapshot(user_id)
         chosen = swiggy_live.choose_address(user_id, request.get_json().get("address_id"))
         # A new address can put planned restaurants out of reach: re-check the week (W7).
-        return jsonify({**chosen, "order_enabled": config.LIVE_ORDERS,
-                        "week": address_change.revalidate(user_id, before)})
+        week = address_change.revalidate(user_id, before)
+        # r3 #2: say what changed. Usual dishes are kept; ones saved for the other address are greyed.
+        changed = None
+        if before.get("address_id") and before.get("address_id") != (chosen.get("address") or {}).get("id"):
+            from .domain import meal_pools
+            changed = meal_pools.address_summary(user_id)
+        return jsonify({**chosen, "order_enabled": config.LIVE_ORDERS, "week": week, "address_changed": changed})
 
     @app.get("/api/user/<int:user_id>/swiggy/menu")
     def swiggy_menu(user_id):
@@ -1053,6 +1058,12 @@ def create_app() -> Flask:
     @app.delete("/api/user/<int:user_id>/favourites/suggested")
     def delete_suggested_favourites(user_id):
         return jsonify(swiggy_history.delete(user_id))
+
+    @app.post("/api/user/<int:user_id>/favourites/suggested/places")
+    def save_suggested_places(user_id):
+        # One tap: the places from the person's own orders become saved places (r3 #8).
+        ratelimit.check(f"pools:{user_id}", 60, 3600)
+        return jsonify(swiggy_history.save_places(user_id, (request.get_json() or {}).get("restaurant_ids")))
 
     # Without Swiggy: a typed delivery address and typed favourites (grill #25; W7).
     @app.get("/api/user/<int:user_id>/typed-favourites")

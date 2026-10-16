@@ -312,9 +312,13 @@ async function downloadPrivate(path, filename, mime) {
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   } catch (error) { URL.revokeObjectURL(url); throw error; }
 }
+// r3 #33: once the person has a profile of their own, the shared sample profiles are hidden
+// (one that is open right now stays until they switch).
 function mergeUsers(open) {
   const priv = Object.entries(keys.all()).map(([id, v]) => ({ id: Number(id), name: v.name || "My profile", city: "Chennai", setup_done: true, private: true }));
-  return [...priv, ...open.filter(u => !priv.some(p => p.id === u.id))];
+  const current = S.userId || Number(store.get("smartplate.user")) || null;
+  const samples = open.filter(u => !priv.some(p => p.id === u.id) && (!priv.length || u.id === current));
+  return [...priv, ...samples];
 }
 
 /* ---------------------------------------------------------------- server */
@@ -767,13 +771,22 @@ function forgetAddressState() {
   S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null; S.liveOrderReview = null;
   S.pools = null; S.poolMenus = null; S.pickFor = null;            // pools and dish ids belong to one address
 }
+// r3 #2: say what an address change did. Usual dishes stay; ones saved for the other address are
+// greyed until checked here; menus and the prepared cart are read again for the new address.
+function addressToast(sw) {
+  const where = `Delivering to ${sw.address?.label || "this address"}`;
+  const c = sw.address_changed;
+  if (!c) return where;
+  const kept = c.kept ? ` Your ${c.kept} usual dish${c.kept === 1 ? " stays" : "es stay"}${c.not_checked_here ? `; ${c.not_checked_here} saved for your other address ${c.not_checked_here === 1 ? "is" : "are"} greyed until you add ${c.not_checked_here === 1 ? "it" : "them"} here` : ""}.` : "";
+  return `${where}.${kept} Menus and cart are read again for this address.`;
+}
 async function chooseAddress(addressId) {
   S.swiggy = await api(`/api/user/${S.userId}/swiggy/address`, "POST", { address_id: addressId });
   forgetAddressState();
   S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
   await refreshLiveCart(false);
   S.addrSheet = false; S.connectSheet = false;
-  toast(S.swiggy.week?.dropped?.length ? S.swiggy.week.note : `Delivering to ${S.swiggy.address?.label || "this address"}`);
+  toast(S.swiggy.week?.dropped?.length ? S.swiggy.week.note : addressToast(S.swiggy));
   S.view = await api(`/api/plan/${S.planId}`);          // its source now says what the new address needs
   S.liveSync = null; render();
   if (!(await resumePending())) await autoSyncLive();

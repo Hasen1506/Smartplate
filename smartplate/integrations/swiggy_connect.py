@@ -136,6 +136,20 @@ CREATE TABLE IF NOT EXISTS swiggy_history_suggestions (  -- favourites suggested
     imported_ts TEXT NOT NULL,
     PRIMARY KEY (user_id, restaurant_id, item_name)
 );
+CREATE TABLE IF NOT EXISTS swiggy_history_combos (  -- whole past orders suggested as one usual order (swiggy_history.py)
+    user_id INTEGER NOT NULL,
+    restaurant_id TEXT NOT NULL,
+    restaurant_name TEXT NOT NULL,
+    label TEXT NOT NULL,
+    items TEXT NOT NULL,              -- [{name, qty, menu_item_id, side}]: dish names and quantities only
+    slot TEXT NOT NULL,
+    slots TEXT,
+    times INTEGER NOT NULL,
+    last_date TEXT NOT NULL,
+    score REAL NOT NULL,
+    imported_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, restaurant_id, label)
+);
 """
 COLUMNS = [                                      # added after gate 1 shipped
     ("swiggy_connections", "address_id", "TEXT"),
@@ -147,6 +161,9 @@ COLUMNS = [                                      # added after gate 1 shipped
     ("swiggy_order_attempts", "to_pay", "REAL"),
     ("swiggy_cart_intents", "menu_price", "REAL"),
     ("swiggy_cart_intents", "quantity", "INTEGER"),          # portions for a household meal; NULL = 1
+    ("swiggy_history_suggestions", "qty", "INTEGER"),        # usual quantity in one order (r3 #7)
+    ("swiggy_history_suggestions", "side", "INTEGER"),       # a side (naan, raita): suggested with its main
+    ("swiggy_history_suggestions", "slots", "TEXT"),         # meals it fits, best first ("lunch,dinner")
 ]
 CLIENT_VERSION = "2025-06-18"          # protocol we offer; the server's reply is what we record
 PENDING_TTL = dt.timedelta(minutes=15)
