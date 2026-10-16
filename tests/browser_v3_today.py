@@ -182,7 +182,7 @@ def test_today_favourites_first_journey(town, viewport, theme):
         expect(today.get_by_text("Today's budget")).to_be_visible(timeout=BOOT_MS)
         expect(today.locator(".v3-budget .v3-big")).to_have_text("₹600")
         expect(today.locator(".v3-budget")).to_contain_text("(B+L)")
-        expect(today.get_by_label("Weather today")).to_be_visible()
+        expect(today.get_by_label("Weather today")).to_have_count(0)    # ux #38: no tile without a live forecast
         rules = today.get_by_label("Your rules")
         for chip in ("Vegetarian", "4★ and up", "≤ 30 min"):
             expect(rules).to_contain_text(chip)
@@ -236,16 +236,20 @@ def test_today_favourites_first_journey(town, viewport, theme):
         option = page.locator("#v3-pick-lunch option", has_text="Chicken Burrito")
         assert option.get_attribute("disabled") is not None
 
-        # budget presets: ₹300 leaves no room for the ₹650 thali → Decide says so
-        page.locator(".v3-budget").get_by_role("button", name="₹300").click()
-        expect(today.locator(".v3-budget .v3-big")).to_have_text("₹300")
+        # budget presets sit around the person's own ₹600 a day (ux #15): ₹450 leaves no room
+        # for the ₹650 thali → Decide says so
+        page.locator(".v3-budget").get_by_role("button", name="₹450").click()
+        expect(today.locator(".v3-budget .v3-big")).to_have_text("₹450")
         page.get_by_role("button", name="Decide for me").click()
         dlg = page.get_by_role("dialog", name="Decide for me")
         expect(dlg.get_by_role("button", name="Decide", exact=True)).to_be_disabled()
         dlg.get_by_role("radio", name="From my favourites only").click()
         dlg.get_by_role("button", name="Decide", exact=True).click()
         expect(page.locator(".toast")).to_contain_text("Couldn't fill lunch")
-        page.locator(".v3-budget").get_by_role("button", name="₹1,000").click()
+        page.locator(".v3-budget").get_by_role("button", name="Other…").click()
+        page.locator("#v3-budget-in").fill("1000")
+        page.get_by_role("button", name="Use this budget").click()
+        expect(today.locator(".v3-budget .v3-big")).to_have_text("₹1,000")
         page.get_by_role("button", name="Decide for me").click()
         dlg = page.get_by_role("dialog", name="Decide for me")
         dlg.get_by_role("radio", name="From my favourites only").click()
@@ -352,7 +356,8 @@ def test_first_run_two_questions_then_today_and_account_after_value(fresh, viewp
         page.locator('[data-v3-ob="diet:veg"]').click()
         page.get_by_role("button", name="Peanut").click()
         page.get_by_role("button", name="Continue").click()
-        expect(page.get_by_role("heading", name="Today's food budget")).to_be_visible()
+        expect(page.get_by_role("heading", name="Your food budget")).to_be_visible()
+        expect(page.get_by_role("group", name="How many eat")).to_be_visible()
         expect(page.get_by_role("button", name="Show my day")).to_be_disabled()
         page.get_by_role("button", name="₹600").click()
         page.get_by_role("button", name="Breakfast").click()

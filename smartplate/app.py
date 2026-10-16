@@ -232,6 +232,8 @@ def create_app() -> Flask:
             return response, 409        # the place is shut right now: information for the user, not an outage
         if error.code in ('swiggy_demo_mode', 'swiggy_read_only'):
             return response, 403        # this server's Swiggy mode doesn't allow it
+        if error.code == 'swiggy_redirect_not_whitelisted':
+            return response, 503        # Swiggy has not allow-listed this sign-in address yet
         return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
     from . import db as _db

@@ -8,6 +8,8 @@
 .v3-mode{max-width:280px}
 .v3-top{display:grid;grid-template-columns:minmax(0,1fr) 116px;gap:12px}
 .v3-top .card{padding:14px 16px;gap:8px}
+.v3-top.solo{grid-template-columns:minmax(0,1fr)}
+@media (max-width:480px){.v3-top{grid-template-columns:minmax(0,1fr)}}   /* ux #38: stack, never squeeze the budget */
 .v3-budget-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .v3-big{font-size:34px}
 .v3-budget .chips{gap:6px}

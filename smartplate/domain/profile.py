@@ -82,6 +82,12 @@ def meals_planned(user: dict) -> list[str]:
     return [m for m in MEALS if m in meals] if meals else list(MEALS)
 
 
+def eaters(user: dict) -> int:
+    """How many people a meal feeds (onboarding's "How many eat?"), 1 when never said."""
+    n = (user.get("prefs") or {}).get("eaters")
+    return int(n) if isinstance(n, int) and 1 <= n <= 10 else 1
+
+
 def daily_cap(user: dict) -> float | None:
     cap = (user.get("prefs") or {}).get("daily_cap")
     return float(cap) if cap else None
@@ -140,7 +146,7 @@ def validate_setup(body: dict) -> dict:
     """Normalise an onboarding / settings payload. Every field is optional except
     what a first-time profile needs; unknown keys are rejected."""
     allowed = {"name", "area", "diet", "allergens", "medical", "observances", "weekly_budget",
-               "daily_cap", "meals", "goal", "body", "favourites", "variety", "rating_floor", "cuisine_tilt"}
+               "daily_cap", "meals", "goal", "body", "favourites", "variety", "rating_floor", "cuisine_tilt", "eaters"}
     if not isinstance(body, dict):
         raise ValueError("Send a JSON object")
     extra = set(body) - allowed
@@ -195,6 +201,8 @@ def validate_setup(body: dict) -> dict:
         out["favourites"] = sorted(set(favs))
     if "cuisine_tilt" in body:
         out["cuisine_tilt"] = validate_tilt(body["cuisine_tilt"])
+    if "eaters" in body:                  # "How many eat?" (ux #15): the default portions per dish
+        out["eaters"] = _number(body["eaters"], "How many eat", 1, 10, integer=True)
     if out.get("daily_cap") and out.get("weekly_budget"):
         check_caps(out["weekly_budget"], out["daily_cap"])
     return out

@@ -133,6 +133,8 @@ def create_profile(body: dict) -> dict:
     prefs = {"setup_done": True, "meals": data["meals"], "daily_cap": data.get("daily_cap"),
              "goal": data["goal"], "body": data.get("body"), "area": data.get("area", ""),
              "cook": cook, "targets_working": working}
+    if data.get("eaters"):
+        prefs["eaters"] = data["eaters"]
     if rhythm:
         prefs["rhythm"] = rhythm
     with db.cursor() as cur:
@@ -181,7 +183,7 @@ def update_setup(user_id: int, body: dict) -> dict:
     for key in ("allergens", "medical", "observances"):
         if key in data:
             updates[key] = db.jd(data[key])
-    for key in ("meals", "daily_cap", "area", "cuisine_tilt"):
+    for key in ("meals", "daily_cap", "area", "cuisine_tilt", "eaters"):
         if key in data:
             prefs[key] = data[key]
     ht = dict(user["health_targets"])
@@ -216,6 +218,9 @@ def update_setup(user_id: int, body: dict) -> dict:
                     (*updates.values(), user_id))
     if "favourites" in data:
         taste.set_favourites(user_id, data["favourites"])
+    if "weekly_budget" in data and data["weekly_budget"] != user["weekly_budget"]:
+        from . import today
+        today.follow_week(user_id)
     view = service.current_plan(user_id)
     if "meals" in data:
         _sync_meals(view["plan"]["id"], data["meals"])

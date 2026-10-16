@@ -220,6 +220,13 @@ def plan_view(plan_id: int) -> dict:
     env = budget.envelope(cap, spend_rows)
     env["weekly_budget"] = user["weekly_budget"]
     env["prorated"] = cap < user["weekly_budget"]
+    # One budget model (r3): the weekly budget is the person's number; a day is a seventh of
+    # it; a plan made mid-week targets only the days it covers, and says which days those are.
+    _covered = optimizer.days_covered(plan)
+    env["daily"] = round(user["weekly_budget"] / 7, 2)
+    env["days_covered"] = _covered
+    env["covers"] = ("Mon–Sun" if _covered == 7 else
+                     ("Sun" if _covered == 1 else f"{models.DAYS[7 - _covered][:3]}–Sun"))
     env["daily_cap"] = profile.daily_cap(user)
     # A weekly TARGET for planning, not a hard cap on what's spent (critique 33): beside it, what
     # real Swiggy bills say was actually spent this week (never estimates).
