@@ -118,6 +118,12 @@ def create_profile(body: dict) -> dict:
         raise ValueError("Choose how often you cook")
     rhythm = _pop_rhythm(body)
     tuning = _pop_tuning(body)
+    # Founder rule "never auto-decide first" (usab audit 16 Oct #24): a new profile's week
+    # holds only what the person chose; the rest stays open until "Decide for me".
+    from . import config
+    week_fill = body.pop("week_fill", config.WEEK_FILL_DEFAULT) if isinstance(body, dict) else config.WEEK_FILL_DEFAULT
+    if week_fill not in ("chosen", "auto"):
+        raise ValueError("week_fill is chosen or auto")
     if rhythm:
         body["meals"] = [m for m in profile.MEALS if rhythm[m] != "skip"]
     data = profile.validate_setup(body)
@@ -132,7 +138,7 @@ def create_profile(body: dict) -> dict:
     _apply_tuning(nt, ht, tuning)
     prefs = {"setup_done": True, "meals": data["meals"], "daily_cap": data.get("daily_cap"),
              "goal": data["goal"], "body": data.get("body"), "area": data.get("area", ""),
-             "cook": cook, "targets_working": working}
+             "cook": cook, "targets_working": working, "week_fill": week_fill}
     if rhythm:
         prefs["rhythm"] = rhythm
     with db.cursor() as cur:
@@ -239,7 +245,8 @@ def _sync_meals(plan_id: int, meals: list[str]) -> None:
                 if (day, meal) not in have:
                     cur.execute("INSERT INTO sessions(plan_id, day, meal, scheduled_ts, status) "
                                 "VALUES (?,?,?,?, 'active')",
-                                (plan_id, day, meal, scheduler.trigger_ts(plan["week_start"], day, meal)))
+                                (plan_id, day, meal, scheduler.trigger_ts(plan["week_start"], day, meal,
+                                                                          models.meal_minute(meal, models.get_user(plan["user_id"])))))
 
 
 def suggest_budget(body: dict) -> dict:
@@ -508,6 +515,9 @@ def choose(session_id: int, body: dict) -> dict:
     with db.cursor() as cur:
         cur.execute("UPDATE sessions SET pinned=?, status='active', note='' WHERE id=?",
                     (db.jd(pin) if pin else None, session_id))
+    if pin and models.session_date(plan, session["day"]) == optimizer.now().date().isoformat():
+        from . import today as today_mod             # the Week's pick is now today's meal (usab #1)
+        today_mod.clear_pick(user["id"], session["meal"])
     optimizer.optimize(plan["id"])
     return service.plan_view(plan["id"])
 
@@ -526,7 +536,7 @@ def eat_now(plan_id: int, body: dict) -> dict:
     day = (at.date() - dt.date.fromisoformat(plan["week_start"])).days
     if not 0 <= day < 7:
         raise ValueError("This plan isn't for this week. Plan this week first")
-    ts = scheduler.trigger_ts(plan["week_start"], day, meal)
+    ts = scheduler.trigger_ts(plan["week_start"], day, meal, models.meal_minute(meal, models.get_user(plan["user_id"])))
     if dt.datetime.fromisoformat(ts) + scheduler.PAST_GRACE < at:
         raise ValueError(f"It's past {meal} time today. Pick your next meal instead")
     session = next((s for s in models.sessions_for_plan(plan_id) if s["day"] == day and s["meal"] == meal), None)

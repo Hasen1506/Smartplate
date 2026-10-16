@@ -28,7 +28,13 @@ def test_reminders_fire_at_order_by_and_before_cooking(client):
     for r in rows:
         c = cells[r["session_id"]]
         if c["kind"] == "delivery":
-            assert r["at"].endswith(c["order"]["order_at"]) and r["link"].startswith("https://www.swiggy.com/")
+            # usab #21: the nudge is when the Swiggy cart opens (window before order-by), or
+            # at order-by once that moment has passed; order_by always names the deadline
+            assert r["order_by"].endswith(c["order"]["order_at"]) and r["link"].startswith("https://www.swiggy.com/")
+            by = dt.datetime.fromisoformat(r["order_by"])
+            gap = (by - dt.datetime.fromisoformat(r["at"])).total_seconds() / 60
+            assert (r["kind"], gap) in (("cart_open", c["order"]["window_min"]), ("order_by", 0))
+            assert r["title"].startswith("Cart open: order " if r["kind"] == "cart_open" else "Order ")
         else:
             assert c["kind"] == "cook" and r["title"].startswith("Start cooking")
 

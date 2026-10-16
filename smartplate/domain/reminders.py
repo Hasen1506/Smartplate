@@ -18,7 +18,7 @@ import datetime as dt
 from icalendar import Alarm, Calendar, Event
 
 from .. import clock
-from . import models
+from . import models, timing
 
 COOK_LEAD_MIN = 45
 EVENT_MIN = 10
@@ -33,36 +33,61 @@ def _tz():
 
 
 def upcoming(view: dict, at: dt.datetime | None = None) -> list[dict]:
-    """The reminders a plan view implies, soonest first."""
+    """The reminders a plan view implies, soonest first.
+
+    A delivery meal's reminder fires when its Swiggy cart opens (timing.CART_WINDOW_MIN before
+    order-by), so the nudge lands when the person can act on it, not at the last minute
+    (usab audit 16 Oct #21). Once that moment has passed but order-by hasn't, the reminder
+    is at order-by. Today's cells already carry Today's picks (today.overlay_plan), so the
+    reminder names the dish the person picked on Today (#1)."""
     at = at or clock.now()
+    user = view.get("user") or {}
     out = []
     for day in view["grid"]:
         if "date" not in day:
             continue
         date = dt.date.fromisoformat(day["date"])
+        midnight = dt.datetime.combine(date, dt.time())
         for meal in models.MEALS:
             c = day["meals"].get(meal)
             if not c or c.get("status") != "active":
                 continue
+            extra = {}
             if c["kind"] == "delivery" and c.get("order"):
-                start = dt.datetime.combine(date, dt.time()) + dt.timedelta(minutes=c["order"]["order_at_min"])
-                title = f"Order {c['item']} · {c['restaurant']} · ₹{c['cost']:.0f}"
-                body = f"Order by {c['order']['order_at']}: {c['order']['why']}."
+                o = c["order"]
+                by = midnight + dt.timedelta(minutes=o["order_at_min"])
+                opens = by - dt.timedelta(minutes=int(o.get("window_min") or timing.CART_WINDOW_MIN))
+                start = opens if opens > at else by
+                price = f" · ₹{c['cost']:.0f}" if c.get("cost") else ""
+                where = f" · {c['restaurant']}" if c.get("restaurant") else ""
+                title = (f"Cart open: order {c['item']}{where}{price}" if start == opens
+                         else f"Order {c['item']}{where}{price}")
+                body = f"Order by {o['order_at']}: {o['why']}."
                 link = c.get("handoff_url")
+                extra = {"order_by": by.isoformat(timespec="minutes"), "kind": "cart_open" if start == opens else "order_by"}
             elif c["kind"] == "cook" and c.get("recipe_key"):
-                meal_min = models.MEAL_WINDOWS[meal][1]
-                start = dt.datetime.combine(date, dt.time()) + dt.timedelta(minutes=meal_min - COOK_LEAD_MIN)
+                meal_min = models.meal_minute(meal, user)
+                start = midnight + dt.timedelta(minutes=meal_min - COOK_LEAD_MIN)
                 title = f"Start cooking: {c['item'].removeprefix('Cook: ')}"
-                body = f"{meal.capitalize()} at {models.MEAL_WINDOWS[meal][1] // 60:02d}:{models.MEAL_WINDOWS[meal][1] % 60:02d}."
+                body = f"{meal.capitalize()} at {meal_min // 60:02d}:{meal_min % 60:02d}."
                 link = None
+                extra = {"kind": "cook"}
             else:
                 continue
             if start <= at:
                 continue
+            closes = midnight + dt.timedelta(minutes=models.meal_window(meal, user)[3])
             out.append({"session_id": c["session_id"], "meal": meal, "day": day["day"], "date": day["date"],
-                        "at": start.isoformat(timespec="minutes"), "title": title, "body": body, "link": link})
+                        "at": start.isoformat(timespec="minutes"), "title": title, "body": body, "link": link,
+                        "closes": closes.isoformat(timespec="minutes"), "today_pick": bool(c.get("today_pick")),
+                        **extra})
     out.sort(key=lambda r: r["at"])
     return out
+
+
+def for_meal(reminders: list[dict], date: str, meal: str) -> list[dict]:
+    """The one meal's reminder (a per-meal .ics, usab #22)."""
+    return [r for r in reminders if r["date"] == date and r["meal"] == meal]
 
 
 def to_ics(reminders: list[dict], *, plan_id: int, name: str = "Ziggy") -> bytes:

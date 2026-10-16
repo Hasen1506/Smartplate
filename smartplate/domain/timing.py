@@ -24,8 +24,14 @@ def hhmm(minutes: int) -> str:
     return f"{h:02d}:{m:02d}"
 
 
-def order_plan(meal: str, *, eta_min: int | None, time_shift: dict | None, condition: str = "clear") -> dict:
-    peak = MEAL_WINDOWS[meal][1]
+def order_plan(meal: str, *, eta_min: int | None, time_shift: dict | None, condition: str = "clear",
+               meal_min: int | None = None) -> dict:
+    """`meal_min`: the person's own time for this meal (models.meal_minute). A person who
+    eats at their own time isn't shifted to the usual off-peak slot."""
+    own = meal_min is not None and meal_min != MEAL_WINDOWS[meal][1]
+    peak = meal_min if meal_min is not None else MEAL_WINDOWS[meal][1]
+    if own:
+        time_shift = None
     arrive = time_shift["offpeak_min"] if time_shift else peak
     buffer = BASE_BUFFER_MIN + (BAD_WEATHER_EXTRA_MIN if condition in ("rain", "storm") else 0)
     order_at = arrive - (eta_min or 35) - buffer

@@ -32,8 +32,14 @@ MODES = {
     "favourites_new": "Favourites + new places at or above my rating",
     "surprise": "Surprise me (within my rules)",
 }
-DEFAULT_MIN_RATING = 4.0
-DEFAULT_MAX_ETA = 30
+# Ziggy's own defaults (usab audit 16 Oct #10): 4★ / 30 min greyed out a heavy user's real
+# favourites, so a new profile starts at any rating and up to 45 minutes; once the person's
+# own places say more (LEARN_MIN ratings or delivery times), the defaults follow their medians.
+DEFAULT_MIN_RATING = 0.0
+DEFAULT_MAX_ETA = 45
+LEARN_MIN = 3
+RATING_STEPS = (4.5, 4.0, 3.5)          # the rule chips (v3 MIN_RATINGS), strictest first
+ETA_STEPS = (20, 30, 45)                # the rule chips (v3 MAX_ETAS), tightest first
 BUDGET_PRESETS = (300, 600, 1000)
 MAX_QTY = 8
 MAX_TYPED_PER_MEAL = 20
@@ -82,6 +88,17 @@ CREATE TABLE IF NOT EXISTS today_cart_bills (     -- the real Swiggy cart bill o
     qty INTEGER NOT NULL,
     to_pay REAL NOT NULL,
     PRIMARY KEY (user_id, day, restaurant_id, item_id, qty)
+);
+CREATE TABLE IF NOT EXISTS meal_reminders (       -- "remind me" for one meal on one day (usab #22)
+    user_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    meal TEXT NOT NULL,
+    created_ts TEXT NOT NULL,
+    PRIMARY KEY (user_id, day, meal)
+);
+CREATE TABLE IF NOT EXISTS reminder_prefs (       -- push for every meal ("all") or only the ones asked for ("meals")
+    user_id INTEGER PRIMARY KEY,
+    scope TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS pool_meta (            -- quantity + what Swiggy showed when a dish was added
     user_id INTEGER NOT NULL,
@@ -152,19 +169,77 @@ def meals_today(user: dict) -> list[str]:
     return meals or list(MEALS)
 
 
+def _median(xs: list[float]) -> float:
+    xs = sorted(xs)
+    n = len(xs)
+    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+
+
+def _learned_rules(user_id: int) -> dict:
+    """Defaults learned from the person's own places: the rating and delivery time Swiggy
+    showed for the dishes they added, plus the ratings of places in their order history.
+    {"min_rating": x | None, "max_eta": n | None, "basis": str | None}; None = not enough
+    to go on. Headroom on purpose: a default must not grey out the places they use."""
+    ratings, etas = [], []
+    with db.cursor() as cur:
+        for r in cur.execute("SELECT rating, eta_min FROM pool_meta WHERE user_id=?", (user_id,)).fetchall():
+            if r["rating"]:
+                ratings.append(float(r["rating"]))
+            if r["eta_min"]:
+                etas.append(int(r["eta_min"]))
+        try:
+            ratings += [float(r["rating"]) for r in cur.execute(
+                "SELECT rating FROM swiggy_history_suggestions WHERE user_id=? AND rating IS NOT NULL",
+                (user_id,)).fetchall() if r["rating"]]
+        except Exception:                  # history table not there yet
+            pass
+    out = {"min_rating": None, "max_eta": None, "basis": None}
+    bits = []
+    if len(ratings) >= LEARN_MIN:
+        med = _median(ratings)
+        out["min_rating"] = next((x for x in RATING_STEPS if x <= med - 0.3), 0.0)
+        bits.append(f"your places are rated about {med:.1f}★")
+    if len(etas) >= LEARN_MIN:
+        med = _median(etas)
+        out["max_eta"] = next((x for x in ETA_STEPS if x >= med * 1.25), 0)
+        bits.append(f"they usually take about {med:.0f} min")
+    if bits:
+        out["basis"] = "Learned from your own places: " + " and ".join(bits) + "."
+    return out
+
+
 def settings(user_id: int) -> dict:
+    """The person's Today rules. Each of min_rating / max_eta is theirs once they set it
+    (source "you"); before that it is learned from their own places ("learned") or Ziggy's
+    default ("ziggy"), and the rules row says so."""
     init_schema()
     with db.cursor() as cur:
         row = cur.execute("SELECT * FROM today_settings WHERE user_id=?", (user_id,)).fetchone()
     row = dict(row) if row else {}
-    return {"min_rating": row.get("min_rating") if row.get("min_rating") is not None else DEFAULT_MIN_RATING,
-            "max_eta": row.get("max_eta") if row.get("max_eta") is not None else DEFAULT_MAX_ETA,
-            "nutrition": bool(row.get("nutrition"))}
+    learned = None
+    out, source = {}, {}
+    for key, default in (("min_rating", DEFAULT_MIN_RATING), ("max_eta", DEFAULT_MAX_ETA)):
+        if row.get(key) is not None:
+            out[key], source[key] = row[key], "you"
+            continue
+        learned = learned if learned is not None else _learned_rules(user_id)
+        if learned[key] is not None:
+            out[key], source[key] = learned[key], "learned"
+        else:
+            out[key], source[key] = default, "ziggy"
+    out["nutrition"] = bool(row.get("nutrition"))
+    out["source"] = source
+    out["defaults_basis"] = (learned or {}).get("basis") if "learned" in source.values() else None
+    return out
 
 
 def set_rules(user_id: int, body: dict) -> dict:
     _user(user_id)
-    now = settings(user_id)
+    init_schema()
+    with db.cursor() as cur:
+        row = cur.execute("SELECT * FROM today_settings WHERE user_id=?", (user_id,)).fetchone()
+    row = dict(row) if row else {}
+    now = {"min_rating": row.get("min_rating"), "max_eta": row.get("max_eta"), "nutrition": bool(row.get("nutrition"))}
     if "min_rating" in body:
         r = _num(body["min_rating"], 0, 5, "Minimum rating")
         now["min_rating"] = 0.0 if r is None else round(r, 1)
@@ -178,6 +253,149 @@ def set_rules(user_id: int, body: dict) -> dict:
                     "VALUES (?,?,?,?,?)", (user_id, now["min_rating"], now["max_eta"], int(now["nutrition"]),
                                             clock.now().isoformat(timespec="seconds")))
     return view(user_id)
+
+
+# --------------------------------------------------------------------------- meal times (usab #14)
+def _minute(value, meal: str) -> int | None:
+    from .domain import models
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        raise ValueError("Give a time like 21:30")
+    if isinstance(value, (int, float)):
+        m = int(value)
+    else:
+        txt = str(value).strip()
+        try:
+            h, mm = txt.split(":", 1)
+            m = int(h) * 60 + int(mm[:2])
+        except (ValueError, TypeError):
+            raise ValueError("Give a time like 21:30") from None
+    lo, hi = models.MEAL_TIME_RANGE[meal]
+    if not lo <= m <= hi:
+        raise ValueError(f"{meal.capitalize()} time must be between {lo // 60:02d}:{lo % 60:02d} "
+                         f"and {hi // 60:02d}:{hi % 60:02d}")
+    return m
+
+
+def _save_prefs(user_id: int, prefs: dict) -> None:
+    with db.cursor() as cur:
+        cur.execute("UPDATE users SET prefs=? WHERE id=?", (db.jd(prefs), user_id))
+
+
+def set_meal_times(user_id: int, body: dict) -> dict:
+    """{"dinner": "22:30"} sets when the person eats a meal (order-by, the cart window,
+    reminders and the Week all follow); null puts it back to Ziggy's usual time;
+    {"dismiss": true} answers the one-time question without changing anything."""
+    from .domain import models
+    from .kernel import scheduler
+    user = _user(user_id)
+    prefs = dict(user.get("prefs") or {})
+    times = dict(prefs.get("meal_times") or {})
+    changed = []
+    for meal in MEALS:
+        if meal not in (body or {}):
+            continue
+        m = _minute(body[meal], meal)
+        if m is None:
+            times.pop(meal, None)
+        else:
+            times[meal] = m
+        changed.append(meal)
+    if not changed and not (body or {}).get("dismiss"):
+        raise ValueError("Say which meal and when")
+    prefs["meal_times"] = times
+    prefs["meal_times_asked"] = True
+    _save_prefs(user_id, prefs)
+    user = _user(user_id)
+    monday = (clock.today() - dt.timedelta(days=clock.today().weekday())).isoformat()
+    with db.cursor() as cur:
+        plans = cur.execute("SELECT id, week_start FROM plans WHERE user_id=? AND week_start>=?",
+                            (user_id, monday)).fetchall()
+    for p in plans:
+        for meal in changed:
+            scheduler.retime(p["id"], p["week_start"], meal, models.meal_minute(meal, user))
+    return view(user_id)
+
+
+def meal_time_hint(user_id: int) -> dict | None:
+    """From the person's Swiggy order history (time-of-day buckets only, read with their
+    consent): most of their dinners come after 10 pm → suggest a late dinner."""
+    try:
+        with db.cursor() as cur:
+            rows = cur.execute("SELECT slot, times FROM swiggy_history_suggestions WHERE user_id=?",
+                               (user_id,)).fetchall()
+    except Exception:
+        return None
+    late = sum(int(r["times"] or 0) for r in rows if r["slot"] == "late")
+    dinner = sum(int(r["times"] or 0) for r in rows if r["slot"] == "dinner")
+    if late >= 2 and late > dinner:
+        return {"meal": "dinner", "at": "22:30",
+                "why": "Most of your recent Swiggy dinners were ordered after 10 pm."}
+    return None
+
+
+def _meal_times_view(user: dict, meals: list[str]) -> dict:
+    from .domain import models
+    out = {}
+    for m in MEALS:
+        mm = models.meal_minute(m, user)
+        out[m] = {"at": f"{mm // 60:02d}:{mm % 60:02d}", "own": models.has_own_time(m, user)}
+    return out
+
+
+def _ask_meal_time(user: dict, meals: list[str]) -> dict | None:
+    """Ask once: "When do you usually eat dinner?" (dinner is the meal people eat late)."""
+    from .domain import models
+    prefs = user.get("prefs") or {}
+    if "dinner" not in meals or prefs.get("meal_times_asked") or models.has_own_time("dinner", user):
+        return None
+    hint = meal_time_hint(user["id"])
+    return {"meal": "dinner", "options": ["20:00", "21:00", "22:00", "23:00"], "hint": hint}
+
+
+# --------------------------------------------------------------------------- reminders for one meal (usab #22)
+def set_meal_reminder(user_id: int, meal, on=True) -> dict:
+    """Remember that the person wants a nudge for today's `meal` (push sends only those
+    meals unless they turned on reminders for every meal)."""
+    _user(user_id)
+    meal = _meal(meal)
+    init_schema()
+    with db.cursor() as cur:
+        if on:
+            cur.execute("INSERT OR REPLACE INTO meal_reminders(user_id, day, meal, created_ts) VALUES (?,?,?,?)",
+                        (user_id, _today(), meal, clock.now().isoformat(timespec="seconds")))
+            if not cur.execute("SELECT 1 FROM reminder_prefs WHERE user_id=?", (user_id,)).fetchone():
+                cur.execute("INSERT INTO reminder_prefs(user_id, scope) VALUES (?, 'meals')", (user_id,))
+        else:
+            cur.execute("DELETE FROM meal_reminders WHERE user_id=? AND day=? AND meal=?", (user_id, _today(), meal))
+    return view(user_id)
+
+
+def set_reminder_scope(user_id: int, scope: str) -> None:
+    if scope not in ("all", "meals"):
+        raise ValueError("Reminders are for every meal or only the meals you ask for")
+    init_schema()
+    with db.cursor() as cur:
+        cur.execute("INSERT OR REPLACE INTO reminder_prefs(user_id, scope) VALUES (?,?)", (user_id, scope))
+
+
+def reminder_filter(user_id: int):
+    """None when every meal's reminder goes out (the default, and "all"); else the set of
+    (date, meal) the person asked a reminder for."""
+    init_schema()
+    with db.cursor() as cur:
+        row = cur.execute("SELECT scope FROM reminder_prefs WHERE user_id=?", (user_id,)).fetchone()
+        if not row or row["scope"] != "meals":
+            return None
+        return {(r["day"], r["meal"]) for r in cur.execute(
+            "SELECT day, meal FROM meal_reminders WHERE user_id=?", (user_id,)).fetchall()}
+
+
+def _reminded(user_id: int) -> set[str]:
+    with db.cursor() as cur:
+        return {r["meal"] for r in cur.execute("SELECT meal FROM meal_reminders WHERE user_id=? AND day=?",
+                                               (user_id, _today())).fetchall()}
 
 
 def budget_for(user: dict) -> dict:
@@ -254,7 +472,9 @@ def _hard_reason(user: dict, name: str, veg, allergens=None) -> str | None:
     reason = allergen_rules.violates(user, item)
     # unmarked (typed, no veg answer) is "not marked", never "marked non-veg" (W1's wording for veg=0)
     if reason and veg is None and reason.lower().startswith(("not ", "marked non-veg")):
-        return f"Not marked {user.get('diet')}"
+        word = {"jain": "veg (Jain)", "egg": "veg or egg"}.get(user.get("diet"),
+                                                                                                 user.get("diet"))
+        return f"Not marked {word}"
     return cap(reason) if reason else None
 
 
@@ -480,7 +700,95 @@ def pick(user_id: int, meal, ref, qty=None) -> dict:
         raise ValueError(f"{entry['name']} breaks your food rules: {entry['reasons'][0]}")
     with db.cursor() as cur:
         _save_pick(cur, user_id, meal, entry, _qty(qty or entry["qty"]), "you")
+    _unpin_today(user_id, meal)
     return view(user_id)
+
+
+# --------------------------------------------------------------------------- one truth for today (usab #1)
+def _today_sessions(user_id: int) -> dict:
+    """{meal: session row} of the plan covering today (light: no plan view, no solve)."""
+    today = clock.today()
+    monday = (today - dt.timedelta(days=today.weekday())).isoformat()
+    try:
+        with db.cursor() as cur:
+            rows = cur.execute("SELECT s.id, s.meal, s.status, s.pinned FROM sessions s JOIN plans p ON p.id=s.plan_id "
+                               "WHERE p.user_id=? AND p.week_start=? AND s.day=? ORDER BY p.id DESC",
+                               (user_id, monday, today.weekday())).fetchall()
+    except Exception:
+        return {}
+    out = {}
+    for r in rows:
+        out.setdefault(r["meal"], dict(r))
+    return out
+
+
+def _unpin_today(user_id: int, meal: str) -> None:
+    """A pick on Today is the person's latest word on today's meal: an older Week pick
+    (a pin) for the same meal gives way, so the Week shows Today's pick."""
+    s = _today_sessions(user_id).get(meal)
+    if s and s.get("pinned") and s["status"] == "active":
+        with db.cursor() as cur:
+            cur.execute("UPDATE sessions SET pinned=NULL WHERE id=?", (s["id"],))
+
+
+def clear_pick(user_id: int, meal: str) -> None:
+    """The Week chose today's meal (a pin): that's now the person's latest word."""
+    init_schema()
+    with db.cursor() as cur:
+        cur.execute("DELETE FROM today_picks WHERE user_id=? AND day=? AND meal=?", (user_id, _today(), meal))
+
+
+def picked_today(user_id: int) -> set[str]:
+    init_schema()
+    with db.cursor() as cur:
+        return {r["meal"] for r in cur.execute("SELECT meal FROM today_picks WHERE user_id=? AND day=?",
+                                               (user_id, _today())).fetchall()}
+
+
+def overlay_decisions(user: dict, plan: dict, decisions: list[dict]) -> None:
+    """Put today's picks into the plan's decisions for today (read model only), so the Week
+    cell, the week's money and the reminders all name the dish picked on Today. A meal the
+    Week holds on its own (kept/pinned, carted with a real bill, ordered, skipped, past)
+    stays as the Week has it."""
+    from .domain import models
+    today = _today()
+    rows = [d for d in decisions if models.session_date(plan, d["day"]) == today]
+    if not rows:
+        return
+    init_schema()
+    picks = _picks(user["id"])
+    if not picks:
+        return
+    bills, rule = _cart_bills(user["id"]), _fee_rule(user["id"])
+    for d in rows:
+        p = picks.get(d["meal"])
+        if (not p or d.get("session_status") != "active" or d.get("pinned") or d.get("past")
+                or d.get("real_bill")):
+            continue
+        total, basis = _total(p, p["qty"], bills, rule)
+        cook = p.get("kind") == "cook"
+        d.update({"chosen_kind": "cook" if cook else "delivery",
+                  "item_name": (f"{p['qty']}× " if p["qty"] > 1 else "") + p["name"],
+                  "restaurant_name": p.get("restaurant") or ("" if cook else "Your own dish"),
+                  "cost": float(total) if total is not None else 0.0,
+                  "item_id": p.get("item_id") if p.get("source") == "swiggy" else None,
+                  "recipe_key": p.get("recipe_key") if cook else None,
+                  "time_shift": None, "substituted": False, "delivery_fee": None, "charges": None,
+                  "nutrition": {}, "carbon_kg": 0.0,
+                  "reasons": ["Your pick on Today" if p.get("how") == "you" else "Picked on Today (Decide for me)"],
+                  "today_pick": True, "pick_ref": p["ref"], "today_eta": p.get("eta_min"),
+                  "today_total_basis": basis})
+
+
+def _when(user: dict, meal: str, p: dict, condition: str = "clear") -> dict:
+    """When to order today's pick: the same arithmetic the Week uses (timing.order_plan +
+    order_status) at the person's own meal time, so Today and Week agree to the minute."""
+    from .domain import models, timing
+    own = models.meal_minute(meal, user)
+    order = timing.order_plan(meal, eta_min=p.get("eta_min"), time_shift=None, condition=condition,
+                              meal_min=own if models.has_own_time(meal, user) else None)
+    order.update(timing.order_status(clock.today(), order, clock.now(), meal_min=own))
+    return order
 
 
 def _cost(e: dict, qty: int) -> float:
@@ -678,14 +986,34 @@ def decide(user_id: int, mode: str) -> dict:
             _save_pick(cur, user_id, meal, e, _qty(qty), how)
             filled.append(meal)
             why[meal] = p.get("why")
-    note = None
+    note, actions = None, []
     if missing:
+        from .domain import live_catalog
+        live = live_catalog.has_live(user_id)
+        tail = " Add dishes to the pool or change today's budget."
+        empty = 0
+        for m in missing:
+            entries = pool.get(m) or []
+            if entries and all(e["hard"] for e in entries):
+                # usab #28: every favourite breaks a food rule: say which, and what to do
+                e0 = entries[0]
+                reasons[m] = f"No safe {m} in your favourites ({e0['name']}: {e0['reasons'][0]})."
+                empty += 1
+                actions.append({"act": "add", "meal": m, "label": f"Add a {m}"})
+            elif not entries:
+                reasons[m] = f"No {m} in your favourites yet."
+                empty += 1
+                actions.append({"act": "add", "meal": m, "label": f"Add a {m}"})
+        if empty == len(missing):
+            tail = " Add one" + (" or try Surprise me." if live and engine_mode != "surprise_me" else ".")
+        if actions and live and engine_mode != "surprise_me":
+            actions.append({"act": "surprise", "label": "Surprise me"})
         note = (f"Couldn't fill {' and '.join(missing)}: "
-                + " ".join(reasons[m][:1].upper() + reasons[m][1:] for m in missing)
-                + " Add dishes to the pool or change today's budget.")
+                + " ".join(reasons[m][:1].upper() + reasons[m][1:] for m in missing) + tail)
     return {**view(user_id), "decided": {"mode": ui_mode, "engine_mode": engine_mode, "label": MODES[ui_mode],
                                          "filled": filled, "missing": missing, "reasons": reasons, "why": why,
-                                         "note": note, "spent": out["spent"], "money": out["money"]}}
+                                         "note": note, "actions": actions,
+                                         "spent": out["spent"], "money": out["money"]}}
 
 
 # --------------------------------------------------------------------------- read model
@@ -803,6 +1131,15 @@ def view(user_id: int) -> dict:
                    "basis": "Dish prices on Swiggy's menu; fees, taxes and delivery show in the Swiggy cart."}
     # The v3 budget card's "₹X left after fees" (estimate | real bill): only with a Swiggy pick;
     # without one there are no fees and the plain "left" is already the whole story.
+    wx = _weather(user)
+    sessions = _today_sessions(user_id)
+    reminded = _reminded(user_id)
+    for m, p in picks.items():
+        if m in meals and p.get("kind", "order") == "order":
+            p["when"] = _when(user, m, p, wx.get("condition") or "clear")
+            s = sessions.get(m)
+            p["when"]["session_id"] = s["id"] if s else None
+            p["when"]["reminder"] = m in reminded
     swiggy_bases = [p["total_basis"] for m, p in picks.items()
                     if m in meals and p.get("total_basis") in ("estimate", "swiggy_cart")]
     left = round(b["amount"] - picked, 2)
@@ -821,7 +1158,10 @@ def view(user_id: int) -> dict:
                    "picked_bill": bill_total,
                    "bill_estimated": any(p.get("total_basis") == "estimate" for p in priced)},
         "recap": _recap(user),
-        "weather": _weather(user),
+        "weather": wx,
+        "meal_times": _meal_times_view(user, meals),
+        "ask_meal_time": _ask_meal_time(user, meals),
+        "other_meals": [m for m in MEALS if m not in meals],
         "rules": {"diet": user.get("diet"), "allergens": user.get("allergens") or [],
                   "medical": user.get("medical") or [], **rules},
         "pools": pool, "picks": {m: picks[m] for m in meals if m in picks},

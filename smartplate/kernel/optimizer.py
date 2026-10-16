@@ -208,6 +208,10 @@ def build_context(user: dict, plan: dict) -> dict:
         # how far calories may drift before the nutrition term bites — the mode's
         # "what's allowed to give" knob (config.MODE_META).
         "nutri_tol": config.mode_meta(plan["mode"])["nutri_tol"],
+        # "Never auto-decide first" (founder; usab audit 16 Oct #24): a profile that fills its
+        # week only with what the person chose leaves every other meal open until they tap
+        # "Decide for me" (whose picks become pins) or choose a dish themselves.
+        "chosen_only": (user.get("prefs") or {}).get("week_fill") == "chosen",
     }
 
 
@@ -432,6 +436,9 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     fasting = health.in_fasting_window(user, scheduled_min)
     cands = []
     pool = (ctx.get("pools") or {}).get(meal)
+    chosen_only = ctx.get("chosen_only") and not ctx.get("allow_cheaper")
+    if chosen_only and (fasting or not pool or not pool.get("ids")):
+        return [_skip(forced=True, reason=OPEN_REASON.format(meal=meal))]
     if not fasting and pool:
         # The person's own pool for this meal: its dishes first, hard rules still apply.
         # (Their pick, so the treat filter and rating floor don't second-guess it.)
@@ -444,7 +451,7 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
         # eating (said so), or when the run was asked to (ctx["allow_cheaper"]: a
         # Decide-for-me mode the person chose). A list that's too dear for the money left
         # is not swapped: the meal is left for the person to build out (buildout.py).
-        if not safe or ctx.get("allow_cheaper"):
+        if (not safe and not chosen_only) or ctx.get("allow_cheaper"):
             cands += _pool_fallback(user, plan, session, ctx, pool, safe_all, unsafe_pool=not safe)
     elif not fasting:
         safe = allergens.safe_items(user, ctx["menu"])             # §5.1.1 hard
@@ -485,7 +492,7 @@ def build_candidates(user: dict, plan: dict, session: dict, ctx: dict) -> list[d
     # the flexible "cook 1–2× a week" days only go to meals they didn't say they order.
     # Tight Week (asked for explicitly) still offers a labelled home-cook instead of a skip.
     ordered = rhythm(user).get(meal) == "order" and not ctx.get("tight")
-    cook = None if ordered else _cook_candidate(user, session, ctx)
+    cook = None if ordered or chosen_only else _cook_candidate(user, session, ctx)
     if cook:
         cands.append(cook)
 
@@ -575,6 +582,11 @@ def _empty_pool_reason(user, ctx, pool, meal) -> str:
                 f"places is. Add a {meal} dish that suits everyone.")
     return (f"Nothing in your {meal} pool is on Swiggy's menu right now, or safe for your rules. "
             f"Add another dish to your {meal} pool.")
+
+
+# A meal the person hasn't chosen anything for (chosen-only weeks): open, not "skipped".
+OPEN_PREFIX = "Not chosen yet"
+OPEN_REASON = OPEN_PREFIX + ": add a usual {meal} or tap Decide for me."
 
 
 def _skip(forced: bool, reason: str) -> dict:

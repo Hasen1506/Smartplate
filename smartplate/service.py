@@ -34,15 +34,16 @@ def create_plan(user_id: int, mode: str | None = None, week_start: str | None = 
             "INSERT INTO plans(user_id, week_start, mode, status, created_ts) VALUES (?,?,?,?,?)",
             (user_id, ws, mode, "active", optimizer.now().isoformat()))
         plan_id = cur.lastrowid
-    scheduler.build_week(plan_id, ws, meals=profile.meals_planned(user))
+    scheduler.build_week(plan_id, ws, meals=profile.meals_planned(user),
+                         minutes={m: models.meal_minute(m, user) for m in models.MEALS})
     optimizer.optimize(plan_id)
     return plan_id
 
 
-def _meal_ahead(date: dt.date, meals, at: dt.datetime) -> bool:
+def _meal_ahead(date: dt.date, meals, at: dt.datetime, user: dict | None = None) -> bool:
     """Is any of these meals on `date` still ahead (its time + grace not yet passed)?"""
-    return any(dt.datetime.fromisoformat(scheduler.trigger_ts(date.isoformat(), 0, m)) + scheduler.PAST_GRACE >= at
-               for m in meals)
+    return any(dt.datetime.fromisoformat(scheduler.trigger_ts(date.isoformat(), 0, m, models.meal_minute(m, user)))
+               + scheduler.PAST_GRACE >= at for m in meals)
 
 
 def _plan_week_start(user_id: int) -> str:
@@ -54,7 +55,7 @@ def _plan_week_start(user_id: int) -> str:
     monday = today - dt.timedelta(days=today.weekday())
     user = models.get_user(user_id)
     meals = profile.meals_planned(user) if user else models.MEALS
-    start = monday if (today.weekday() < 6 or _meal_ahead(today, meals, at)) else monday + dt.timedelta(days=7)
+    start = monday if (today.weekday() < 6 or _meal_ahead(today, meals, at, user)) else monday + dt.timedelta(days=7)
     with db.cursor() as cur:
         taken = {r["week_start"] for r in cur.execute("SELECT week_start FROM plans WHERE user_id=?", (user_id,))}
     while start.isoformat() in taken:                    # "plan another week" → the following one
@@ -91,12 +92,12 @@ def current_plan(user_id):
     row = rows[0] if rows else None
     if row:
         end = dt.date.fromisoformat(row['week_start']) + dt.timedelta(days=7)
-        if end <= today or (end == today + dt.timedelta(days=1) and not _meal_ahead(today, meals, at)):
+        if end <= today or (end == today + dt.timedelta(days=1) and not _meal_ahead(today, meals, at, user)):
             row = None
     view = plan_view(row['id'] if row else create_plan(user_id))
     covering = next((r for r in rows if dt.date.fromisoformat(r['week_start']) <= today
                      < dt.date.fromisoformat(r['week_start']) + dt.timedelta(days=7)), None)
-    if covering and covering['id'] != view['plan']['id'] and _meal_ahead(today, meals, at):
+    if covering and covering['id'] != view['plan']['id'] and _meal_ahead(today, meals, at, user):
         view['today_plan_id'] = covering['id']
     return view
 
@@ -116,8 +117,8 @@ def update_preferences(user_id, body):
             raise ValueError('Enter a name of 1–80 characters')
         updates['name'] = body['name'].strip()
     if 'diet' in body:
-        if body['diet'] not in ('veg', 'nonveg', 'vegan'):
-            raise ValueError('Choose vegetarian, non-vegetarian, or vegan')
+        if body['diet'] not in profile.DIETS:
+            raise ValueError('Choose vegetarian, eggetarian, Jain, non-vegetarian, or vegan')
         updates['diet'] = body['diet']
     if 'name' in body and not user.get('access_hash'):
         raise ValueError("Sample profiles are shared by every visitor, so their name can't be changed. "
@@ -214,6 +215,10 @@ def plan_view(plan_id: int) -> dict:
             d["planned_cost"] = r["planned_cost"] if r["planned_cost"] is not None else d["cost"]
             d["cost"] = r["to_pay"]
             d["real_bill"] = True
+    # One source of truth for today (usab audit 16 Oct #1): what the person picked on Today
+    # is today's meal in the Week, its money and its reminder.
+    from . import today as today_mod
+    today_mod.overlay_decisions(user, plan, decisions)
     # a past meal the user never confirmed is unknown, not spent (reconcile, don't assume)
     spend_rows = [d for d in decisions if d["chosen_kind"] in ("delivery", "cook") and not d["past"]]
     cap = optimizer.week_cap(user, plan)
@@ -408,18 +413,23 @@ def _counts(decisions):
     return c
 
 
-def _meal_min(d: dict) -> int:
-    """Minute of the day a planned meal arrives: its off-peak slot, else the usual time."""
+def _meal_min(d: dict, user: dict | None = None) -> int:
+    """Minute of the day a planned meal arrives: the person's own meal time when they set
+    one (usab #14), else its off-peak slot, else the usual time."""
+    if models.has_own_time(d["meal"], user):
+        return models.meal_minute(d["meal"], user)
     ts = d.get("time_shift") or {}
     return int(ts.get("offpeak_min") or models.MEAL_WINDOWS[d["meal"]][1])
 
 
-def order_info(d: dict, plan: dict, *, eta_min, condition: str, at: dt.datetime) -> dict:
+def order_info(d: dict, plan: dict, *, eta_min, condition: str, at: dt.datetime, user: dict | None = None) -> dict:
     """A delivery meal's order-by plan plus *when*, on the meal's own date: the absolute
     order-by instant (countdown target), its label, and the Swiggy cart window."""
-    order = timing.order_plan(d["meal"], eta_min=eta_min, time_shift=d.get("time_shift"), condition=condition)
+    own = models.meal_minute(d["meal"], user) if models.has_own_time(d["meal"], user) else None
+    order = timing.order_plan(d["meal"], eta_min=eta_min, time_shift=d.get("time_shift"), condition=condition,
+                              meal_min=own)
     order.update(timing.order_status(dt.date.fromisoformat(models.session_date(plan, d["day"])), order, at,
-                                     meal_min=_meal_min(d)))
+                                     meal_min=_meal_min(d, user)))
     return order
 
 
@@ -436,7 +446,8 @@ def session_order_status(session_id: int, at: dt.datetime | None = None) -> dict
     with db.cursor() as cur:
         row = cur.execute("SELECT eta_min FROM restaurants WHERE id=?", (d.get("restaurant_id"),)).fetchone()
     cond = weather.week(user["city"], plan["week_start"]).get(d["day"], {}).get("condition", "clear")
-    return order_info(d, plan, eta_min=row["eta_min"] if row else None, condition=cond, at=at or optimizer.now())
+    return order_info(d, plan, eta_min=row["eta_min"] if row else None, condition=cond, at=at or optimizer.now(),
+                      user=user)
 
 
 def require_cart_window(session_id: int, at: dt.datetime | None = None) -> None:
@@ -479,11 +490,17 @@ def _grid(decisions, *, plan=None, user=None, wx=None, sig=None, at=None):
                      "rating_given": ratings.get(d["session_id"]),
                      "reasons_given": reasons.get(d["session_id"], []),
                      "usual": bool(sig and d.get("restaurant_id") in sig["favourites"]),
-                     "pooled": d.get("item_id") in (pools.get(d["meal"]) or {}).get("ids", ())}
+                     "pooled": bool(d.get("today_pick")) or d.get("item_id") in (pools.get(d["meal"]) or {}).get("ids", ())}
+            if d.get("today_pick"):                    # Today's pick is this meal (usab #1)
+                extra.update(today_pick=True, usual=True, pick_ref=d.get("pick_ref"))
+            if d["chosen_kind"] in ("skip", "skipped") and str((d.get("reasons") or [""])[0]).startswith(
+                    optimizer.OPEN_PREFIX):
+                extra["open"] = True
             if d["chosen_kind"] == "delivery":
                 cond = (wx or {}).get(d["day"], {}).get("condition", "clear")
-                extra["order"] = order_info(d, plan, eta_min=etas.get(d.get("restaurant_id")), condition=cond,
-                                            at=at or optimizer.now())
+                eta = d.get("today_eta") if d.get("today_pick") else etas.get(d.get("restaurant_id"))
+                extra["order"] = order_info(d, plan, eta_min=eta, condition=cond,
+                                            at=at or optimizer.now(), user=user)
                 extra["handoff_url"] = timing.swiggy_handoff(d.get("restaurant_name") or "", d.get("item_name") or "")
                 if d.get("delivery_fee") is not None:   # live dish: estimated until a real bill shows the fee
                     extra["delivery_fee"] = {"amount": d["delivery_fee"], "estimated": bool(d.get("fee_estimated"))}
@@ -890,10 +907,17 @@ def _decide_slots(user: dict, plan: dict, sessions: list[dict], people: list[dic
 
 
 def _open_sessions(plan_id: int, *, day: int | None = None) -> list[dict]:
+    """Meals still open for "Decide for me": not pinned, not past, and not one the person
+    already picked on Today (that pick is today's meal: usab #1)."""
     at = optimizer.now()
+    plan = models.get_plan(plan_id)
+    from . import today as today_mod
+    picked = today_mod.picked_today(plan["user_id"]) if plan else set()
+    today_iso = at.date().isoformat()
     return [s for s in models.sessions_for_plan(plan_id)
             if s["status"] == "active" and not s.get("pinned") and not scheduler.is_past(s, at)
-            and (day is None or s["day"] == day)]
+            and (day is None or s["day"] == day)
+            and not (s["meal"] in picked and models.session_date(plan, s["day"]) == today_iso)]
 
 
 def _decide(user: dict, plan: dict, sessions: list[dict], *, mode: str, money: float, money_word: str,
