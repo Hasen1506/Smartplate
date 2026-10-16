@@ -23,6 +23,7 @@ each with a reason code and plain words).
 """
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 
 from . import food_lexicon
@@ -56,6 +57,45 @@ MEDICAL_INSTRUCTIONS = {
     "hypertension": "less salt — no extra salt",
 }
 
+# Jain / no onion-garlic diet (usab audit 16 Oct #11): onion, garlic and the root vegetables a
+# Jain diet leaves out, in English and the Hindi, Tamil, Telugu, Kannada and Malayalam names a
+# Chennai menu uses. Read over the dish name like the food lexicon; a hit rules the dish out.
+JAIN_WORDS = (
+    (r"onions?|spring onions?|shallots?|scallions?|leeks?", "onion"),
+    (r"pyaa?z|pyaaz|kanda|kaanda|vengayam|vengaya|vengaaya|chinna vengayam|ulli|eerulli|erulli|"
+     r"neerulli|ullipaya|ullipaaya|savala", "onion"),
+    (r"garlic|garlicky", "garlic"),
+    (r"lehsun|lahsun|lasun|lehsuni|lasooni|lasuni|poondu|vellulli|velluli|veluthulli|belluli|"
+     r"bellulli", "garlic"),
+    (r"potato(es)?|aloo|alu|batata|urulai|urulaikizhangu|urulai kizhangu|bangaladumpa|aalugadde",
+     "potato (a root vegetable, not Jain)"),
+    (r"carrots?|gajar|radish|mooli|mullangi|beet ?root|beets?|sweet potato|shakarkandi|sakkaravalli|"
+     r"yam|suran|senai|kizhangu|arbi|seppankizhangu|ginger|adrak|inji|turnip|shalgam",
+     "a root vegetable (not Jain)"),
+)
+_JAIN_RE = [(re.compile(r"\b(" + rx + r")\b"), gloss) for rx, gloss in JAIN_WORDS]
+# Phrases that say the dish is made without them.
+_JAIN_OK = re.compile(r"\b(jain|no onion|without onion|no garlic|without garlic|"
+                                    r"satvik|sattvic|swaminarayan)\b")
+JAIN_NOTE = ("Restaurants often cook with onion and garlic even when the name doesn't say so: ask for "
+             "Jain preparation (no onion, garlic or root vegetables).")
+JAIN_INSTRUCTION = "Jain: no onion, no garlic, no root vegetables"
+
+
+def jain_hit(name: str) -> str | None:
+    """Plain words for the first onion / garlic / root-vegetable word in a dish name, else None
+    ("Aloo means potato (a root vegetable, not Jain)"). "Jain …" / "no onion" dishes pass."""
+    n = food_lexicon.normalise(name)
+    if not n or _JAIN_OK.search(n):
+        return None
+    for rx, gloss in _JAIN_RE:
+        m = rx.search(n)
+        if m:
+            w = m.group(1)
+            return f"The name says “{w}”" if w.rstrip("s") in (gloss, gloss.split(" ")[0]) else f"{w.capitalize()} means {gloss}"
+    return None
+
+
 NOT_CHECKED = ("Not checked: Ziggy reads dish names, not recipes, and Swiggy doesn't list allergens or "
                "nutrition. Ask the restaurant before you order.")
 MEDICAL_NOTE = "Health filters are a convenience, not medical advice."
@@ -71,6 +111,8 @@ def order_instructions(user: dict, item: dict | None = None) -> list[str]:
     plain dal), keeping the note set tight.
     """
     notes: list[str] = []
+    if user.get("diet") == "jain":                    # the kitchen is asked, every order (#11)
+        notes.append(JAIN_INSTRUCTION)
     for condition in user.get("medical", []):
         msg = MEDICAL_INSTRUCTIONS.get(condition)
         if not msg:
@@ -212,10 +254,26 @@ def _check_one(person: dict, item: dict) -> dict | None:
         return _verdict("unsafe", "celiac", f"{_allergen_words(item, 'gluten')} (celiac)")
 
     diet = person.get("diet") or "nonveg"
-    if diet in ("veg", "vegan"):
+    if diet in ("veg", "vegan", "jain"):
         state, why = _veg_state(item)
+        word = "Jain" if diet == "jain" else diet
         if state == "nonveg":
-            return _verdict("unsafe", "not_veg", f"{why} (not {diet})")
+            return _verdict("unsafe", "not_veg", f"{why} (not {word})")
+        if state == "unknown":
+            return _verdict("unknown", "veg_unknown", why)
+    if diet == "jain":
+        hit = jain_hit(_name(item)) or (jain_hit(item.get("description") or "") if item.get("description") else None)
+        if hit:
+            return _verdict("unsafe", "not_jain", f"{hit} (Jain / no onion-garlic)")
+    if diet == "egg":
+        meat = [h for h in reading(item).hits if h.kind == "nonveg"]
+        if meat:
+            return _verdict("unsafe", "not_eggetarian", f"{meat[0].words} (eggetarian: no meat or fish)")
+        state, why = _veg_state(item)
+        if state == "nonveg" and not (reading(item).egg or "egg" in set(item.get("allergens") or [])):
+            return _verdict("unknown", "egg_unknown",
+                            "Swiggy marks it non-veg and its name doesn't say egg, so Ziggy can't tell it has no "
+                            "meat or fish")
         if state == "unknown":
             return _verdict("unknown", "veg_unknown", why)
     if diet == "vegan":
@@ -261,6 +319,8 @@ def check(user: dict, item: dict) -> dict:
     cautious = any(p.get("allergens") or p.get("medical") or p.get("diet") == "vegan" for p in people)
     if cautious and _basis(item) != "provider":
         return _verdict("not_checked", "not_checked", NOT_CHECKED)
+    if any(p.get("diet") == "jain" for p in people) and _basis(item) != "provider":
+        return _verdict("not_checked", "jain_not_checked", JAIN_NOTE)
     return _verdict("ok", "ok", "")
 
 

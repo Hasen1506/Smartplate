@@ -680,7 +680,7 @@ def live_menu(user_id: int, restaurant_id: str, restaurant_name: str, *, screen:
                     known["categories"].append(c)
             continue
         veg = _row_veg(row)
-        if user["diet"] in ("veg", "vegan") and veg in (False, 0):
+        if user["diet"] in ("veg", "vegan", "jain") and veg in (False, 0):
             hidden += 1
         name = str(_get(row, "name"))
         desc = row.get("description") if isinstance(row.get("description"), str) else None
@@ -728,7 +728,7 @@ def search_live_dishes(user_id: int, restaurant_id: str, restaurant_name: str, q
     if not _find(props, "restaurant_scope") or (offset and not _find(props, "offset")):
         raise SwiggyError("Swiggy did not offer scoped menu pagination. Refresh tools or search in Swiggy.")
     from ..domain import models
-    vegetarian = models.get_user(user_id)["diet"] in ("veg", "vegan")
+    vegetarian = models.get_user(user_id)["diet"] in ("veg", "vegan", "jain")
     result = call(user_id, "search_menu", build_args(tool, {"query": query, "address": _address(conn),
                     "restaurant_scope": restaurant_id, "offset": offset, "veg_filter": 1 if vegetarian else 0}))
     body = result.get("data", result) if isinstance(result, dict) else {}
@@ -817,7 +817,7 @@ def menu_for(user_id: int, restaurant: str, *, fresh: bool = False) -> dict:
     m = menu(user_id, restaurant, fresh=fresh)
     user = models.get_user(user_id) or {}
     diet = user.get("diet")
-    marked = sum(1 for i in m["items"] if diet in ("veg", "vegan") and i["veg"] is False)
+    marked = sum(1 for i in m["items"] if diet in ("veg", "vegan", "jain") and i["veg"] is False)
     items, not_for_you, by_code = _screen(user, m["items"])
     return {**m, "items": items, "hidden_nonveg": marked, "hidden": len(not_for_you),
             "hidden_items": not_for_you, "hidden_by": by_code, "diet": diet}
@@ -930,7 +930,7 @@ def cart_preview(session_id: int, part: int = 1) -> dict:
     if _has_options(item):
         raise SwiggyError("This dish needs options or add-ons Ziggy cannot safely choose. "
                           "Customize it in Swiggy instead.")
-    if any(p.get("diet") == "veg" for p in eating) and _get(item, "veg") not in (True, 1):
+    if any(p.get("diet") in ("veg", "jain") for p in eating) and _get(item, "veg") not in (True, 1):
         raise SwiggyError("Swiggy did not verify this dish as vegetarian. Check it in Swiggy before ordering.")
     item_id = _get(item, "menu_item_id")
     details = {"session_id": session_id, "planned": cell["item"], "planned_restaurant": cell["restaurant"],
@@ -1081,7 +1081,7 @@ def live_cart_preview(user_id: int, restaurant_id: str, restaurant_name: str,
         blocked = "Swiggy did not confirm this dish is in stock. Refresh the menu or check it in Swiggy."
     elif _has_options(item):
         blocked = "This dish needs options that Ziggy cannot choose yet. Customize it in Swiggy."
-    elif user["diet"] == "veg" and _get(item, "veg") not in (True, 1):
+    elif user["diet"] in ("veg", "jain") and _get(item, "veg") not in (True, 1):
         blocked = "Swiggy did not verify this dish as vegetarian. Check it in Swiggy."
     cap = None
     if not blocked and price:
@@ -1424,7 +1424,7 @@ def _checkout_state(user_id: int, payment: str = "cod", upi_app: str | None = No
         raise SwiggyError("Ziggy could not verify one dish and quantity in the live cart.")
     if _flag(_get(item, "stock")) is False:
         raise SwiggyError("The dish is no longer in stock. Refresh your cart.")
-    if any(p["diet"] == "veg" for p in eating) and _flag(_get(item, "veg")) is not True:
+    if any(p["diet"] in ("veg", "jain") for p in eating) and _flag(_get(item, "veg")) is not True:
         raise SwiggyError("Swiggy did not verify the cart dish as vegetarian. Check it in Swiggy.")
     if item.get("variants") or item.get("addons") or item.get("variations") or item.get("variantsV2"):
         raise SwiggyError("The cart has customizations that Ziggy did not review. Check it in Swiggy.")

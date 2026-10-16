@@ -158,7 +158,7 @@ def add(user_id: int, meal: str, restaurant_id: str, restaurant_name: str, item_
         raise SwiggyError("This dish has options (sizes or add-ons), so Ziggy can't fill it into your cart. "
                           "Pick another, or order it in Swiggy.")
     user = models.get_user(user_id)
-    if user["diet"] in ("veg", "vegan") and item.get("veg") is not True:
+    if user["diet"] in ("veg", "vegan", "jain") and item.get("veg") is not True:
         raise ValueError("Swiggy doesn't mark this dish as vegetarian, so it can't go in your pool.")
     address = _address(user_id)
     place = menu["restaurant"]
