@@ -57,10 +57,10 @@ def _budget(n: int):
 
 
 @st.composite
-def profiles(draw):
+def profiles(draw, diets=None):
     body = {
         "name": "Prop",
-        "diet": draw(st.sampled_from(profile.DIETS)),
+        "diet": draw(st.sampled_from(diets or profile.DIETS)),
         "allergens": draw(st.lists(st.sampled_from(profile.ALLERGENS), unique=True, max_size=3)),
         "medical": draw(st.lists(st.sampled_from(profile.MEDICAL), unique=True, max_size=2)),
         "observances": draw(st.lists(st.sampled_from(profile.OBSERVANCES), unique=True, max_size=1)),
