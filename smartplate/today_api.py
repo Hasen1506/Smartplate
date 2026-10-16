@@ -68,6 +68,21 @@ def today_pool_remove(user_id):
     return jsonify(today.remove(user_id, b.get("meal"), b.get("ref")))
 
 
+@bp.post("/api/user/<int:user_id>/today/meal-times")
+def today_meal_times(user_id):
+    """When the person eats (usab #14): {"dinner": "22:30"}, null to reset, {"dismiss": true}."""
+    return jsonify(today.set_meal_times(user_id, _body()))
+
+
+@bp.post("/api/user/<int:user_id>/today/remind")
+def today_remind(user_id):
+    """A reminder for one of today's meals (usab #22): push sends it when its cart opens;
+    the .ics for just this meal is the fallback where push isn't available."""
+    b = _body()
+    ratelimit.check(f"today-remind:{user_id}", 60, 3600)
+    return jsonify(today.set_meal_reminder(user_id, b.get("meal"), b.get("on", True) is not False))
+
+
 @bp.post("/api/user/<int:user_id>/today/pool/qty")
 def today_pool_qty(user_id):
     b = _body()

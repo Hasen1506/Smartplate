@@ -775,7 +775,12 @@ def create_app() -> Flask:
     def reminders_ics(user_id):
         from .domain import reminders
         view = service.current_plan(user_id)
-        body = reminders.to_ics(reminders.upcoming(view), plan_id=view["plan"]["id"], name=view["user"]["name"])
+        rows = reminders.upcoming(view)
+        meal, day = request.args.get("meal"), request.args.get("date")
+        if meal:                                       # one meal's reminder (usab #22)
+            from . import clock
+            rows = reminders.for_meal(rows, day or clock.today().isoformat(), meal)
+        body = reminders.to_ics(rows, plan_id=view["plan"]["id"], name=view["user"]["name"])
         return Response(body, mimetype="text/calendar", headers={
             "Content-Disposition": "attachment; filename=ziggy-reminders.ics"})
 

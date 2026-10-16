@@ -13,6 +13,38 @@ MEAL_WINDOWS = {
     "dinner": (1170, 1230, 1185, 1290),   # 19:30 / 20:30 / 19:45 / 21:30
 }
 MEALS = ("breakfast", "lunch", "dinner")
+# When a person may say they eat each meal (usab audit 16 Oct #14: a late-night dinner has to be
+# possible). Same calendar day only, so a meal never spills into tomorrow.
+MEAL_TIME_RANGE = {"breakfast": (300, 690), "lunch": (660, 990), "dinner": (1020, 1425)}
+
+
+def meal_minute(meal: str, user: dict | None = None) -> int:
+    """Minute of the day this person eats `meal`: their own time (prefs.meal_times, set in
+    Rules or inferred from their Swiggy orders), else the usual peak in MEAL_WINDOWS."""
+    own = ((user or {}).get("prefs") or {}).get("meal_times") or {}
+    lo, hi = MEAL_TIME_RANGE.get(meal, (0, 1439))
+    try:
+        m = int(own.get(meal))
+        if lo <= m <= hi:
+            return m
+    except (TypeError, ValueError):
+        pass
+    return MEAL_WINDOWS[meal][1]
+
+
+def meal_window(meal: str, user: dict | None = None) -> tuple[int, int, int, int]:
+    """(open, peak, offpeak, close) shifted to the person's own meal time."""
+    base = MEAL_WINDOWS[meal]
+    shift = meal_minute(meal, user) - base[1]
+    return tuple(min(1439, w + shift) for w in base)
+
+
+def has_own_time(meal: str, user: dict | None) -> bool:
+    """True when the person set (or confirmed) their own time for this meal."""
+    own = ((user or {}).get("prefs") or {}).get("meal_times") or {}
+    lo, hi = MEAL_TIME_RANGE.get(meal, (0, 1439))
+    return isinstance(own.get(meal), int) and lo <= own[meal] <= hi
+
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 

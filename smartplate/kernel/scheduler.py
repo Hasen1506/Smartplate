@@ -28,7 +28,7 @@ def trigger_ts(week_start_iso: str, day: int, meal: str, minute: int | None = No
     return dt.datetime.combine(base, dt.time(h, m)).isoformat()
 
 
-def build_week(plan_id: int, week_start_iso: str, meals=MEALS, days=7) -> None:
+def build_week(plan_id: int, week_start_iso: str, meals=MEALS, days=7, minutes: dict | None = None) -> None:
     """Create the session grid for a plan (idempotent per plan). `meals` is the
     user's own rhythm — someone who only orders dinner gets 7 sessions, not 21."""
     with db.cursor() as cur:
@@ -38,8 +38,22 @@ def build_week(plan_id: int, week_start_iso: str, meals=MEALS, days=7) -> None:
                 cur.execute(
                     "INSERT INTO sessions(plan_id, day, meal, scheduled_ts, status) "
                     "VALUES (?,?,?,?, 'active')",
-                    (plan_id, day, meal, trigger_ts(week_start_iso, day, meal)),
+                    (plan_id, day, meal, trigger_ts(week_start_iso, day, meal, (minutes or {}).get(meal))),
                 )
+
+
+def retime(plan_id: int, week_start_iso: str, meal: str, minute: int) -> int:
+    """Move a plan's open sessions of `meal` to the person's own meal time (usab #14).
+    Ordered / confirmed meals keep the time they were ordered for."""
+    n = 0
+    with db.cursor() as cur:
+        rows = cur.execute("SELECT id, day FROM sessions WHERE plan_id=? AND meal=? AND status NOT IN "
+                           "('ordered','confirmed')", (plan_id, meal)).fetchall()
+        for r in rows:
+            cur.execute("UPDATE sessions SET scheduled_ts=? WHERE id=?",
+                        (trigger_ts(week_start_iso, r["day"], meal, minute), r["id"]))
+            n += 1
+    return n
 
 
 def set_status(session_id: int, status: str, note: str = "") -> None:

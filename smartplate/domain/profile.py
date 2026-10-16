@@ -19,7 +19,10 @@ MEALS = ("breakfast", "lunch", "dinner")
 # One set of limits for onboarding, settings and PATCH /api/user (L-10).
 BUDGET_MIN, BUDGET_MAX = 100, 100000
 DAILY_CAP_MIN, DAILY_CAP_MAX = 50, 20000
-DIETS = ("veg", "nonveg", "vegan")
+# usab audit 16 Oct #11: "egg" = eggetarian (vegetarian + eggs), "jain" = Jain / no onion-garlic
+# (vegetarian, no onion, garlic or root vegetables; domain/allergens.JAIN_WORDS).
+DIETS = ("veg", "nonveg", "vegan", "egg", "jain")
+VEG_DIETS = ("veg", "vegan", "jain")     # a dish must carry Swiggy's veg mark
 ALLERGENS = ("peanut", "dairy", "gluten", "egg", "soy", "shellfish", "fish", "sesame", "tree_nut")
 MEDICAL = ("diabetes", "hypertension", "celiac")
 OBSERVANCES = ("navratri", "ramadan", "karva_chauth")
@@ -163,7 +166,7 @@ def validate_setup(body: dict) -> dict:
         out["area"] = body["area"].strip()
     if "diet" in body:
         if not isinstance(body["diet"], str) or body["diet"] not in DIETS:
-            raise ValueError("Choose vegetarian, non-vegetarian, or vegan")
+            raise ValueError("Choose vegetarian, eggetarian, Jain, non-vegetarian, or vegan")
         out["diet"] = body["diet"]
     for key, allowed_values in (("allergens", ALLERGENS), ("medical", MEDICAL), ("observances", OBSERVANCES)):
         if key in body:

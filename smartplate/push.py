@@ -61,6 +61,9 @@ def _push_host(endpoint: str) -> bool:
 
 
 def subscribe(user_id: int, body: dict) -> dict:
+    """`scope`: "all" (a reminder for every meal: the alerts switch) or "meals" (only the
+    meals the person tapped "Remind me" on). Without it the person's choice stays as it is."""
+    scope = body.get("scope") if isinstance(body, dict) else None
     sub = body.get("subscription") if isinstance(body.get("subscription"), dict) else body
     endpoint = sub.get("endpoint")
     keys = sub.get("keys") if isinstance(sub.get("keys"), dict) else {}
@@ -77,7 +80,18 @@ def subscribe(user_id: int, body: dict) -> dict:
         cur.execute("INSERT INTO push_subscriptions(user_id, endpoint, p256dh, auth, created_ts) VALUES (?,?,?,?,?) "
                     "ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id, p256dh=excluded.p256dh, "
                     "auth=excluded.auth", (user_id, endpoint, p256dh, auth, clock.now().isoformat(timespec="seconds")))
+    if scope in ("all", "meals"):
+        from . import today
+        if scope == "all" or today.reminder_filter(user_id) is not None or not _has_scope(user_id):
+            today.set_reminder_scope(user_id, scope)
     return status(user_id, endpoint)
+
+
+def _has_scope(user_id: int) -> bool:
+    from . import today
+    today.init_schema()
+    with db.cursor() as cur:
+        return cur.execute("SELECT 1 FROM reminder_prefs WHERE user_id=?", (user_id,)).fetchone() is not None
 
 
 def unsubscribe(user_id: int, body: dict) -> dict:
@@ -90,13 +104,20 @@ def unsubscribe(user_id: int, body: dict) -> dict:
 def status(user_id: int, endpoint: str | None = None) -> dict:
     with db.cursor() as cur:
         rows = cur.execute("SELECT endpoint FROM push_subscriptions WHERE user_id=? ORDER BY id", (user_id,)).fetchall()
-    return {"enabled": config.PUSH_ENABLED, "public_key": public_key(), "devices": len(rows),
+    from . import today
+    scope = "all" if today.reminder_filter(user_id) is None else "meals"
+    return {"enabled": config.PUSH_ENABLED, "public_key": public_key(), "devices": len(rows), "scope": scope,
             "this_device": bool(endpoint) and any(r["endpoint"] == endpoint for r in rows)}
 
 
 def meal_closes(r: dict) -> dt.datetime | None:
     """When the reminder's meal window closes (after that a nudge is pointless)."""
     from .domain import models
+    if r.get("closes"):                               # the person's own meal time (usab #14)
+        try:
+            return dt.datetime.fromisoformat(r["closes"])
+        except (TypeError, ValueError):
+            pass
     try:
         window = models.MEAL_WINDOWS[r["meal"]]
         close_min = window[3] if len(window) > 3 else window[1] + 60
@@ -110,6 +131,12 @@ def classify(r: dict, at: dt.datetime) -> str:
     when = dt.datetime.fromisoformat(r["at"])
     if at - when <= LATE_OK:
         return "on_time"
+    if r.get("order_by"):                 # a cart-open nudge is still in time until order-by (#21)
+        try:
+            if at < dt.datetime.fromisoformat(r["order_by"]):
+                return "on_time"
+        except (TypeError, ValueError):
+            pass
     closes = meal_closes(r)
     if closes is not None and at >= closes:
         return "missed"
@@ -124,6 +151,11 @@ def _upcoming(uid: int, since: dt.datetime) -> list[dict]:
     from .runtime import user_lock
     with user_lock(uid):                              # only this profile's requests wait (M-05)
         return reminders.upcoming(service.current_plan(uid), since)
+
+
+def _meal_filter(uid: int):
+    from . import today
+    return today.reminder_filter(uid)
 
 
 def due(at: dt.datetime | None = None, _next: list | None = None) -> list[tuple[dict, dict]]:
@@ -141,6 +173,9 @@ def due(at: dt.datetime | None = None, _next: list | None = None) -> list[tuple[
         if uid not in views:
             try:
                 views[uid] = _upcoming(uid, at - LOOKBACK)
+                only = _meal_filter(uid)              # per-meal "Remind me" (usab #22)
+                if only is not None:
+                    views[uid] = [r for r in views[uid] if (r["date"], r["meal"]) in only]
             except Exception:                         # a deleted profile, a plan that can't solve
                 log.exception("push: reminders for user %s failed", uid)
                 views[uid] = []

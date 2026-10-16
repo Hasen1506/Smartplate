@@ -1274,7 +1274,7 @@ function whyChips(c) {
   const al = (u.allergens || []).map(a => a.replace("_", " "));
   if (al.length && c.kind === "delivery") out.push([S.view.source?.kind === "live" ? `No ${al.join(", ")} by dish name` : `${cap1(al.join(", "))} filtered out`, "ok"]);
   if (al.length && c.kind === "cook") out.push([`Recipe has no ${al.join(", ")}`, "ok"]);
-  if (u.diet === "veg" || u.diet === "vegan") out.push([u.diet === "vegan" ? "Vegan plan" : "Vegetarian", ""]);
+  if (u.diet && u.diet !== "nonveg") out.push([u.diet === "vegan" ? "Vegan plan" : DIET_NAME[u.diet] || "Vegetarian", ""]);
   return out.length ? `<ul class="why" aria-label="Why this pick">${out.map(([t, k]) => `<li class="${k}">${esc(t)}</li>`).join("")}</ul>` : "";
 }
 // "Order by 19:45": a ring that empties as the order-by time gets closer (the last 3 hours).
@@ -1544,13 +1544,13 @@ function keyBytes(b64) {
   const raw = atob((b64 + "=".repeat((4 - b64.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
   return Uint8Array.from(raw, c => c.charCodeAt(0));
 }
-async function subscribePush() {
+async function subscribePush(scope) {
   const reg = await navigator.serviceWorker.ready;
   const st = await api(`/api/user/${S.userId}/push`);
   const old = await reg.pushManager.getSubscription();
   if (old) await old.unsubscribe().catch(() => {});        // the server key may have changed
   const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(st.public_key) });
-  await api(`/api/user/${S.userId}/push/subscribe`, "POST", { subscription: sub.toJSON() });
+  await api(`/api/user/${S.userId}/push/subscribe`, "POST", scope ? { subscription: sub.toJSON(), scope } : { subscription: sub.toJSON() });
   store.set("smartplate.push", String(S.userId));
 }
 async function syncPush() {                                 // re-register after a server reset
@@ -1588,9 +1588,9 @@ async function toggleAlerts() {
       store.del("smartplate.push"); toast("Reminders off for this device"); render(); return;
     }
     if (await Notification.requestPermission() !== "granted") { toast("Notifications are blocked for this site. Add the calendar instead."); render(); return; }
-    await subscribePush();
+    await subscribePush("all");
     await api(`/api/user/${S.userId}/push/test`, "POST", {}).catch(() => {});
-    toast("Reminders on. You'll get a nudge at each order-by time."); render(); return;
+    toast("Reminders on. You'll get a nudge when each meal's Swiggy cart opens."); render(); return;
   }
   if (store.get("smartplate.notify") === "1" && Notification.permission === "granted") {
     store.del("smartplate.notify"); alertTimers.splice(0).forEach(clearTimeout); toast("Browser alerts off"); render(); return;
@@ -1617,7 +1617,7 @@ function mealRow(m, meal) {
     : m.kind === "delivery" && m.delivery_fee ? ` · delivery ₹${Math.round(m.delivery_fee.amount)} ${m.delivery_fee.estimated ? "est." : "from your bill"}` : "";
   const sub = m.kind === "delivery" ? `${esc(m.restaurant)}${fee}${m.order?.order_at && !locked && !past ? ` · order by ${esc(m.order.order_at)}` : ""}`
     : m.kind === "cook" ? (m.cost_unknown ? "Cook at home · groceries not priced" : m.recipe_key ? "Cook at home · grocery estimate" : "From your fridge") : "";
-  const name = off && !food ? "Skipped" : m.item;
+  const name = off && !food ? (m.open ? "Open" : "Skipped") : m.item;   // usab #24: nothing chosen yet
   const why = (m.reasons || [])[0];
   const subText = food ? sub : esc(why && why !== name ? why : past ? "This meal's time has passed" : "");
   return `<button class="mrow ${off ? "off" : ""} ${target ? "target" : ""}" data-meal="${m.session_id}" aria-label="${esc(cap1(meal))}: ${esc(name)}${target ? ". Tap to swap here" : ""}">
@@ -2473,7 +2473,7 @@ function menuSheet() {
     <p class="eyebrow">Opening ${esc(S.liveLoading || "menu")}…</p><div class="skeleton"><i></i><i></i><i></i></div></section></div>`;
   const menu = S.liveBrowseMenu, u = S.view.user || {};
   const mine = new Set(u.allergens || []);
-  const vegUser = ["veg", "vegan"].includes(u.diet);
+  const vegUser = VEG_DIETS.includes(u.diet);
   const b = S.view.budget || {}, left = Math.max(0, (b.budget || 0) - (b.spend || 0));
   const f = S.filters;
   const flagged = (i) => (i.name_allergens || []).filter(a => mine.has(a));
@@ -2592,7 +2592,7 @@ function meScreen() {
   const swState = !sw ? "" : sw.connected ? (sw.address ? `Connected · ${esc(sw.address.label)}` : "Choose an address") : sw.expired ? "Sign-in expired" : "Not connected";
   const login = S.account?.login;
   const row = (go, label, value) => `<button class="set" data-go="more:${go}"><span>${label}</span><span><span>${value}</span>${ICON.right}</span></button>`;
-  const rules = [{ veg: "Vegetarian", vegan: "Vegan", nonveg: "Non-veg" }[u.diet] || "", ...(u.allergens || []).map(a => `no ${a.replace("_", " ")}`)].filter(Boolean).join(" · ");
+  const rules = [{ veg: "Vegetarian", egg: "Eggetarian", jain: "Jain", vegan: "Vegan", nonveg: "Non-veg" }[u.diet] || "", ...(u.allergens || []).map(a => `no ${a.replace("_", " ")}`)].filter(Boolean).join(" · ");
   return `<div class="row rise" style="flex-wrap:nowrap;gap:14px"><span class="avatar" style="width:56px;height:56px;font-size:22px;display:grid;place-items:center">${esc((u.name || "?").slice(0, 1).toUpperCase())}</span>
       <span class="stack" style="gap:0"><b class="money" style="font-size:26px">${esc(u.name || "You")}</b><span class="muted">${keys.has(S.userId) ? (login ? `Signed in as ${esc(login)}` : "Private to this device") : "Shared sample profile"}</span></span></div>
     <section class="card rise2 stats" aria-label="This week's money">
@@ -2714,7 +2714,7 @@ function settingsPanel() {
     <form id="preferences" class="stack" style="gap:16px">
       <section class="card"><label>Name<input name="name" maxlength="80" value="${esc(u.name)}" required></label></section>
       <section class="card"><fieldset><legend>Food rules (always applied)</legend>
-        <label>Diet${opt("diet", u.diet, [["nonveg", "Non-vegetarian"], ["veg", "Vegetarian"], ["vegan", "Vegan"]])}</label></fieldset>
+        <label>Diet${opt("diet", u.diet, DIET_CHOICES.map(([k, l]) => [k, l]))}</label></fieldset>
         <fieldset><legend>Allergies (always excluded)</legend><div class="checks">${checks("allergens", ["peanut", "dairy", "gluten", "egg", "soy", "shellfish", "fish", "sesame", "tree_nut"])}</div></fieldset>
         <details><summary>Medical filters and fasts</summary><div class="checks">${checks("medical", ["diabetes", "hypertension", "celiac"])}</div>
           <p class="fine">Simple menu-label rules. They can't guarantee a dish is medically suitable or free of cross-contact.</p>
@@ -2794,7 +2794,12 @@ async function saveSettings(form) {
 
 /* ---- household: the people you cook and order for ---- */
 const ALLERGY_LIST = ["peanut", "dairy", "gluten", "egg", "soy", "shellfish", "fish", "sesame", "tree_nut"];
-const DIET_NAME = { veg: "Vegetarian", vegan: "Vegan", nonveg: "Non-vegetarian" };
+const DIET_NAME = { veg: "Vegetarian", egg: "Eggetarian", jain: "Jain / no onion-garlic", vegan: "Vegan", nonveg: "Non-vegetarian" };
+// usab #11: the diets onboarding and settings offer ([key, name, what it means, dot class]).
+const DIET_CHOICES = [["veg", "Vegetarian", "No meat, fish or egg", ""], ["egg", "Eggetarian", "Vegetarian, plus eggs", ""],
+  ["jain", "Jain / no onion-garlic", "Vegetarian, no onion, garlic or root vegetables", ""],
+  ["nonveg", "Non-vegetarian", "Everything is on the menu", "nonveg"], ["vegan", "Vegan", "No animal products at all", ""]];
+const VEG_DIETS = ["veg", "vegan", "jain"];
 function personForm(id, m = {}) {
   const meals = S.view.user.meals || MEALS;
   const box = (name, v, on, label) => `<label class="check"><input type="checkbox" name="${name}" value="${v}" ${on ? "checked" : ""}>${esc(label)}</label>`;
@@ -3005,7 +3010,7 @@ function onboardingScreen() {
   let body = "";
   if (st === 0) {
     body = `<h1 class="h1">${t("What do you eat?")}</h1>
-      <div class="stack" style="gap:10px" role="group" aria-label="${t("What do you eat?")}">${[["veg", "Vegetarian", "No meat, fish or egg", ""], ["nonveg", "Non-vegetarian", "Everything is on the menu", "nonveg"], ["vegan", "Vegan", "No animal products at all", ""]].map(([k, l, s, dot]) =>
+      <div class="stack" style="gap:10px" role="group" aria-label="${t("What do you eat?")}">${DIET_CHOICES.map(([k, l, s, dot]) =>
         `<button type="button" class="opt" data-ob="diet" data-val="${k}" data-multi="0" aria-pressed="${d.diet === k}"><span class="dot ${dot}"></span><span><b>${t(l)}</b><span class="muted">${t(s)}</span></span></button>`).join("")}</div>
       <p class="k">${t("Anything you must avoid?")}</p>
       <div class="chips">${ALLERGY_LIST.map(a => chip("allergens", a, cap1(a.replace("_", " ")), d.allergens.includes(a))).join("")}</div>
@@ -3127,7 +3132,7 @@ async function onboardNav(dir) {
     o.step -= 1; S.error = null; render(); return;
   }
   const d = o.d;
-  if (o.step === 0 && !d.diet) throw new Error("Choose what you eat: vegetarian, non-vegetarian or vegan");
+  if (o.step === 0 && !d.diet) throw new Error("Choose what you eat: vegetarian, eggetarian, Jain, non-vegetarian or vegan");
   if (o.step === 1 && MEALS.every(m => d.rhythm[m] === "skip")) throw new Error("Pick at least one meal you order or cook");
   if (o.step === 2) {
     if (!d.weekly_budget) throw new Error("Enter a weekly budget greater than ₹0");

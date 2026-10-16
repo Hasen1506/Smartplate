@@ -90,6 +90,7 @@ def no_network(monkeypatch):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "cart_window: keep the Swiggy cart-window refusal on (domain/timing)")
+    config.addinivalue_line("markers", "chosen_week: new profiles fill their week only with chosen dishes (the product default)")
     config.addinivalue_line("markers", "sqlite_only: exercises the SQLite file itself; on the Postgres "
                                        "run it still runs, against SQLite")
     if pg_support.enabled():
@@ -103,6 +104,16 @@ def cart_window_for_test(request, monkeypatch):
     clock), which is not what they test. tests/test_time_today.py covers the window."""
     from smartplate.domain import timing
     monkeypatch.setattr(timing, "CART_WINDOW_ENFORCED", request.node.get_closest_marker("cart_window") is not None)
+
+
+@pytest.fixture(autouse=True)
+def week_fill_for_test(request, monkeypatch):
+    """New profiles fill their week only with chosen dishes (config.WEEK_FILL_DEFAULT,
+    usab #24). The many older planner tests are about the auto-filled week, so they keep
+    it; tests marked `chosen_week` run with the product default."""
+    from smartplate import config
+    if request.node.get_closest_marker("chosen_week") is None:
+        monkeypatch.setattr(config, "WEEK_FILL_DEFAULT", "auto")
 
 
 @pytest.fixture(autouse=True)

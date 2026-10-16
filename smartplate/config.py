@@ -34,6 +34,10 @@ PG_POOL_TIMEOUT = float(os.environ.get("SMARTPLATE_PG_POOL_TIMEOUT", "5"))
 # Background pool keep-alive (db_pg.start_keepalive): on by default on Render.
 PG_KEEPALIVE = os.environ.get("SMARTPLATE_PG_KEEPALIVE", "on" if os.environ.get("RENDER") else "off") == "on"
 DB_PATH = os.environ.get("SMARTPLATE_DB", "smartplate.db")
+# How a new profile's week is filled (founder rule "never auto-decide first", usab audit
+# 16 Oct #24): "chosen" = only dishes the person chose, the rest left open until "Decide for
+# me"; "auto" = the planner fills every meal (the older behaviour, kept for its tests).
+WEEK_FILL_DEFAULT = os.environ.get("SMARTPLATE_WEEK_FILL", "chosen")
 # Where a persistent disk is mounted on Render (render.production.yaml). Anything else
 # on Render lives on the instance's ephemeral disk and is erased on every spin-down,
 # restart or redeploy (https://render.com/docs/free).

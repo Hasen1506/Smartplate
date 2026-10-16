@@ -28,7 +28,8 @@ def test_today_decide_runs_on_the_kernel_engine(plain, monkeypatch):
     monkeypatch.setattr(engine, "plan", spy)
     t = c.post(f"/api/user/{uid}/today/decide", json={"mode": "favourites"}).get_json()
     assert len(calls) == 1 and calls[0]["mode"] == "favourites_only"
-    assert calls[0]["money"] == 600 and calls[0]["rules"]["min_rating"] == 4.0
+    assert calls[0]["money"] == 600 and calls[0]["rules"]["min_rating"] == 0     # Ziggy default: any rating (#10)
+    assert calls[0]["rules"]["max_eta"] == 45
     assert t["decided"]["engine_mode"] == "favourites_only" and t["decided"]["mode"] == "favourites"
     assert set(t["picks"]) == {"breakfast", "lunch"}
     # the engine's one-line reason comes through for each pick

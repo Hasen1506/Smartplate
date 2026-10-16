@@ -61,7 +61,9 @@ def test_today_starts_with_budget_from_the_week_and_nothing_decided(plain):
     assert t["meals"] == ["breakfast", "lunch"] and t["label"] == "B+L"
     assert t["budget"]["amount"] == 600 and t["budget"]["source"] == "week"       # ₹4,200 ÷ 7
     assert t["picks"] == {}                                                          # never auto-decided
-    assert t["rules"]["min_rating"] == 4.0 and t["rules"]["max_eta"] == 30
+    # usab audit 16 Oct #10: Ziggy's defaults are any rating / up to 45 min, and say so
+    assert t["rules"]["min_rating"] == 0.0 and t["rules"]["max_eta"] == 45
+    assert t["rules"]["source"] == {"min_rating": "ziggy", "max_eta": "ziggy"}
     assert t["price_compare"] is None                                               # no data → no row
     assert t["weather"] == {"known": False} or t["weather"]["known"] is True
     assert t["account_saved"] is False and t["swiggy"]["connected"] is False
@@ -133,7 +135,10 @@ def test_decide_says_why_a_meal_could_not_be_filled(plain):
     c.post(f"/api/user/{uid}/today/budget", json={"amount": 100})
     _typed(c, uid, "breakfast", "Cappuccino", 140)
     t = c.post(f"/api/user/{uid}/today/decide", json={"mode": "favourites"}).get_json()
-    assert t["picks"] == {} and "fits" in t["decided"]["note"] and "breakfast" in t["decided"]["missing"]
+    assert t["picks"] == {} and "breakfast" in t["decided"]["missing"]
+    assert "₹140" in t["decided"]["note"] and "change today's budget" in t["decided"]["note"]
+    assert t["decided"]["reasons"]["lunch"] == "No lunch in your favourites yet."
+    assert {"act": "add", "meal": "lunch", "label": "Add a lunch"} in t["decided"]["actions"]
 
 
 def test_favourites_plus_cook_uses_priced_home_recipes(plain):
@@ -145,6 +150,7 @@ def test_favourites_plus_cook_uses_priced_home_recipes(plain):
 
 def test_rules_soft_filters_and_swiggy_pool_with_price_compare(town):
     c, uid = town["c"], town["uid"]
+    c.post(f"/api/user/{uid}/today/rules", json={"max_eta": 30, "min_rating": 4})
     r = c.post(f"/api/user/{uid}/today/pool", json={"source": "swiggy", "meal": "breakfast", "restaurant_id": "r-101",
                                                      "restaurant_name": "Annapoorna Tiffin Room", "item_id": "r-101-i5",
                                                      "rating": 4.4, "eta_min": 25})
