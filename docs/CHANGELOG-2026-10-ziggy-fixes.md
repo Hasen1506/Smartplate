@@ -150,6 +150,72 @@ workstreams, merged in this order on top of `ziggy/last-three-gaps` (PR #44, inc
 - Tests: Python 1,102 passed, 6 skipped, 0 failed (SQLite, 86 files + `tests/scenarios`, `-n 2` in
   chunks); node `tests/*.cjs` 165 passed; `menu-source.test.js` 10 passed; Playwright, 12 files, 29 passed.
 
+## Fix round 4: budget model v2 (branch `ziggy/r4-budget-envelope`, 17 Oct 2026)
+
+Trigger: "on Monday I may want chicken biryani at ₹350 regardless of the ₹285/day share, and I
+may not plan the whole week." Design: `work/budget-design.md`. The weekly number is now an
+envelope, not a ration: the daily share is a guide line, never a wall, and the person's own
+choice always wins (Ziggy shows what it costs, then rebalances the rest).
+
+**What was built**
+- `smartplate/domain/envelope.py`: one weekly envelope per person and week. Each day is Spent
+  (real bills), Committed (own picks and pins, or a day amount the person set), Flexible (Ziggy
+  fills it) or Off (no money, no assumption, no reminders). Flexible money is shared over the
+  flexible days by their meals, with largest-remainder rounding so the day chips add up to the
+  envelope. Today (`today.budget_for`) and the Week read this one function, which fixes the old
+  flat weekly/7 (Today) versus rolling share (Week) disagreement.
+- New tables `day_budget` (date, amount, soft/hard, set_at; r3's `today_budget` rows move in once),
+  `week_override`, `day_plan` (Plan/Off per day or meal), `budget_settings` (scope: all food spend
+  or only planned meals; carry-over toggle), outside bills. Routes in `smartplate/envelope_api.py`:
+  `GET envelope`, `PUT day-budget`, `PUT week-override`, `PUT day-plan`, `PUT budget-settings`,
+  `POST/DELETE outside-spend`.
+- Pins are never blocked or dropped: a pick or pin returns its impact ("₹65 above Monday's share;
+  rest of week ₹1,650 over 6 days") with options (take it from the week, raise just this week,
+  skip or cook other meals, keep it and run over).
+- Planners: soft day targets (slack over/under per day, staged objective) in the MILP and the
+  greedy; `daily_cap` stays hard only when the person set it as a hard limit.
+- v3 UI: Week strip day chips (₹ planned vs a guide tick); tapping a day opens one slider with its
+  minimum (spent + committed), guide line and a live rest-of-week preview, plus Plan/Off; Today's
+  budget card opens the same control.
+- Menu cache and Swap's "Nearby now" read a `light` envelope (no cheapest-meal flags); the
+  envelope schema is created once per database per process; the "below your cheapest usual" flag
+  reads the cheapest meal's `cost` (it read a missing `amount` and never fired), once per request.
+- Menu tap race (r3 `test_page_one_first_then_the_rest_in_the_background`, made worse by the
+  envelope call on the menu route): the menu, its screening and the per-meal budget line are built
+  first, and the background read of the rest of the menu starts when the request ends (app
+  teardown), so page 1 never competes with pages 2+ for the database or the CPU.
+
+**Edge cases covered** (design checklist): a pin above the whole remaining envelope; several
+splurge days over the envelope; a bill above its estimate (surge) absorbed by later flexible days
+with a note when a day drops below the cheapest usual meal; refund/cancel returns money to the
+pool; outside bills (Zomato etc.) eat the envelope on their date and mark a planned slot eaten;
+budget below cheapest × flexible meals suggests Off/cook and never invents cheap food; late-night
+dinner after 00:00 belongs to the previous day; household eaters raise a day's committed cost;
+fast days get a lighter target; week-end "Kept ₹X" with carry-over off by default (when on, it
+carries exactly the kept amount: every real bill counts); the meal's date decides the week; snack
+picks count in the money without a slot; two devices editing a day amount: last write wins.
+
+**Compromises**
+- Week planner soft day targets apply only on days the person set an amount; other days keep the
+  envelope's even share as the planner's target.
+- A weekly budget change mid-week makes a new whole-week envelope; it is not pro-rated to the
+  remaining days (spent stays spent).
+- Past days that were never confirmed roll forward: a past day counts only its real bills, and
+  its unspent share (an open pick nobody confirmed) returns to the remaining flexible days.
+- Bill-vs-pick de-dup is per day, not per meal: real bills beyond what the plan ordered first
+  pay for that day's own picks and pins (a pick ordered through Swiggy is never counted twice);
+  anything above them is extra spend on that day.
+- Server-written impact text ("₹65 above Monday's share …") is English only.
+- Some tests are slower (the envelope is computed on more routes); the menu route uses the light
+  envelope to keep a tap fast.
+
+**Tests**
+- `tests/test_r4_budget_envelope.py` (goldens: biryani, all-Off weekend, surge, refund; property
+  test: day targets + spent + committed equal the envelope, pins never dropped; API),
+  `tests/frontend_r4_envelope.test.cjs`, `tests/browser_r4_envelope.py`; CI runs the r4 node and
+  browser tests.
+- Totals: TOTALS_PLACEHOLDER
+
 ## sp-grill critiques (1–72)
 
 | # | Topic | Status | Note |
