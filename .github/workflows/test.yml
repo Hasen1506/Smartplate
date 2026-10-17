@@ -24,7 +24,7 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pip_audit -r requirements.txt --strict
       - name: Unit and property tests
-        timeout-minutes: 3
+        timeout-minutes: 5            # 1.9-3.1 min on GitHub runners (r4: +36 tests, runner speed varies ~2x)
         run: >-
           python -m pytest -q -n auto --durations=10
           --ignore=tests/test_gt_golden_planner.py --ignore=tests/test_gt_journey.py
@@ -42,11 +42,12 @@ jobs:
       - run: node --test tests/frontend_r3_connect_budget.test.cjs
       - run: node --test tests/frontend_r3_today_truth.test.cjs
       - run: node --test tests/frontend_r3_menus.test.cjs
+      - run: node --test tests/frontend_r4_envelope.test.cjs
       - run: python -m pip install playwright==1.63.0
       - run: python -m playwright install --with-deps chromium
       - name: Browser E2E (golden first-week journey, smoke, household, Epicure swaps, Ziggy redesign 375/1280 light+dark, live-only production mode)
         timeout-minutes: 7
-        run: python -m pytest -q tests/browser_journey.py tests/browser_smoke.py tests/browser_household.py tests/browser_epicure.py tests/browser_redesign.py tests/browser_live_only.py tests/browser_pools.py tests/browser_v3_today.py tests/browser_r3_connect_budget.py tests/browser_r3_today_truth.py tests/browser_r3_history.py --durations=10
+        run: python -m pytest -q tests/browser_journey.py tests/browser_smoke.py tests/browser_household.py tests/browser_epicure.py tests/browser_redesign.py tests/browser_live_only.py tests/browser_pools.py tests/browser_v3_today.py tests/browser_r3_connect_budget.py tests/browser_r3_today_truth.py tests/browser_r3_history.py tests/browser_r4_envelope.py --durations=10
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -83,7 +84,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements-dev.txt
       - name: Unit and property tests on Postgres
-        timeout-minutes: 8
+        timeout-minutes: 12           # 5.6-7.6 min
         run: >-
           python -m pytest -q -n auto --durations=10
           --ignore=tests/test_gt_golden_planner.py --ignore=tests/test_gt_journey.py

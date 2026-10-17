@@ -90,9 +90,10 @@ def quantize(score: float) -> int:
     return int(round(score / SCORE_STEP))
 
 
-def plan_key(filled: int, score_q: int, cost: float, repeats: int = 0) -> tuple:
-    """Bigger is better. The lexicographic order of rules 4, 3 (score), 5 and variety."""
-    return (filled, score_q, -round(cost, 2), -repeats)
+def plan_key(filled: int, score_q: int, cost: float, repeats: int = 0, over: float = 0.0) -> tuple:
+    """Bigger is better. The lexicographic order of rules 4, 3 (score), the least money over the
+    days' soft targets (budget model v2: a day's share is a guide, never a wall), 5 and variety."""
+    return (filled, score_q, -round(over, 2), -round(cost, 2), -repeats)
 
 
 # --- plain words -------------------------------------------------------------------------

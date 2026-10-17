@@ -75,6 +75,7 @@
   async function post(path, body, msg) {
     const r = await api(`/api/user/${S.userId}/today${path}`, "POST", body || {});
     st().data = r;
+    if (path === "/pick") st().impact = r.impact?.text ? r.impact : null;
     if (msg) toast(msg);
     render();
     return r;
@@ -101,7 +102,8 @@
         <span class="stepper sm"><button type="button" data-v3-budget="-${STEP}" aria-label="Lower today's budget by ${STEP} rupees">${ICON.minus}</button>
           <button type="button" data-v3-budget="${STEP}" aria-label="Raise today's budget by ${STEP} rupees">${ICON.plus}</button></span></div>
       <div class="chips" role="group" aria-label="Budget presets">${b.presets.map(n => `<button class="chip small" data-v3-preset="${n}" aria-pressed="${b.amount === n}">${money(n)}</button>`).join("")}
-        <button class="chip small" data-v3-sheet="budget">Other…</button></div>
+        <button class="chip small" data-v3-day="${esc(b.date || todayIso())}">Other…</button></div>
+      ${b.guide != null && b.amount !== b.guide ? `<p class="fine v3-share">Fair share today ${money(b.guide)}${b.source === "today" ? " · you set today's amount" : ""}</p>` : ""}${b.state === "off" ? `<p class="fine">Today is Off: nothing planned.</p>` : ""}${impactNote()}
       ${b.picked ? `<p class="v3-left-line">${leftLine(b)}</p>` : ""}<p class="fine">${b.picked ? `${money(b.picked_dishes ?? b.picked)} picked` : "Nothing picked yet"}${b.unpriced?.length ? ` · ${b.unpriced.length} without a price` : ""}${b.source === "week" && b.basis ? ` · ${esc(b.basis)}` : ""}</p>${b.picked_bill != null ? `<p class="fine v3-bill-total">${b.bill_estimated ? "About " : ""}${money(b.picked_bill)} with Swiggy delivery, fees &amp; GST${b.bill_estimated ? " (estimate until Swiggy shows the bill)" : ""}</p>` : ""}${weekMoney()}</section>`;
   }
   // What's left of today's budget, net of Swiggy fees. The server's figure (budget.left_after_fees,
@@ -384,7 +386,7 @@
     }).join("") : "";
     const open = (S.view?.grid || []).some(d => Object.values(d.meals).some(m => m.open));
     const decideBtn = open ? `<div class="row v3-week-decide"><button class="secondary small" data-v3-weekdecide="1">Decide for me</button><span class="fine">Open meals stay open until you ask.</span></div>` : "";
-    return `${decideBtn}<div class="row v3-week-top"><label class="check"><input type="checkbox" data-v3-nutrition ${on ? "checked" : ""}> Show nutrition</label>
+    return `${envStrip()}${decideBtn}<div class="row v3-week-top"><label class="check"><input type="checkbox" data-v3-nutrition ${on ? "checked" : ""}> Show nutrition</label>
       <span class="fine">${on ? "A day, on average, from dish-name estimates. Unknown dishes add nothing." : "Off by default. Turn on to see the week against your daily targets."}</span></div>
       ${bars ? `<section class="card v3-nut" aria-label="Nutrition">${bars}</section>` : ""}`;
   }
@@ -393,6 +395,128 @@
     if (d) return !!d.rules.nutrition;
     return store.get(`ziggy.v3.nutrition.${S.userId}`) === "1";
   }
+
+  /* -------------------------------------------------------------- the week's envelope (fix round 4)
+     The weekly budget is an envelope; a day's share is a guide line, never a wall. The Week
+     strip shows each day as a chip (₹ planned, a tick at its fair share); a tap opens one
+     slider for that day (no wall of sliders). Today's budget card opens the same control. */
+  const weekEnv = () => S.view?.budget?.envelope || null;
+  const tt = (en, vars) => (typeof t === "function" ? t(en, vars) : en);       // app.js English / தமிழ்
+  const envFor = (date) => { const e = st().env; return e && e.days?.some(x => x.date === date) ? e : weekEnv(); };
+  function envStrip() {
+    const e = weekEnv();
+    if (!e || !Array.isArray(e.days)) return "";
+    const days = e.days.filter(d => d.state !== "before");
+    const top = Math.max(1, ...days.map(d => Math.max(d.planned || 0, d.target || 0, d.guide || 0, d.reserve || 0)));
+    const chip = (d) => {
+      const off = d.state === "off", past = d.state === "past";
+      // a day the person set shows their amount (the bar still shows what's planned in it)
+      const amt = past ? d.spent : off ? d.reserve : d.set != null ? d.target : d.planned;
+      const h = Math.min(100, Math.round(((past ? d.spent : (d.planned || 0)) / top) * 100));
+      const g = Math.min(100, Math.round((d.guide / top) * 100));
+      const label = `${d.weekday}: ${off ? `Off, ${money(d.reserve)} kept aside` : `${money(amt)} ${past ? "spent" : "planned"}, share ${money(d.guide)}`}${d.set != null ? `, set to ${money(d.set)}` : ""}`;
+      return `<button type="button" class="v3-daychip${off ? " off" : ""}${past ? " past" : ""}${d.is_today ? " today" : ""}${d.set != null ? " set" : ""}" data-v3-day="${esc(d.date)}" aria-label="${esc(label)}"${past ? " disabled" : ""}>
+        <span class="v3-dc-d">${esc(d.weekday)}</span><span class="v3-dc-bar" aria-hidden="true"><i style="height:${h}%"></i><s style="bottom:${g}%"></s></span>
+        <b>${off ? tt("Off") : money(amt)}</b></button>`;
+    };
+    const kept = e.kept?.text ? ` · ${esc(e.kept.text)}` : "";
+    const parts = [`${money(e.spent)} spent`, `${money(e.committed)} picked`, `${money(Math.max(0, e.flexible))} for Ziggy to fill`];
+    if (e.reserve > 0) parts.push(`${money(e.reserve)} kept for Off days`);
+    const over = e.is_over ? `<p class="fine v3-env-over">Your own picks take this week ${money(e.over)} over ${money(e.envelope)}. They stay.</p>` : "";
+    const low = e.low ? `<p class="fine v3-env-low">${esc(e.low.text)}</p>` : "";
+    return `${impactNote()}<section class="card v3-env rise" aria-label="This week's money by day">
+      <p class="fine">${money(e.envelope)} this week${e.override != null ? " (this week only)" : ""}: ${parts.join(" · ")}${kept}</p>
+      <div class="v3-daychips" role="group" aria-label="Days. Tap one to set its amount or turn it Off">${days.map(chip).join("")}</div>${over}${low}
+      <p class="fine v3-env-help">${tt("The line on each day is its fair share: a guide, not a limit.")}</p></section>`;
+  }
+  // Rest-of-week preview while the slider moves: the days that follow the envelope share what this day leaves.
+  function restPreview(e, d, value) {
+    // days whose own picks already use their whole share don't take more; the rest share what this day leaves
+    const flex = e.days.filter(x => x.date !== d.date && x.state === "plan" && x.set == null && x.date >= todayIso()
+      && (x.target_exact ?? x.target) > x.spent + x.committed + 0.5);
+    if (!flex.length) return "No other day shares this week's money.";
+    const pool = flex.reduce((a, x) => a + (x.target_exact ?? x.target), 0) + (d.target_exact ?? d.target) - value;
+    if (pool < 0) return `${money(-pool)} over this week's ${money(e.envelope)}. Your choice stays; Ziggy shows it, never blocks it.`;
+    return `Rest of week: ${money(pool)} over ${flex.length} day${flex.length === 1 ? "" : "s"} ≈ ${money(pool / flex.length)}/day`;
+  }
+  const dayName = (iso) => { try { return new Date(`${iso}T12:00:00`).toLocaleDateString("en-IN", { weekday: "long" }); } catch (_) { return iso; } };
+  function daySheet() {
+    const s = st().sheet, e = envFor(s.date), d = e?.days?.find(x => x.date === s.date);
+    const title = s.date === todayIso() ? "Today's budget" : `${dayName(s.date)}'s budget`;
+    if (!d) return sheet("day", title, `<p class="fine">Loading the week…</p>`, "day budget");
+    const off = (s.state ?? d.state) === "off";
+    // the slider's floor: what the day already has (spent + picked), on the slider's ₹10 grid
+    const min = Math.floor(Math.max(0, d.min ?? Math.ceil(d.spent + d.committed)) / 10) * 10;
+    const cur = Math.max(min, Math.round(s.value ?? d.target));
+    const max = Math.max(min + 500, Math.ceil((Math.max(d.guide * 3, cur + 200)) / 50) * 50);
+    const gp = Math.max(0, Math.min(100, ((d.guide - min) / Math.max(1, max - min)) * 100));
+    const plan = `<div class="seg v3-dayplan" role="group" aria-label="Plan or Off">${["plan", "off"].map(k => `<button type="button" class="chip small" data-v3-dayplan="${k}" aria-pressed="${(off ? "off" : "plan") === k}">${tt(k === "plan" ? "Plan" : "Off")}</button>`).join("")}</div>`;
+    const body = off
+      ? `${plan}<p class="fine">Off: no meals planned, no reminders, no money assumed.${e.settings?.scope !== "planned" ? ` Its share (${money(d.guide)}) is kept aside for what you eat that day.` : ""}</p>`
+      : `${plan}<div class="v3-slider"><label for="v3-day-slider" class="sr">${esc(title)} in rupees</label>
+          <output id="v3-day-out" class="money v3-big" for="v3-day-slider">${money(cur)}</output>
+          <div class="v3-slider-track"><input id="v3-day-slider" type="range" min="${min}" max="${max}" step="10" value="${cur}" aria-valuetext="${money(cur)}">
+            <span class="v3-guide" style="left:${gp.toFixed(1)}%" aria-hidden="true"></span></div>
+          <p class="fine v3-slider-scale"><span>${money(min)}${min ? " already spent or picked" : ""}</span><span>${money(max)}</span></p>
+          <p class="fine">The line is ${s.date === todayIso() ? "today's" : "this day's"} fair share, ${money(d.guide)}: a guide, not a limit.</p></div>
+        <p class="fine" id="v3-day-preview" role="status">${esc(restPreview(e, d, cur))}</p>
+        ${(d.flags || []).map(f => `<p class="fine v3-env-low">${esc(f.text)}</p>`).join("")}
+        <label class="check"><input type="checkbox" id="v3-day-hard" ${(s.mode ?? d.mode) === "hard" ? "checked" : ""}> ${tt("Never above this (a hard limit)")}</label>
+        <button class="primary" data-v3-act="day-save" id="v3-day-save">Use ${money(cur)} for ${s.date === todayIso() ? "today" : esc(dayName(s.date))}</button>
+        ${d.set != null ? `<button class="ghost" data-v3-act="day-follow">${tt("Follow the week again")}</button>` : ""}
+        <p class="fine">Only this day. The days still ahead share the rest; your weekly budget doesn't change.</p>`;
+    return sheet("day", title, body, "day budget");
+  }
+  async function openDay(date) {
+    const sh = st().sheet;
+    if (sh?.kind !== "day" || sh.date !== date) { st().sheet = { kind: "day", date }; render(); }
+    st().env = await api(`/api/user/${S.userId}/envelope?week=${encodeURIComponent(date)}`);
+    render();
+  }
+  async function afterMoney(r) {
+    if (r?.envelope) st().env = r.envelope;
+    if (r && r.applied === false) toast("Another device changed this day just now. Showing its amount.");
+    if (S.planId) { try { S.view = await api(`/api/plan/${S.planId}`); } catch (_) { /* the Week reloads on its own */ } }
+    if (S.v3?.data) await load(); else render();
+  }
+  async function saveDay(amount) {
+    const s = st().sheet;
+    const mode = document.getElementById("v3-day-hard")?.checked ? "hard" : "soft";
+    const r = await api(`/api/user/${S.userId}/day-budget`, "PUT", { date: s.date, amount, mode, set_at: new Date().toISOString() });
+    st().sheet = null;
+    toast(amount == null ? "This day follows the week again." : "Saved. The days ahead re-balanced.");
+    await afterMoney(r);
+  }
+  async function setDayPlan(state) {
+    const s = st().sheet;
+    const r = await api(`/api/user/${S.userId}/day-plan`, "PUT", { date: s.date, state, set_at: new Date().toISOString() });
+    s.state = state;
+    toast(state === "off" ? `${s.date === todayIso() ? "Today" : dayName(s.date)} is Off: nothing planned, no reminders.` : "Back to planning this day.");
+    await afterMoney(r);
+  }
+  // What a pick or pin costs the week: shown after the person's own choice, never as a block.
+  function impactNote() {
+    const imp = S.v3?.impact;
+    if (!imp?.text) return "";
+    const btn = (o) => `<button class="small ${o.act === imp.default ? "primary" : "secondary"}" data-v3-impact="${esc(o.act)}"${o.amount ? ` data-v3-amount="${o.amount}"` : ""}>${esc(o.act === "take_from_week" ? tt(o.label) : o.label)}</button>`;
+    const sugg = imp.showSuggest && imp.suggest?.length ? `<div class="stack v3-impact-sugg" style="gap:6px">${imp.suggest.map(x =>
+      `<div class="row" style="justify-content:space-between;gap:8px"><span class="fine">${esc(dayName(x.date))} ${esc(x.meal)}: ${esc(x.name || "")} ${money(x.cost)}</span><button class="small secondary" data-v3-impact-skip="${x.session_id}">Skip it</button></div>`).join("")}<p class="fine">Or open that meal in the Week to cook it instead.</p></div>` : "";
+    return `<div class="note v3-impact" role="status"><span style="flex:1"><b>${esc(imp.text)}</b>
+      <span class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px">${(imp.options || []).map(btn).join("")}</span>${sugg}</span></div>`;
+  }
+  async function impactAct(act, amount) {
+    const imp = st().impact;
+    if (act === "suggest") { imp.showSuggest = true; render(); return; }
+    if (act === "raise_week") {
+      const d = new Date(`${imp.date}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      const ws = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const r = await api(`/api/user/${S.userId}/week-override`, "PUT", { week_start: ws, amount: Number(amount), set_at: new Date().toISOString() });
+      st().impact = null; toast(`This week is ${money(Number(amount))}. Next week goes back to your usual budget.`);
+      await afterMoney(r); return;
+    }
+    st().impact = null; render();
+  }
+  function showImpact(imp) { if (imp?.text) { st().impact = imp; render(); } }
 
   /* -------------------------------------------------------------- sheets */
   const sheet = (ov, title, body, label) => `<div class="sheet-bg" data-ov="v3-${ov}" data-v3-close="1"><section class="sheet v3-sheet" role="dialog" aria-modal="true" aria-labelledby="v3-${ov}-h">
@@ -647,7 +771,9 @@
     st().sheet = null; await load();
   }
   function overlays() {
-    if (!ON || !S.v3?.sheet || !S.v3.data) return "";
+    if (!ON) return "";
+    if (S.v3?.sheet?.kind === "day") return daySheet();
+    if (!S.v3?.sheet || !S.v3.data) return "";
     const k = S.v3.sheet.kind;
     return k === "decide" ? decideSheet() : k === "rules" ? rulesSheet() : k === "budget" ? budgetSheet()
       : k === "swap" ? swapSheet() : k === "add" ? addSheet() : k === "order" ? orderSheet() : k === "remind" ? remindSheet() : "";
@@ -956,6 +1082,21 @@
     if (obC) obC.onchange = obReady;                 // W8: the notice must be agreed to before a profile exists
     if (!S.userId) return;
     on("[data-v3-mode]", "click", (e) => { v().mode = e.currentTarget.dataset.v3Mode; render(); });
+    on("[data-v3-day]", "click", (e) => { const d = e.currentTarget.dataset.v3Day; guard(() => openDay(d), "Open the day"); });
+    on("[data-v3-dayplan]", "click", (e) => { const k = e.currentTarget.dataset.v3Dayplan; guard(() => setDayPlan(k), "Plan or Off"); });
+    on("[data-v3-impact]", "click", (e) => { const t = e.currentTarget.dataset; guard(() => impactAct(t.v3Impact, t.v3Amount), "This week's money"); });
+    on("[data-v3-impact-skip]", "click", (e) => { const sid = e.currentTarget.dataset.v3ImpactSkip;
+      guard(async () => { const view = await api(`/api/session/${sid}/choose`, "POST", { action: "skip" }); adoptView(view);
+        const imp = v().impact; if (imp) imp.suggest = (imp.suggest || []).filter(x => String(x.session_id) !== String(sid));
+        toast("Skipped. The week re-balanced."); render(); }, "Skip a meal"); });
+    const slider = document.getElementById("v3-day-slider");
+    if (slider) slider.oninput = () => { const sh = v().sheet, e = envFor(sh.date), d = e?.days?.find(x => x.date === sh.date);
+      const n = Number(slider.value); sh.value = n; if (!d) return;
+      const out = document.getElementById("v3-day-out"), pv = document.getElementById("v3-day-preview"), sv = document.getElementById("v3-day-save");
+      if (out) out.textContent = money(n);
+      slider.setAttribute("aria-valuetext", money(n));
+      if (pv) pv.textContent = restPreview(e, d, n);
+      if (sv) sv.textContent = `Use ${money(n)} for ${sh.date === todayIso() ? "today" : dayName(sh.date)}`; };
     on("[data-v3-budget]", "click", (e) => { const n = Number(e.currentTarget.dataset.v3Budget);
       guard(() => post("/budget", { amount: Math.max(50, (v().data?.budget.amount || 0) + n) }), "Change today's budget"); });
     on("[data-v3-preset]", "click", (e) => { const n = Number(e.currentTarget.dataset.v3Preset); guard(() => post("/budget", { amount: n }), "Change today's budget"); });
@@ -1030,7 +1171,9 @@
         "remind-push": remindPush, "remind-ics": () => remindIcs(e.currentTarget.dataset.v3Ics),
         "save-later": async () => { store.set(`ziggy.v3.saved-later.${S.userId}`, "1"); render(); },
         "code-saved": async () => { S.codeAcked = S.userId; render(); },
-        olist: async () => { T(null); await openOrderList(); } }[a];
+        olist: async () => { T(null); await openOrderList(); },
+        "day-save": () => saveDay(Number(document.getElementById("v3-day-slider")?.value ?? v().sheet?.value)),
+        "day-follow": () => saveDay(null) }[a];
       if (f) guard(f);
     });
     const mq = document.getElementById("v3-mq");
@@ -1087,6 +1230,7 @@
     overlays,
     wire,
     weekTop() { return ON ? weekTop() : ""; },
+    impact(view) { if (ON && view) showImpact(view.impact); },
     nutritionOn() { return ON ? nutritionOn() : true; },
     startOnboard,
     // A tap on a meal in the Week opens Swap (for today's meals) — one way to change a meal.
@@ -1102,6 +1246,7 @@
     invalidate() { if (S.v3) S.v3.data = null; },
     _test: { load, post, decide, share, startOnboard, finishOb, obTap, today, cookScreen, overlays, hiddenList, suggBlock, addSugg, histChips, savePlaces, snackRow, recapCard, actions, orderSheet,
       rulesRow, mealLine, swapSheet, remindSheet, relaxFor, earlyOrder, askTime, decideNote, weekTop,
-      menuBody, menuRow, etaText, openPlace, addSheet, compareRow, cartOffers, readCartOnce },
+      menuBody, menuRow, etaText, openPlace, addSheet, compareRow, cartOffers, readCartOnce,
+      envStrip, daySheet, restPreview, openDay, saveDay, setDayPlan, impactNote, impactAct, showImpact },
   };
 })();

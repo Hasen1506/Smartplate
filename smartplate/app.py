@@ -133,7 +133,7 @@ def create_app() -> Flask:
                     return _missing(key, args[key])
         if request.path.startswith('/api/'):
             presented = request.headers.get(access.HEADER)
-            body = request.get_json(silent=True) if request.method == 'POST' else None
+            body = request.get_json(silent=True) if request.method in ('POST', 'PUT') else None
             owners = access.owners_of(args, body if isinstance(body, dict) else None,
                                       request.args.get('user_id', type=int))
             if not all(access.allowed(uid, presented) or websession.grants(g.web_session, uid) for uid in owners):
@@ -154,6 +154,13 @@ def create_app() -> Flask:
             g.user_locks = locks
 
     @app.teardown_request
+    def start_background_menu_reads(error):
+        # a menu tap's background read (the rest of the menu) starts once the tap is
+        # answered, never racing page 1 for the database or the CPU (fix round 4)
+        from .integrations import swiggy_menu_cache
+        swiggy_menu_cache.start_deferred()
+
+    @app.teardown_request              # registered after: Flask runs it first
     def release_user_locks(error):
         for lock in reversed(g.pop('user_locks', [])):
             lock.release()
@@ -1418,4 +1425,6 @@ def create_app() -> Flask:
     ops.init_app(app)                        # /cron/tick, /admin/metrics, analytics events (W9)
     from . import today_api                 # v3 Today: budget, pools, picks, Decide for me
     app.register_blueprint(today_api.bp)
+    from . import envelope_api              # budget model v2: the week's envelope, day amounts, Plan/Off
+    app.register_blueprint(envelope_api.bp)
     return app

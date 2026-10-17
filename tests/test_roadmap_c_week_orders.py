@@ -67,7 +67,9 @@ def test_c1_bill_breakdown_shows_every_line_swiggy_returns():
     assert swiggy_live.bill_breakdown({"pricing": {}}, 210) is None
 
 
-def test_c2_pick_any_slots_and_days_not_just_lunch(client, swiggy):
+def test_c2_pick_any_slots_and_days_not_just_lunch(frozen, client, swiggy):
+    # frozen clock (Mon 2 Nov 2026 08:00 IST): days 2-4 and their breakfasts/dinners are still
+    # ahead whatever the real day and hour (it failed on Saturdays and late in the day)
     pid = _plan(client)["plan"]["id"]
     q = client.get(f"/api/plan/{pid}/order-queue").get_json()
     assert q["queued"] == 0 and q["scheduling"]["supported"] is False

@@ -236,6 +236,16 @@ def plan_view(plan_id: int) -> dict:
     env["covers"] = ("Mon–Sun" if _covered == 7 else
                      ("Sun" if _covered == 1 else f"{models.DAYS[7 - _covered][:3]}–Sun"))
     env["daily_cap"] = profile.daily_cap(user)
+    env["daily_cap_mode"] = profile.daily_cap_mode(user) if env["daily_cap"] else None
+    # Budget model v2: the same envelope Today reads (domain/envelope.py): each day's state,
+    # target, guide share, spent and committed money, for the Week strip's day chips.
+    from .domain import envelope as _envelope
+    try:
+        env["envelope"] = _envelope.week(user["id"], plan["week_start"], user=user, plan=plan)
+    except Exception:                      # never let the strip take the Week down
+        import logging
+        logging.getLogger("smartplate").exception("envelope for plan %s", plan_id)
+        env["envelope"] = None
     # A weekly TARGET for planning, not a hard cap on what's spent (critique 33): beside it, what
     # real Swiggy bills say was actually spent this week (never estimates).
     from .domain import spend
@@ -978,10 +988,10 @@ def decide_today(user_id: int, mode: str | None = None, money: float | None = No
         return {"mode": mode or "favourites_only", "picks": [], "money": 0.0, "spent": 0.0, "left": 0.0,
                 "plan_id": plan["id"], "meals": 0, "filled": 0, "method": "none",
                 "note": "This week's plan starts on " + plan["week_start"] + "; nothing to decide for today."}
+    from .domain import envelope
     cap = optimizer.week_cap(user, plan)
     fixed, by_day = _fixed_money(plan["id"])
     week_left = max(0.0, cap - fixed)
-    spent_today = by_day.get(day, 0.0)
     if money is not None:
         try:
             money = float(money)
@@ -991,11 +1001,15 @@ def decide_today(user_id: int, mode: str | None = None, money: float | None = No
             raise ValueError("money must be between 0 and 100000")
         today_money = money
     else:
-        days_left = 7 - day
-        today_money = max(0.0, min(week_left, (week_left + spent_today) / days_left - spent_today))
-        dcap = profile.daily_cap(user)
+        # One function for Today and Week (budget model v2): today's target from the envelope,
+        # less what today already has (spent, picked, pinned).
+        d = envelope.day_view(user, today)["day"]
+        today_money = max(0.0, d["target_exact"] - d["spent"] - d["committed"])
+        dcap = profile.daily_cap(user) if profile.daily_cap_mode(user) == "hard" else None
         if dcap:
-            today_money = min(week_left, max(0.0, dcap - spent_today))
+            today_money = min(today_money, max(0.0, dcap - d["spent"] - d["committed"]))
+        if d.get("mode") == "hard":
+            today_money = min(today_money, max(0.0, float(d["set"]) - d["spent"] - d["committed"]))
     sessions = _open_sessions(plan["id"], day=day)
     out = _decide(user, plan, sessions, mode=mode, money=round(today_money, 2), money_word="today's",
                   rules_extra={"daily_cap": None})
@@ -1014,11 +1028,15 @@ def decide_week(plan_id: int, mode: str | None = None, *, apply: bool = False) -
         raise ValueError("Plan not found")
     user = models.get_user(plan["user_id"])
     sessions = _open_sessions(plan_id)
+    from .domain import envelope
     cap = optimizer.week_cap(user, plan)
     fixed, day_money = _fixed_money(plan_id)
-    money = max(0.0, cap - fixed)
+    spent_by_day = optimizer.committed_spend(plan_id)["by_day"]
+    et = envelope.solver_targets(user, plan, day_money, spent_by_day)
+    money = max(0.0, min(cap - fixed, et["room"]))
     out = _decide(user, plan, sessions, mode=mode, money=round(money, 2), money_word="this week's",
-                  rules_extra={"day_money": day_money})
+                  rules_extra={"day_money": day_money, "day_targets": et["targets"],
+                               "day_caps": {d: v["open"] for d, v in et["sets"].items() if v["mode"] == "hard"}})
     out["horizon"] = "week"
     if apply:
         kept_open = []

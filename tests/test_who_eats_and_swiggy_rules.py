@@ -129,7 +129,9 @@ def test_a_household_member_with_rules_stops_the_cart_until_they_are_not_eating(
     assert preview.get_json()["quantity"] == 1
 
 
-def test_two_eaters_put_two_portions_in_the_swiggy_cart(client, swiggy, monkeypatch):
+def test_two_eaters_put_two_portions_in_the_swiggy_cart(frozen, client, swiggy, monkeypatch):
+    # frozen clock (Mon 2 Nov 2026 08:00 IST): the next delivery is ahead and its cart window
+    # rules are the same at any real hour (it 502ed late in the day)
     _meera_has_no_rules()
     _arjun(client, swiggy)
     cell = _next_delivery(client, uid=3)
@@ -145,9 +147,13 @@ def test_two_eaters_put_two_portions_in_the_swiggy_cart(client, swiggy, monkeypa
     assert cart["to_pay"] == 455.0                              # 2 × ₹210 + ₹35 delivery, Swiggy's own total
     assert "place_food_order" not in swiggy.tool_calls()
     # A preview for one portion can't fill a two-portion cart: the head count is in the fingerprint
-    client.post(f"/api/session/{sid}/eaters", json={"eaters": [3]})
+    view = client.post(f"/api/session/{sid}/eaters", json={"eaters": [3]}).get_json()
+    # the re-solve for one eater may pick another dish; Swiggy (the fake) sells it too, so the
+    # refusal below is the stale fingerprint and not an unknown dish (502 on some days)
+    one = next(c for d in view["grid"] for c in d["meals"].values() if c.get("session_id") == sid)
+    swiggy.dishes = {cell["item"]: 21000, one["item"]: 21000}
     again = client.post(f"/api/session/{sid}/swiggy-cart", json={"expected_fingerprint": preview["fingerprint"]})
-    assert again.status_code == 409
+    assert again.status_code == 409, again.get_json()
 
     # Placing a two-portion order re-checks everyone in the household
     monkeypatch.setattr(config, "LIVE_ORDERS", True)

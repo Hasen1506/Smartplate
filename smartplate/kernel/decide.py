@@ -230,8 +230,10 @@ class _State:
         self.money, self.rules, self.caps = money, rules, caps
         self.max_repeat = int(rules.get("max_repeat") or 2)
         self.cook_cap = int(rules.get("cook_cap", 99))
-        self.daily_cap = rules.get("daily_cap")
+        self.daily_cap = rules.get("daily_cap")                    # hard only: the person's "never above"
         self.day_money = dict(rules.get("day_money") or {})       # day -> money already fixed that day
+        self.day_caps = dict(rules.get("day_caps") or {})         # day -> open money of a hard day amount
+        self.targets = dict(rules.get("day_targets") or {})       # day -> soft target of open money
         self.spent = 0.0
         self.item_n: dict = {}
         self.item_day: dict = {}
@@ -249,6 +251,9 @@ class _State:
             if (self.day_spent.get(day, 0.0) - (d_old if old else 0.0) + c["cost"]
                     + self.day_money.get(day, 0.0) > float(self.daily_cap) + 1e-6):
                 return False
+        cap = self.day_caps.get(slot["day"])
+        if cap is not None and (self.day_spent.get(slot["day"], 0.0) - d_old + c["cost"] > float(cap) + 1e-6):
+            return False
         if c["kind"] == "cook" and (old is None or old["kind"] != "cook") and self.cooks >= self.cook_cap:
             return False
         old_ids = set(old.get("item_ids") or ()) if old else set()
@@ -260,6 +265,10 @@ class _State:
             if self.item_day.get((i, slot["day"]), 0) >= 1:
                 return False
         return True
+
+    def over(self) -> float:
+        """Money above the days' soft targets (only days that have one)."""
+        return sum(max(0.0, self.day_spent.get(d, 0.0) - float(t)) for d, t in self.targets.items())
 
     def add(self, slot, c, sign=1):
         if c["kind"] == "skip":
@@ -276,11 +285,21 @@ class _State:
 SKIP = {"kind": "skip", "cost": 0.0, "score": 0.0, "item_ids": ()}
 
 
-def _key(chosen) -> tuple:
+def _over(chosen, slots, rules) -> float:
+    targets = (rules or {}).get("day_targets") or {}
+    if not targets or slots is None:
+        return 0.0
+    by_day: dict = {}
+    for s, c in zip(slots, chosen):
+        by_day[s["day"]] = by_day.get(s["day"], 0.0) + c["cost"]
+    return sum(max(0.0, by_day.get(d, 0.0) - float(t)) for d, t in targets.items())
+
+
+def _key(chosen, slots=None, rules=None) -> tuple:
     filled = sum(1 for c in chosen if c["kind"] != "skip")
     q = sum(obj.quantize(c["score"]) for c in chosen if c["kind"] != "skip")
     cost = sum(c["cost"] for c in chosen)
-    return obj.plan_key(filled, q, cost)
+    return obj.plan_key(filled, q, cost, over=_over(chosen, slots, rules))
 
 
 def _undominated(cands, n, keep_max: int | None = None):
@@ -320,12 +339,12 @@ def _exact(slots, cand_lists, money, rules, caps):
 
     def dfs(i, filled, q, cost):
         if i == n:
-            k = obj.plan_key(filled, q, cost)
+            k = obj.plan_key(filled, q, cost, over=st.over())
             if best["key"] is None or k > best["key"]:
                 best["key"], best["pick"] = k, list(chosen)
             return
         if best["key"] is not None:
-            bound = obj.plan_key(filled + sum(has[i:]), q + sum(best_q[i:]), cost)
+            bound = obj.plan_key(filled + sum(has[i:]), q + sum(best_q[i:]), cost, over=st.over())
             if bound <= best["key"]:
                 return
         for c in lists[i]:
@@ -368,6 +387,7 @@ def _greedy(slots, cand_lists, money, rules, caps):
                 st.add(slots[i], c)
                 chosen[i] = c
                 break
+    _less_over(slots, cand_lists, chosen, st)
     # a meal left empty early may fit now (an upgrade elsewhere never frees money, but
     # rule 5 may have): try once more, cheapest first
     for i in order:
@@ -378,6 +398,33 @@ def _greedy(slots, cand_lists, money, rules, caps):
                     chosen[i] = c
                     break
     return chosen
+
+
+def _less_over(slots, cand_lists, chosen, st):
+    """Greedy mirror of the MILP's third stage: among equally liked dishes, take the one that
+    puts the week least over the days' soft targets (then the cheaper)."""
+    if not st.targets:
+        return
+    for i in range(len(slots)):
+        cur = chosen[i]
+        if cur["kind"] == "skip":
+            continue
+        base = st.over()
+        best = None
+        for c in cand_lists[i]:
+            if c is cur or obj.quantize(c["score"]) != obj.quantize(cur["score"]) or not st.fits(slots[i], c, old=cur):
+                continue
+            st.add(slots[i], cur, -1)
+            st.add(slots[i], c)
+            o = st.over()
+            st.add(slots[i], c, -1)
+            st.add(slots[i], cur)
+            if o < base - 1e-6 and (best is None or (o, c["cost"]) < best[0]):
+                best = ((o, c["cost"]), c)
+        if best:
+            st.add(slots[i], cur, -1)
+            st.add(slots[i], best[1])
+            chosen[i] = best[1]
 
 
 def _pair_exchange(slots, cand_lists, chosen, st, max_rounds: int = 60):
@@ -475,6 +522,19 @@ def solve_milp(slots, cand_lists, money, rules, caps=None):
     for i, cs in enumerate(cand_lists):
         prob += pulp.lpSum(x[(i, j)] for j in range(len(cs))) <= 1
     prob += pulp.lpSum(c["cost"] * x[(i, j)] for i, cs in enumerate(cand_lists) for j, c in enumerate(cs)) <= money
+    for day, cap in (rules.get("day_caps") or {}).items():
+        terms = [c["cost"] * x[(i, j)] for i, cs in enumerate(cand_lists) if slots[i]["day"] == day
+                 for j, c in enumerate(cs)]
+        if terms:
+            prob += pulp.lpSum(terms) <= float(cap)
+    overs = []
+    for day, target in (rules.get("day_targets") or {}).items():
+        terms = [c["cost"] * x[(i, j)] for i, cs in enumerate(cand_lists) if slots[i]["day"] == day
+                 for j, c in enumerate(cs)]
+        if terms:
+            o = pulp.LpVariable(f"over_{day}", lowBound=0)
+            prob += pulp.lpSum(terms) - o <= float(target)
+            overs.append(o)
     if rules.get("daily_cap") is not None:
         for day in {s["day"] for s in slots}:
             prob += pulp.lpSum(c["cost"] * x[(i, j)] for i, cs in enumerate(cand_lists) if slots[i]["day"] == day
@@ -505,7 +565,22 @@ def solve_milp(slots, cand_lists, money, rules, caps=None):
         prob.solve(solver)
         MILP_LAST["proven"] &= prob.status == pulp.LpStatusOptimal and prob.sol_status == pulp.LpSolutionOptimal
         prob += stage >= round(pulp.value(stage) or 0)
+    if overs:                              # third stage: least money over the days' soft targets
+        over_sum = pulp.lpSum(overs)
+        prob.setObjective(-over_sum)
+        prob.solve(solver)
+        MILP_LAST["proven"] &= prob.sol_status == pulp.LpSolutionOptimal
+        prob += over_sum <= (pulp.value(over_sum) or 0) + 0.01
     prob.setObjective(-cost)
+    prob.solve(solver)
+    MILP_LAST["proven"] &= prob.sol_status == pulp.LpSolutionOptimal
+    # last stage: a fixed, content-derived tie-break among the equally good answers (the same
+    # dishes on other days cost and score the same). Without it the choice between them
+    # depends on the CBC build, so x86 (CI) and ARM gave different weeks once the soft day
+    # targets added a stage (fix round 4). Mirrors optimizer._tiebreak.
+    prob += cost <= (pulp.value(cost) or 0) + 0.01
+    prob.setObjective(-pulp.lpSum(_tiebreak(slots[i], c) * x[(i, j)] for i, cs in enumerate(cand_lists)
+                                  for j, c in enumerate(cs)))
     prob.solve(solver)
     MILP_LAST["proven"] &= prob.sol_status == pulp.LpSolutionOptimal
     out = []
@@ -513,6 +588,14 @@ def solve_milp(slots, cand_lists, money, rules, caps=None):
         j = next((j for j in range(len(cs)) if (x[(i, j)].value() or 0) > 0.5), None)
         out.append(cs[j] if j is not None else SKIP)
     return out
+
+
+def _tiebreak(slot: dict, c: dict) -> float:
+    """In [0, 1): a hash of the slot and the dish (never a preference; used only in the
+    MILP's last stage, after meals, score, soft targets and cost are fixed)."""
+    ident = ",".join(str(i) for i in (c.get("item_ids") or ())) or str(c.get("name") or "")
+    key = f"{slot.get('day')}|{slot.get('meal')}|{c.get('kind')}|{ident}".encode()
+    return int.from_bytes(hashlib.blake2b(key, digest_size=4).digest(), "big") / 2**32
 
 
 def solve(slots, cand_lists, money, rules, *, caps=None, method="auto"):
@@ -534,7 +617,7 @@ def solve(slots, cand_lists, money, rules, *, caps=None, method="auto"):
         milp = solve_milp(slots, bounded, money, rules, caps)
     except Exception:                                    # no CBC binary: the greedy answer
         return greedy, "greedy"
-    if _key(milp) >= _key(greedy):
+    if _key(milp, slots, rules) >= _key(greedy, slots, rules):
         return milp, "milp" if MILP_LAST["proven"] else "milp-capped"
     return greedy, "greedy"
 
@@ -625,7 +708,8 @@ def rules_for(user: dict) -> dict:
             "qty": num(prefs.get("qty"), int) or 1,
             "max_repeat": optimizer.item_repeat(user),
             "cook_cap": optimizer._cook_cap(user),
-            "daily_cap": profile.daily_cap(user),
+            # the Settings daily limit binds only as the person's hard "never above" (v2)
+            "daily_cap": profile.daily_cap(user) if profile.daily_cap_mode(user) == "hard" else None,
             # a non-veg eater's non-veg dishes score a little higher, unless they said otherwise
             "nonveg_pref": prefs.get("nonveg_pref", True) is not False}
 
