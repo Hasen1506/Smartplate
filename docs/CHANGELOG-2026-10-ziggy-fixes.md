@@ -185,6 +185,14 @@ choice always wins (Ziggy shows what it costs, then rebalances the rest).
   first, and the background read of the rest of the menu starts when the request ends (app
   teardown), so page 1 never competes with pages 2+ for the database or the CPU.
 
+- "Decide for me" (MILP) gets a last, content-hash tie-break stage after cost (like the week
+  planner's): with the soft day targets the same dishes on other days tied, and CBC on x86 (CI)
+  and ARM picked different days. The golden was regenerated: same dishes and spend, days permuted.
+- Clock-dependent tests that failed on main too: `test_roadmap_c::test_c2` and
+  `test_who_eats::test_two_eaters` run on the frozen clock (Mon 2 Nov 2026 08:00 IST); in
+  `test_two_eaters` the fake Swiggy also sells the dish the one-eater re-solve picks, so the
+  stale-fingerprint 409 is what is tested (it was a 502 "no exact live match" on some days).
+
 **Edge cases covered** (design checklist): a pin above the whole remaining envelope; several
 splurge days over the envelope; a bill above its estimate (surge) absorbed by later flexible days
 with a note when a day drops below the cheapest usual meal; refund/cancel returns money to the
@@ -214,7 +222,11 @@ picks count in the money without a slot; two devices editing a day amount: last 
   test: day targets + spent + committed equal the envelope, pins never dropped; API),
   `tests/frontend_r4_envelope.test.cjs`, `tests/browser_r4_envelope.py`; CI runs the r4 node and
   browser tests.
-- Totals: TOTALS_PLACEHOLDER
+- Local totals (SQLite, `-n 2` in chunks): Python 1,124 passed, 6 skipped, 0 failed (88 files incl.
+  `tests/scenarios`) + golden/journey/differential 12 passed; node `tests/*.cjs` 170 passed;
+  `menu-source.test.js` 10 passed; Playwright, 12 CI files, 26 passed (`browser_v3_today` failed
+  once on the first run and passed on two reruns). The page-one menu test passed 10/10 sequential
+  and about 80 runs under 4-5x CPU oversubscription with one failure. Postgres: CI only.
 
 ## sp-grill critiques (1–72)
 
