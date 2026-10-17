@@ -174,7 +174,8 @@ def _this_pr_reasons(body: dict, n_open: int) -> list[str]:
 
 
 @settings(max_examples=20)
-@given(body=profiles(), at=st.sampled_from(INSTANTS))
+# the diets every compared version knows (eggetarian and Jain came in fix round 3, usab #11)
+@given(body=profiles(diets=("veg", "nonveg", "vegan")), at=st.sampled_from(INSTANTS))
 def test_planner_differences_are_all_intentional(three, body, at):
     pre19, main, current = (three[k].plan(body, at) for k in ("pre19", "main", "current"))
     n_open = sum(1 for k, c in current["cells"].items() if c[0] not in ("past",))

@@ -264,7 +264,7 @@ def test_scoring_buckets_counts_recency_and_rating():
     assert by[("r-105", "Veg Hakka Noodles")]["score"] < dosa["score"]  # old order decays
     assert swiggy_history.bucket(dt.datetime(2026, 1, 1, 12, 30)) == "lunch"
     assert swiggy_history._items({"orderedItems": "2 x Idli, Vada"}) == [
-        {"name": "Idli", "menu_item_id": None}, {"name": "Vada", "menu_item_id": None}]
+        {"name": "Idli", "menu_item_id": None, "qty": 2}, {"name": "Vada", "menu_item_id": None, "qty": 1}]  # r3 #7
 
 
 def test_history_import_only_on_explicit_consent_and_deletable(town):

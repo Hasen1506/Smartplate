@@ -59,12 +59,16 @@ def test_cron_tick_sends_due_reminders_once(client, monkeypatch):
 def test_a_reminder_after_a_sleep_is_sent_late_with_a_note(client):
     first = _subscribe(client)
     when = dt.datetime.fromisoformat(first["at"])
+    # a cart-open nudge (usab #21) is still in time until order-by; later than that it's late
+    late_at = max(when + push.LATE_OK, dt.datetime.fromisoformat(first.get("order_by") or first["at"])) \
+        + dt.timedelta(minutes=5)
     svc = FakeService()
-    stats = push.deliver(when + push.LATE_OK + dt.timedelta(minutes=5), sender=svc)
+    stats = push.deliver(late_at, sender=svc)
     payload = {p["tag"]: p for _, p in svc.calls}[f"smartplate-{first['session_id']}"]
     assert stats["late"] >= 1
     assert payload["title"] == "Late reminder: " + first["title"]
-    assert "25 min late" in payload["body"] and first["body"] in payload["body"]
+    late_min = int((late_at - when).total_seconds() // 60)
+    assert f"{late_min} min late" in payload["body"] and first["body"] in payload["body"]
     assert _outcomes()[first["session_id"]] == "late"
 
 

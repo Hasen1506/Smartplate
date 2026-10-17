@@ -314,7 +314,7 @@ def test_redesign_today_cart_menu_week_me(world, viewport):
             assert page.evaluate("document.documentElement.dataset.theme") == "dark"
             page.wait_for_timeout(600)                                                      # let the colour fade finish
             assert page.evaluate(CONTRAST_JS.replace("[255, 255, 255, 1]", "[0, 0, 0, 1]")) == []
-            page.get_by_role("group", name="Colour").get_by_role("button", name="Zomato × Swiggy").click()
+            page.get_by_role("group", name="Colour").get_by_role("button", name="Saffron").click()
             assert page.evaluate("document.documentElement.dataset.palette") == "mesh"
             shot("me-dark-mesh")
             page.reload()

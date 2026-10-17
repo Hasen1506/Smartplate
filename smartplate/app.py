@@ -226,12 +226,15 @@ def create_app() -> Flask:
         response = jsonify(error=str(error), code=error.code, retry_after=error.retry_after, rule=rule)
         if error.retry_after is not None:
             response.headers['Retry-After'] = str(error.retry_after)
-        if error.code in ('swiggy_cart_other_address', 'price_unit_changed', 'cart_over_cap', 'swiggy_out_of_area'):
+        if error.code in ('swiggy_cart_other_address', 'price_unit_changed', 'cart_over_cap', 'swiggy_out_of_area',
+                          'swiggy_cart_busy'):
             return response, 409        # the user's address/cart/catalogue choice (W4, W7): not an outage
         if error.code == 'restaurant_closed':
             return response, 409        # the place is shut right now: information for the user, not an outage
         if error.code in ('swiggy_demo_mode', 'swiggy_read_only'):
             return response, 403        # this server's Swiggy mode doesn't allow it
+        if error.code == 'swiggy_redirect_not_whitelisted':
+            return response, 503        # Swiggy has not allow-listed this sign-in address yet
         return response, 429 if error.code == 'swiggy_rate_limited' else 502
 
     from . import db as _db
@@ -464,10 +467,21 @@ def create_app() -> Flask:
         plan = models.get_plan(plan_id)
         if not plan:
             raise ValueError("Plan not found")
+        if request.args.get("background") == "1":          # boot: a job the app polls (audit #16)
+            from . import catalog_jobs
+            return jsonify(catalog_jobs.start(plan_id, plan["user_id"])), 202
         ratelimit.check(f"live-menus:{plan['user_id']}", 10, 3600)
         result = live_catalog.refresh(plan["user_id"])
         service.reoptimize(plan_id)
         return jsonify({**service.plan_view(plan_id), "refreshed": result})
+
+    @app.get("/api/plan/<int:plan_id>/live-menus/status")
+    def plan_live_menus_status(plan_id):
+        from . import catalog_jobs
+        plan = models.get_plan(plan_id)
+        if not plan:
+            raise ValueError("Plan not found")
+        return jsonify(catalog_jobs.status(plan["user_id"]))
 
     @app.post("/api/plan/<int:plan_id>/sample-menus")
     def plan_from_sample_menus(plan_id):
@@ -773,7 +787,12 @@ def create_app() -> Flask:
     def reminders_ics(user_id):
         from .domain import reminders
         view = service.current_plan(user_id)
-        body = reminders.to_ics(reminders.upcoming(view), plan_id=view["plan"]["id"], name=view["user"]["name"])
+        rows = reminders.upcoming(view)
+        meal, day = request.args.get("meal"), request.args.get("date")
+        if meal:                                       # one meal's reminder (usab #22)
+            from . import clock
+            rows = reminders.for_meal(rows, day or clock.today().isoformat(), meal)
+        body = reminders.to_ics(rows, plan_id=view["plan"]["id"], name=view["user"]["name"])
         return Response(body, mimetype="text/calendar", headers={
             "Content-Disposition": "attachment; filename=ziggy-reminders.ics"})
 
@@ -849,8 +868,13 @@ def create_app() -> Flask:
         before = address_change.snapshot(user_id)
         chosen = swiggy_live.choose_address(user_id, request.get_json().get("address_id"))
         # A new address can put planned restaurants out of reach: re-check the week (W7).
-        return jsonify({**chosen, "order_enabled": config.LIVE_ORDERS,
-                        "week": address_change.revalidate(user_id, before)})
+        week = address_change.revalidate(user_id, before)
+        # r3 #2: say what changed. Usual dishes are kept; ones saved for the other address are greyed.
+        changed = None
+        if before.get("address_id") and before.get("address_id") != (chosen.get("address") or {}).get("id"):
+            from .domain import meal_pools
+            changed = meal_pools.address_summary(user_id)
+        return jsonify({**chosen, "order_enabled": config.LIVE_ORDERS, "week": week, "address_changed": changed})
 
     @app.get("/api/user/<int:user_id>/swiggy/menu")
     def swiggy_menu(user_id):
@@ -880,8 +904,29 @@ def create_app() -> Flask:
 
     @app.get("/api/user/<int:user_id>/swiggy/live-menu")
     def swiggy_live_menu(user_id):
-        return jsonify(swiggy_live.live_menu(user_id, request.args.get("restaurant_id", ""),
-                                            request.args.get("restaurant_name", "")))
+        # Kept menu at once, revalidated in the background; page 1 first when nothing is kept (audit #3)
+        from .integrations import swiggy_menu_cache
+        return jsonify(swiggy_menu_cache.view(user_id, request.args.get("restaurant_id", ""),
+                                              request.args.get("restaurant_name", ""),
+                                              fresh=request.args.get("fresh") == "1"))
+
+    @app.post("/api/user/<int:user_id>/swiggy/menus/prefetch")
+    def swiggy_prefetch_menus(user_id):
+        """The Add sheet opened: read the menus of the person's own places in the background."""
+        from .integrations import swiggy_menu_cache
+        ratelimit.check(f"menu-prefetch:{user_id}", 30, 3600)
+        extra = (request.get_json(silent=True) or {}).get("restaurants")
+        return jsonify(swiggy_menu_cache.prefetch(user_id, extra if isinstance(extra, list) else None))
+
+    @app.get("/api/user/<int:user_id>/swiggy/nearby")
+    def swiggy_nearby(user_id):
+        """Swap's "Nearby now": dishes from the person's live catalogue within rules and budget."""
+        from .domain import nearby
+        return jsonify(nearby.for_meal(user_id, request.args.get("meal", "")))
+
+    @app.get("/api/user/<int:user_id>/swiggy/live-cart/offers")
+    def swiggy_cart_offers(user_id):
+        return jsonify(swiggy_live.cart_coupons(user_id))
 
     @app.get("/api/user/<int:user_id>/swiggy/dishes")
     def swiggy_dishes(user_id):
@@ -1046,6 +1091,12 @@ def create_app() -> Flask:
     @app.delete("/api/user/<int:user_id>/favourites/suggested")
     def delete_suggested_favourites(user_id):
         return jsonify(swiggy_history.delete(user_id))
+
+    @app.post("/api/user/<int:user_id>/favourites/suggested/places")
+    def save_suggested_places(user_id):
+        # One tap: the places from the person's own orders become saved places (r3 #8).
+        ratelimit.check(f"pools:{user_id}", 60, 3600)
+        return jsonify(swiggy_history.save_places(user_id, (request.get_json() or {}).get("restaurant_ids")))
 
     # Without Swiggy: a typed delivery address and typed favourites (grill #25; W7).
     @app.get("/api/user/<int:user_id>/typed-favourites")

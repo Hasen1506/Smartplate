@@ -63,7 +63,8 @@ def w6_reasons(body: dict, base: dict) -> list[str]:
 
 
 @settings(max_examples=20)
-@given(body=profiles(), at=st.sampled_from(INSTANTS))
+# the diets every compared version knows (eggetarian and Jain came in fix round 3, usab #11)
+@given(body=profiles(diets=("veg", "nonveg", "vegan")), at=st.sampled_from(INSTANTS))
 def test_w6_planner_differences_are_all_intentional(both, body, at):
     base, current = both["base"].plan(body, at), both["current"].plan(body, at)
     d = _diff(base, current)

@@ -73,9 +73,9 @@ async function migrateKeys() {
   } catch (_) {}
 }
 
-/* Appearance: light, dark or the phone's setting; Ember or Zomato × Swiggy colours. */
+/* Appearance: light, dark or the phone's setting; Ember or Saffron colours (ux #36: no partner brand names). */
 const THEMES = [["system", "Auto"], ["light", "Light"], ["dark", "Dark"]];
-const PALETTES = [["ember", "Ember", "#D63E1C"], ["mesh", "Zomato × Swiggy", "linear-gradient(135deg,#E23744,#FC8019)"]];
+const PALETTES = [["ember", "Ember", "#D63E1C"], ["mesh", "Saffron", "linear-gradient(135deg,#E23744,#FC8019)"]];
 const look = () => ({ theme: store.get("ziggy.theme") || "system", palette: store.get("ziggy.palette") || "ember" });
 function applyLook() {
   if (typeof document === "undefined" || !document.documentElement || !document.documentElement.setAttribute) return;
@@ -120,7 +120,7 @@ const I18N = { ta: {
   "Save your profile": "உங்கள் சுயவிவரத்தைச் சேமிக்கவும்",
   "Continue": "தொடரவும்", "Plan my week": "என் வாரத்தைத் திட்டமிடு", "Back": "பின்செல்", "Cancel": "ரத்து செய்",
   "Step {n} of {total}": "படி {n} / {total}",
-  "Your week of meals, already decided.": "உங்கள் வார உணவு, ஏற்கனவே முடிவு செய்யப்பட்டது.",
+  "Your meals, planned within your budget.": "உங்கள் பட்ஜெட்டுக்குள் திட்டமிட்ட உணவு.",
   "Get started": "தொடங்கு", "I already have an account": "எனக்கு ஏற்கனவே கணக்கு உள்ளது",
   "Language": "மொழி",
 } };
@@ -284,6 +284,7 @@ const photoOf = (x) => x?.image || (x?.item_id != null ? (S.photos || {})[x.item
 // Today asks Swiggy for the photos of the dishes it shows (the server caches them; a dish
 // Swiggy shows no photo for keeps its icon). Only with live menus and a Swiggy sign-in.
 async function loadPhotos(items) {
+  if (globalThis.ZiggyV3?.on?.()) return;             // v3 shows no dish photos here: no Swiggy call (audit #16)
   if (S.view?.source?.kind !== "live" || !swiggyReady()) return;
   S.photos = S.photos || {}; S.photoAsked = S.photoAsked || new Set();
   const ids = items.filter(x => x && x.item_id != null && !x.image && !S.photoAsked.has(x.item_id))
@@ -312,9 +313,13 @@ async function downloadPrivate(path, filename, mime) {
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   } catch (error) { URL.revokeObjectURL(url); throw error; }
 }
+// r3 #33: once the person has a profile of their own, the shared sample profiles are hidden
+// (one that is open right now stays until they switch).
 function mergeUsers(open) {
   const priv = Object.entries(keys.all()).map(([id, v]) => ({ id: Number(id), name: v.name || "My profile", city: "Chennai", setup_done: true, private: true }));
-  return [...priv, ...open.filter(u => !priv.some(p => p.id === u.id))];
+  const current = S.userId || Number(store.get("smartplate.user")) || null;
+  const samples = open.filter(u => !priv.some(p => p.id === u.id) && (!priv.length || u.id === current));
+  return [...priv, ...samples];
 }
 
 /* ---------------------------------------------------------------- server */
@@ -547,7 +552,8 @@ async function loadOrCreatePlan() {
   S.exec = await api(`/api/plan/${S.planId}/orders`);
   S.swiggy = await api(`/api/user/${S.userId}/swiggy`).catch(() => null);
   S.liveFavourites = swiggyReady() ? await api(`/api/user/${S.userId}/swiggy/favourites`).catch(() => null) : null;
-  if (swiggyReady()) await refreshLiveCart(false);
+  // v3 reads the cart only when a pick can go in it or the cart block is open (audit #16)
+  if (swiggyReady() && !globalThis.ZiggyV3?.on?.()) await refreshLiveCart(false);
   matchCartToNextMeal();
 }
 // Swiggy's cart already holds the next meal (added on another device, or before a reload):
@@ -568,7 +574,7 @@ function resetProfileState() {
   for (const key of ["exec", "receipts", "recap", "orderReview", "sheet", "moving", "places", "calendar", "account", "swiggy",
     "swAddrs", "carts", "acctDraft", "liveResults", "liveFavourites", "liveBrowseMenu", "liveOrderReview", "liveCart",
     "checkoutReview", "placedOrder", "liveOrderStatus", "liveOrderHistory", "liveCartError", "liveCartEmpty", "saved",
-    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "cook", "dish", "cookAlong", "budgetSheet", "olist"]) S[key] = null;
+    "weekDay", "weekView", "orderQueue", "handedOff", "pools", "poolMenus", "pickFor", "poolPick", "cook", "dish", "cookAlong", "budgetSheet", "budgetUndo", "olist"]) S[key] = null;
   S.welcome = false; S.tab = "today"; S.more = null; S.connectSheet = false; S.addrSheet = false; S.ask = false;
 }
 async function switchUser(id) {
@@ -741,11 +747,24 @@ const cartEligible = (c) => {
 };
 async function loadAddresses() { S.swAddrs = await api(`/api/user/${S.userId}/swiggy/addresses`); render(); }
 async function openAddresses() { S.addrSheet = true; S.connectSheet = false; S.swAddrs = null; render(); await loadAddresses(); }
+// The Swiggy notice is a ticked line inside the Connect sheet (never a native confirm():
+// browsers and in-app webviews can suppress it, which left the tap doing nothing). Any
+// failure is said inside the sheet, where the user is looking.
 async function connectSwiggy() {
-  if (!S.privacyNotice) S.privacyNotice = await api("/api/privacy/notice");
-  if (!askConsent(S.privacyNotice.purposes.swiggy)) return;   // the Swiggy notice, right before connecting
-  const r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", { consent: true });
+  S.connectError = null;
+  if (!S.connectConsent) { S.connectError = "Tick the line above to agree, then continue."; render(); return; }
+  let r;
+  try { r = await api(`/api/user/${S.userId}/swiggy/connect`, "POST", { consent: true }); }
+  catch (e) { S.connectError = e.message || String(e); render(); return; }
+  if (!r?.authorize_url) { S.connectError = "Swiggy didn't give Ziggy a sign-in page. Try again in a minute."; render(); return; }
   rememberResume(); location.href = r.authorize_url;
+}
+function connectConsentLine() {
+  const n = S.privacyNotice?.purposes?.swiggy;
+  const what = n ? n.data.join("; ") : "a Swiggy access token (encrypted), your saved addresses, live menus, your cart and recent orders";
+  return `<label class="row v3-connect-consent" style="flex-wrap:nowrap;gap:10px;align-items:flex-start"><input type="checkbox" id="connect-consent"${S.connectConsent ? " checked" : ""}>
+    <span class="fine">I agree that Ziggy uses ${esc(what)}${n ? ` — ${esc(String(n.why).replace(/\.\s*$/, ""))}` : ""}. Switch it off any time in Me → Privacy. <a href="/privacy" target="_blank" rel="noopener">Full notice</a></span></label>
+    ${S.connectError ? `<p class="inline-err" role="alert" id="connect-error">${esc(S.connectError)}</p>` : ""}`;
 }
 // Everything read for one delivery address; dropped whenever the address changes.
 function forgetAddressState() {
@@ -754,13 +773,22 @@ function forgetAddressState() {
   S.placedOrder = null; S.liveOrderStatus = null; S.liveOrderHistory = null; S.liveOrderReview = null;
   S.pools = null; S.poolMenus = null; S.pickFor = null;            // pools and dish ids belong to one address
 }
+// r3 #2: say what an address change did. Usual dishes stay; ones saved for the other address are
+// greyed until checked here; menus and the prepared cart are read again for the new address.
+function addressToast(sw) {
+  const where = `Delivering to ${sw.address?.label || "this address"}`;
+  const c = sw.address_changed;
+  if (!c) return where;
+  const kept = c.kept ? ` Your ${c.kept} usual dish${c.kept === 1 ? " stays" : "es stay"}${c.not_checked_here ? `; ${c.not_checked_here} saved for your other address ${c.not_checked_here === 1 ? "is" : "are"} greyed until you add ${c.not_checked_here === 1 ? "it" : "them"} here` : ""}.` : "";
+  return `${where}.${kept} Menus and cart are read again for this address.`;
+}
 async function chooseAddress(addressId) {
   S.swiggy = await api(`/api/user/${S.userId}/swiggy/address`, "POST", { address_id: addressId });
   forgetAddressState();
   S.liveFavourites = await api(`/api/user/${S.userId}/swiggy/favourites`);
   await refreshLiveCart(false);
   S.addrSheet = false; S.connectSheet = false;
-  toast(S.swiggy.week?.dropped?.length ? S.swiggy.week.note : `Delivering to ${S.swiggy.address?.label || "this address"}`);
+  toast(S.swiggy.week?.dropped?.length ? S.swiggy.week.note : addressToast(S.swiggy));
   S.view = await api(`/api/plan/${S.planId}`);          // its source now says what the new address needs
   S.liveSync = null; render();
   if (!(await resumePending())) await autoSyncLive();
@@ -903,7 +931,16 @@ async function autoSyncLive() {
   S.liveSyncTried[addr] = true;
   S.liveSync = "loading"; render();
   try {
-    adoptView(await api(`/api/plan/${S.planId}/live-menus`, "POST", {}));
+    // A background job the app polls, so opening Ziggy never waits on every menu (audit #16)
+    let job = await api(`/api/plan/${S.planId}/live-menus?background=1`, "POST", {});
+    for (let i = 0; job.state === "running" && i < LIVE_SYNC_POLLS; i++) {
+      await new Promise(r => setTimeout(r, LIVE_SYNC_POLL_MS));
+      job = await api(`/api/plan/${S.planId}/live-menus/status`);
+    }
+    if (job.state === "error") { const e = new Error(job.error); e.code = job.code; throw e; }
+    if (job.state === "running") { S.liveSync = null; render(); return; }    // still reading: the next open looks again
+    adoptView(await api(`/api/plan/${S.planId}`));
+    globalThis.ZiggyV3?.invalidate?.();
     S.liveSync = null;
   } catch (e) {
     if (SWIGGY_RECONNECT.has(e.code)) { S.liveSync = null; S.error = e.message; S.errorCode = e.code; }
@@ -911,6 +948,7 @@ async function autoSyncLive() {
   }
   render();
 }
+const LIVE_SYNC_POLLS = 90, LIVE_SYNC_POLL_MS = 1500;
 /* One tap: Ziggy reads the exact live item, then puts exactly that in your Swiggy cart and
    shows Swiggy's own bill. The elephant rolls across the button meanwhile. You still pay
    in Swiggy; nothing is ordered here. */
@@ -972,8 +1010,12 @@ function storageBanner() {
 function welcomeLede() {
   // Restaurant dishes come only from Swiggy for the user's own address; nothing is sample data.
   return swiggySignInOpen()
-    ? "Ziggy picks every meal from Swiggy places near you, inside your budget, and tells you exactly when to order."
-    : "Ziggy plans every meal around your diet and budget. Real Swiggy dishes appear once Swiggy approves connecting from Ziggy.";
+    ? "Choose your usual meals from Swiggy places near you. Ziggy keeps them inside your budget and tells you when to order."
+    : "Works with your Swiggy account. Ziggy plans your meals around your diet and budget.";
+}
+// ux #37: said only while sign-in is closed, as a short note, not an internal status line.
+function welcomeSoon() {
+  return swiggySignInOpen() ? "" : `<p class="fine">Swiggy sign-in is coming soon.</p>`;
 }
 function render() {
   const app = document.getElementById("app");
@@ -1097,8 +1139,8 @@ function welcomeScreen() {
   return `<main class="welcome">
     ${mascot("float")}
     <div class="wordmark" style="font-size:30px">ziggy</div>
-    <h1 class="hero-h">${t("Your week of meals, already decided.")}</h1>
-    <p class="sub" style="font-size:17px">${welcomeLede()}</p>
+    <h1 class="hero-h">${t("Your meals, planned within your budget.")}</h1>
+    <p class="sub" style="font-size:17px">${welcomeLede()}</p>${welcomeSoon()}
     <ul class="promise">
       <li><span><b>One tap to your Swiggy cart.</b> You check the bill and pay in Swiggy.</span></li>
       <li><span><b>Your rules, every meal.</b> Diet and budget shape each pick. Check ingredients with the restaurant.</span></li>
@@ -1257,7 +1299,7 @@ function whyChips(c) {
   const al = (u.allergens || []).map(a => a.replace("_", " "));
   if (al.length && c.kind === "delivery") out.push([S.view.source?.kind === "live" ? `No ${al.join(", ")} by dish name` : `${cap1(al.join(", "))} filtered out`, "ok"]);
   if (al.length && c.kind === "cook") out.push([`Recipe has no ${al.join(", ")}`, "ok"]);
-  if (u.diet === "veg" || u.diet === "vegan") out.push([u.diet === "vegan" ? "Vegan plan" : "Vegetarian", ""]);
+  if (u.diet && u.diet !== "nonveg") out.push([u.diet === "vegan" ? "Vegan plan" : DIET_NAME[u.diet] || "Vegetarian", ""]);
   return out.length ? `<ul class="why" aria-label="Why this pick">${out.map(([t, k]) => `<li class="${k}">${esc(t)}</li>`).join("")}</ul>` : "";
 }
 // "Order by 19:45": a ring that empties as the order-by time gets closer (the last 3 hours).
@@ -1415,7 +1457,7 @@ function trackingCard() {
    away (no sheet), and any meal whose time it is now, even one the week leaves out. */
 const quickKey = (c) => `${c.session_id}:${c.kind}:${c.item_id ?? c.recipe_key ?? ""}`;
 function queueQuick() {
-  if (S.tab !== "today" || !S.view || S.offline) return;
+  if (S.tab !== "today" || !S.view || S.offline || globalThis.ZiggyV3?.on?.()) return;   // classic Today only
   const c = S.view.next_up?.cell;
   if (!c || c.status !== "active" || !["delivery", "cook"].includes(c.kind) || (S.carts || {})[c.session_id]) return;
   const key = quickKey(c);
@@ -1527,13 +1569,13 @@ function keyBytes(b64) {
   const raw = atob((b64 + "=".repeat((4 - b64.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
   return Uint8Array.from(raw, c => c.charCodeAt(0));
 }
-async function subscribePush() {
+async function subscribePush(scope) {
   const reg = await navigator.serviceWorker.ready;
   const st = await api(`/api/user/${S.userId}/push`);
   const old = await reg.pushManager.getSubscription();
   if (old) await old.unsubscribe().catch(() => {});        // the server key may have changed
   const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(st.public_key) });
-  await api(`/api/user/${S.userId}/push/subscribe`, "POST", { subscription: sub.toJSON() });
+  await api(`/api/user/${S.userId}/push/subscribe`, "POST", scope ? { subscription: sub.toJSON(), scope } : { subscription: sub.toJSON() });
   store.set("smartplate.push", String(S.userId));
 }
 async function syncPush() {                                 // re-register after a server reset
@@ -1571,9 +1613,9 @@ async function toggleAlerts() {
       store.del("smartplate.push"); toast("Reminders off for this device"); render(); return;
     }
     if (await Notification.requestPermission() !== "granted") { toast("Notifications are blocked for this site. Add the calendar instead."); render(); return; }
-    await subscribePush();
+    await subscribePush("all");
     await api(`/api/user/${S.userId}/push/test`, "POST", {}).catch(() => {});
-    toast("Reminders on. You'll get a nudge at each order-by time."); render(); return;
+    toast("Reminders on. You'll get a nudge when each meal's Swiggy cart opens."); render(); return;
   }
   if (store.get("smartplate.notify") === "1" && Notification.permission === "granted") {
     store.del("smartplate.notify"); alertTimers.splice(0).forEach(clearTimeout); toast("Browser alerts off"); render(); return;
@@ -1600,7 +1642,7 @@ function mealRow(m, meal) {
     : m.kind === "delivery" && m.delivery_fee ? ` · delivery ₹${Math.round(m.delivery_fee.amount)} ${m.delivery_fee.estimated ? "est." : "from your bill"}` : "";
   const sub = m.kind === "delivery" ? `${esc(m.restaurant)}${fee}${m.order?.order_at && !locked && !past ? ` · order by ${esc(m.order.order_at)}` : ""}`
     : m.kind === "cook" ? (m.cost_unknown ? "Cook at home · groceries not priced" : m.recipe_key ? "Cook at home · grocery estimate" : "From your fridge") : "";
-  const name = off && !food ? "Skipped" : m.item;
+  const name = off && !food ? (m.open ? "Open" : "Skipped") : m.item;   // usab #24: nothing chosen yet
   const why = (m.reasons || [])[0];
   const subText = food ? sub : esc(why && why !== name ? why : past ? "This meal's time has passed" : "");
   return `<button class="mrow ${off ? "off" : ""} ${target ? "target" : ""}" data-meal="${m.session_id}" aria-label="${esc(cap1(meal))}: ${esc(name)}${target ? ". Tap to swap here" : ""}">
@@ -1635,11 +1677,11 @@ function weekScreen() {
   return `<div class="row rise" style="justify-content:space-between;align-items:flex-end"><h1 class="h1">${t("Week of {d}", { d: esc(fmtDate(v.plan.week_start)) })}</h1>
       <button class="secondary small" data-act="reopt" title="Re-plan every meal that isn't kept, ordered or in your cart">${t("Re-plan")}</button></div>
     <section class="card rise" aria-label="Budget">
-      <div class="row" style="justify-content:space-between;align-items:baseline"><span><span class="money" style="font-size:26px">${est(b.spend || 0)}</span> <span class="muted">${t("planned of {x}", { x: rupee0(b.budget) })}</span></span>
+      <div class="row" style="justify-content:space-between;align-items:baseline"><span><span class="money" style="font-size:26px">${est(b.spend || 0)}</span> <span class="muted">${t("planned of {x}", { x: rupee0(b.budget) })}${b.prorated && b.covers ? ` for ${esc(b.covers)}` : ""}</span></span>
         <b style="color:${left < 0 ? "var(--bad)" : "var(--leaf-ink)"}">${left < 0 ? t("{x} over", { x: rupee0(-left) }) : t("{x} left", { x: rupee0(left) })}</b></div>
       <div class="bar"><i class="${left < 0 ? "over" : ""}" style="width:${pct}%"></i></div>
-      <span class="fine">${t("{o} to order · {c} to cook", { o: n("delivery"), c: n("cook") })}${b.prorated ? ` · rest of the week only` : ""}${b.daily_cap ? ` · daily limit ${rupee0(b.daily_cap)}` : ""} · ${esc(v.plan.mode_label || "")}</span>
-      <div class="row" style="gap:8px;margin-top:10px"><button class="small secondary" data-act="budget">${t("Change budget")}</button>${n("delivery") ? `<button class="small secondary" data-act="try-different" title="Swap the dishes Ziggy picked for others that still fit your rules and budget">Try different dishes</button>` : ""}</div></section>
+      <span class="fine">${t("{o} to order · {c} to cook", { o: n("delivery"), c: n("cook") })}${b.prorated ? ` · ${esc(b.covers || "rest of the week")} only, from ${rupee0(b.weekly_budget)} a week` : ""}${b.daily_cap ? ` · daily limit ${rupee0(b.daily_cap)}` : ""} · ${esc(v.plan.mode_label || "")}</span>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="small secondary" data-act="budget">${t("Change budget")}</button>${n("delivery") ? `<button class="small secondary" data-act="try-different" title="Swap the dishes Ziggy picked for others that still fit your rules and budget">Try different dishes</button>` : ""}</div>${budgetUndoLine()}</section>
     ${sourceLine(v.source)}${globalThis.ZiggyV3?.weekTop?.() || ""}
     ${S.moving ? `<div class="note" role="status"><span class="ic">${ICON.swap}</span><span style="flex:1">Tap the meal to swap it with, on any day.</span><button class="small ghost" data-act="cancel-move">Cancel</button></div>` : ""}
     ${day ? `<nav class="days rise2" aria-label="Days">${days.map((d, i) => {
@@ -1736,38 +1778,71 @@ const BUDGET_STEP = 250;
 function mealsLeft() {
   return (S.view.grid || []).flatMap(d => Object.values(d.meals)).filter(m => m && m.status === "active").length;
 }
+// One budget model (r3): the weekly budget is the person's number and a day is a seventh of
+// it. A plan made mid-week targets only the days it covers (budget.covers, e.g. "Fri–Sun"),
+// so every figure here names its period and its meal count from the same plan.
+function weekShare(weekly) {
+  const b = S.view.budget || {};
+  return b.weekly_budget ? (weekly * (b.budget || 0)) / b.weekly_budget : weekly;
+}
 function perMealText(weekly) {
   const b = S.view.budget || {}, n = mealsLeft();
-  if (!weekly || !n) return "";
-  const share = b.weekly_budget ? (b.budget || 0) / b.weekly_budget : 1;
-  return `about ${rupee0((weekly * share) / n)} a meal for the ${n} meal${n === 1 ? "" : "s"} left${b.prorated ? " (this week counts from today)" : ""}`;
+  if (!weekly) return "";
+  const parts = [`${rupee0(weekly / 7)} a day · ${rupee0(weekly)} a week`];
+  if (b.prorated) parts.push(`${rupee0(weekShare(weekly))} for ${b.covers || "the rest of this week"}`);
+  if (n) parts.push(`about ${rupee0(weekShare(weekly) / n)} a meal for the ${n} meal${n === 1 ? "" : "s"} left`);
+  return parts.join(" · ");
 }
+// Presets around the person's own budget (ux #15), never fixed amounts.
+function budgetPresets(weekly, per) {
+  const base = per === "day" ? weekly / 7 : weekly, step = per === "day" ? 50 : 250;
+  const r = (x) => Math.max(step, Math.round(x / step) * step);
+  return [...new Set([r(base * 0.75), r(base), r(base * 1.25)])];
+}
+const budgetShown = (d) => d.per === "day" ? Math.round((d.value || 0) / 7) : (d.value || 0);
+const budgetSaveText = (d) => d.value ? `Re-plan with ${rupee0(budgetShown(d))} a ${d.per === "day" ? "day" : "week"}` : "Re-plan with this budget";
 function budgetSheet() {
-  const d = S.budgetSheet, b = S.view.budget || {};
+  const d = S.budgetSheet, b = S.view.budget || {}, per = d.per || "week", shown = budgetShown(d);
+  const step = per === "day" ? 50 : BUDGET_STEP, cur = per === "day" ? Math.round((b.weekly_budget || 0) / 7) : b.weekly_budget;
   return `<div class="sheet-bg" data-ov="budget" data-close-budget="1"><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="budget-title">
     <span class="grab" aria-hidden="true"></span>
-    <div class="sheet-head"><div><p class="eyebrow">Now ${rupee0(b.weekly_budget)} a week</p><h2 class="h2" id="budget-title">Weekly food budget</h2></div>
+    <div class="sheet-head"><div><p class="eyebrow">Now ${rupee0((b.weekly_budget || 0) / 7)} a day · ${rupee0(b.weekly_budget)} a week</p><h2 class="h2" id="budget-title">Food budget</h2></div>
       <button class="icon-btn" data-close-budget="1" aria-label="Close">${ICON.close}</button></div>
+    <div class="seg" role="group" aria-label="Budget per" style="justify-content:center">${["day", "week"].map(k => `<button type="button" class="chip" data-budget-per="${k}" aria-pressed="${per === k}">A ${k}</button>`).join("")}</div>
     <div class="row" style="justify-content:center;align-items:center;gap:14px">
-      <span class="stepper"><button type="button" data-budget-step="-${BUDGET_STEP}" aria-label="${rupee0(BUDGET_STEP)} less" ${d.value <= 250 ? "disabled" : ""}>${ICON.minus}</button></span>
-      <label class="sr" for="budget-in">Weekly budget in rupees</label>
-      <input id="budget-in" class="money" type="number" inputmode="numeric" min="100" max="100000" step="50" value="${d.value || ""}" style="font-size:36px;width:170px;text-align:center">
-      <span class="stepper"><button type="button" data-budget-step="${BUDGET_STEP}" aria-label="${rupee0(BUDGET_STEP)} more" ${d.value >= 100000 ? "disabled" : ""}>${ICON.plus}</button></span></div>
+      <span class="stepper"><button type="button" data-budget-step="-${step}" aria-label="${rupee0(step)} less" ${shown <= step ? "disabled" : ""}>${ICON.minus}</button></span>
+      <label class="sr" for="budget-in">Budget a ${per} in rupees</label>
+      <input id="budget-in" class="money" type="number" inputmode="numeric" min="${per === "day" ? 15 : 100}" max="100000" step="50" value="${shown || ""}" style="font-size:36px;width:170px;text-align:center">
+      <span class="stepper"><button type="button" data-budget-step="${step}" aria-label="${rupee0(step)} more" ${d.value >= 100000 ? "disabled" : ""}>${ICON.plus}</button></span></div>
     <p class="muted" id="budget-per" style="text-align:center">${esc(perMealText(d.value))}</p>
-    <div class="chips" style="justify-content:center">${[...new Set([...BUDGET_PRESETS, b.weekly_budget].filter(Boolean))].sort((x, y) => x - y).map(n => `<button class="chip" data-budget-preset="${n}" aria-pressed="${d.value === n}">${rupee0(n)}</button>`).join("")}</div>
-    <button class="primary" data-act="save-budget" ${!d.value || d.value === b.weekly_budget ? "disabled" : ""}>Re-plan with ${d.value ? rupee0(d.value) : "this budget"}</button>
+    <div class="chips" style="justify-content:center">${budgetPresets(b.weekly_budget || d.value, per).map(n => `<button class="chip" data-budget-preset="${n}" aria-pressed="${shown === n}">${rupee0(n)}${n === cur ? " (now)" : ""}</button>`).join("")}</div>
+    <button class="primary" data-act="save-budget" ${!d.value || d.value === b.weekly_budget ? "disabled" : ""}>${budgetSaveText(d)}</button>
     <p class="fine">Meals you kept, ordered or put in your Swiggy cart stay as they are. Undo puts the old budget back.</p>
   </section></div>`;
 }
-function openBudget() { S.budgetSheet = { value: S.view.budget?.weekly_budget || S.view.user?.weekly_budget || 0 }; render(); }
+// The last budget change, with its Undo kept on the Week budget card (a toast alone vanishes).
+function budgetUndoLine() {
+  const u = S.budgetUndo;
+  if (!u || !S.view?.budget || S.view.budget.weekly_budget !== u.to) return "";
+  return `<p class="fine v3-budget-undo" role="status">Budget changed to ${rupee0(u.to)} a week (was ${rupee0(u.from)}). <button class="link" data-act="budget-undo">Undo</button></p>`;
+}
+function openBudget() { S.budgetSheet = { value: S.view.budget?.weekly_budget || S.view.user?.weekly_budget || 0, per: "week" }; render(); }
 async function setBudget(weekly, undoTo) {
   const before = S.view.budget?.weekly_budget;
   adoptView(await api(`/api/user/${S.userId}/setup`, "PATCH", { weekly_budget: weekly }));
   S.budgetSheet = null;
   const b = S.view.budget || {};
-  const msg = undoTo ? `Back to ${rupee0(weekly)} a week` : `${rupee0(weekly)} a week: about ${rupee0(b.spend || 0)} planned`;
-  toast(msg, undoTo ? null : () => setBudget(before, true));
+  S.budgetUndo = undoTo || !before || before === weekly ? null : { from: before, to: weekly };
+  globalThis.ZiggyV3?.invalidate?.();            // Today follows the new weekly ÷ 7 (server resets today's figure)
+  const period = b.prorated ? ` (${rupee0(b.budget)} for ${b.covers || "the rest of the week"})` : "";
+  const msg = undoTo ? `Back to ${rupee0(weekly)} a week${period}` : `${rupee0(weekly)} a week${period}: about ${rupee0(b.spend || 0)} planned`;
+  toast(msg, S.budgetUndo ? undoBudget : null);
   render();
+}
+async function undoBudget() {
+  const u = S.budgetUndo;
+  if (!u) return;
+  await setBudget(u.from, true);
 }
 async function saveBudget() {
   const v = Math.round(Number(S.budgetSheet?.value));
@@ -2379,6 +2454,9 @@ function orderHistoryCard() {
 // Swiggy doesn't document the unit of a bare menu price; the server reads either form and
 // marks inferred ones. A menu price is an estimate until Swiggy's cart prices the order.
 function livePrice(price) { return price == null ? "Price in cart" : est(price, true); }
+// The review's price, read fresh for this exact dish: Swiggy's own number when the server
+// confirmed it on the sectioned menu just read (price_estimated false, audit #20), else ≈ est.
+const reviewPrice = (r) => r.price_estimated === false ? rupee(r.menu_price) : livePrice(r.menu_price);
 function etaMinutes(eta) { const m = /\d+/.exec(String(eta ?? "")); return m ? Number(m[0]) : null; }
 const FAST_MIN = 30;
 function filterChip(key, label, extra = "") {
@@ -2423,7 +2501,7 @@ function menuSheet() {
     <p class="eyebrow">Opening ${esc(S.liveLoading || "menu")}…</p><div class="skeleton"><i></i><i></i><i></i></div></section></div>`;
   const menu = S.liveBrowseMenu, u = S.view.user || {};
   const mine = new Set(u.allergens || []);
-  const vegUser = ["veg", "vegan"].includes(u.diet);
+  const vegUser = VEG_DIETS.includes(u.diet);
   const b = S.view.budget || {}, left = Math.max(0, (b.budget || 0) - (b.spend || 0));
   const f = S.filters;
   const flagged = (i) => (i.name_allergens || []).filter(a => mine.has(a));
@@ -2479,7 +2557,7 @@ function liveOrderReviewDialog() {
     <div class="sheet-head"><div><p class="eyebrow">Fresh from Swiggy</p><h2 class="h2" id="live-review-title">${r.orderable === false ? "Check this dish" : "Add this to your cart?"}</h2></div>
       <button class="icon-btn" data-close-live-review="1" aria-label="Close live item review">${ICON.close}</button></div>
     <div class="dish-row">${dishIcon(r.item, { image: r.image, lg: true })}<div class="t"><b class="h3">${esc(r.item)}</b><span class="muted">${esc(r.restaurant)} · to ${esc(r.address)}</span></div>
-      <b>${r.menu_price == null ? "Price in cart" : (r.quantity || 1) > 1 ? `${r.quantity} × ${livePrice(r.menu_price)}` : livePrice(r.menu_price)}</b></div>
+      <b>${r.menu_price == null ? "Price in cart" : (r.quantity || 1) > 1 ? `${r.quantity} × ${reviewPrice(r)}` : reviewPrice(r)}</b></div>
     <p class="fine">Swiggy shows the exact total, with fees and taxes, once it's in your cart.</p>
     ${r.orderable === false ? `<div class="fine" role="note">${esc(r.reason)}${ruleWhy(r.rule)}</div>
       <a class="btn primary" href="${esc(r.handoff_url)}" target="_blank" rel="noopener">Open in Swiggy ${ICON.out}</a>
@@ -2515,7 +2593,8 @@ function connectSheet() {
   else body = `<h2 class="h2">${sw.needs_reconnect || sw.expired ? "Reconnect Swiggy" : "Connect Swiggy"}</h2>
     <p class="sub">${sw.needs_reconnect ? "This server can no longer read the saved Swiggy sign-in. " : sw.expired ? "Swiggy sign-ins last about 5 days. " : ""}Sign in on Swiggy's own page with your phone and OTP, about 20 seconds.${resume}</p>
     <div class="stack" style="gap:10px"><div class="row" style="flex-wrap:nowrap"><span class="tick n">1</span><span>Sign in on Swiggy</span></div><div class="row" style="flex-wrap:nowrap"><span class="tick n">2</span><span>Tap the address you order to</span></div><div class="row" style="flex-wrap:nowrap"><span class="tick n">3</span><span>Ziggy never orders or pays without you</span></div></div>
-    <button class="primary" data-act="swiggy-connect">Continue with Swiggy</button><button class="ghost" data-close-connect="1">Not now</button>`;
+    ${connectConsentLine()}
+    <button class="primary" data-act="swiggy-connect"${S.connectConsent ? "" : " disabled"}>Continue with Swiggy</button><button class="ghost" data-close-connect="1">Not now</button>`;
   return `<div class="sheet-bg" data-ov="connect" data-close-connect="1"><section class="sheet" role="dialog" aria-modal="true" aria-label="Connect Swiggy"><span class="grab" aria-hidden="true"></span>${body}</section></div>`;
 }
 function addressSheet() {
@@ -2541,7 +2620,7 @@ function meScreen() {
   const swState = !sw ? "" : sw.connected ? (sw.address ? `Connected · ${esc(sw.address.label)}` : "Choose an address") : sw.expired ? "Sign-in expired" : "Not connected";
   const login = S.account?.login;
   const row = (go, label, value) => `<button class="set" data-go="more:${go}"><span>${label}</span><span><span>${value}</span>${ICON.right}</span></button>`;
-  const rules = [{ veg: "Vegetarian", vegan: "Vegan", nonveg: "Non-veg" }[u.diet] || "", ...(u.allergens || []).map(a => `no ${a.replace("_", " ")}`)].filter(Boolean).join(" · ");
+  const rules = [{ veg: "Vegetarian", egg: "Eggetarian", jain: "Jain", vegan: "Vegan", nonveg: "Non-veg" }[u.diet] || "", ...(u.allergens || []).map(a => `no ${a.replace("_", " ")}`)].filter(Boolean).join(" · ");
   return `<div class="row rise" style="flex-wrap:nowrap;gap:14px"><span class="avatar" style="width:56px;height:56px;font-size:22px;display:grid;place-items:center">${esc((u.name || "?").slice(0, 1).toUpperCase())}</span>
       <span class="stack" style="gap:0"><b class="money" style="font-size:26px">${esc(u.name || "You")}</b><span class="muted">${keys.has(S.userId) ? (login ? `Signed in as ${esc(login)}` : "Private to this device") : "Shared sample profile"}</span></span></div>
     <section class="card rise2 stats" aria-label="This week's money">
@@ -2663,7 +2742,7 @@ function settingsPanel() {
     <form id="preferences" class="stack" style="gap:16px">
       <section class="card"><label>Name<input name="name" maxlength="80" value="${esc(u.name)}" required></label></section>
       <section class="card"><fieldset><legend>Food rules (always applied)</legend>
-        <label>Diet${opt("diet", u.diet, [["nonveg", "Non-vegetarian"], ["veg", "Vegetarian"], ["vegan", "Vegan"]])}</label></fieldset>
+        <label>Diet${opt("diet", u.diet, DIET_CHOICES.map(([k, l]) => [k, l]))}</label></fieldset>
         <fieldset><legend>Allergies (always excluded)</legend><div class="checks">${checks("allergens", ["peanut", "dairy", "gluten", "egg", "soy", "shellfish", "fish", "sesame", "tree_nut"])}</div></fieldset>
         <details><summary>Medical filters and fasts</summary><div class="checks">${checks("medical", ["diabetes", "hypertension", "celiac"])}</div>
           <p class="fine">Simple menu-label rules. They can't guarantee a dish is medically suitable or free of cross-contact.</p>
@@ -2743,7 +2822,12 @@ async function saveSettings(form) {
 
 /* ---- household: the people you cook and order for ---- */
 const ALLERGY_LIST = ["peanut", "dairy", "gluten", "egg", "soy", "shellfish", "fish", "sesame", "tree_nut"];
-const DIET_NAME = { veg: "Vegetarian", vegan: "Vegan", nonveg: "Non-vegetarian" };
+const DIET_NAME = { veg: "Vegetarian", egg: "Eggetarian", jain: "Jain / no onion-garlic", vegan: "Vegan", nonveg: "Non-vegetarian" };
+// usab #11: the diets onboarding and settings offer ([key, name, what it means, dot class]).
+const DIET_CHOICES = [["veg", "Vegetarian", "No meat, fish or egg", ""], ["egg", "Eggetarian", "Vegetarian, plus eggs", ""],
+  ["jain", "Jain / no onion-garlic", "Vegetarian, no onion, garlic or root vegetables", ""],
+  ["nonveg", "Non-vegetarian", "Everything is on the menu", "nonveg"], ["vegan", "Vegan", "No animal products at all", ""]];
+const VEG_DIETS = ["veg", "vegan", "jain"];
 function personForm(id, m = {}) {
   const meals = S.view.user.meals || MEALS;
   const box = (name, v, on, label) => `<label class="check"><input type="checkbox" name="${name}" value="${v}" ${on ? "checked" : ""}>${esc(label)}</label>`;
@@ -2954,7 +3038,7 @@ function onboardingScreen() {
   let body = "";
   if (st === 0) {
     body = `<h1 class="h1">${t("What do you eat?")}</h1>
-      <div class="stack" style="gap:10px" role="group" aria-label="${t("What do you eat?")}">${[["veg", "Vegetarian", "No meat, fish or egg", ""], ["nonveg", "Non-vegetarian", "Everything is on the menu", "nonveg"], ["vegan", "Vegan", "No animal products at all", ""]].map(([k, l, s, dot]) =>
+      <div class="stack" style="gap:10px" role="group" aria-label="${t("What do you eat?")}">${DIET_CHOICES.map(([k, l, s, dot]) =>
         `<button type="button" class="opt" data-ob="diet" data-val="${k}" data-multi="0" aria-pressed="${d.diet === k}"><span class="dot ${dot}"></span><span><b>${t(l)}</b><span class="muted">${t(s)}</span></span></button>`).join("")}</div>
       <p class="k">${t("Anything you must avoid?")}</p>
       <div class="chips">${ALLERGY_LIST.map(a => chip("allergens", a, cap1(a.replace("_", " ")), d.allergens.includes(a))).join("")}</div>
@@ -3076,7 +3160,7 @@ async function onboardNav(dir) {
     o.step -= 1; S.error = null; render(); return;
   }
   const d = o.d;
-  if (o.step === 0 && !d.diet) throw new Error("Choose what you eat: vegetarian, non-vegetarian or vegan");
+  if (o.step === 0 && !d.diet) throw new Error("Choose what you eat: vegetarian, eggetarian, Jain, non-vegetarian or vegan");
   if (o.step === 1 && MEALS.every(m => d.rhythm[m] === "skip")) throw new Error("Pick at least one meal you order or cook");
   if (o.step === 2) {
     if (!d.weekly_budget) throw new Error("Enter a weekly budget greater than ₹0");
@@ -3150,6 +3234,13 @@ function wire() {
   on("[data-filter]", "click", (e) => toggleFilter(e.currentTarget.dataset.filter));
   on("[data-cat]", "click", (e) => { S.menuCat = e.currentTarget.dataset.cat || null; render(); });
   on("[data-close-addr]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.addrSheet = false; render(); } });
+  on("#connect-consent", "change", (e) => { S.connectConsent = !!e.currentTarget.checked; S.connectError = null;
+    const b = document.querySelector('[data-act="swiggy-connect"]'); if (b) b.disabled = !S.connectConsent;
+    document.getElementById("connect-error")?.remove(); });
+  if (S.connectSheet && !S.privacyNotice && !S.noticeLoading) {      // the notice's own words in the consent line
+    S.noticeLoading = true;
+    api("/api/privacy/notice").then(n => { S.privacyNotice = n; if (S.connectSheet) render(); }).catch(() => {}).finally(() => { S.noticeLoading = false; });
+  }
   on("[data-close-connect]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.connectSheet = false; S.pendingResume = null; render(); } });
   on("[data-close-menu]", "click", (e) => { if (e.target === e.currentTarget) { S.liveBrowseMenu = null; render(); } });
   on("[data-mode]", "click", (e) => guard(() => setMode(e.currentTarget.dataset.mode)));
@@ -3181,16 +3272,20 @@ function wire() {
   const olq = document.getElementById("ol-q");
   if (olq) olq.oninput = () => { S.olist.q = olq.value; S.olist.show = OL_SHOW; render(); refocus("ol-q"); };
   on("[data-close-budget]", "click", (e) => { if (e.target === e.currentTarget || e.currentTarget.tagName === "BUTTON") { S.budgetSheet = null; render(); } });
+  // The sheet edits the weekly budget; "A day" shows and takes it as a seventh (one model).
+  const toWeekly = (n) => S.budgetSheet.per === "day" ? Math.round(n * 7) : Math.round(n);
+  on("[data-budget-per]", "click", (e) => { S.budgetSheet.per = e.currentTarget.dataset.budgetPer; render(); });
   on("[data-budget-step]", "click", (e) => {
-    S.budgetSheet.value = Math.min(100000, Math.max(250, (Number(S.budgetSheet.value) || 0) + Number(e.currentTarget.dataset.budgetStep))); render(); });
-  on("[data-budget-preset]", "click", (e) => { S.budgetSheet.value = Number(e.currentTarget.dataset.budgetPreset); render(); });
+    const shown = budgetShown(S.budgetSheet) + Number(e.currentTarget.dataset.budgetStep);
+    S.budgetSheet.value = Math.min(100000, Math.max(100, toWeekly(shown))); render(); });
+  on("[data-budget-preset]", "click", (e) => { S.budgetSheet.value = toWeekly(Number(e.currentTarget.dataset.budgetPreset)); render(); });
   const bin = document.getElementById("budget-in");
   if (bin) {
     bin.oninput = () => {
-      S.budgetSheet.value = Math.round(Number(bin.value)) || 0;
+      S.budgetSheet.value = toWeekly(Number(bin.value) || 0);
       const per = document.getElementById("budget-per"); if (per) per.textContent = perMealText(S.budgetSheet.value);
       const save = document.querySelector('[data-act="save-budget"]');
-      if (save) { save.disabled = !S.budgetSheet.value || S.budgetSheet.value === S.view.budget?.weekly_budget; save.textContent = `Re-plan with ${S.budgetSheet.value ? rupee0(S.budgetSheet.value) : "this budget"}`; }
+      if (save) { save.disabled = !S.budgetSheet.value || S.budgetSheet.value === S.view.budget?.weekly_budget; save.textContent = budgetSaveText(S.budgetSheet); }
     };
     bin.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); guard(saveBudget, "Re-plan"); } };
   }
@@ -3247,7 +3342,7 @@ function wire() {
     budget: async () => openBudget(),
     "order-list": () => openOrderList(), "ol-cart": olCart,
     "ol-veg": async () => { S.olist.veg = !S.olist.veg; S.olist.show = OL_SHOW; render(); },
-    "ol-more": async () => { S.olist.show = (S.olist.show || OL_SHOW) + OL_SHOW; render(); }, "save-budget": saveBudget, "try-different": tryDifferent,
+    "ol-more": async () => { S.olist.show = (S.olist.show || OL_SHOW) + OL_SHOW; render(); }, "save-budget": saveBudget, "budget-undo": undoBudget, "try-different": tryDifferent,
     "confirm-live-cart": addLiveItemToCart,
     "review-live-checkout": reviewLiveCheckout, "place-live-order": placeLiveOrder,
     "track-live-order": trackLiveOrder, "live-order-history": loadLiveOrderHistory,

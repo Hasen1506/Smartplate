@@ -300,9 +300,10 @@ def test_ordering_gate_and_unsupported_tools_are_refused(client, swiggy):
         swiggy_live.call(1, "place_food_order", {})
     with pytest.raises(SwiggyError, match="disabled"):      # UPI confirm: live_order only (swiggy_upi)
         swiggy_live.call(1, "confirm_order", {})
-    for name in ["apply_food_coupon", "fetch_food_coupons"]:
-        with pytest.raises(SwiggyError, match="does not support"):
-            swiggy_live.call(1, name, {})
+    # Coupons are read at the cart (fetch_food_coupons, audit #9) but never applied from Ziggy.
+    with pytest.raises(SwiggyError, match="does not support"):
+        swiggy_live.call(1, "apply_food_coupon", {})
+    assert "fetch_food_coupons" in swiggy_live.ALLOWED and "fetch_food_coupons" in swiggy_live.READ_ONLY
     assert swiggy.tool_calls() == []
 
 

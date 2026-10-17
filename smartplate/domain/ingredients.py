@@ -20,7 +20,8 @@ ALLERGENS = ("peanut", "dairy", "gluten", "egg", "soy", "shellfish", "fish", "se
 # diet class of an ingredient: vegan (plant) < veg (dairy/honey) < egg < nonveg (meat/fish).
 # Indian veg marks (FSSAI) count egg as non-vegetarian, as allergens.violates does.
 DIET_RANK = {"vegan": 0, "veg": 1, "egg": 2, "nonveg": 3}
-DIET_ALLOWS = {"vegan": {"vegan"}, "veg": {"vegan", "veg"}, "nonveg": {"vegan", "veg", "egg", "nonveg"}}
+DIET_ALLOWS = {"vegan": {"vegan"}, "veg": {"vegan", "veg"}, "jain": {"vegan", "veg"}, "egg": {"vegan", "veg", "egg"},
+               "nonveg": {"vegan", "veg", "egg", "nonveg"}}
 
 # token: (display name, roles, allergen families, diet class)
 PANTRY: dict[str, tuple[str, tuple[str, ...], tuple[str, ...], str]] = {
@@ -280,6 +281,10 @@ def unsafe_for(people: list[dict], token: str) -> str | None:
         diet = p.get("diet", "nonveg")
         if cls not in DIET_ALLOWS.get(diet, DIET_ALLOWS["nonveg"]):
             return f"{who}: not {diet}"
+        if diet == "jain":
+            from . import allergens as _a
+            if _a.jain_hit(name(token)) or _a.jain_hit(token.replace("_", " ")):
+                return f"{who}: not Jain (no onion, garlic or root vegetables)"
     return None
 
 

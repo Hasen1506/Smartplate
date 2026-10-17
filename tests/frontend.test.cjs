@@ -163,18 +163,20 @@ test('Today never shows a sample or demo banner; without live menus it says how 
 test('connected with an address: Today shows a skeleton and reads real dishes by itself, once', async () => {
   const live = { plan: { id: 42, mode: 'balanced', week_start: '2026-09-14' }, user: { id: 2, name: 'Meera', allergens: [], medical: [] },
     budget: { spend: 0, budget: 1500 }, grid: [], week_context: [], source: { kind: 'live', label: 'Live Swiggy menus', note: '' } };
-  const { context, calls } = fixture({ '/api/plan/42/live-menus': live }); await context.bootPromise;
+  // The refresh runs as a background job the app polls (audit #16), then the plan is re-read.
+  const { context, calls } = fixture({ '/api/plan/42/live-menus?background=1': { state: 'done' }, '/api/plan/42': live }); await context.bootPromise;
   vm.runInContext("S.swiggy = { connected: true, address: { id: 'addr-home', label: 'Home' } }; S.view.source = { kind: 'none', connected: true, needs: 'sync' }", context);
   assert.match(vm.runInContext('realDishesState()', context), /Finding real dishes near you/);
   await vm.runInContext('autoSyncLive()', context);
   assert.equal(vm.runInContext('S.view.source.kind', context), 'live');
   vm.runInContext("S.view.source = { kind: 'none', connected: true, needs: 'sync' }", context);
   await vm.runInContext('autoSyncLive()', context);                 // never loops for the same address
-  assert.equal(calls.filter(c => c.url === '/api/plan/42/live-menus').length, 1);
+  assert.equal(calls.filter(c => c.url.startsWith('/api/plan/42/live-menus')).length, 1);
+  assert.equal(calls.find(c => c.url.startsWith('/api/plan/42/live-menus')).options.method, 'POST');
 });
 
 test('a failed live sync says why and offers Try again and search, never a fake dish', async () => {
-  const { context } = fixture({ '/api/plan/42/live-menus': { __status: 502, error: "Swiggy's menus had no dishes Ziggy can plan with yet." } });
+  const { context } = fixture({ '/api/plan/42/live-menus?background=1': { state: 'error', error: "Swiggy's menus had no dishes Ziggy can plan with yet." } });
   await context.bootPromise;
   vm.runInContext("S.swiggy = { connected: true, address: { id: 'addr-w', label: 'Work' } }; S.view.source = { kind: 'none', connected: true, needs: 'sync' }", context);
   await vm.runInContext('autoSyncLive()', context);
@@ -358,7 +360,12 @@ test('private profile keys are sent as a header and merged into the profile list
   await vm.runInContext("api('/api/user/2/plan')", context);
   assert.equal(calls.at(-1).options.headers['X-SmartPlate-Key'], 'secret-key-123456789');
   const users = JSON.parse(vm.runInContext("JSON.stringify(mergeUsers([{ id: 1, name: 'Sample' }, { id: 2, name: 'Meera' }]))", context));
-  assert.deepEqual(users.map(u => [u.id, !!u.private]), [[2, true], [1, false]]);
+  // r3 #33: with a private profile of their own, the shared samples are hidden (an open one stays)
+  assert.deepEqual(users.map(u => [u.id, !!u.private]), [[2, true]]);
+  vm.runInContext("S.userId = 1", context);
+  const open = JSON.parse(vm.runInContext("JSON.stringify(mergeUsers([{ id: 1, name: 'Sample' }, { id: 3, name: 'Other' }]))", context));
+  assert.deepEqual(open.map(u => [u.id, !!u.private]), [[2, true], [1, false]]);
+  vm.runInContext("S.userId = 2", context);
   assert.match(vm.runInContext('receiptsPanel()', context), /data-act="download-csv"/);
   assert.match(vm.runInContext('meScreen()', context), /data-act="download-ics"/);
   assert.ok(!source.includes('withKey('));
@@ -926,7 +933,9 @@ test('welcome on the simulated, unapproved server never promises real Swiggy res
   await vm.runInContext('boot()', context);
   const html = element.innerHTML;
   assert.doesNotMatch(html, /sample|demo/i);
-  assert.match(html, /once Swiggy approves connecting/);
+  assert.match(html, /Works with your Swiggy account/);                 // ux #37: no internal status line
+  assert.match(html, /Swiggy sign-in is coming soon/);
+  assert.doesNotMatch(html, /once Swiggy approves connecting|already decided/);
   assert.doesNotMatch(html, /connect Swiggy to find real restaurants/i);
   assert.doesNotMatch(html, /browse their current Swiggy menus/);
 });
@@ -1480,19 +1489,24 @@ test('budget changes in place with a per-meal figure, and Try different dishes c
     budget: { spend: 900, budget: 1500, weekly_budget: 1500 }, grid: [], try_different: { changed: 3, meals: 5, can_undo: true } };
   const { context, calls } = fixture({ '/api/plan/42/try-different': tried });
   await context.bootPromise;
-  vm.runInContext(`S.view.budget = { spend: 1000, budget: 750, weekly_budget: 1500, prorated: true };
+  vm.runInContext(`S.view.budget = { spend: 1000, budget: 750, weekly_budget: 1500, prorated: true, covers: 'Thu–Sun' };
     S.view.grid = [{ day: 'Thu', date: '2026-09-17', meals: { lunch: { status: 'active', kind: 'delivery' }, dinner: { status: 'past', kind: 'delivery' } } },
                    { day: 'Fri', date: '2026-09-18', meals: { lunch: { status: 'active', kind: 'cook' }, dinner: { status: 'skipped', kind: 'skip' } } }];
-    S.budgetSheet = { value: 2000 };`, context);
+    S.budgetSheet = { value: 2000, per: 'week' };`, context);
   const sheet = vm.runInContext('budgetSheet()', context);
-  assert.match(sheet, /Now ₹1,500 a week/);
-  assert.match(sheet, /about ₹500 a meal for the 2 meals left \(this week counts from today\)/);   // 2000 × (750/1500) ÷ 2
-  assert.match(sheet, /Re-plan with ₹2,000/);
-  assert.match(sheet, /data-budget-preset="1500"/);
+  assert.match(sheet, /Now ₹214 a day · ₹1,500 a week/);
+  // r3 one budget model: every figure names its period, from the same plan
+  assert.match(sheet, /₹286 a day · ₹2,000 a week · ₹1,000 for Thu–Sun · about ₹500 a meal for the 2 meals left/);   // 2000 × (750/1500) ÷ 2
+  assert.match(sheet, /Re-plan with ₹2,000 a week/);
+  assert.match(sheet, /data-budget-preset="1500"/);                                   // presets around their own ₹1,500
+  assert.match(sheet, /data-budget-preset="1250"/);
+  assert.match(sheet, /data-budget-per="day"/);
   vm.runInContext('S.budgetSheet = { value: 1500 }', context);
   assert.match(vm.runInContext('budgetSheet()', context), /data-act="save-budget" disabled/);   // nothing to change
   const week = vm.runInContext('weekScreen()', context);
   assert.match(week, /data-act="budget">Change budget/);
+  assert.match(week, /planned of ₹750 for Thu–Sun/);
+  assert.match(week, /Thu–Sun only, from ₹1,500 a week/);
   assert.match(week, /data-act="try-different"/);
   assert.match(vm.runInContext('todayScreen()', context), /data-act="budget"/);
   await vm.runInContext('tryDifferent()', context);

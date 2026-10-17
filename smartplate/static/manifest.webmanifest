@@ -1,7 +1,7 @@
 {
-  "name": "Ziggy — your week of meals, already decided",
+  "name": "Ziggy — your meals, planned within your budget",
   "short_name": "Ziggy",
-  "description": "Plans your week of meals within your budget, around your allergies, from places you like, and tells you when to order.",
+  "description": "Plans the meals you choose within your budget, around your allergies, from places you like, and tells you when to order.",
   "id": "/",
   "start_url": "/?source=home-screen",
   "scope": "/",

@@ -85,6 +85,15 @@ Every call goes through one function with an allow-list (`get_addresses`,
 coupons are refused in code, and a test checks it. The person opens Swiggy to
 review the cart and pay.
 
+**Update (16 Oct 2026, fix round 3 "menus-offers"):** `fetch_food_coupons` is now allowed
+as a read, called only when the person is at their cart; the coupons are shown with
+"apply one in Swiggy", and `apply_food_coupon` stays refused. Menus read for the person
+(a tap, the catalogue refresh of their own places, or a prefetch of their own places when
+the Add sheet opens, at most 6) are kept 6 hours per delivery address
+(`swiggy_menu_cache`), served at once and re-read in the background after 20 minutes;
+with nothing kept, page 1 is shown first and the other pages follow. Nothing is read for
+places the person doesn't use or open: no bulk catalogue reads, no aggregation.
+
 Because real schemas are only visible after sign-in, arguments are built from each
 tool's discovered `inputSchema`: documented names first, then common spellings. A
 required field SmartPlate can't fill is named in the error, not guessed. Replies are

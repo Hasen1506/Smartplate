@@ -63,7 +63,8 @@ def _jitter(seed: str, item_id) -> float:
 
 
 def _diet_word(person: dict) -> str:
-    bits = [person.get("diet") or ""] if person.get("diet") in ("veg", "vegan") else []
+    word = {"egg": "eggetarian", "jain": "Jain"}
+    bits = [word.get(person.get("diet"), person.get("diet") or "")] if person.get("diet") in ("veg", "vegan", "egg", "jain") else []
     bits += [f"no {a}" for a in person.get("allergens") or []]
     bits += list(person.get("medical") or [])
     return ", ".join(b for b in bits if b) or "their rules"

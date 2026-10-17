@@ -34,7 +34,7 @@ def get(household_id: int) -> dict | None:
 def merged_profile(members: list[dict]) -> dict:
     """A synthetic 'user' whose constraints are the strictest across members."""
     allerg, medical = set(), set()
-    diet_rank = {"vegan": 0, "veg": 1, "nonveg": 2}
+    diet_rank = {"vegan": 0, "jain": 0, "veg": 1, "egg": 1.5, "nonveg": 2}
     widest = "vegan"
     for m in members:
         allerg |= set(m.get("allergens", []))
@@ -47,7 +47,9 @@ def merged_profile(members: list[dict]) -> dict:
         "medical": sorted(medical),
         # Group meals must satisfy everyone, so use the MOST restrictive diet.
         "diet": ("vegan" if any(m.get("diet") == "vegan" for m in members)
-                 else "veg" if any(m.get("diet") == "veg" for m in members) else "nonveg"),
+                 else "jain" if any(m.get("diet") == "jain" for m in members)
+                 else "veg" if any(m.get("diet") == "veg" for m in members)
+                 else "egg" if any(m.get("diet") == "egg" for m in members) else "nonveg"),
         "_widest_diet": widest,
     }
 

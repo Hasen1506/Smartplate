@@ -118,8 +118,10 @@ def test_multiple_addresses_dense_vs_periurban(run_week):
     w.plan_week()
     assert w.c.post(f"/api/user/{w.uid}/swiggy/address", json={"address_id": "addr-minjur"}).status_code == 200
     back = w.c.get(f"/api/user/{w.uid}/pools").get_json()["meals"]
-    names = lambda pools: {m: [d["name"] for d in ds] for m, ds in pools.items()}   # noqa: E731
+    # r3 #2: favourites saved at another address are kept, greyed (`elsewhere`), never planned here
+    names = lambda pools: {m: [d["name"] for d in ds if not d.get("elsewhere")] for m, ds in pools.items()}   # noqa: E731
     assert names(back) == names(minjur_pools)                        # Minjur's favourites come back
+    assert any(d["name"] == "Veg Biryani" and d.get("elsewhere") for d in back["dinner"])   # kept, greyed
     _invariants(w)
 
 
