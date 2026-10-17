@@ -415,8 +415,9 @@ def test_kept_at_week_end_and_carry_over_is_off_by_default(app):
     clock.set(dt.datetime(2026, 11, 9, 9, 0))
     assert _env(c, uid)["envelope"] == 2000                          # no automatic carry-over
     c.put(f"/api/user/{uid}/budget-settings", json={"carry": True})
-    # carry counts real Swiggy bills only; last week had none, so the whole budget is "kept"
-    assert _env(c, uid)["carry_in"] == 2000 and _env(c, uid)["envelope"] == 4000
+    # carry counts every real bill (Swiggy and other apps), so what carries is exactly
+    # what the Sunday view called kept: 2000 - 1500 = 500
+    assert _env(c, uid)["carry_in"] == 500 and _env(c, uid)["envelope"] == 2500
 
 
 def test_snack_pick_counts_in_todays_money_without_a_slot(app):
