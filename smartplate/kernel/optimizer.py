@@ -173,10 +173,15 @@ def days_covered(plan: dict) -> int:
     return 7 - min(6, max(0, (created - start).days))
 
 
+OVER_TARGET_W = 2.0     # per average meal's worth of rupees over a day's set amount (soft)
+
+
 def week_cap(user: dict, plan: dict) -> float:
-    """The weekly budget, prorated when a plan starts part-way through its week —
-    a plan made on Thursday covers 4 days, so it gets 4/7 of the weekly budget."""
-    return round(user["weekly_budget"] * days_covered(plan) / 7, 2)
+    """The week's envelope (domain/envelope.py): the weekly budget, prorated when a plan starts
+    part-way through its week (a plan made on Thursday covers 4 days, so it gets 4/7), or the
+    week's own override ("Make this week ₹X")."""
+    from ..domain import envelope
+    return envelope.plan_envelope(user, plan)
 
 
 def build_context(user: dict, plan: dict) -> dict:
@@ -709,6 +714,8 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
     move freely; otherwise current picks are kept unless changing them buys something."""
     plan = models.get_plan(plan_id)
     user = models.get_user(plan["user_id"])
+    from ..domain import envelope
+    envelope.sync_off(user, plan)                  # Off days/meals: no money, nothing planned
     ctx = build_context(user, plan)
     w = ctx["weights"]
     at = now()
@@ -820,8 +827,32 @@ def optimize(plan_id: int, *, stable: bool = True) -> dict:
         fixed_by_day[day] = fixed_by_day.get(day, 0.0) + amount
     fixed = committed["total"] + sum(c["cost"] for c in pinned.values())
     room = max(0, cap - fixed)
-    prob += pulp.lpSum(budget_terms) <= room
-    dcap = profile.daily_cap(user)
+    # Budget model v2 (domain/envelope.py): the envelope also pays for real bills from other
+    # apps and keeps Off days' share aside (scope "all"); a day the person set an amount for
+    # spends that amount (soft target: overshoot is penalised; hard: never above).
+    et = envelope.solver_targets(user, plan, fixed_by_day, committed["by_day"])
+    room = max(0, min(room, et["room"]))
+    set_days = {d: v for d, v in et["sets"].items() if d in day_terms}
+    over_vars = {}
+    non_set_terms = [c["cost"] * x[(s["id"], i)] for s in active if s["day"] not in set_days
+                     for i, c in enumerate(cand_map[s["id"]])]
+    set_money = []
+    for day, info in set_days.items():
+        over = pulp.LpVariable(f"over_{day}", lowBound=0)
+        over_vars[day] = over
+        prob += pulp.lpSum(day_terms[day]) - over <= info["open"]
+        if info["mode"] == "hard":
+            prob += over == 0
+        prob.objective += OVER_TARGET_W * over / ref_cost
+        set_money.append(info["open"] + over)
+    if set_days:
+        # a set day spends its amount (reserved) or more: the rest of the week gets the rest
+        # (days set above the money left still keep what they were set to: the person's word)
+        room = max(room, sum(v["open"] for v in set_days.values()))
+        prob += pulp.lpSum(non_set_terms) + pulp.lpSum(set_money) <= room
+    else:
+        prob += pulp.lpSum(budget_terms) <= room
+    dcap = profile.daily_cap(user) if profile.daily_cap_mode(user) == "hard" else None
     if dcap:
         for day, terms in day_terms.items():
             prob += pulp.lpSum(terms) <= max(0, dcap - fixed_by_day.get(day, 0.0))

@@ -133,7 +133,7 @@ def create_app() -> Flask:
                     return _missing(key, args[key])
         if request.path.startswith('/api/'):
             presented = request.headers.get(access.HEADER)
-            body = request.get_json(silent=True) if request.method == 'POST' else None
+            body = request.get_json(silent=True) if request.method in ('POST', 'PUT') else None
             owners = access.owners_of(args, body if isinstance(body, dict) else None,
                                       request.args.get('user_id', type=int))
             if not all(access.allowed(uid, presented) or websession.grants(g.web_session, uid) for uid in owners):
@@ -1418,4 +1418,6 @@ def create_app() -> Flask:
     ops.init_app(app)                        # /cron/tick, /admin/metrics, analytics events (W9)
     from . import today_api                 # v3 Today: budget, pools, picks, Decide for me
     app.register_blueprint(today_api.bp)
+    from . import envelope_api              # budget model v2: the week's envelope, day amounts, Plan/Off
+    app.register_blueprint(envelope_api.bp)
     return app

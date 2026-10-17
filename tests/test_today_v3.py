@@ -216,8 +216,9 @@ def test_today_records_are_exported_and_deleted_with_the_profile(plain):
     c.post(f"/api/user/{uid}/today/budget", json={"amount": 500})
     data = c.get(f"/api/user/{uid}/data.json").get_json()["data"]
     assert [r["name"] for r in data["pool_typed"]] == ["Cappuccino"]
-    assert len(data["today_picks"]) == 1 and data["today_budget"][0]["amount"] == 500
+    assert len(data["today_picks"]) == 1 and data["day_budget"][0]["amount"] == 500   # r4: day_budget
+    assert data["day_budget"][0]["mode"] == "soft" and data["today_budget"] == []
     assert c.delete(f"/api/user/{uid}", json={"confirmation": "DELETE"}).status_code == 200
     with db.cursor() as cur:
-        for table in ("today_picks", "today_budget", "pool_typed", "pool_meta", "today_settings"):
+        for table in ("today_picks", "today_budget", "day_budget", "pool_typed", "pool_meta", "today_settings"):
             assert cur.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE user_id=?", (uid,)).fetchone()["n"] == 0

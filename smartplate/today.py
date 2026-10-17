@@ -116,8 +116,10 @@ CREATE TABLE IF NOT EXISTS pool_meta (            -- quantity + what Swiggy show
 """
 
 def init_schema() -> None:
+    from .domain import envelope
     with db.cursor() as cur:
         cur.executescript(SCHEMA)
+    envelope.init_schema()
 
 
 # --------------------------------------------------------------------------- helpers
@@ -406,17 +408,42 @@ def _reminded(user_id: int) -> set[str]:
 
 
 def budget_for(user: dict) -> dict:
-    """Today's budget: what the person set for today, else their weekly budget ÷ 7 (said so)."""
+    """Today's budget from the week's envelope (domain/envelope.py): the same figure the Week
+    shows for today. A day amount the person set wins; otherwise today's share of the money
+    left this week, after what is spent, picked and pinned (budget model v2, fix round 4)."""
+    from .domain import envelope
     init_schema()
-    with db.cursor() as cur:
-        row = cur.execute("SELECT amount FROM today_budget WHERE user_id=? AND day=?",
-                          (user["id"], _today())).fetchone()
-    weekly = float(user.get("weekly_budget") or 0)
-    default = round(weekly / 7) if weekly else 0
-    if row:
-        return {"amount": float(row["amount"]), "source": "today", "default": default}
-    return {"amount": float(default), "source": "week", "default": default,
-            "basis": f"Your weekly ₹{weekly:,.0f} ÷ 7" if weekly else None}
+    v = envelope.day_view(user)
+    d, w = v["day"], v["week"]
+    out = {"amount": float(d["target"]), "default": int(d["guide"]), "guide": int(d["guide"]),
+           "min": d.get("min", 0), "state": d["state"], "mode": d.get("mode"),
+           "spent": d["spent"], "committed": d["committed"], "flags": d.get("flags") or [],
+           "date": d["date"], "week": w, "rest": v["rest"]}
+    if d["state"] == "off":
+        out.update(source="off", basis="Today is Off: no meals planned, no money assumed")
+    elif d.get("set") is not None:
+        out.update(source="today", basis=None)
+    else:
+        weekly = float(user.get("weekly_budget") or 0)
+        out.update(source="week", basis=(f"Your ₹{w['envelope']:,.0f} this week, shared over the days left"
+                                         if weekly else None))
+    return out
+
+
+def committed_today(user: dict) -> tuple[dict, float]:
+    """Today's own picks (meals and the optional snack) and what they cost in all: the money
+    the person committed today (an estimate until the Swiggy cart shows the bill)."""
+    init_schema()
+    picks = _picks(user["id"])
+    if not picks:
+        return {}, 0.0
+    counted = set(meals_today(user)) | {SNACK}
+    bills, rule = _cart_bills(user["id"]), _fee_rule(user["id"])
+    total = 0.0
+    for m, p in picks.items():
+        if m in counted:
+            total += float(_total(p, p["qty"], bills, rule)[0] or 0)
+    return {m: p for m, p in picks.items() if m in counted}, round(total, 2)
 
 
 def presets_for(daily) -> list[int]:
@@ -434,23 +461,31 @@ def _eaters(user_id: int) -> int:
 
 
 def follow_week(user_id: int) -> None:
-    """The weekly budget just changed: today goes back to following it (weekly ÷ 7), so Today
-    and Week never show two unrelated budgets (r3 one budget model)."""
+    """The weekly budget just changed: today goes back to following the envelope, so Today
+    and Week never show two unrelated budgets (r3 one budget model; v2 envelope)."""
+    from .domain import envelope
     init_schema()
     with db.cursor() as cur:
-        cur.execute("DELETE FROM today_budget WHERE user_id=? AND day=?", (user_id, _today()))
+        cur.execute("DELETE FROM day_budget WHERE user_id=? AND day=?", (user_id, _today()))
+    envelope.budget_changed(user_id)
 
 
 def set_budget(user_id: int, amount) -> dict:
+    """Today's own amount (the Today card): a soft day budget for today in the envelope."""
+    from .domain import envelope
     _user(user_id)
     a = _num(amount, 50, 20000, "Today's budget")
     if a is None:
         raise ValueError("Enter today's budget")
-    init_schema()
-    with db.cursor() as cur:
-        cur.execute("INSERT OR REPLACE INTO today_budget(user_id, day, amount) VALUES (?,?,?)",
-                    (user_id, _today(), round(a)))
+    envelope.set_day_budget(user_id, _today(), round(a), "soft")
+    _replan(user_id)
     return view(user_id)
+
+
+def _replan(user_id: int) -> None:
+    """Rebalance the days ahead after a money change (forward only; never retroactive)."""
+    from .domain import envelope
+    envelope.replan(user_id)
 
 
 # --------------------------------------------------------------------------- pools
@@ -799,7 +834,16 @@ def pick(user_id: int, meal, ref, qty=None) -> dict:
     with db.cursor() as cur:
         _save_pick(cur, user_id, meal, entry, _qty(qty or entry["qty"]), "you")
     _unpin_today(user_id, meal)
-    return view(user_id)
+    out = view(user_id)
+    # Budget model v2: the pick is the person's word, never blocked; say what it costs the week
+    total = (out["picks"].get(meal) or {}).get("total")
+    if total:
+        from .domain import envelope
+        try:
+            out["impact"] = envelope.impact_for(user_id, _today(), float(total), user=user)
+        except Exception:
+            out["impact"] = None
+    return out
 
 
 # --------------------------------------------------------------------------- one truth for today (usab #1)

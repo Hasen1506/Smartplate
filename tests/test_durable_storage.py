@@ -208,6 +208,8 @@ def test_app_sql_uses_only_the_portable_dialect():
     db_pg.register_schema(today.SCHEMA)
     from smartplate.domain import autofill
     db_pg.register_schema(autofill.SCHEMA)
+    from smartplate.domain import envelope
+    db_pg.register_schema(envelope.SCHEMA)
     found = []
     for path, line, sql in _app_sql():
         low = sql.lower()

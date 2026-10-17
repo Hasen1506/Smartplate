@@ -96,6 +96,12 @@ def daily_cap(user: dict) -> float | None:
     return float(cap) if cap else None
 
 
+def daily_cap_mode(user: dict) -> str:
+    """The Settings "Daily limit" is the person's own "never above X a day": hard, unless they
+    made it a soft guide (prefs.daily_cap_mode = "soft"; budget model v2)."""
+    return "soft" if (user.get("prefs") or {}).get("daily_cap_mode") == "soft" else "hard"
+
+
 # --------------------------------------------------------------------------- #
 # Validation — reject the whole payload rather than half-save it
 # --------------------------------------------------------------------------- #
@@ -149,7 +155,8 @@ def validate_setup(body: dict) -> dict:
     """Normalise an onboarding / settings payload. Every field is optional except
     what a first-time profile needs; unknown keys are rejected."""
     allowed = {"name", "area", "diet", "allergens", "medical", "observances", "weekly_budget",
-               "daily_cap", "meals", "goal", "body", "favourites", "variety", "rating_floor", "cuisine_tilt", "eaters"}
+               "daily_cap", "meals", "goal", "body", "favourites", "variety", "rating_floor", "cuisine_tilt", "eaters",
+               "daily_cap_mode"}
     if not isinstance(body, dict):
         raise ValueError("Send a JSON object")
     extra = set(body) - allowed
@@ -178,6 +185,10 @@ def validate_setup(body: dict) -> dict:
     if "daily_cap" in body:
         out["daily_cap"] = None if body["daily_cap"] in (None, 0) else _number(body["daily_cap"], "Daily limit",
                                                                                        DAILY_CAP_MIN, DAILY_CAP_MAX)
+    if "daily_cap_mode" in body:
+        if body["daily_cap_mode"] not in ("soft", "hard"):
+            raise ValueError("The daily limit is a guide (soft) or never above (hard)")
+        out["daily_cap_mode"] = body["daily_cap_mode"]
     if "rating_floor" in body:
         out["rating_floor"] = _number(body["rating_floor"], "Minimum rating", 0, 5)
     if "meals" in body:

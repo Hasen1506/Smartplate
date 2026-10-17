@@ -189,7 +189,7 @@ def update_setup(user_id: int, body: dict) -> dict:
     for key in ("allergens", "medical", "observances"):
         if key in data:
             updates[key] = db.jd(data[key])
-    for key in ("meals", "daily_cap", "area", "cuisine_tilt", "eaters"):
+    for key in ("meals", "daily_cap", "daily_cap_mode", "area", "cuisine_tilt", "eaters"):
         if key in data:
             prefs[key] = data[key]
     ht = dict(user["health_targets"])
@@ -524,7 +524,18 @@ def choose(session_id: int, body: dict) -> dict:
         from . import today as today_mod             # the Week's pick is now today's meal (usab #1)
         today_mod.clear_pick(user["id"], session["meal"])
     optimizer.optimize(plan["id"])
-    return service.plan_view(plan["id"])
+    view = service.plan_view(plan["id"])
+    if pin:
+        # Budget model v2: the person's pick is never blocked; say what it costs the week
+        d = next((x for x in models.decisions_for_plan(plan["id"]) if x["session_id"] == session_id), None)
+        if d and d["chosen_kind"] in ("delivery", "cook"):
+            from .domain import envelope
+            try:
+                view["impact"] = envelope.impact_for(user["id"], models.session_date(plan, session["day"]),
+                                                     float(d["cost"]), user=user)
+            except Exception:
+                view["impact"] = None
+    return view
 
 
 def eat_now(plan_id: int, body: dict) -> dict:

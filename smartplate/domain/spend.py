@@ -161,6 +161,7 @@ def record_handoff(user_id: int, session_id: int, amount, restaurant: str = "") 
 def entries(user_id: int, start: str, end: str, *, confirmed_only: bool = True) -> list[dict]:
     with db.cursor() as cur:
         rows = cur.execute("SELECT * FROM spend_ledger WHERE user_id=? AND iso_date>=? AND iso_date<=? "
+                           "AND source != 'outside' "        # other apps' bills: the envelope's, not Swiggy's
                            + ("AND confirmed=1 " if confirmed_only else "") + "ORDER BY iso_date, ref",
                            (user_id, start, end)).fetchall()
     return [db.row_to_dict(r) for r in rows]
