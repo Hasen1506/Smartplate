@@ -722,13 +722,10 @@ def kept(alloc: dict, today: dt.date) -> dict | None:
 
 
 def carried_in(user: dict, ws: dt.date) -> float:
-    """With carry-over on (off by default): last week's kept money, real bills only."""
+    """With carry-over on (off by default): last week's kept money against its real bills."""
     prev = ws - dt.timedelta(days=7)
-    try:
-        from . import spend
-        spent = spend.actual(user["id"], prev.isoformat(), (prev + dt.timedelta(days=6)).isoformat())["amount"]
-    except Exception:
-        return 0.0
+    # every real bill of last week (Swiggy and other apps: scope "all")
+    spent = sum(_ledger_by_day(user["id"], prev, prev + dt.timedelta(days=6)).values())
     _, _, ov = _rows(user["id"], prev, prev + dt.timedelta(days=6))
     base = float(ov["amount"]) if ov else float(user.get("weekly_budget") or 0)
     return round(max(0.0, base - spent), 2)

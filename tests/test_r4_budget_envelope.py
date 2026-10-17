@@ -381,3 +381,61 @@ def test_solver_hard_day_amount_is_a_wall(method):
     rules = {"max_repeat": 2, "day_caps": {0: 300}}
     chosen, _ = decide.solve(slots, [[_cand("P", 400)], [_cand("Q", 160)]], 1000, rules, method=method)
     assert [c["kind"] for c in chosen] == ["skip", "delivery"]
+
+
+# --------------------------------------------------------------------------- more edge cases
+def test_weekly_budget_changed_mid_week_applies_to_the_rest_and_spent_stays(app):
+    c, uid, clock = app["c"], app["uid"], app["clock"]
+    c.post(f"/api/user/{uid}/outside-spend", json={"amount": 500, "app": "zomato", "date": WEEK[0]})
+    clock.set(dt.datetime(2026, 11, 4, 9, 0))                       # Wednesday
+    c.put(f"/api/user/{uid}/week-override", json={"week_start": WEEK[0], "amount": 2500})
+    c.patch(f"/api/user/{uid}/setup", json={"weekly_budget": 2800})
+    env = _env(c, uid)
+    assert env["override"] is None and env["envelope"] == 2800        # the new number; the one-week override gave way
+    assert env["days"][0]["spent"] == 500 and env["days"][0]["target"] == 500   # spent stays spent
+    ahead = [d for d in env["days"] if d["date"] >= WEEK[2]]
+    assert sum(d["target"] for d in ahead) == 2800 - 500 - env["days"][1]["target"]
+
+
+def test_fast_day_gets_a_lighter_target(app, monkeypatch):
+    c, uid = app["c"], app["uid"]
+    monkeypatch.setattr(envelope, "_fasts", lambda user, ws: {WEEK[3]: {"name": "Ekadashi"}})
+    env = _env(c, uid)
+    thu, fri = env["days"][3], env["days"][4]
+    assert thu["target"] < fri["target"] and thu["guide"] < fri["guide"]
+    assert any(f["kind"] == "fast" for f in thu["flags"])
+
+
+def test_kept_at_week_end_and_carry_over_is_off_by_default(app):
+    c, uid, clock = app["c"], app["uid"], app["clock"]
+    c.post(f"/api/user/{uid}/outside-spend", json={"amount": 1500, "app": "other", "date": WEEK[0]})
+    clock.set(dt.datetime(2026, 11, 8, 21, 0))                      # Sunday night
+    env = _env(c, uid)
+    assert env["kept"]["amount"] == 500 and env["kept"]["text"] == "Kept ₹500"
+    clock.set(dt.datetime(2026, 11, 9, 9, 0))
+    assert _env(c, uid)["envelope"] == 2000                          # no automatic carry-over
+    c.put(f"/api/user/{uid}/budget-settings", json={"carry": True})
+    # carry counts real Swiggy bills only; last week had none, so the whole budget is "kept"
+    assert _env(c, uid)["carry_in"] == 2000 and _env(c, uid)["envelope"] == 4000
+
+
+def test_snack_pick_counts_in_todays_money_without_a_slot(app):
+    c, uid = app["c"], app["uid"]
+    t = c.post(f"/api/user/{uid}/today/pool", json={"source": "typed", "meal": "snack", "name": "Samosa",
+                                                     "restaurant_name": "Corner", "price": 40, "veg": True}).get_json()
+    ref = t["pools"]["snack"][0]["ref"]
+    c.post(f"/api/user/{uid}/today/pick", json={"meal": "snack", "ref": ref})
+    mon = _env(c, uid)["days"][0]
+    assert mon["committed"] == 40
+    from smartplate.domain import models
+    assert all(s["meal"] != "snack" for s in models.sessions_for_plan(app["plan"]["plan"]["id"]))
+
+
+def test_low_money_says_so_and_never_invents_cheap_food():
+    days = [{"date": WEEK[i], "state": "plan", "spent": 0, "committed": 0, "set": None, "weight": 3}
+            for i in range(7)]
+    a = envelope.allocate(700, [dict(d, guide_weight=3, off_meals=0, mode=None) for d in days])
+    low = envelope._low(a, {"amount": 120.0}, days)
+    assert low and low["fits"] == 5 and "Turn a day Off, cook a few, or raise this week" in low["text"]
+    assert envelope._low(envelope.allocate(9000, [dict(d, guide_weight=3, off_meals=0, mode=None) for d in days]),
+                         {"amount": 120.0}, days) is None
