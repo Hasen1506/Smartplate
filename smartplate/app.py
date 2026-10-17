@@ -154,6 +154,13 @@ def create_app() -> Flask:
             g.user_locks = locks
 
     @app.teardown_request
+    def start_background_menu_reads(error):
+        # a menu tap's background read (the rest of the menu) starts once the tap is
+        # answered, never racing page 1 for the database or the CPU (fix round 4)
+        from .integrations import swiggy_menu_cache
+        swiggy_menu_cache.start_deferred()
+
+    @app.teardown_request              # registered after: Flask runs it first
     def release_user_locks(error):
         for lock in reversed(g.pop('user_locks', [])):
             lock.release()

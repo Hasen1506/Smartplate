@@ -197,18 +197,22 @@ def view(user_id: int, restaurant_id: str, restaurant_name: str, *, fresh: bool 
         raise ValueError("Choose a restaurant from live Swiggy search")
     rid, key = str(restaurant_id), (user_id, str(restaurant_id))
     raw, age = (None, None) if fresh else load(user_id, rid)
-    started = False
+    # The background read is decided here but started only once this tap's answer (menu,
+    # screening, the per-meal budget line) is built, so the rest of the menu never competes
+    # with page 1 for the database and the first page is answered first (fix round 4).
+    later = None
     source = "cache"
     if raw is not None:
         if raw.get("partial") and not busy(user_id, rid):
-            started = _run(key, lambda: _read_rest(user_id, rid, raw))
+            kept_raw = raw
+            later = lambda: _read_rest(user_id, rid, kept_raw)
         elif age is not None and age > REVALIDATE_AFTER:
-            started = _run(key, lambda: _read_full(user_id, rid, restaurant_name))
+            later = lambda: _read_full(user_id, rid, restaurant_name)
     else:
         raw = None if fresh else _from_catalogue(user_id, rid)
         if raw is not None:
             source = "catalogue"
-            started = _run(key, lambda: _read_full(user_id, rid, restaurant_name))
+            later = lambda: _read_full(user_id, rid, restaurant_name)
         else:
             source = "swiggy"
             first = swiggy_live.live_menu(user_id, rid, restaurant_name, screen=False, pages=1)   # stores it
@@ -216,11 +220,42 @@ def view(user_id: int, restaurant_id: str, restaurant_name: str, *, fresh: bool 
             raw = raw or {**first, "address_id": _address_id(user_id)}
             if first.get("partial"):
                 kept = raw
-                started = _run(key, lambda: _read_rest(user_id, rid, kept))
-    out = swiggy_live.menu_view(user_id, raw)
-    return annotate(user_id, {**out, "source": source, "cached": source != "swiggy",
-                              "age_min": int(age.total_seconds() // 60) if age is not None else 0,
-                              "refreshing": started or busy(user_id, rid)})
+                later = lambda: _read_rest(user_id, rid, kept)
+    out = annotate(user_id, {**swiggy_live.menu_view(user_id, raw), "source": source, "cached": source != "swiggy",
+                             "age_min": int(age.total_seconds() // 60) if age is not None else 0})
+    started = _run_after_request(key, later) if later else False
+    out["refreshing"] = started or busy(user_id, rid)
+    return out
+
+
+def _run_after_request(key: tuple[int, str], fn) -> bool:
+    """Like _run, but inside a request the read starts when the request ends (the app's
+    teardown calls start_deferred), so a menu tap is answered before the rest of the menu
+    is read. Outside a request (scripts, direct calls) it starts at once."""
+    try:
+        from flask import g, has_request_context
+        if has_request_context():
+            pending = g.setdefault("_menu_reads_after", [])
+            if key in [k for k, _ in pending]:
+                return True
+            if busy(*key):
+                return False
+            pending.append((key, fn))
+            return True
+    except Exception:
+        pass
+    return _run(key, fn)
+
+
+def start_deferred() -> None:
+    """The request is over: start the background menu reads it decided on (app teardown)."""
+    try:
+        from flask import g
+        pending = g.pop("_menu_reads_after", [])
+    except Exception:
+        return
+    for key, fn in pending:
+        _run(key, fn)
 
 
 def place(user_id: int, restaurant_id: str, restaurant_name: str) -> dict:
