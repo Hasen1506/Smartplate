@@ -574,11 +574,28 @@ def solve_milp(slots, cand_lists, money, rules, caps=None):
     prob.setObjective(-cost)
     prob.solve(solver)
     MILP_LAST["proven"] &= prob.sol_status == pulp.LpSolutionOptimal
+    # last stage: a fixed, content-derived tie-break among the equally good answers (the same
+    # dishes on other days cost and score the same). Without it the choice between them
+    # depends on the CBC build, so x86 (CI) and ARM gave different weeks once the soft day
+    # targets added a stage (fix round 4). Mirrors optimizer._tiebreak.
+    prob += cost <= (pulp.value(cost) or 0) + 0.01
+    prob.setObjective(-pulp.lpSum(_tiebreak(slots[i], c) * x[(i, j)] for i, cs in enumerate(cand_lists)
+                                  for j, c in enumerate(cs)))
+    prob.solve(solver)
+    MILP_LAST["proven"] &= prob.sol_status == pulp.LpSolutionOptimal
     out = []
     for i, cs in enumerate(cand_lists):
         j = next((j for j in range(len(cs)) if (x[(i, j)].value() or 0) > 0.5), None)
         out.append(cs[j] if j is not None else SKIP)
     return out
+
+
+def _tiebreak(slot: dict, c: dict) -> float:
+    """In [0, 1): a hash of the slot and the dish (never a preference; used only in the
+    MILP's last stage, after meals, score, soft targets and cost are fixed)."""
+    ident = ",".join(str(i) for i in (c.get("item_ids") or ())) or str(c.get("name") or "")
+    key = f"{slot.get('day')}|{slot.get('meal')}|{c.get('kind')}|{ident}".encode()
+    return int.from_bytes(hashlib.blake2b(key, digest_size=4).digest(), "big") / 2**32
 
 
 def solve(slots, cand_lists, money, rules, *, caps=None, method="auto"):
