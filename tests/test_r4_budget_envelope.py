@@ -354,3 +354,30 @@ def test_decide_week_reads_the_envelope_and_never_touches_pins(app):
     assert all(p["day"] != 6 for p in body["picks"])                    # an Off day is not planned
     env = _env(c, uid)
     assert body["money"] <= env["envelope"] - env["reserve"] - env["spent"] - env["committed"] + 0.01
+
+
+# --------------------------------------------------------------------------- the solver: soft day targets
+def _cand(name, cost, score=0.8):
+    return {"kind": "delivery", "name": name, "cost": cost, "score": score, "item_ids": (name,)}
+
+
+@pytest.mark.parametrize("method", ["exact", "greedy", "milp"])
+def test_solver_stages_meals_then_score_then_least_over_then_cheapest(method):
+    from smartplate.kernel import decide
+    slots = [{"day": 0, "meal": "dinner"}, {"day": 1, "meal": "dinner"}]
+    cands = [[_cand("P", 150), _cand("Q", 160)], [_cand("P", 150), _cand("Q", 160)]]
+    rules = {"max_repeat": 1, "day_targets": {0: 100, 1: 1000}}
+    chosen, _ = decide.solve(slots, cands, 1000, rules, method=method)
+    assert [c["name"] for c in chosen] == ["P", "Q"]          # the cheaper dish on the tight day
+    # a day's share is a guide: a meal is still filled though it takes the day over its target
+    chosen, _ = decide.solve(slots, [[_cand("P", 400)], [_cand("Q", 160)]], 1000, rules, method=method)
+    assert [c["name"] for c in chosen] == ["P", "Q"]
+
+
+@pytest.mark.parametrize("method", ["exact", "greedy", "milp"])
+def test_solver_hard_day_amount_is_a_wall(method):
+    from smartplate.kernel import decide
+    slots = [{"day": 0, "meal": "dinner"}, {"day": 1, "meal": "dinner"}]
+    rules = {"max_repeat": 2, "day_caps": {0: 300}}
+    chosen, _ = decide.solve(slots, [[_cand("P", 400)], [_cand("Q", 160)]], 1000, rules, method=method)
+    assert [c["kind"] for c in chosen] == ["skip", "delivery"]

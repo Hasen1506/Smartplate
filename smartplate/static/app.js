@@ -123,6 +123,9 @@ const I18N = { ta: {
   "Your meals, planned within your budget.": "உங்கள் பட்ஜெட்டுக்குள் திட்டமிட்ட உணவு.",
   "Get started": "தொடங்கு", "I already have an account": "எனக்கு ஏற்கனவே கணக்கு உள்ளது",
   "Language": "மொழி",
+  "Plan": "திட்டமிடு", "Off": "விடுமுறை", "Take it from the week": "வாரத் தொகையிலிருந்து எடு",
+  "Follow the week again": "மீண்டும் வாரத்தைப் பின்பற்று", "Never above this (a hard limit)": "இதற்கு மேல் ஒருபோதும் இல்லை (கடும் வரம்பு)",
+  "The line on each day is its fair share: a guide, not a limit.": "ஒவ்வொரு நாளின் கோடு அதன் நியாயமான பங்கு: வழிகாட்டி, வரம்பு அல்ல.",
 } };
 const lang = () => { const l = store.get("ziggy.lang"); return I18N[l] ? l : "en"; };
 function t(en, vars) {
@@ -646,8 +649,11 @@ async function openSheet(sid) {
   loadPhotos(quickPicks(S.sheet.data));
 }
 async function choose(sid, body, msg) {
-  adoptView(await api(`/api/session/${sid}/choose`, "POST", body));
-  S.sheet = null; toast(msg || "Done. The rest of the week re-balanced."); render();
+  const view = await api(`/api/session/${sid}/choose`, "POST", body);
+  adoptView(view);
+  S.sheet = null; toast(msg || "Done. The rest of the week re-balanced.");
+  globalThis.ZiggyV3?.impact?.(view);       // fix round 4: what the pick costs the week (never a block)
+  render();
 }
 /* Epicure: "more like this" on the planned dish, ingredient swaps for cook days. */
 const epicureOn = () => !!S.meta?.epicure?.available;
@@ -1761,7 +1767,7 @@ function orderListPanel() {
 }
 async function olHave(sid) {
   const o = S.olist, d = o.data.dishes.find(x => x.id === o.pick);
-  adoptView(await api(`/api/session/${sid}/choose`, "POST", { item_id: d.id }));
+  { const view = await api(`/api/session/${sid}/choose`, "POST", { item_id: d.id }); adoptView(view); globalThis.ZiggyV3?.impact?.(view); }
   const label = sessionLabel(sid) || "that meal";
   S.olist = null; S.weekView = null; render();
   toast(`${d.name} for ${label}`);
@@ -2089,7 +2095,7 @@ function openMeals(all = false) {
 }
 async function cookFor(sid) {
   const d = S.dish;
-  adoptView(await api(`/api/session/${sid}/choose`, "POST", { recipe_key: d.key }));
+  { const view = await api(`/api/session/${sid}/choose`, "POST", { recipe_key: d.key }); adoptView(view); globalThis.ZiggyV3?.impact?.(view); }
   const label = sessionLabel(sid);
   S.dish = null; S.sheet = null; S.cook = null;
   toast(`${d.title} for ${label}. It's in your week as a home-cooked meal.`); render();

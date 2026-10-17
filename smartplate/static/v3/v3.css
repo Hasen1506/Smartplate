@@ -133,3 +133,28 @@
 .v3-menu-head{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .v3-coupons ul{margin:4px 0 6px 18px;padding:0}
 .v3-sec-n{margin-left:4px;text-transform:none;letter-spacing:0}
+
+/* Fix round 4: the week's envelope. Day chips (₹ planned, a tick at the fair share), one slider on tap. */
+.v3-env{gap:10px;padding:14px 12px}
+.v3-daychips{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.v3-daychip{display:flex;flex-direction:column;align-items:center;gap:4px;min-height:96px;padding:6px 2px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);font:inherit;cursor:pointer}
+.v3-daychip b{font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.v3-dc-d{font-size:12px;font-weight:700;color:var(--ink2)}
+.v3-dc-bar{position:relative;width:14px;height:40px;border-radius:7px;background:var(--raised);overflow:visible}
+.v3-dc-bar i{position:absolute;left:0;right:0;bottom:0;border-radius:7px;background:var(--accent)}
+.v3-dc-bar s{position:absolute;left:-5px;right:-5px;height:2px;background:var(--ink);text-decoration:none}
+.v3-daychip.today{border-color:var(--ink);box-shadow:0 0 0 1.5px var(--ink) inset}
+.v3-daychip.set .v3-dc-bar i{background:var(--leaf)}
+.v3-daychip.off{background:var(--raised);color:var(--ink2)}
+.v3-daychip.off .v3-dc-bar i{background:var(--line2)}
+.v3-daychip.past{opacity:.6;cursor:default}
+.v3-env-over,.v3-env-low{color:var(--amber)}
+.v3-slider{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+.v3-slider output{text-align:center}
+.v3-slider-track{position:relative;padding:8px 0}
+.v3-slider-track input[type=range]{width:100%;min-height:44px;accent-color:var(--accent)}
+.v3-guide{position:absolute;top:2px;bottom:2px;width:2px;margin-left:-1px;background:var(--ink);pointer-events:none}
+.v3-slider-scale{display:flex;justify-content:space-between;gap:8px}
+.v3-dayplan{display:flex;gap:6px}
+.v3-impact .row .small{min-height:40px}
+@media (max-width:380px){.v3-daychip b{font-size:11px}.v3-daychips{gap:2px}}

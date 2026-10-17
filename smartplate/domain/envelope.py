@@ -36,6 +36,7 @@ STATES = ("plan", "off")
 MEAL_DAY_CUTOFF_H = 4          # a meal eaten before 04:00 belongs to the day before (late dinner)
 FAST_SUSPENDS = ("breakfast", "lunch")
 OFF_NOTE = "Off: you're not planning this"
+SKEW_S = 600                   # a device clock more than 10 minutes off is not trusted for set_at
 MEALS = ("breakfast", "lunch", "dinner")
 
 SCHEMA = """
@@ -265,7 +266,8 @@ def impact(alloc_before: dict, alloc_after: dict, date: str, today: str | None =
     fixed = day["spent"] + day["committed"]
     over_share = round(max(0.0, fixed - day["guide_exact"]), 2)
     rest = [d for d in alloc_after["days"] if d["date"] != date and d["state"] == "plan" and d["set"] is None
-            and (today is None or d["date"] >= today)]
+            and (today is None or d["date"] >= today)
+            and d["target_exact"] > d["spent"] + d["committed"] + 0.5]     # a day its own picks fill takes no more
     rest_money = sum(d["target_exact"] for d in rest)
     rest_days = len(rest)
     per_day = rest_money / rest_days if rest_days else 0.0
@@ -331,14 +333,28 @@ def set_settings(user_id: int, body: dict) -> dict:
     return settings(user_id)
 
 
+def _local(value: str) -> dt.datetime:
+    """An ISO time as the app's local naive time (a phone sends UTC with a Z; the server stores
+    local time), so two devices' stamps compare on one clock."""
+    t = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if t.tzinfo is not None:
+        tz = getattr(clock, "_TZ", None)
+        t = (t.astimezone(tz) if tz is not None else t.astimezone()).replace(tzinfo=None)
+    return t
+
+
 def _check_set_at(value) -> str:
     if value in (None, ""):
         return _now_iso()
     try:
-        dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        raise ValueError("set_at must be an ISO time") from None
-    return str(value)
+        t = _local(value)
+    except (TypeError, ValueError):          # an unreadable device stamp: the server's time stamps it
+        return _now_iso()
+    # a device whose clock is far off can't win (or lose) every edit: beyond the skew allowed,
+    # the server's own time stamps the write (last write wins, on one clock)
+    if abs((t - clock.now()).total_seconds()) > SKEW_S:
+        return _now_iso()
+    return t.isoformat(timespec="seconds")
 
 
 def _newer(existing: str | None, incoming: str) -> bool:
@@ -346,11 +362,7 @@ def _newer(existing: str | None, incoming: str) -> bool:
     if not existing:
         return True
     try:
-        a = dt.datetime.fromisoformat(existing.replace("Z", "+00:00"))
-        b = dt.datetime.fromisoformat(incoming.replace("Z", "+00:00"))
-        if (a.tzinfo is None) != (b.tzinfo is None):
-            a, b = a.replace(tzinfo=None), b.replace(tzinfo=None)
-        return b >= a
+        return _local(incoming) >= _local(existing)
     except ValueError:
         return True
 
