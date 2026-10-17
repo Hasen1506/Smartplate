@@ -289,7 +289,7 @@ def impact(alloc_before: dict, alloc_after: dict, date: str, today: str | None =
                        f"{rest_days} day{'s' if rest_days != 1 else ''} ≈ {rupees(per_day)}/day.")
         out["options"] = [
             {"act": "take_from_week", "label": "Take it from the week"},
-            {"act": "raise_week", "label": f"Make this week {rupees(env + over_share)}",
+            {"act": "raise_week", "label": f"Make this week {rupees(math.ceil(env + over_share))}",
              "amount": int(math.ceil(env + over_share))},
         ]
         out["default"] = "take_from_week"
