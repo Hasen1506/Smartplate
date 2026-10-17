@@ -215,7 +215,8 @@ picks count in the money without a slot; two devices editing a day amount: last 
   anything above them is extra spend on that day.
 - Server-written impact text ("₹65 above Monday's share …") is English only.
 - Some tests are slower (the envelope is computed on more routes); the menu route uses the light
-  envelope to keep a tap fast.
+  envelope to keep a tap fast. CI step limits raised: unit 3 → 5 min (it took 1.9 min on one
+  runner and 3.1 min, timing out with every test passed, on another), Postgres unit 8 → 12 min.
 
 **Tests**
 - `tests/test_r4_budget_envelope.py` (goldens: biryani, all-Off weekend, surge, refund; property
