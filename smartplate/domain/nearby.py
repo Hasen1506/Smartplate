@@ -16,7 +16,7 @@ def _cap(user: dict, meal: str) -> tuple[float | None, str]:
     """(₹ this meal may cost, how that was worked out): today's budget less the other meals
     already picked, or an even share of it when nothing else is picked yet."""
     from .. import today
-    budget = today.budget_for(user)["amount"]
+    budget = today.budget_for(user, light=True)["amount"]
     if not budget:
         return None, ""
     meals = today.meals_today(user)

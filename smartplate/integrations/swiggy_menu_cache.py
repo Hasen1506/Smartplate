@@ -307,7 +307,7 @@ def per_meal_budget(user_id: int) -> float | None:
     from .. import today
     try:
         user = today._user(user_id)
-        amount = today.budget_for(user)["amount"]
+        amount = today.budget_for(user, light=True)["amount"]
         meals = today.meals_today(user)
     except Exception:
         return None

@@ -407,13 +407,13 @@ def _reminded(user_id: int) -> set[str]:
                                                (user_id, _today())).fetchall()}
 
 
-def budget_for(user: dict) -> dict:
+def budget_for(user: dict, *, light: bool = False) -> dict:
     """Today's budget from the week's envelope (domain/envelope.py): the same figure the Week
     shows for today. A day amount the person set wins; otherwise today's share of the money
     left this week, after what is spent, picked and pinned (budget model v2, fix round 4)."""
     from .domain import envelope
     init_schema()
-    v = envelope.day_view(user)
+    v = envelope.day_view(user, light=light)
     d, w = v["day"], v["week"]
     out = {"amount": float(d["target"]), "default": int(d["guide"]), "guide": int(d["guide"]),
            "min": d.get("min", 0), "state": d["state"], "mode": d.get("mode"),

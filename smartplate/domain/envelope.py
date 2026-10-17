@@ -80,14 +80,27 @@ CREATE TABLE IF NOT EXISTS budget_settings (      -- what the weekly budget cove
 
 
 
+_READY: set = set()
+
+
+def _db_key() -> tuple:
+    from .. import config
+    return (config.DATABASE_URL, config.PG_SCHEMA, getattr(config, "DB_PATH", ""))
+
+
 def init_schema() -> None:
-    """Create the tables and move r3's today_budget rows into day_budget (soft, once)."""
+    """Create the tables and move r3's today_budget rows into day_budget (soft, once per
+    database per process; the r3 Today card can still write today_budget until then)."""
+    key = _db_key()
+    if key in _READY:
+        return
     with db.cursor() as cur:
         cur.executescript(SCHEMA)
         if cur.execute("SELECT 1 FROM today_budget LIMIT 1").fetchone():
             cur.execute("INSERT OR IGNORE INTO day_budget(user_id, day, amount, mode, set_at) "
                         "SELECT user_id, day, amount, 'soft', '' FROM today_budget")
             cur.execute("DELETE FROM today_budget")
+    _READY.add(key)
 
 
 # --------------------------------------------------------------------------- #
@@ -685,12 +698,25 @@ def _week(user_id: int, week_start=None, *, user: dict | None = None, plan: dict
 
 
 def _cheapest(user: dict) -> dict | None:
+    """The person's cheapest usual meal delivered (spend.cheapest_meal), once per request."""
+    memo = None
+    try:
+        from flask import g, has_request_context
+        if has_request_context():
+            memo = g.setdefault("_envelope_cheapest", {})
+            if user["id"] in memo:
+                return memo[user["id"]]
+    except Exception:
+        memo = None
     try:
         from . import spend
         c = spend.cheapest_meal(user)
-        return {"amount": float(c["amount"]), "item": c.get("item")} if c and c.get("amount") else None
+        out = {"amount": float(c["cost"]), "item": c.get("item")} if c and c.get("cost") else None
     except Exception:
-        return None
+        out = None
+    if memo is not None:
+        memo[user["id"]] = out
+    return out
 
 
 def _low(alloc: dict, cheapest: dict | None, days_in: list[dict]) -> dict | None:
@@ -731,10 +757,11 @@ def carried_in(user: dict, ws: dt.date) -> float:
     return round(max(0.0, base - spent), 2)
 
 
-def day_view(user: dict, date: dt.date | None = None) -> dict:
-    """One day of the envelope (Today reads this): target, guide, spent, committed, flags."""
+def day_view(user: dict, date: dt.date | None = None, *, light: bool = False) -> dict:
+    """One day of the envelope (Today reads this): target, guide, spent, committed, flags.
+    `light` skips the cheapest-meal flags (a menu's per-meal line needs only the figure)."""
     date = date or clock.today()
-    w = week(user["id"], date.isoformat(), user=user)
+    w = week(user["id"], date.isoformat(), user=user, light=light)
     d = next(x for x in w["days"] if x["date"] == date.isoformat())
     rest = [x for x in w["days"] if x["date"] > date.isoformat() and x["state"] == "plan"]
     return {"day": d, "week": {k: w[k] for k in ("envelope", "spent", "committed", "flexible", "reserve", "over",
